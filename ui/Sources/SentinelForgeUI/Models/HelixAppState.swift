@@ -8,8 +8,11 @@ class HelixAppState: ObservableObject {
 
     @Published var thread: ChatThread
     @Published var isProcessing: Bool = false
+    @Published var apiLogs: [String] = []          // Buffered logs from Python core
+    @Published var apiResults: SentinelResults?    // Latest scan snapshot
 
     private let llm: LLMService
+    private let api = SentinelAPIClient()
     private var cancellables = Set<AnyCancellable>()
 
     init(llm: LLMService) {
@@ -61,5 +64,36 @@ class HelixAppState: ObservableObject {
     // Allows UI Stop button to interrupt generation.
     func cancelGeneration() {
         llm.cancel()
+    }
+
+    // MARK: - Core IPC Helpers (HTTP bridge to Python)
+
+    /// Start a scan via the local Python API.
+    func startScan(target: String) {
+        Task {
+            try? await api.startScan(target: target)
+        }
+    }
+
+    /// Poll for new log lines from Python and append to our buffer.
+    func refreshLogs() {
+        Task {
+            if let lines = try? await api.fetchLogs(), !lines.isEmpty {
+                await MainActor.run {
+                    self.apiLogs.append(contentsOf: lines)
+                }
+            }
+        }
+    }
+
+    /// Pull the latest scan snapshot (findings/issues/etc.) from Python.
+    func refreshResults() {
+        Task {
+            if let results = try? await api.fetchResults() {
+                await MainActor.run {
+                    self.apiResults = results
+                }
+            }
+        }
     }
 }
