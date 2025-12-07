@@ -1,17 +1,23 @@
 import SwiftUI
 
 // Simple chat-oriented shell for early Sentinel UI.
-// Later we will embed scan controls, target lists, and log viewers.
+// This adds minimal scan controls and a basic log/result viewer so we can
+// exercise the Python bridge while we flesh out the UI.
 struct MainWindowView: View {
 
     @EnvironmentObject var appState: HelixAppState
     @State private var input: String = ""
+    @State private var scanTarget: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
+            scanControls
+            Divider()
             transcript
+            Divider()
+            logsAndResults
             Divider()
             inputArea
         }
@@ -45,11 +51,37 @@ struct MainWindowView: View {
         .padding()
     }
 
+    // Kick off scans, poll logs/results, and show quick actions.
+    private var scanControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Scan Control")
+                .font(.headline)
+            HStack {
+                TextField("Target (e.g., https://example.com)", text: $scanTarget)
+                    .textFieldStyle(.roundedBorder)
+                Button("Start Scan") {
+                    appState.startScan(target: scanTarget)
+                }
+                .disabled(scanTarget.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            HStack {
+                Button("Refresh Logs") {
+                    appState.refreshLogs()
+                }
+                Button("Refresh Results") {
+                    appState.refreshResults()
+                }
+                Spacer()
+            }
+        }
+        .padding([.leading, .trailing, .bottom])
+    }
+
     private var transcript: some View {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(appState.thread.messages) { msg in
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(appState.thread.messages) { msg in
                             ChatBubbleView(message: msg)
                                 .id(msg.id)
                     }
@@ -65,6 +97,40 @@ struct MainWindowView: View {
                 }
             }
         }
+    }
+
+    // Minimal log viewer and a tiny summary of results.
+    private var logsAndResults: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Engine Logs")
+                .font(.headline)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(appState.apiLogs, id: \.self) { line in
+                        Text(line)
+                            .font(.system(size: 12, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(6)
+            }
+            .frame(maxHeight: 120)
+            .background(Color(NSColor.textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            if let results = appState.apiResults {
+                Text("Latest Results")
+                    .font(.headline)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Target: \(results.target)")
+                    Text("Findings: \(results.findings?.count ?? 0)")
+                    Text("Issues: \(results.issues?.count ?? 0)")
+                    Text("Killchain edges: \(results.killchain_edges?.count ?? 0)")
+                }
+                .font(.subheadline)
+            }
+        }
+        .padding([.leading, .trailing, .bottom])
     }
 
     private var inputArea: some View {

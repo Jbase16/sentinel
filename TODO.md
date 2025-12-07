@@ -3,21 +3,21 @@
 > Use this as the single source of truth for day-to-day tasks. Check items off or promote to issues.
 
 ## Immediate Setup
-- [ ] Create Python venv in `sentinelforge/.venv` and install AraUltra deps: `python -m venv .venv && source .venv/bin/activate && pip install -r ../AraUltra/requirements.txt`.
+- [x] Create Python venv in `sentinelforge/.venv` and install AraUltra deps: `python -m venv .venv && source .venv/bin/activate && pip install -r ../AraUltra/requirements.txt`.
 - [ ] Verify Ollama running on `127.0.0.1:11434` with models `llama3:latest`, `phi3:mini`, `deepseek-coder:6.7b`.
 - [ ] Wire `core/api.py` to AraUltra engines (`AIEngine`, `ScanOrchestrator`, `ReasoningEngine`) and expose JSON-friendly methods for Swift.
-- [ ] Decide IPC transport (pipes vs. local HTTP). Implement a tiny shim in `core/api.py` to stream logs + results.
+- [x] Decide IPC transport (pipes vs. local HTTP). Implement a tiny shim in `core/api.py` to stream logs + results.
 
 ## SwiftUI (UI Layer)
 - [ ] Rename target/bundle identifiers to `Sentinel` across Swift package/Xcode.
 - [ ] Build a project/target selector view (targets list, add/remove, scope notes).
-- [ ] Add scan controls bound to IPC (start, stop, module selection).
+- [x] Add scan controls bound to IPC (start, stop, module selection).
 - [ ] Real-time log console and findings panel (streamed from Python).
 - [ ] Model controls: pick model, toggle auto-routing, show Ollama status.
 - [ ] Report export (Markdown/HTML/PDF) triggered from UI.
 
 ## Python Core (Engine Layer)
-- [ ] Port AraUltra `ScanOrchestrator`, `ScannerEngine`, `AIEngine`, `TaskRouter`, `raw_classifier`, `tools` into `core/` (initial copy done).
+- [x] Port AraUltra `ScanOrchestrator`, `ScannerEngine`, `AIEngine`, `TaskRouter`, `raw_classifier`, `tools` into `core/` (initial copy done).
 - [ ] Trim/modernize tool list for macOS; add capability flags per module (recon/fuzz/vuln-analysis).
 - [ ] Implement recon module entry in `core/recon/` (e.g., passive httpx + dnsx).
 - [ ] Implement fuzz module entry in `core/fuzz/` (parameter fuzzer stub).
