@@ -1,0 +1,14 @@
+# Build artifacts
+ui/.build/
+
+# Python venv and caches
+.venv/
+__pycache__/
+*.pyc
+
+# macOS cruft
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp

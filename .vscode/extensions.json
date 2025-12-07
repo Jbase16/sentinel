@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "sswg.swift-lang",
+    "tamasfe.even-better-toml",
+    "eamodio.gitlens",
+    "editorconfig.editorconfig"
+  ]
+}
