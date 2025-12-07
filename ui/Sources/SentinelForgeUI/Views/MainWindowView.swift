@@ -128,6 +128,21 @@ struct MainWindowView: View {
                     Text("Killchain edges: \(results.killchain_edges?.count ?? 0)")
                 }
                 .font(.subheadline)
+
+                if let findings = results.findings, !findings.isEmpty {
+                    Text("Findings (sample)")
+                        .font(.subheadline)
+                        .padding(.top, 4)
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(findings.prefix(5)).enumerated().map({ $0 }), id: \.offset) { _, item in
+                            let type = item["type"]?.stringValue ?? "Unknown"
+                            let severity = item["severity"]?.stringValue ?? "?"
+                            let tool = item["tool"]?.stringValue ?? "tool"
+                            Text("[\(severity)] \(type) (\(tool))")
+                                .font(.system(size: 12, design: .monospaced))
+                        }
+                    }
+                }
             }
         }
         .padding([.leading, .trailing, .bottom])

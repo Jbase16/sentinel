@@ -112,6 +112,18 @@ enum JSONValue: Decodable {
 
 typealias JSONDict = [String: JSONValue]
 
+extension JSONValue {
+    /// Convenience to unwrap a string if present.
+    var stringValue: String? {
+        switch self {
+        case .string(let s): return s
+        case .number(let n): return String(n)
+        case .bool(let b): return String(b)
+        default: return nil
+        }
+    }
+}
+
 enum APIError: Error {
     case badStatus
 }

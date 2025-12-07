@@ -14,6 +14,7 @@ class HelixAppState: ObservableObject {
     private let llm: LLMService
     private let api = SentinelAPIClient()
     private var cancellables = Set<AnyCancellable>()
+    private var pollCancellable: AnyCancellable?
 
     init(llm: LLMService) {
         self.llm = llm
@@ -26,6 +27,9 @@ class HelixAppState: ObservableObject {
                 self?.isProcessing = generating
             }
             .store(in: &cancellables)
+
+        // Kick off lightweight polling to keep logs/results fresh.
+        beginPolling()
     }
 
     convenience init() {
@@ -95,5 +99,22 @@ class HelixAppState: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Start periodic polling for logs/results every few seconds.
+    func beginPolling() {
+        pollCancellable?.cancel()
+        pollCancellable = Timer.publish(every: 2.0, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                self?.refreshLogs()
+                self?.refreshResults()
+            }
+    }
+
+    /// Stop periodic polling (if needed later).
+    func stopPolling() {
+        pollCancellable?.cancel()
+        pollCancellable = nil
     }
 }

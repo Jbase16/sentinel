@@ -12,7 +12,7 @@
 - [ ] Rename target/bundle identifiers to `Sentinel` across Swift package/Xcode.
 - [ ] Build a project/target selector view (targets list, add/remove, scope notes).
 - [x] Add scan controls bound to IPC (start, stop, module selection).
-- [ ] Real-time log console and findings panel (streamed from Python).
+- [x] Real-time log console and findings panel (streamed from Python).
 - [ ] Model controls: pick model, toggle auto-routing, show Ollama status.
 - [ ] Report export (Markdown/HTML/PDF) triggered from UI.
 
