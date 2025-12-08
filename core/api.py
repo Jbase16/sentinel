@@ -65,8 +65,8 @@ def _scan_runner(target: str) -> None:
     global _latest_result
     _cancel_requested.clear()
     orchestrator = ScanOrchestrator(log_fn=_log_sink)
-    # If ScanOrchestrator gains native cancellation, wire _cancel_requested into it.
-    ctx = orchestrator.run_sync(target)
+    # Pass the cancel flag down so scanner engine can stop launching new tools.
+    ctx = orchestrator.run_sync(target, cancel_flag=_cancel_requested)
     # Store only JSON-serializable structures for the UI to consume.
     _latest_result = {
         "target": ctx.target,

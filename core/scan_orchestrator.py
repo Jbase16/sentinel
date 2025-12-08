@@ -59,14 +59,14 @@ class ScanOrchestrator:
                 self.log(f"[AUTONOMOUS] AI suggests: {tool} ({reason}). Queueing...")
                 self.scanner.queue_task(tool, args)
 
-    async def run(self, target: str) -> ScanContext:
+    async def run(self, target: str, cancel_flag=None) -> ScanContext:
         self.current_target = target
         logs: List[str] = []
         
         # Reset dispatcher history for new scan
         self.dispatcher = ActionDispatcher()
 
-        async for line in self.scanner.scan(target):
+        async for line in self.scanner.scan(target, cancel_flag=cancel_flag):
             logs.append(line)
             self.log(line)
 

@@ -50,7 +50,7 @@ class ScannerEngine:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    async def scan(self, target: str, selected_tools: List[str] | None = None) -> AsyncGenerator[str, None]:
+    async def scan(self, target: str, selected_tools: List[str] | None = None, cancel_flag=None) -> AsyncGenerator[str, None]:
         """
         Async generator that yields log-style strings while the supported tools run.
         Each tool's raw output is saved to the evidence store and parsed into findings.
@@ -92,6 +92,12 @@ class ScannerEngine:
             # FIXED: Wait for ALL tasks to complete, not just until slots fill
             while self._pending_tasks or self._running_tasks:
                 # Fill available slots
+                # Check for cancellation before launching new tasks
+                if cancel_flag is not None and cancel_flag.is_set():
+                    await self._queue.put("[scanner] cancellation requested; stopping new tasks")
+                    self._pending_tasks.clear()
+                    break
+
                 while self._pending_tasks and len(self._running_tasks) < self.MAX_CONCURRENT_TOOLS:
                     task_def = self._pending_tasks.pop(0)
                     # Handle both simple strings (legacy) and dicts (dynamic args)
@@ -111,7 +117,7 @@ class ScannerEngine:
                 done, _ = await asyncio.wait(list(self._running_tasks.values()), timeout=0.2)
                 while not self._queue.empty():
                     yield self._queue.get_nowait()
-                
+
                 for finished in done:
                     tool_name = next((name for name, t in self._running_tasks.items() if t is finished), None)
                     if tool_name:
@@ -123,6 +129,9 @@ class ScannerEngine:
                         del self._running_tasks[tool_name]
                 
                 if not done:
+                    # If cancellation was requested mid-run, try to wait for running tasks to finish.
+                    if cancel_flag is not None and cancel_flag.is_set():
+                        await self._queue.put("[scanner] cancellation requested; waiting for running tasks to finish")
                     await asyncio.sleep(0.05)
             
             
