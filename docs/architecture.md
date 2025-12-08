@@ -13,6 +13,7 @@ Transport: local HTTP (default `http://127.0.0.1:8765`), JSON-only.
 Endpoints (see `core/api.py`):
 - `GET /ping` → `{"status":"ok"}` for health checks.
 - `POST /scan` with `{"target": "<url_or_host>"}` → starts scan in background; returns 202.
+- `POST /cancel` → best-effort scan cancellation (sets a flag; upgrade to cooperative cancel later).
 - `GET /logs` → `{"lines": ["[scanner] ...", ...]}`; drains buffered logs since last call.
 - `GET /results` → latest snapshot: `{"target","findings","issues","killchain_edges","phase_results","logs"}`; 204 if none.
 

@@ -63,6 +63,9 @@ struct MainWindowView: View {
                     appState.startScan(target: scanTarget)
                 }
                 .disabled(scanTarget.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Stop") {
+                    appState.cancelScan()
+                }
             }
             HStack {
                 Button("Refresh Logs") {

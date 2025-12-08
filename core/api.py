@@ -45,6 +45,8 @@ _current_scan_thread: Optional[threading.Thread] = None
 # Simple lock so we don't start overlapping scans.
 _scan_lock = threading.Lock()
 
+# Flag to request cancellation (best-effort).
+_cancel_requested = threading.Event()
 
 def _log_sink(msg: str) -> None:
     """Callback passed to ScanOrchestrator to collect log lines."""
@@ -61,7 +63,9 @@ def _scan_runner(target: str) -> None:
     Executed inside a background thread so HTTP requests stay responsive.
     """
     global _latest_result
+    _cancel_requested.clear()
     orchestrator = ScanOrchestrator(log_fn=_log_sink)
+    # If ScanOrchestrator gains native cancellation, wire _cancel_requested into it.
     ctx = orchestrator.run_sync(target)
     # Store only JSON-serializable structures for the UI to consume.
     _latest_result = {
@@ -72,6 +76,7 @@ def _scan_runner(target: str) -> None:
         "phase_results": ctx.phase_results,
         "logs": ctx.logs,
     }
+    _cancel_requested.clear()
 
 
 def start_scan(target: str) -> None:
@@ -87,6 +92,20 @@ def start_scan(target: str) -> None:
         thread = threading.Thread(target=_scan_runner, args=(target,), daemon=True)
         _current_scan_thread = thread
         thread.start()
+
+
+def cancel_scan() -> bool:
+    """
+    Best-effort cancellation toggle. Scanner engine does not yet expose
+    cooperative cancellation; for now we just set a flag and return whether
+    a scan was in flight.
+    """
+    global _current_scan_thread
+    with _scan_lock:
+        if _current_scan_thread and _current_scan_thread.is_alive():
+            _cancel_requested.set()
+            return True
+    return False
 
 
 def drain_logs() -> Dict[str, Any]:
@@ -139,6 +158,8 @@ class CoreAPI:
     def latest_results(self) -> Dict[str, Any]:
         return get_latest_results()
 
+    def cancel_scan(self) -> bool:
+        return cancel_scan()
 
 # ---------------------------------------------------------------------------
 # Minimal HTTP server for local IPC (no external deps).
@@ -195,6 +216,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 return self._send_json(409, {"error": str(exc)})
 
             return self._send_json(202, {"status": "started", "target": target})
+
+        if self.path == "/cancel":
+            if cancel_scan():
+                return self._send_json(202, {"status": "cancelling"})
+            return self._send_json(409, {"error": "no active scan"})
 
         self._send_json(404, {"error": "not found"})
 

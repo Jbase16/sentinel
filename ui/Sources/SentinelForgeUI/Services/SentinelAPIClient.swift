@@ -64,6 +64,17 @@ struct SentinelAPIClient {
         guard http.statusCode == 200 else { throw APIError.badStatus }
         return try JSONDecoder().decode(SentinelResults.self, from: data)
     }
+
+    // Request best-effort scan cancellation.
+    func cancelScan() async throws {
+        guard let url = URL(string: "/cancel", relativeTo: baseURL) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 202 else {
+            throw APIError.badStatus
+        }
+    }
 }
 
 // MARK: - Models

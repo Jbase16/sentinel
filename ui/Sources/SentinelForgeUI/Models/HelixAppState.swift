@@ -101,6 +101,13 @@ class HelixAppState: ObservableObject {
         }
     }
 
+    /// Ask Python core to cancel any active scan.
+    func cancelScan() {
+        Task {
+            try? await api.cancelScan()
+        }
+    }
+
     /// Start periodic polling for logs/results every few seconds.
     func beginPolling() {
         pollCancellable?.cancel()
