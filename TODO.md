@@ -19,8 +19,8 @@
 ## Python Core (Engine Layer)
 - [x] Port AraUltra `ScanOrchestrator`, `ScannerEngine`, `AIEngine`, `TaskRouter`, `raw_classifier`, `tools` into `core/` (initial copy done).
 - [ ] Trim/modernize tool list for macOS; add capability flags per module (recon/fuzz/vuln-analysis).
-- [ ] Implement recon module entry in `core/recon/` (e.g., passive httpx + dnsx).
-- [ ] Implement fuzz module entry in `core/fuzz/` (parameter fuzzer stub).
+- [x] Implement recon module entry in `core/recon/` (e.g., passive httpx + dnsx).
+- [x] Implement fuzz module entry in `core/fuzz/` (parameter fuzzer stub).
 - [ ] Define structured results schema (findings/issues/evidence/killchain) returned through `core/api.py`.
 - [ ] Add unit tests for classifiers and IPC handlers.
 - [ ] Evaluate fine-tune/adapter approach using vulnerability datasets (e.g., https://huggingface.co/datasets/CyberNative/Code_Vulnerability_Security_DPO) to bias local models toward vuln reasoning (guardrail-free).
