@@ -13,6 +13,8 @@ struct MainWindowView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            modelControls
+            Divider()
             scanControls
             Divider()
             transcript
@@ -49,6 +51,49 @@ struct MainWindowView: View {
             }
         }
         .padding()
+    }
+
+    // Model selection + routing controls.
+    private var modelControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Model & Routing")
+                    .font(.headline)
+                if let ai = appState.aiStatus {
+                    Label(ai.connected ? "Ollama online" : "Ollama offline",
+                          systemImage: ai.connected ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundColor(ai.connected ? .green : .orange)
+                        .font(.subheadline)
+                }
+                Spacer()
+                Button("Refresh Models") {
+                    appState.refreshStatus()
+                }
+            }
+            HStack(spacing: 12) {
+                Picker("Model", selection: Binding(
+                    get: { appState.preferredModel },
+                    set: { appState.updatePreferredModel($0) }
+                )) {
+                    ForEach(appState.modelOptions, id: \.self) { model in
+                        Text(model)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Toggle("Auto-route", isOn: Binding(
+                    get: { appState.autoRoutingEnabled },
+                    set: { appState.updateAutoRouting($0) }
+                ))
+                .toggleStyle(SwitchToggleStyle())
+            }
+            if let scan = appState.engineStatus?.scanState {
+                Text("Scan status: \((scan.status ?? "idle").capitalized)\((scan.target ?? "").isEmpty ? "" : " · \(scan.target ?? "")")")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding([.leading, .trailing, .bottom])
     }
 
     // Kick off scans, poll logs/results, and show quick actions.
@@ -125,10 +170,16 @@ struct MainWindowView: View {
                 Text("Latest Results")
                     .font(.headline)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Target: \(results.target)")
-                    Text("Findings: \(results.findings?.count ?? 0)")
-                    Text("Issues: \(results.issues?.count ?? 0)")
-                    Text("Killchain edges: \(results.killchain_edges?.count ?? 0)")
+                    Text("Target: \(results.scan?.target ?? "—")")
+                    if let status = results.scan?.status {
+                        Text("Status: \(status)")
+                    }
+                    if let duration = results.scan?.durationMs {
+                        Text(String(format: "Duration: %.1fs", Double(duration) / 1000.0))
+                    }
+                    Text("Findings: \(results.summary?.counts?.findings ?? results.findings?.count ?? 0)")
+                    Text("Issues: \(results.summary?.counts?.issues ?? results.issues?.count ?? 0)")
+                    Text("Killchain edges: \(results.summary?.counts?.killchainEdges ?? results.killchain?.edges?.count ?? 0)")
                 }
                 .font(.subheadline)
 
@@ -144,6 +195,17 @@ struct MainWindowView: View {
                             Text("[\(severity)] \(type) (\(tool))")
                                 .font(.system(size: 12, design: .monospaced))
                         }
+                    }
+                }
+
+                if let recs = results.killchain?.recommendedPhases, !recs.isEmpty {
+                    Text("Recommended Phases")
+                        .font(.subheadline)
+                        .padding(.top, 4)
+                    ForEach(recs, id: \.self) { rec in
+                        Text("• \(rec)")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
                     }
                 }
             }

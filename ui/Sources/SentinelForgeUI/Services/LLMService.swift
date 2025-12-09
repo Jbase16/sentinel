@@ -9,6 +9,10 @@ final class LLMService: ObservableObject {
 
     @Published var isGenerating: Bool = false
     @Published var streamedResponse: String = ""
+    @Published var preferredModel: String = ModelRouter.defaultPreferredModel
+    @Published var autoRoutingEnabled: Bool = true
+    @Published var availableModels: [String] = ModelRouter.defaultCandidates
+    @Published var ollamaOnline: Bool = true
 
     private let router = ModelRouter()
     private var currentTask: Task<Void, Never>?
@@ -18,6 +22,27 @@ final class LLMService: ObservableObject {
         currentTask?.cancel()
         currentTask = nil
         isGenerating = false
+    }
+
+    func updatePreferredModel(_ model: String) {
+        preferredModel = model
+    }
+
+    func updateAutoRouting(_ enabled: Bool) {
+        autoRoutingEnabled = enabled
+    }
+
+    func applyAvailability(connected: Bool, models: [String], defaultModel: String? = nil) {
+        ollamaOnline = connected
+        let cleaned = models.filter { !$0.isEmpty }
+        if !cleaned.isEmpty {
+            availableModels = cleaned
+            if let incoming = defaultModel, !incoming.isEmpty {
+                preferredModel = incoming
+            } else if !cleaned.contains(preferredModel) {
+                preferredModel = cleaned.first ?? preferredModel
+            }
+        }
     }
 
     // Kick off a streaming generation call and deliver tokens to the caller.
@@ -32,7 +57,12 @@ final class LLMService: ObservableObject {
         isGenerating = true
 
         // Heuristic router decides which local model to use.
-        let modelName = router.modelName(for: trimmed)
+        let modelName = router.routeModel(
+            for: trimmed,
+            preferredModel: preferredModel,
+            autoRoutingEnabled: autoRoutingEnabled,
+            available: availableModels
+        )
 
         currentTask = Task.detached { [weak self] in
             guard let self else { return }

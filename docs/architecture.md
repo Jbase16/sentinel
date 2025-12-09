@@ -12,18 +12,20 @@ Transport: local HTTP (default `http://127.0.0.1:8765`), JSON-only.
 
 Endpoints (see `core/api.py`):
 - `GET /ping` → `{"status":"ok"}` for health checks.
+- `GET /status` → engine + AI status (running scan, Ollama reachability, available models).
 - `POST /scan` with `{"target": "<url_or_host>"}` → starts scan in background; returns 202.
 - `POST /cancel` → best-effort scan cancellation (sets a flag; upgrade to cooperative cancel later).
 - `GET /logs` → `{"lines": ["[scanner] ...", ...]}`; drains buffered logs since last call.
-- `GET /results` → latest snapshot: `{"target","findings","issues","killchain_edges","phase_results","logs"}`; 204 if none.
+- `GET /results` → structured snapshot: `{"scan","summary","findings","issues","killchain","phase_results","evidence","logs"}`; 204 if none.
 
 Swift client: `SentinelAPIClient` wraps these endpoints; `HelixAppState` polls every ~2s to refresh logs/results.
 
 ## Data Shapes (high-level)
 - **Findings** (from AraUltra): array of dicts with keys like `type`, `severity`, `tool`, `target`, `proof`, `tags`, `families`, `metadata`.
 - **Issues**: enriched findings produced by `vuln_rules`.
-- **Killchain edges**: graph edges (source, target, edge_type, severity) generated during enrichment.
-- **Phase results**: per-phase outputs from `PhaseRunner`.
+- **Killchain**: graph edges (source, target, edge_type, severity) generated during enrichment, plus derived attack paths and recommendations from `ReasoningEngine`.
+- **Evidence summary**: per-tool metadata and previews (id, tool, summary, metadata, raw preview length) without full raw output.
+- **Phase results**: per-phase outputs from `PhaseRunner` keyed by phase name.
 
 ## Flow
 1. UI POSTs `/scan` with target.

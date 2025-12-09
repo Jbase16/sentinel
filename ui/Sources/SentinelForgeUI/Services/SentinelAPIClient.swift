@@ -27,13 +27,16 @@ struct SentinelAPIClient {
     }
 
     // Kick off a scan for a given target.
-    func startScan(target: String) async throws {
+    func startScan(target: String, modules: [String] = []) async throws {
         guard let url = URL(string: "/scan", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body = ["target": target]
-        request.httpBody = try JSONEncoder().encode(body)
+        var body: [String: Any] = ["target": target]
+        if !modules.isEmpty {
+            body["modules"] = modules
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 202 else {
             throw APIError.badStatus
@@ -51,6 +54,18 @@ struct SentinelAPIClient {
         }
         let decoded = try JSONDecoder().decode(LogBatch.self, from: data)
         return decoded.lines
+    }
+
+    // Fetch lightweight engine + AI status (model availability, running scan).
+    func fetchStatus() async throws -> EngineStatus? {
+        guard let url = URL(string: "/status", relativeTo: baseURL) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.badStatus
+        }
+        return try JSONDecoder().decode(EngineStatus.self, from: data)
     }
 
     // Fetch the latest scan snapshot (findings/issues/killchain/phase_results).
@@ -83,13 +98,145 @@ struct LogBatch: Decodable {
     let lines: [String]
 }
 
+struct EngineStatus: Decodable {
+    let status: String
+    let scanRunning: Bool
+    let latestTarget: String?
+    let ai: AIStatus?
+    let scanState: ScanState?
+    let cancelRequested: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case ai
+        case scanRunning = "scan_running"
+        case latestTarget = "latest_target"
+        case scanState = "scan_state"
+        case cancelRequested = "cancel_requested"
+    }
+}
+
+struct ScanState: Decodable {
+    let target: String?
+    let modules: [String]?
+    let status: String?
+    let startedAt: String?
+    let finishedAt: String?
+    let durationMs: Int?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case target, modules, status, error
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+        case durationMs = "duration_ms"
+    }
+}
+
+struct AIStatus: Decodable {
+    let provider: String?
+    let model: String?
+    let connected: Bool
+    let fallbackEnabled: Bool
+    let availableModels: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model, connected
+        case fallbackEnabled = "fallback_enabled"
+        case availableModels = "available_models"
+    }
+}
+
 struct SentinelResults: Decodable {
-    let target: String
+    let scan: ScanSummary?
+    let summary: ResultsSummary?
     let findings: [JSONDict]?
     let issues: [JSONDict]?
-    let killchain_edges: [JSONDict]?
-    let phase_results: [String: [JSONDict]]?
+    let killchain: Killchain?
+    let phaseResults: [String: [JSONDict]]?
+    let evidence: [EvidenceSummary]?
     let logs: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case scan, summary, findings, issues, killchain, logs, evidence
+        case phaseResults = "phase_results"
+    }
+}
+
+struct ScanSummary: Decodable {
+    let target: String?
+    let modules: [String]?
+    let status: String?
+    let startedAt: String?
+    let finishedAt: String?
+    let durationMs: Int?
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case target, modules, status, error
+        case startedAt = "started_at"
+        case finishedAt = "finished_at"
+        case durationMs = "duration_ms"
+    }
+}
+
+struct ResultsSummary: Decodable {
+    let counts: ResultCounts?
+    let ai: AIStatus?
+}
+
+struct ResultCounts: Decodable {
+    let findings: Int
+    let issues: Int
+    let killchainEdges: Int
+    let logs: Int
+    let phaseResults: [String: Int]
+
+    enum CodingKeys: String, CodingKey {
+        case findings, issues, logs
+        case killchainEdges = "killchain_edges"
+        case phaseResults = "phase_results"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        findings = try container.decodeIfPresent(Int.self, forKey: .findings) ?? 0
+        issues = try container.decodeIfPresent(Int.self, forKey: .issues) ?? 0
+        killchainEdges = try container.decodeIfPresent(Int.self, forKey: .killchainEdges) ?? 0
+        logs = try container.decodeIfPresent(Int.self, forKey: .logs) ?? 0
+        phaseResults = try container.decodeIfPresent([String: Int].self, forKey: .phaseResults) ?? [:]
+    }
+}
+
+struct Killchain: Decodable {
+    let edges: [JSONDict]?
+    let attackPaths: [[String]]?
+    let degradedPaths: [[String]]?
+    let recommendedPhases: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case edges
+        case attackPaths = "attack_paths"
+        case degradedPaths = "degraded_paths"
+        case recommendedPhases = "recommended_phases"
+    }
+}
+
+struct EvidenceSummary: Decodable {
+    let id: Int
+    let tool: String?
+    let summary: String?
+    let metadata: JSONDict?
+    let rawPreview: String?
+    let rawBytes: Int?
+    let findingCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, tool, summary, metadata
+        case rawPreview = "raw_preview"
+        case rawBytes = "raw_bytes"
+        case findingCount = "finding_count"
+    }
 }
 
 // Minimal JSON value wrapper to decode arbitrary dictionaries coming from Python.

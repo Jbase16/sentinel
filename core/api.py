@@ -9,9 +9,10 @@ to extend. It does two things:
 
 Endpoints (when run as a script, default port 8765):
   GET  /ping       -> {"status": "ok"}
+  GET  /status     -> engine + AI status (model availability, running scan)
   POST /scan       -> kicks off a scan in a background thread
   GET  /logs       -> returns any buffered log lines since last call
-  GET  /results    -> latest findings/issues/killchain/phase_results
+  GET  /results    -> structured findings/issues/killchain/phase_results/evidence
 
 Notes for entry-level contributors:
 - We keep everything JSON-serializable to make Swift ↔ Python IPC simple.
@@ -25,8 +26,12 @@ import http.server
 import json
 import queue
 import threading
-from typing import Any, Dict, Iterable, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional
 
+from core.ai_engine import AIEngine
+from core.evidence_store import EvidenceStore
+from core.reasoning import reasoning_engine
 from core.scan_orchestrator import ScanOrchestrator
 
 # ---------------------------------------------------------------------------
@@ -39,6 +44,9 @@ _log_queue: "queue.Queue[str]" = queue.Queue(maxsize=10_000)
 # Stores the latest scan results snapshot for the UI.
 _latest_result: Dict[str, Any] = {}
 
+# Tracks meta about the most recent scan (target, status, timings).
+_scan_state: Dict[str, Any] = {}
+
 # Tracks the currently running scan thread (if any).
 _current_scan_thread: Optional[threading.Thread] = None
 
@@ -47,6 +55,9 @@ _scan_lock = threading.Lock()
 
 # Flag to request cancellation (best-effort).
 _cancel_requested = threading.Event()
+
+# Shared AI engine singleton for status reporting.
+_ai_engine = AIEngine.instance()
 
 def _log_sink(msg: str) -> None:
     """Callback passed to ScanOrchestrator to collect log lines."""
@@ -57,29 +68,144 @@ def _log_sink(msg: str) -> None:
         pass
 
 
-def _scan_runner(target: str) -> None:
+def _ai_status() -> Dict[str, Any]:
+    """Expose AI engine health + available models in a JSON-friendly shape."""
+    try:
+        return _ai_engine.status()
+    except Exception:
+        return {
+            "provider": "unknown",
+            "model": None,
+            "connected": False,
+            "fallback_enabled": True,
+            "available_models": [],
+        }
+
+
+def _evidence_snapshot() -> List[Dict[str, Any]]:
+    """
+    Summarize evidence entries without shipping raw output over IPC.
+    """
+    items: List[Dict[str, Any]] = []
+    evidence = EvidenceStore.instance().get_all()
+    for eid, data in evidence.items():
+        raw = data.get("raw_output") or ""
+        items.append({
+            "id": eid,
+            "tool": data.get("tool"),
+            "summary": data.get("summary"),
+            "metadata": data.get("metadata") or {},
+            "raw_preview": raw[:500],
+            "raw_bytes": len(raw.encode("utf-8")) if raw else 0,
+            "finding_count": len(data.get("findings") or []),
+        })
+    return items
+
+
+def _build_result_envelope(
+    target: str,
+    modules: List[str],
+    ctx,
+    started_at: datetime,
+    finished_at: datetime,
+    cancelled: bool = False,
+) -> Dict[str, Any]:
+    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+    phase_counts = {name: len(items) for name, items in (ctx.phase_results or {}).items()}
+    reasoning = reasoning_engine.analyze()
+    status = "cancelled" if cancelled else "completed"
+
+    return {
+        "scan": {
+            "target": target,
+            "modules": modules,
+            "status": status,
+            "started_at": started_at.isoformat(),
+            "finished_at": finished_at.isoformat(),
+            "duration_ms": duration_ms,
+        },
+        "summary": {
+            "counts": {
+                "findings": len(ctx.findings or []),
+                "issues": len(ctx.issues or []),
+                "killchain_edges": len(ctx.killchain_edges or []),
+                "logs": len(ctx.logs or []),
+                "phase_results": phase_counts,
+            },
+            "ai": _ai_status(),
+        },
+        "findings": ctx.findings,
+        "issues": ctx.issues,
+        "killchain": {
+            "edges": ctx.killchain_edges,
+            "attack_paths": reasoning.get("attack_paths", []),
+            "degraded_paths": reasoning.get("degraded_paths", []),
+            "recommended_phases": reasoning.get("recommended_phases", []),
+        },
+        "phase_results": ctx.phase_results,
+        "evidence": _evidence_snapshot(),
+        "logs": ctx.logs,
+    }
+
+
+def _scan_runner(target: str, modules: Optional[Iterable[str]] = None) -> None:
     """
     Runs a scan synchronously and stores the latest result snapshot.
     Executed inside a background thread so HTTP requests stay responsive.
     """
-    global _latest_result
+    global _latest_result, _scan_state
+    module_list = list(modules) if modules else []
+    started_at = datetime.now(timezone.utc)
+    _scan_state = {
+        "target": target,
+        "modules": module_list,
+        "status": "running",
+        "started_at": started_at.isoformat(),
+    }
     _cancel_requested.clear()
     orchestrator = ScanOrchestrator(log_fn=_log_sink)
     # Pass the cancel flag down so scanner engine can stop launching new tools.
-    ctx = orchestrator.run_sync(target, cancel_flag=_cancel_requested)
-    # Store only JSON-serializable structures for the UI to consume.
-    _latest_result = {
-        "target": ctx.target,
-        "findings": ctx.findings,
-        "issues": ctx.issues,
-        "killchain_edges": ctx.killchain_edges,
-        "phase_results": ctx.phase_results,
-        "logs": ctx.logs,
-    }
-    _cancel_requested.clear()
+    try:
+        ctx = orchestrator.run_sync(target, modules=module_list, cancel_flag=_cancel_requested)
+        finished_at = datetime.now(timezone.utc)
+        cancelled = _cancel_requested.is_set()
+        _latest_result = _build_result_envelope(
+            target=target,
+            modules=module_list,
+            ctx=ctx,
+            started_at=started_at,
+            finished_at=finished_at,
+            cancelled=cancelled,
+        )
+        _scan_state.update({
+            "status": "cancelled" if cancelled else "completed",
+            "finished_at": finished_at.isoformat(),
+            "duration_ms": int((finished_at - started_at).total_seconds() * 1000),
+        })
+    except Exception as exc:
+        finished_at = datetime.now(timezone.utc)
+        _latest_result = {
+            "scan": {
+                "target": target,
+                "modules": module_list,
+                "status": "error",
+                "error": str(exc),
+                "started_at": started_at.isoformat(),
+                "finished_at": finished_at.isoformat(),
+            },
+            "summary": {"counts": {}, "ai": _ai_status()},
+            "logs": [],
+        }
+        _scan_state.update({
+            "status": "error",
+            "error": str(exc),
+            "finished_at": finished_at.isoformat(),
+        })
+    finally:
+        _cancel_requested.clear()
 
 
-def start_scan(target: str) -> None:
+def start_scan(target: str, modules: Optional[Iterable[str]] = None) -> None:
     """
     Public helper that starts a scan in a background thread.
     Raises RuntimeError if a scan is already running.
@@ -89,7 +215,11 @@ def start_scan(target: str) -> None:
         if _current_scan_thread and _current_scan_thread.is_alive():
             raise RuntimeError("A scan is already running")
 
-        thread = threading.Thread(target=_scan_runner, args=(target,), daemon=True)
+        thread = threading.Thread(
+            target=_scan_runner,
+            args=(target, modules),
+            daemon=True,
+        )
         _current_scan_thread = thread
         thread.start()
 
@@ -100,10 +230,11 @@ def cancel_scan() -> bool:
     cooperative cancellation; for now we just set a flag and return whether
     a scan was in flight.
     """
-    global _current_scan_thread
+    global _current_scan_thread, _scan_state
     with _scan_lock:
         if _current_scan_thread and _current_scan_thread.is_alive():
             _cancel_requested.set()
+            _scan_state["status"] = "cancelling"
             return True
     return False
 
@@ -129,6 +260,28 @@ def get_latest_results() -> Dict[str, Any]:
     return dict(_latest_result)
 
 
+def get_status() -> Dict[str, Any]:
+    """
+    Lightweight health endpoint for the SwiftUI client.
+    """
+    with _scan_lock:
+        running = _current_scan_thread is not None and _current_scan_thread.is_alive()
+
+    status = {
+        "status": "ok",
+        "scan_running": running,
+        "latest_target": _scan_state.get("target"),
+        "ai": _ai_status(),
+    }
+
+    if _scan_state:
+        status["scan_state"] = dict(_scan_state)
+    if running:
+        status["cancel_requested"] = _cancel_requested.is_set()
+
+    return status
+
+
 # ---------------------------------------------------------------------------
 # Programmatic API class (usable without HTTP).
 # ---------------------------------------------------------------------------
@@ -143,8 +296,7 @@ class CoreAPI:
         return {"status": "ok"}
 
     def start_scan(self, target: str, modules: Optional[Iterable[str]] = None) -> None:
-        # modules are ignored for now; wire selective module runs later.
-        start_scan(target)
+        start_scan(target, modules=modules)
 
     def stream_logs(self) -> Iterable[str]:
         # This yields and drains buffered log lines.
@@ -160,6 +312,9 @@ class CoreAPI:
 
     def cancel_scan(self) -> bool:
         return cancel_scan()
+
+    def status(self) -> Dict[str, Any]:
+        return get_status()
 
 # ---------------------------------------------------------------------------
 # Minimal HTTP server for local IPC (no external deps).
@@ -183,6 +338,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/ping":
             return self._send_json(200, {"status": "ok"})
+
+        if self.path == "/status":
+            return self._send_json(200, get_status())
 
         if self.path == "/logs":
             return self._send_json(200, drain_logs())
@@ -210,12 +368,17 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if not target:
                 return self._send_json(400, {"error": "target is required"})
 
+            modules_raw = data.get("modules")
+            modules: Optional[List[str]] = None
+            if isinstance(modules_raw, list):
+                modules = [str(item) for item in modules_raw if isinstance(item, str)]
+
             try:
-                start_scan(target)
+                start_scan(target, modules=modules)
             except RuntimeError as exc:
                 return self._send_json(409, {"error": str(exc)})
 
-            return self._send_json(202, {"status": "started", "target": target})
+            return self._send_json(202, {"status": "started", "target": target, "modules": modules or []})
 
         if self.path == "/cancel":
             if cancel_scan():

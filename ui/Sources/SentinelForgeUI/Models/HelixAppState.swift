@@ -10,6 +10,11 @@ class HelixAppState: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var apiLogs: [String] = []          // Buffered logs from Python core
     @Published var apiResults: SentinelResults?    // Latest scan snapshot
+    @Published var engineStatus: EngineStatus?
+    @Published var aiStatus: AIStatus?
+    @Published var availableModels: [String] = ModelRouter.defaultCandidates
+    @Published var preferredModel: String = ModelRouter.defaultPreferredModel
+    @Published var autoRoutingEnabled: Bool = true
 
     private let llm: LLMService
     private let api = SentinelAPIClient()
@@ -19,6 +24,9 @@ class HelixAppState: ObservableObject {
     init(llm: LLMService) {
         self.llm = llm
         self.thread = ChatThread(title: "Main Chat", messages: [])
+        self.availableModels = llm.availableModels
+        self.preferredModel = llm.preferredModel
+        self.autoRoutingEnabled = llm.autoRoutingEnabled
 
         // Mirror the LLM's generating flag to the UI.
         llm.$isGenerating
@@ -28,12 +36,39 @@ class HelixAppState: ObservableObject {
             }
             .store(in: &cancellables)
 
+        llm.$preferredModel
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] model in
+                self?.preferredModel = model
+            }
+            .store(in: &cancellables)
+
+        llm.$autoRoutingEnabled
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                self?.autoRoutingEnabled = enabled
+            }
+            .store(in: &cancellables)
+
+        llm.$availableModels
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] models in
+                self?.availableModels = models
+            }
+            .store(in: &cancellables)
+
         // Kick off lightweight polling to keep logs/results fresh.
         beginPolling()
+        refreshStatus()
     }
 
     convenience init() {
         self.init(llm: LLMService())
+    }
+
+    var modelOptions: [String] {
+        let models = availableModels
+        return models.isEmpty ? ModelRouter.defaultCandidates : models
     }
 
     // Reset conversation state.
@@ -70,6 +105,14 @@ class HelixAppState: ObservableObject {
         llm.cancel()
     }
 
+    func updatePreferredModel(_ model: String) {
+        llm.updatePreferredModel(model)
+    }
+
+    func updateAutoRouting(_ enabled: Bool) {
+        llm.updateAutoRouting(enabled)
+    }
+
     // MARK: - Core IPC Helpers (HTTP bridge to Python)
 
     /// Start a scan via the local Python API.
@@ -85,6 +128,26 @@ class HelixAppState: ObservableObject {
             if let lines = try? await api.fetchLogs(), !lines.isEmpty {
                 await MainActor.run {
                     self.apiLogs.append(contentsOf: lines)
+                }
+            }
+        }
+    }
+
+    /// Fetch engine/AI status (model availability + running scan).
+    func refreshStatus() {
+        Task {
+            if let status = try? await api.fetchStatus() {
+                await MainActor.run {
+                    self.engineStatus = status
+                    if let ai = status.ai {
+                        self.aiStatus = ai
+                        let models = ai.availableModels ?? []
+                        self.llm.applyAvailability(
+                            connected: ai.connected,
+                            models: models.isEmpty ? self.availableModels : models,
+                            defaultModel: ai.model
+                        )
+                    }
                 }
             }
         }
@@ -116,6 +179,7 @@ class HelixAppState: ObservableObject {
             .sink { [weak self] _ in
                 self?.refreshLogs()
                 self?.refreshResults()
+                self?.refreshStatus()
             }
     }
 

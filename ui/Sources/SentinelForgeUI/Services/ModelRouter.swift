@@ -3,7 +3,10 @@ import Foundation
 // Extremely simple heuristic model selector.
 // Swap out rules here to prefer different Ollama models per prompt type.
 struct ModelRouter {
-    func routeModel(for prompt: String, preferredModel: String, autoRoutingEnabled: Bool) -> String {
+    static let defaultPreferredModel = "llama3:latest"
+    static let defaultCandidates = ["llama3:latest", "phi3:mini", "deepseek-coder:6.7b"]
+
+    func routeModel(for prompt: String, preferredModel: String, autoRoutingEnabled: Bool, available: [String] = []) -> String {
         guard autoRoutingEnabled else { return preferredModel }
         let lower = prompt.lowercased()
 
@@ -14,17 +17,24 @@ struct ModelRouter {
             || lower.contains("swift")
             || lower.contains("stack trace")
             || lower.contains("error:") {
-            return "deepseek-coder:6.7b"
+            return pickAvailable("deepseek-coder:6.7b", fallback: preferredModel, available: available)
         }
 
         if prompt.count < 120 {
-            return "phi3:mini"
+            return pickAvailable("phi3:mini", fallback: preferredModel, available: available)
         }
 
-        return "llama3:latest"
+        return pickAvailable("llama3:latest", fallback: preferredModel, available: available)
+    }
+
+    private func pickAvailable(_ candidate: String, fallback: String, available: [String]) -> String {
+        guard !available.isEmpty else { return candidate }
+        if available.contains(candidate) { return candidate }
+        if available.contains(fallback) { return fallback }
+        return available.first ?? candidate
     }
 
     func modelName(for prompt: String) -> String {
-        routeModel(for: prompt, preferredModel: "llama3:latest", autoRoutingEnabled: true)
+        routeModel(for: prompt, preferredModel: Self.defaultPreferredModel, autoRoutingEnabled: true)
     }
 }

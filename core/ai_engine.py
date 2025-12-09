@@ -80,6 +80,39 @@ class AIEngine:
                 logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
                 self.client = None
 
+    # ---------------------------------------------------------
+    # Status helpers for UI/IPC
+    # ---------------------------------------------------------
+    def status(self) -> Dict[str, object]:
+        connected = self.client is not None
+        status = {
+            "provider": AI_PROVIDER,
+            "model": getattr(self.client, "model", AI_MODEL),
+            "connected": connected,
+            "fallback_enabled": AI_FALLBACK_ENABLED,
+            "available_models": [],
+        }
+        if connected:
+            status["available_models"] = self.available_models()
+        return status
+
+    def available_models(self) -> List[str]:
+        if not self.client:
+            return []
+        try:
+            with urllib.request.urlopen(f"{self.client.base_url}/api/tags", timeout=4) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            models = payload.get("models") or []
+            names: List[str] = []
+            for item in models:
+                name = item.get("name")
+                if name:
+                    names.append(str(name))
+            return names
+        except Exception as exc:  # pragma: no cover - network-dependent
+            logger.warning("Failed to fetch available models: %s", exc)
+            return []
+
     def process_tool_output(
         self,
         tool_name: str,

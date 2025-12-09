@@ -59,14 +59,14 @@ class ScanOrchestrator:
                 self.log(f"[AUTONOMOUS] AI suggests: {tool} ({reason}). Queueing...")
                 self.scanner.queue_task(tool, args)
 
-    async def run(self, target: str, cancel_flag=None) -> ScanContext:
+    async def run(self, target: str, modules: Optional[List[str]] = None, cancel_flag=None) -> ScanContext:
         self.current_target = target
         logs: List[str] = []
         
         # Reset dispatcher history for new scan
         self.dispatcher = ActionDispatcher()
 
-        async for line in self.scanner.scan(target, cancel_flag=cancel_flag):
+        async for line in self.scanner.scan(target, selected_tools=modules, cancel_flag=cancel_flag):
             logs.append(line)
             self.log(line)
 
@@ -86,9 +86,9 @@ class ScanOrchestrator:
             logs=logs,
         )
 
-    def run_sync(self, target: str) -> ScanContext:
+    def run_sync(self, target: str, modules: Optional[List[str]] = None, cancel_flag=None) -> ScanContext:
         """Convenience wrapper to run orchestrator in a synchronous context."""
-        return asyncio.run(self.run(target))
+        return asyncio.run(self.run(target, modules=modules, cancel_flag=cancel_flag))
 
     def _log(self, msg: str, logs: List[str]):
         logs.append(msg)
