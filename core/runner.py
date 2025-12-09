@@ -7,7 +7,7 @@ import subprocess
 from typing import Callable, Dict, List, Tuple
 
 from core.tools import get_tool_command, get_installed_tools
-from core.recon import BehavioralRecon
+from core.recon.behavioral import BehavioralRecon
 
 OutputCallback = Callable[[str], None]
 

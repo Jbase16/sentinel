@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from typing import Callable, List
 
-from core.recon import PassiveReconEngine
+from core.recon.behavioral import PassiveReconEngine
 
 LogFn = Callable[[str], None]
 
