@@ -24,6 +24,7 @@
 - [ ] Define structured results schema (findings/issues/evidence/killchain) returned through `core/api.py`.
 - [ ] Add unit tests for classifiers and IPC handlers.
 - [ ] Evaluate fine-tune/adapter approach using vulnerability datasets (e.g., https://huggingface.co/datasets/CyberNative/Code_Vulnerability_Security_DPO) to bias local models toward vuln reasoning (guardrail-free).
+- [ ] Strengthen cancellation: ensure UI shows cancelling state; confirm per-tool kills behave as expected in logs/results.
 
 ## Documentation
 - [ ] Fill out `docs/architecture.md` with diagrams, IPC schemas, and threading model.

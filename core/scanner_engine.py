@@ -61,6 +61,7 @@ class ScannerEngine:
         self._fingerprint_cache = set()
         self._recon_edges = []
         self._recon_edge_keys = set()
+        self._procs: Dict[str, asyncio.subprocess.Process] = {}
 
         selected_clean = [t for t in (selected_tools or []) if t in TOOLS]
         tools_to_run = list(installed.keys())
@@ -108,7 +109,9 @@ class ScannerEngine:
                          tool = task_def["tool"]
                          args = task_def.get("args")
 
-                    self._running_tasks[tool] = asyncio.create_task(self._run_tool_task(tool, target, self._queue, args))
+                    self._running_tasks[tool] = asyncio.create_task(
+                        self._run_tool_task(tool, target, self._queue, args, cancel_flag)
+                    )
                     await self._queue.put(f"[scanner] Started {tool} (dynamic launch)")
 
                 if not self._running_tasks:
@@ -131,6 +134,14 @@ class ScannerEngine:
                 if not done:
                     # If cancellation was requested mid-run, try to wait for running tasks to finish.
                     if cancel_flag is not None and cancel_flag.is_set():
+                        # Best-effort: terminate running subprocesses and wait for tasks to notice.
+                        for name, proc in list(self._procs.items()):
+                            if proc.returncode is None:
+                                try:
+                                    proc.terminate()
+                                    await self._queue.put(f"[{name}] terminated due to cancellation")
+                                except ProcessLookupError:
+                                    pass
                         await self._queue.put("[scanner] cancellation requested; waiting for running tasks to finish")
                     await asyncio.sleep(0.05)
             
@@ -261,7 +272,14 @@ class ScannerEngine:
         killchain_store.replace_all(combined_edges)
         return len(enriched), len(combined_edges)
 
-    async def _run_tool_task(self, tool: str, target: str, queue: asyncio.Queue[str], custom_args: List[str] = None) -> List[dict]:
+    async def _run_tool_task(
+        self,
+        tool: str,
+        target: str,
+        queue: asyncio.Queue[str],
+        custom_args: List[str] = None,
+        cancel_flag=None,
+    ) -> List[dict]:
         meta_override = self._installed_meta.get(tool)
         
         if custom_args:
@@ -279,6 +297,8 @@ class ScannerEngine:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
+            # Track proc so cancellation can terminate it.
+            self._procs[tool] = proc
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
             evidence_store.save_text(f"{tool}_error", target, msg)
@@ -293,6 +313,9 @@ class ScannerEngine:
         output_lines: List[str] = []
         assert proc.stdout is not None
         while True:
+            if cancel_flag is not None and cancel_flag.is_set():
+                # Stop reading further; process may be terminated by caller.
+                break
             line = await proc.stdout.readline()
             if not line:
                 break
@@ -304,6 +327,8 @@ class ScannerEngine:
 
         exit_code = await proc.wait()
         await queue.put(f"[{tool}] Exit code: {exit_code}")
+        # Cleanup tracked proc
+        self._procs.pop(tool, None)
 
         output_text = "\n".join(output_lines)
         evidence_store.save_text(tool, target, output_text)
