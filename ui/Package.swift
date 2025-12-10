@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "SentinelUI",
+    name: "SentinelUI",hhhhhhrthhrthrtrthhrh
     platforms: [
         .macOS(.v13)
     ],

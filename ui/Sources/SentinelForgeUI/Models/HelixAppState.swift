@@ -58,9 +58,7 @@ class HelixAppState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Start SSE stream for real-time updates
-        startEventStream()
-        refreshStatus()
+        // Initialization is now lazy via onAppear in the View
     }
 
     convenience init() {
@@ -177,7 +175,14 @@ class HelixAppState: ObservableObject {
         Task {
             do {
                 for try await event in api.streamEvents() {
-                    await handleSSEEvent(event)
+                    // handleSSEEvent is @MainActor but synchronous logic, so await isn't strictly needed 
+                    // for suspension, but MainActor isolation requires it if we weren't already on MainActor.
+                    // However, since we are inside a Task, we are likely off-main.
+                    // The warning "No async operations" suggests swift compiler sees it as synchronous.
+                    // Let's rely on MainActor.run to be explicit and avoid the warning.
+                    await MainActor.run {
+                        self.handleSSEEvent(event)
+                    }
                 }
             } catch {
                 print("[AppState] SSE Stream error: \(error), retrying in 5s...")

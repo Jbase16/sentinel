@@ -3,6 +3,7 @@ import SwiftUI
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var scanTarget: String = ""
+    @FocusState private var isFocused: Bool
     
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +15,12 @@ struct ScanControlView: View {
                 TextField("Target (e.g., https://example.com)", text: $scanTarget)
                     .textFieldStyle(.roundedBorder)
                     .font(.body)
+                    .focused($isFocused)
+                    .onSubmit {
+                        if !scanTarget.isEmpty {
+                            appState.startScan(target: scanTarget)
+                        }
+                    }
                 
                 if appState.engineStatus?.scanRunning == true {
                     Button(action: { appState.cancelScan() }) {

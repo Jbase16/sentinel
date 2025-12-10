@@ -3,6 +3,7 @@ import SwiftUI
 struct ChatView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var input: String = ""
+    @FocusState private var isFocused: Bool
     
     var body: some View {
         VStack(spacing: 0) {
@@ -24,16 +25,21 @@ struct ChatView: View {
                     }
                 }
             }
+            // Close keyboard on scroll (optional, mostly mobile behavior but good practice)
+            .onTapGesture {
+                isFocused = false
+            }
             
             Divider()
             
             HStack(alignment: .bottom) {
-                TextEditor(text: $input)
-                    .frame(minHeight: 30, maxHeight: 100)
-                    .padding(4)
-                    .background(Color(NSColor.textBackgroundColor))
-                    .cornerRadius(6)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                TextField("Message Sentinel AI...", text: $input)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isFocused)
+                    .onSubmit {
+                        sendMessage()
+                    }
+                    .frame(minHeight: 30)
                 
                 Button(action: sendMessage) {
                     Image(systemName: "paperplane.fill")
@@ -41,11 +47,14 @@ struct ChatView: View {
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
-                .padding(.bottom, 4)
+                .padding(.bottom, 2) // Minor alignment tweak
                 .disabled(input.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
+        }
+        .onAppear {
+            isFocused = true
         }
     }
     

@@ -71,7 +71,13 @@ struct MainWindowView: View {
                         Text("Select an item")
                     }
                 }
-                .frame(minWidth: 900, minHeight: 600)
-            }
-        }
-        
+                        .frame(minWidth: 900, minHeight: 600)
+                        .onAppear {
+                            print("MainWindowView appeared")
+                            // Safely kick off streams when the UI is actually visible
+                            appState.startEventStream()
+                            appState.refreshStatus()
+                        }
+                    }
+                }
+                
