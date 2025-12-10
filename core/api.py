@@ -497,34 +497,43 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", "0"))
             except ValueError:
                 length = 0
-            raw = self.rfile.read(length) if length else b""
+            
             try:
-                data = json.loads(raw or "{}")
-            except json.JSONDecodeError:
-                return self._send_json(400, {"error": "invalid json"})
-
-            prompt = data.get("prompt", "")
-            
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-
-            # Stream tokens from AIEngine
-            for token in _ai_engine.stream_chat(prompt):
-                # SSE format: data: <json_content>\n\n
-                payload = json.dumps({"token": token})
-                msg = f"data: {payload}\n\n"
+                raw = self.rfile.read(length) if length else b""
                 try:
-                    self.wfile.write(msg.encode("utf-8"))
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    break
-            
-            # End of stream
-            self.wfile.write(b"data: [DONE]\n\n")
-            self.wfile.flush()
-            return
+                    data = json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    return self._send_json(400, {"error": "invalid json"})
+
+                prompt = data.get("prompt", "")
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+
+                # Stream tokens from AIEngine
+                for token in _ai_engine.stream_chat(prompt):
+                    # SSE format: data: <json_content>\n\n
+                    payload = json.dumps({"token": token})
+                    msg = f"data: {payload}\n\n"
+                    try:
+                        self.wfile.write(msg.encode("utf-8"))
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        # Client disconnected
+                        break
+                
+                # End of stream
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+            except Exception as e:
+                # Catch-all to prevent server crash
+                print(f"[API] Chat error: {e}")
+                # Try to send error if headers not sent, otherwise just log
+                # (If headers were sent, we can't cleanly error out to client except via stream)
+                return
             
         if self.path.startswith("/actions/"):
             # Action approval/denial
