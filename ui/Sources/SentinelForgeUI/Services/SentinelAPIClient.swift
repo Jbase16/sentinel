@@ -90,6 +90,136 @@ struct SentinelAPIClient {
             throw APIError.badStatus
         }
     }
+
+    // Stream context-aware chat from Python backend
+    func streamChat(prompt: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                guard let url = URL(string: "/chat", relativeTo: baseURL) else {
+                    continuation.finish(throwing: APIError.badStatus)
+                    return
+                }
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body = ["prompt": prompt]
+                do {
+                    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                    let (bytes, _) = try await session.bytes(for: request)
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("data: ") {
+                            let jsonStr = String(line.dropFirst(6))
+                            if jsonStr == "[DONE]" { break }
+                            if let data = jsonStr.data(using: .utf8),
+                               let obj = try? JSONDecoder().decode([String: String].self, from: data),
+                               let token = obj["token"] {
+                                continuation.yield(token)
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+
+    // Stream server-sent events (logs, findings, etc.)
+    func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                guard let url = URL(string: "/events", relativeTo: baseURL) else {
+                    continuation.finish(throwing: APIError.badStatus)
+                    return
+                }
+                let request = URLRequest(url: url)
+                do {
+                    let (bytes, _) = try await session.bytes(for: request)
+                    var currentEvent = ""
+                    var currentData = ""
+                    
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("event: ") {
+                            currentEvent = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                        } else if line.hasPrefix("data: ") {
+                            currentData = String(line.dropFirst(6))
+                        } else if line.isEmpty {
+                            if !currentEvent.isEmpty && !currentData.isEmpty {
+                                continuation.yield(SSEEvent(type: currentEvent, data: currentData))
+                            }
+                            currentEvent = ""
+                            currentData = ""
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+    
+    // Approve a pending action
+    func approveAction(id: String) async throws {
+        guard let url = URL(string: "/actions/\(id)/approve", relativeTo: baseURL) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.badStatus
+        }
+    }
+
+    // Deny a pending action
+    func denyAction(id: String) async throws {
+        guard let url = URL(string: "/actions/\(id)/deny", relativeTo: baseURL) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.badStatus
+        }
+    }
+    // Stream report section
+    func streamReportSection(section: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                guard let url = URL(string: "/report/generate?section=\(section)", relativeTo: baseURL) else {
+                    continuation.finish(throwing: APIError.badStatus)
+                    return
+                }
+                var request = URLRequest(url: url)
+                request.httpMethod = "GET"
+                
+                do {
+                    let (bytes, _) = try await session.bytes(for: request)
+                    for try await line in bytes.lines {
+                        if line.hasPrefix("data: ") {
+                            let jsonStr = String(line.dropFirst(6))
+                            if jsonStr == "[DONE]" { break }
+                            if let data = jsonStr.data(using: .utf8),
+                               let obj = try? JSONDecoder().decode([String: String].self, from: data),
+                               let token = obj["token"] {
+                                continuation.yield(token)
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
+        }
+    }
+}
+
+struct SSEEvent {
+    let type: String
+    let data: String
 }
 
 // MARK: - Models
@@ -103,16 +233,29 @@ struct EngineStatus: Decodable {
     let scanRunning: Bool
     let latestTarget: String?
     let ai: AIStatus?
+    let tools: ToolStatus?
     let scanState: ScanState?
     let cancelRequested: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case status
-        case ai
+        case status, ai, tools
         case scanRunning = "scan_running"
         case latestTarget = "latest_target"
         case scanState = "scan_state"
         case cancelRequested = "cancel_requested"
+    }
+}
+
+struct ToolStatus: Decodable {
+    let installed: [String]
+    let missing: [String]
+    let countInstalled: Int
+    let countTotal: Int
+    
+    enum CodingKeys: String, CodingKey {
+        case installed, missing
+        case countInstalled = "count_installed"
+        case countTotal = "count_total"
     }
 }
 

@@ -26,6 +26,7 @@ import http.server
 import json
 import queue
 import threading
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -33,6 +34,11 @@ from core.ai_engine import AIEngine
 from core.evidence_store import EvidenceStore
 from core.reasoning import reasoning_engine
 from core.scan_orchestrator import ScanOrchestrator
+from core.tools import get_installed_tools, TOOLS
+from core.task_router import TaskRouter
+from core.action_dispatcher import ActionDispatcher
+
+from core.reporting import ReportComposer
 
 # ---------------------------------------------------------------------------
 # Shared state for the in-process API and the HTTP handler.
@@ -40,6 +46,10 @@ from core.scan_orchestrator import ScanOrchestrator
 
 # Queue buffers log lines coming from the orchestrator.
 _log_queue: "queue.Queue[str]" = queue.Queue(maxsize=10_000)
+
+# Global event bus for SSE
+_event_subscribers: List["queue.Queue[str]"] = []
+_subscribers_lock = threading.Lock()
 
 # Stores the latest scan results snapshot for the UI.
 _latest_result: Dict[str, Any] = {}
@@ -59,12 +69,36 @@ _cancel_requested = threading.Event()
 # Shared AI engine singleton for status reporting.
 _ai_engine = AIEngine.instance()
 
+def _broadcast_sse(event_type: str, data: Any):
+    """Push an event to all connected SSE clients."""
+    payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+    with _subscribers_lock:
+        for q in _event_subscribers:
+            try:
+                q.put_nowait(payload)
+            except queue.Full:
+                pass
+
+def _router_event_listener(event_type: str, payload: dict):
+    """Bridge TaskRouter events to SSE."""
+    _broadcast_sse(event_type, payload)
+
+# Hook up the listener
+TaskRouter.instance().ui_event.connect(_router_event_listener)
+
+# Hook up ActionDispatcher events to SSE
+def _action_needed_listener(action_id: str, action: dict):
+    _broadcast_sse("action_needed", action)
+
+ActionDispatcher.instance().action_needed.connect(_action_needed_listener)
+
 def _log_sink(msg: str) -> None:
     """Callback passed to ScanOrchestrator to collect log lines."""
     try:
         _log_queue.put_nowait(msg)
+        # Also broadcast logs via SSE
+        _broadcast_sse("log", {"line": msg})
     except queue.Full:
-        # If the queue is full, drop logs to avoid blocking scans.
         pass
 
 
@@ -259,7 +293,6 @@ def get_latest_results() -> Dict[str, Any]:
     """
     return dict(_latest_result)
 
-
 def get_status() -> Dict[str, Any]:
     """
     Lightweight health endpoint for the SwiftUI client.
@@ -267,11 +300,22 @@ def get_status() -> Dict[str, Any]:
     with _scan_lock:
         running = _current_scan_thread is not None and _current_scan_thread.is_alive()
 
+    # Tool health check
+    installed = get_installed_tools()
+    all_tools = list(TOOLS.keys())
+    missing = [t for t in all_tools if t not in installed]
+
     status = {
         "status": "ok",
         "scan_running": running,
         "latest_target": _scan_state.get("target"),
         "ai": _ai_status(),
+        "tools": {
+            "installed": list(installed.keys()),
+            "missing": missing,
+            "count_installed": len(installed),
+            "count_total": len(all_tools)
+        }
     }
 
     if _scan_state:
@@ -316,6 +360,7 @@ class CoreAPI:
     def status(self) -> Dict[str, Any]:
         return get_status()
 
+
 # ---------------------------------------------------------------------------
 # Minimal HTTP server for local IPC (no external deps).
 # ---------------------------------------------------------------------------
@@ -349,10 +394,71 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             result = get_latest_results()
             status = 200 if result else 204
             return self._send_json(status, result)
+            
+        if self.path == "/events":
+            # Server-Sent Events (SSE) stream
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+
+            q = queue.Queue(maxsize=100)
+            with _subscribers_lock:
+                _event_subscribers.append(q)
+
+            try:
+                while True:
+                    msg = q.get()
+                    self.wfile.write(msg.encode("utf-8"))
+                    self.wfile.flush()
+            finally:
+                with _subscribers_lock:
+                    if q in _event_subscribers:
+                        _event_subscribers.remove(q)
+            return
+
+        if self.path.startswith("/report/generate"):
+            # Stream specific report section
+            # /report/generate?section=executive_summary
+            try:
+                from urllib.parse import urlparse, parse_qs
+                query = parse_qs(urlparse(self.path).query)
+                section = query.get("section", ["executive_summary"])[0]
+                
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                
+                composer = ReportComposer()
+                # For now, we generate the whole section at once and send it as one chunk
+                # In a future iteration, ReportComposer could stream tokens too
+                content = composer.generate_section(section)
+                
+                # Split content into smaller chunks to simulate streaming if it's large
+                chunk_size = 1024
+                for i in range(0, len(content), chunk_size):
+                    chunk = content[i:i+chunk_size]
+                    payload = json.dumps({"token": chunk})
+                    msg = f"data: {payload}\n\n"
+                    try:
+                        self.wfile.write(msg.encode("utf-8"))
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        break
+                        
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+            except Exception as e:
+                # Log error but can't send JSON if headers already sent
+                print(f"Report generation error: {e}")
+                return
 
         self._send_json(404, {"error": "not found"})
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST() -> None:  # noqa: N802
         if self.path == "/scan":
             try:
                 length = int(self.headers.get("Content-Length", "0"))
@@ -384,6 +490,60 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             if cancel_scan():
                 return self._send_json(202, {"status": "cancelling"})
             return self._send_json(409, {"error": "no active scan"})
+
+        if self.path == "/chat":
+            # Streaming chat endpoint
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+            except ValueError:
+                length = 0
+            raw = self.rfile.read(length) if length else b""
+            try:
+                data = json.loads(raw or "{}")
+            except json.JSONDecodeError:
+                return self._send_json(400, {"error": "invalid json"})
+
+            prompt = data.get("prompt", "")
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+
+            # Stream tokens from AIEngine
+            for token in _ai_engine.stream_chat(prompt):
+                # SSE format: data: <json_content>\n\n
+                payload = json.dumps({"token": token})
+                msg = f"data: {payload}\n\n"
+                try:
+                    self.wfile.write(msg.encode("utf-8"))
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+            
+            # End of stream
+            self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+            return
+            
+        if self.path.startswith("/actions/"):
+            # Action approval/denial
+            parts = self.path.split("/")
+            if len(parts) >= 4:
+                action_id = parts[2]
+                verb = parts[3] # approve or deny
+                dispatcher = ActionDispatcher.instance()
+                
+                success = False
+                if verb == "approve":
+                    success = dispatcher.approve_action(action_id)
+                elif verb == "deny":
+                    success = dispatcher.deny_action(action_id)
+                
+                if success:
+                    return self._send_json(200, {"status": "ok", "action_id": action_id, "result": verb})
+                else:
+                    return self._send_json(404, {"error": "action not found or already processed"})
 
         self._send_json(404, {"error": "not found"})
 

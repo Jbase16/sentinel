@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from core.findings import findings_store
+from core.findings_store import findings_store
 from core.issues_store import issues_store
 from core.killchain_store import killchain_store
 from core.risk import risk_engine
 from core.reasoning import reasoning_engine
+from core.ai_engine import AIEngine
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ReportBundle:
@@ -21,142 +24,136 @@ class ReportBundle:
     markdown_path: str
     json_path: str
 
+class ReportComposer:
+    """
+    AI-driven 'Investigative Journalist' for security reporting.
+    Generates semantic narratives rather than just listing bugs.
+    """
+    
+    SECTIONS = [
+        "executive_summary",
+        "attack_narrative",
+        "technical_findings",
+        "risk_assessment",
+        "remediation_roadmap"
+    ]
 
-from core.ai_engine import AIEngine
+    def __init__(self):
+        self.ai = AIEngine.instance()
 
-# ...
+    def generate_section(self, section_name: str, context_override: Optional[Dict] = None) -> str:
+        """
+        Generates a specific section of the report using the LLM.
+        """
+        if section_name not in self.SECTIONS:
+            return f"Error: Unknown section '{section_name}'"
 
+        context = context_override or self._gather_context()
+        
+        prompts = {
+            "executive_summary": self._prompt_exec_summary,
+            "attack_narrative": self._prompt_attack_narrative,
+            "technical_findings": self._prompt_technical,
+            "risk_assessment": self._prompt_risk,
+            "remediation_roadmap": self._prompt_remediation
+        }
+        
+        prompt_fn = prompts.get(section_name)
+        if not prompt_fn:
+            return "Section not implemented."
+
+        if not self.ai.client:
+            return self._fallback_content(section_name, context)
+
+        user_prompt = prompt_fn(context)
+        system_prompt = (
+            "You are a Senior Security Consultant writing a high-stakes penetration testing report. "
+            "Your tone is professional, authoritative, and concise. "
+            "Focus on business impact and attack chains, not just list of bugs. "
+            "Use Markdown formatting."
+        )
+        
+        return self.ai.client.generate(user_prompt, system_prompt) or "AI Generation failed."
+
+    def _gather_context(self) -> Dict:
+        return {
+            "findings": findings_store.get_all(),
+            "issues": issues_store.get_all(),
+            "risk": risk_engine.get_scores(),
+            "killchain": killchain_store.get_all(),
+            "reasoning": reasoning_engine.analyze()
+        }
+
+    # --- Prompts ---
+
+    def _prompt_exec_summary(self, ctx: Dict) -> str:
+        issues = ctx.get("issues", [])
+        return (
+            f"Write an Executive Summary for a security assessment.\n"
+            f"Context: Found {len(issues)} confirmed issues. "
+            f"Top risks: {', '.join([i.get('title', '') for i in issues[:3]])}.\n"
+            "Summarize the overall security posture, highlight the most critical risks, and "
+            "explain the potential business impact of these vulnerabilities being exploited."
+        )
+
+    def _prompt_attack_narrative(self, ctx: Dict) -> str:
+        chains = ctx.get("reasoning", {}).get("attack_paths", [])
+        if not chains:
+            return "No complete attack chains were verified. Describe individual vectors found."
+        
+        chain_text = "\n".join([" -> ".join(path) for path in chains[:5]])
+        return (
+            f"Write an Attack Narrative describing how an attacker could compromise the target.\n"
+            f"Observed Attack Chains:\n{chain_text}\n"
+            "Tell the story of the attack. How does one finding lead to another? "
+            "Connect the dots between recon, initial access, and impact."
+        )
+
+    def _prompt_technical(self, ctx: Dict) -> str:
+        findings = ctx.get("findings", [])
+        return (
+            f"Draft the Technical Findings section.\n"
+            f"Raw Data: {len(findings)} findings available.\n"
+            "Group these findings logically (e.g., by vulnerability class or affected asset). "
+            "For the top 5 most severe findings, provide technical depth: evidence, reproduction steps, and root cause."
+        )
+
+    def _prompt_risk(self, ctx: Dict) -> str:
+        scores = ctx.get("risk", {})
+        return (
+            f"Provide a Risk Assessment based on these asset scores: {json.dumps(scores, indent=2)}\n"
+            "Explain *why* certain assets are high risk. Factor in data sensitivity and exposure."
+        )
+
+    def _prompt_remediation(self, ctx: Dict) -> str:
+        recs = ctx.get("reasoning", {}).get("recommended_phases", [])
+        return (
+            "Draft a Remediation Roadmap.\n"
+            f"System recommendations: {json.dumps(recs)}\n"
+            "Prioritize fixes based on impact. Suggest immediate 'stop the bleeding' fixes "
+            "versus long-term architectural hardening."
+        )
+
+    # --- Fallbacks ---
+
+    def _fallback_content(self, section: str, ctx: Dict) -> str:
+        return f"## {section.replace('_', ' ').title()}\n\n*AI Unavailable. Raw data stats: {len(ctx.get('findings', []))} findings.*"
+
+
+# Legacy wrapper for backward compatibility
 def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
-    """
-    Export findings/issues/killchain data plus reasoning summary into markdown + JSON files.
-    Returns the created bundle metadata.
-    """
+    composer = ReportComposer()
+    full_report = ""
+    for section in composer.SECTIONS:
+        full_report += composer.generate_section(section) + "\n\n"
+    
     os.makedirs(base_dir, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     bundle_dir = os.path.join(base_dir, f"bundle-{timestamp}")
     os.makedirs(bundle_dir, exist_ok=True)
-
-    findings = findings_store.get_all()
-    issues = issues_store.get_all()
-    risk_scores = risk_engine.get_scores()
-    reasoning = reasoning_engine.analyze()
-    edges = killchain_store.get_all()
-
-    summary = {
-        "generated_at": timestamp,
-        "findings_count": len(findings),
-        "issues_count": len(issues),
-        "risk_scores": risk_scores,
-        "reasoning": reasoning,
-        "killchain_edges": edges,
-    }
-
-    # Generate AI Narrative Report if available
-    ai_report = ""
-    try:
-        ai_engine = AIEngine.instance()
-        if ai_engine.client:
-            ai_report = ai_engine.generate_report_narrative(findings, issues)
-    except Exception as e:
-        ai_report = f"AI Report Generation Failed: {e}"
-
-    markdown = _render_markdown(summary, findings, issues, ai_report)
-
-    md_path = os.path.join(bundle_dir, "report.md")
-    json_path = os.path.join(bundle_dir, "report.json")
-
-    with open(md_path, "w", encoding="utf-8") as fh:
-        fh.write(markdown)
-
-    with open(json_path, "w", encoding="utf-8") as fh:
-        json.dump(summary, fh, indent=2)
-
-    return ReportBundle(folder=bundle_dir, markdown_path=md_path, json_path=json_path)
-
-
-def _render_markdown(summary: Dict, findings: List[dict], issues: List[dict], ai_report: str = "") -> str:
-    lines = [
-        "# AraUltra Report Bundle",
-        "",
-        f"- Generated: {summary['generated_at']} UTC",
-        f"- Total Findings: {summary['findings_count']}",
-        f"- Correlated Issues: {summary['issues_count']}",
-        "",
-    ]
     
-    if ai_report:
-        lines.append("## Executive Summary (AI Generated)")
-        lines.append(ai_report)
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-    lines.append("## Top Assets by Risk")
-    # ... (rest of the function)
-
-    risk_scores = summary["risk_scores"]
-    if risk_scores:
-        for asset, score in sorted(risk_scores.items(), key=lambda kv: kv[1], reverse=True):
-            lines.append(f"- **{asset}** — score {score:.1f}")
-    else:
-        lines.append("- No risk data available yet.")
-
-    lines.append("")
-    lines.append("## Correlated Issues")
-    if issues:
-        for issue in issues:
-            lines.extend([
-                f"### {issue.get('title', issue.get('type', 'Issue'))}",
-                f"- Target: {issue.get('target') or issue.get('asset') or 'unknown'}",
-                f"- Severity: {issue.get('severity', 'INFO')}",
-                f"- Tags: {', '.join(issue.get('tags', [])) or '—'}",
-                f"- Description: {issue.get('description', issue.get('message', ''))}",
-                ""
-            ])
-    else:
-        lines.append("- No correlated issues yet.")
-
-    lines.append("## Reasoning Snapshot")
-    reasoning = summary["reasoning"]
-    attack_paths = reasoning.get("attack_paths") or []
-    if attack_paths:
-        lines.append("### Attack Paths")
-        for idx, path in enumerate(attack_paths, 1):
-            lines.append(f"{idx}. " + " → ".join(path))
-    else:
-        lines.append("- No attack paths derived.")
-
-    recommendations = reasoning.get("recommended_phases") or []
-    lines.append("")
-    lines.append("### Recommended Phases")
-    if recommendations:
-        for rec in recommendations:
-            lines.append(f"- {rec}")
-    else:
-        lines.append("- No additional phases recommended.")
-
-    lines.append("")
-    lines.append("## Killchain Edges")
-    edges = summary["killchain_edges"]
-    if edges:
-        for edge in edges[:50]:
-            lines.append(
-                f"- {edge.get('source')} → {edge.get('target')} | "
-                f"{edge.get('severity')} | {edge.get('label') or edge.get('signal')}"
-            )
-        if len(edges) > 50:
-            lines.append(f"- … {len(edges) - 50} more edges omitted")
-    else:
-        lines.append("- No killchain edges yet.")
-
-    lines.append("")
-    lines.append("## Raw Findings Snapshot (first 20)")
-    for finding in findings[:20]:
-        lines.append(
-            f"- {finding.get('target')} | {finding.get('tool')} | "
-            f"{finding.get('type')} | {finding.get('severity')}"
-        )
-    if len(findings) > 20:
-        lines.append(f"- … {len(findings) - 20} more findings omitted")
-
-    return "\n".join(lines) + "\n"
+    md_path = os.path.join(bundle_dir, "report.md")
+    with open(md_path, "w") as f:
+        f.write(full_report)
+        
+    return ReportBundle(bundle_dir, md_path, "")

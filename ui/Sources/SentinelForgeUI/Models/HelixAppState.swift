@@ -15,6 +15,7 @@ class HelixAppState: ObservableObject {
     @Published var availableModels: [String] = ModelRouter.defaultCandidates
     @Published var preferredModel: String = ModelRouter.defaultPreferredModel
     @Published var autoRoutingEnabled: Bool = true
+    @Published var pendingActions: [PendingAction] = []
 
     private let llm: LLMService
     private let api = SentinelAPIClient()
@@ -57,8 +58,8 @@ class HelixAppState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Kick off lightweight polling to keep logs/results fresh.
-        beginPolling()
+        // Start SSE stream for real-time updates
+        startEventStream()
         refreshStatus()
     }
 
@@ -75,7 +76,7 @@ class HelixAppState: ObservableObject {
     func clear() {
         thread = ChatThread(title: "Main Chat", messages: [])
     }
-
+    
     // Append user message, create an empty assistant bubble, and stream tokens into it.
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -171,21 +172,70 @@ class HelixAppState: ObservableObject {
         }
     }
 
-    /// Start periodic polling for logs/results every few seconds.
-    func beginPolling() {
-        pollCancellable?.cancel()
-        pollCancellable = Timer.publish(every: 2.0, on: .main, in: .common)
-            .autoconnect()
-            .sink { [weak self] _ in
-                self?.refreshLogs()
-                self?.refreshResults()
-                self?.refreshStatus()
+    /// Start SSE stream to receive real-time updates from Python
+    func startEventStream() {
+        Task {
+            do {
+                for try await event in api.streamEvents() {
+                    await handleSSEEvent(event)
+                }
+            } catch {
+                print("[AppState] SSE Stream error: \(error), retrying in 5s...")
+                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                startEventStream()
             }
+        }
     }
 
-    /// Stop periodic polling (if needed later).
-    func stopPolling() {
-        pollCancellable?.cancel()
-        pollCancellable = nil
+    @MainActor
+    private func handleSSEEvent(_ event: SSEEvent) {
+        switch event.type {
+        case "log":
+             if let data = event.data.data(using: .utf8),
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let line = json["line"] as? String {
+                 self.apiLogs.append(line)
+             }
+        case "findings_update", "evidence_update":
+            // For now, just trigger a full refresh of results to keep it simple and consistent
+            self.refreshResults()
+        case "action_needed":
+            if let data = event.data.data(using: .utf8),
+               let action = try? JSONDecoder().decode(PendingAction.self, from: data) {
+                // Avoid duplicates
+                if !self.pendingActions.contains(where: { $0.id == action.id }) {
+                    self.pendingActions.append(action)
+                }
+            }
+        default:
+            break
+        }
     }
+    
+    func approveAction(_ action: PendingAction) {
+        Task {
+            try? await api.approveAction(id: action.id)
+            await MainActor.run {
+                self.pendingActions.removeAll { $0.id == action.id }
+            }
+        }
+    }
+
+    func denyAction(_ action: PendingAction) {
+        Task {
+            try? await api.denyAction(id: action.id)
+            await MainActor.run {
+                self.pendingActions.removeAll { $0.id == action.id }
+            }
+        }
+    }
+}
+
+struct PendingAction: Identifiable, Decodable {
+    let id: String
+    let tool: String
+    let args: [String]
+    let reason: String?
+    let target: String?
+    let timestamp: String?
 }

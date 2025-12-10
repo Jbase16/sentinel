@@ -35,12 +35,30 @@ class ScanOrchestrator:
     def __init__(self, log_fn: Optional[LogCallback] = None):
         self.log = log_fn or (lambda msg: None)
         self.scanner = ScannerEngine()
-        self.dispatcher = ActionDispatcher()
+        self.dispatcher = ActionDispatcher.instance()
         
         # We need to listen to TaskRouter events to trigger new scans
         self.router = TaskRouter.instance()
-        self.router.register_ui_callback("findings_update", self._handle_autonomous_actions)
+        self.router.ui_event.connect(self._on_router_event)
+        
+        # Listen for approved actions (both auto and manual)
+        self.dispatcher.action_approved.connect(self._on_action_approved)
+        
         self.current_target = ""
+
+    def _on_action_approved(self, action: dict):
+        """
+        Executed when an action is greenlit (either auto or by user).
+        """
+        tool = action["tool"]
+        args = action["args"]
+        reason = action.get("reason", "")
+        self.log(f"[AUTONOMOUS] Executing approved action: {tool} ({reason})")
+        self.scanner.queue_task(tool, args)
+
+    def _on_router_event(self, event_type: str, payload: dict):
+        if event_type == "findings_update":
+            self._handle_autonomous_actions(payload)
 
     def _handle_autonomous_actions(self, payload: dict):
         """
@@ -51,20 +69,19 @@ class ScanOrchestrator:
             return
 
         for step in next_steps:
-            validated = self.dispatcher.validate_action(step, self.current_target)
-            if validated:
-                tool = validated["tool"]
-                args = validated["args"]
-                reason = validated["reason"]
-                self.log(f"[AUTONOMOUS] AI suggests: {tool} ({reason}). Queueing...")
-                self.scanner.queue_task(tool, args)
+            # Request action - dispatcher will either auto-approve (emitting action_approved)
+            # or hold it in pending (emitting action_needed)
+            status = self.dispatcher.request_action(step, self.current_target)
+            if status == "PENDING":
+                self.log(f"[AUTONOMOUS] Action paused for approval: {step.get('tool')}")
 
     async def run(self, target: str, modules: Optional[List[str]] = None, cancel_flag=None) -> ScanContext:
         self.current_target = target
         logs: List[str] = []
         
-        # Reset dispatcher history for new scan
-        self.dispatcher = ActionDispatcher()
+        # Note: We do NOT reset dispatcher history here anymore, 
+        # so duplicates are remembered across scans in the same session.
+        # If per-scan dedupe is desired, we'd add a method to clear history.
 
         async for line in self.scanner.scan(target, selected_tools=modules, cancel_flag=cancel_flag):
             logs.append(line)

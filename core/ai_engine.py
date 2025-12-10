@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.request
-import urllib.error
-from typing import Dict, List, Optional
+import httpx
+from typing import Dict, List, Optional, Generator
 
 from core.findings_store import findings_store
 from core.killchain_store import killchain_store
@@ -35,25 +34,47 @@ class OllamaClient:
         }
         
         try:
-            data = json.dumps(payload).encode('utf-8')
-            req = urllib.request.Request(
-                url, 
-                data=data, 
-                headers={'Content-Type': 'application/json'}
-            )
-            with urllib.request.urlopen(req, timeout=60) as response:
-                if response.status == 200:
-                    result = json.loads(response.read().decode('utf-8'))
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.post(url, json=payload)
+                if resp.status_code == 200:
+                    result = resp.json()
                     return result.get('response')
-        except urllib.error.URLError as e:
-            logger.error(f"Ollama API timeout or connection error: {e}")
+        except Exception as e:
+            logger.error(f"Ollama API error: {e}")
             return None
         return None
 
+    def stream_generate(self, prompt: str, system: str = "") -> Generator[str, None, None]:
+        url = f"{self.base_url}/api/generate"
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "system": system,
+            "stream": True,
+        }
+        
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                with client.stream("POST", url, json=payload) as response:
+                    for line in response.iter_lines():
+                        if not line: continue
+                        try:
+                            chunk = json.loads(line)
+                            if "response" in chunk:
+                                yield chunk["response"]
+                            if chunk.get("done"):
+                                break
+                        except:
+                            pass
+        except Exception as e:
+            logger.error(f"Ollama stream error: {e}")
+            yield f"[Error: {e}]"
+
     def check_connection(self) -> bool:
         try:
-            with urllib.request.urlopen(f"{self.base_url}/api/tags", timeout=2) as response:
-                return response.status == 200
+            with httpx.Client(timeout=2.0) as client:
+                resp = client.get(f"{self.base_url}/api/tags")
+                return resp.status_code == 200
         except Exception:
             return False
 
@@ -100,8 +121,9 @@ class AIEngine:
         if not self.client:
             return []
         try:
-            with urllib.request.urlopen(f"{self.client.base_url}/api/tags", timeout=4) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+            with httpx.Client(timeout=4.0) as client:
+                resp = client.get(f"{self.client.base_url}/api/tags")
+                payload = resp.json()
             models = payload.get("models") or []
             names: List[str] = []
             for item in models:
@@ -109,9 +131,37 @@ class AIEngine:
                 if name:
                     names.append(str(name))
             return names
-        except Exception as exc:  # pragma: no cover - network-dependent
+        except Exception as exc:
             logger.warning("Failed to fetch available models: %s", exc)
             return []
+
+    def stream_chat(self, question: str) -> Generator[str, None, None]:
+        """
+        Stream answer to a natural-language question based on stored evidence & findings.
+        """
+        question = (question or "").strip()
+        findings = findings_store.get_all()
+        
+        if self.client:
+            # Construct context for the LLM
+            context = "Current Scan Findings:\n"
+            for f in findings[:30]: # Limit context
+                context += f"- [{f.get('severity')}] {f.get('type')}: {f.get('message') or f.get('value')}\n"
+            
+            system_prompt = (
+                "You are AraUltra, an autonomous security assistant. "
+                "You have access to the current scan findings. "
+                "Answer the user's question based on the provided findings context. "
+                "Be concise, professional, and actionable. "
+                "Do NOT use markdown code blocks for the entire response, just for snippets."
+            )
+            
+            user_prompt = f"{context}\n\nUser Question: {question}"
+            
+            yield from self.client.stream_generate(user_prompt, system_prompt)
+            return
+
+        yield "AI Chat unavailable (Ollama offline). Please check connection."
 
     def process_tool_output(
         self,

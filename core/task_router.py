@@ -1,27 +1,20 @@
 # core/task_router.py
 # Central event bus connecting tools, AI engine, and UI panels.
 
-try:
-    from PyQt6.QtCore import QObject, pyqtSignal
-except ImportError:
-    class QObject:
-        def __init__(self): pass
-    class pyqtSignal:
-        def __init__(self, *args): pass
-        def emit(self, *args): pass
+from core.utils.observer import Observable, Signal
 
 from .ai_engine import AIEngine
-from .findings_store import findings_store
-from .killchain_store import killchain_store
+# from .findings_store import findings_store
+# from .killchain_store import killchain_store
 
 
-class TaskRouter(QObject):
+class TaskRouter(Observable):
     """
     Core event bus for AraUltra.
     All tool output → AIEngine → FindingsStore / Killchain / Evidence → UI
     """
 
-    ui_event = pyqtSignal(str, dict)
+    ui_event = Signal()
 
     _instance = None
 
@@ -47,24 +40,13 @@ class TaskRouter(QObject):
         self._ui_callbacks = {}
 
     # -------------------------------------------------------
-    # UI callback registration
+    # UI signal emission
     # -------------------------------------------------------
-    def register_ui_callback(self, event_type: str, func):
-        """
-        UI files register for updates (e.g., findings_update, evidence_update,
-        ai_live_comment, etc.)
-        """
-        if event_type not in self._ui_callbacks:
-            self._ui_callbacks[event_type] = []
-        self._ui_callbacks[event_type].append(func)
-
     def emit_ui_event(self, event_type: str, payload: dict):
         """
-        Fires callbacks inside UI.
+        Fires callbacks inside UI via the generic Signal.
         """
-        if event_type in self._ui_callbacks:
-            for cb in self._ui_callbacks[event_type]:
-                cb(payload)
+        self.ui_event.emit(event_type, payload)
 
     # -------------------------------------------------------
     # Primary tool output handler

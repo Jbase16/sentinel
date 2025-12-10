@@ -1,0 +1,34 @@
+from typing import Any, Callable, List
+
+class Signal:
+    """
+    A simple pure-Python signal implementation to replace PyQt6.pyqtSignal.
+    """
+    def __init__(self):
+        self._observers: List[Callable[..., Any]] = []
+
+    def connect(self, callback: Callable[..., Any]):
+        """Subscribe a callback function."""
+        if callback not in self._observers:
+            self._observers.append(callback)
+
+    def disconnect(self, callback: Callable[..., Any]):
+        """Unsubscribe a callback function."""
+        if callback in self._observers:
+            self._observers.remove(callback)
+
+    def emit(self, *args, **kwargs):
+        """Notify all subscribers."""
+        for callback in self._observers:
+            try:
+                callback(*args, **kwargs)
+            except Exception as e:
+                # Prevent one subscriber from breaking the loop
+                print(f"[Signal] Error in observer callback: {e}")
+
+class Observable:
+    """
+    Base class for objects that emit signals.
+    Replaces QObject for our purposes.
+    """
+    pass

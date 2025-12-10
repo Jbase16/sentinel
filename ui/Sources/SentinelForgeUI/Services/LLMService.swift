@@ -15,6 +15,7 @@ final class LLMService: ObservableObject {
     @Published var ollamaOnline: Bool = true
 
     private let router = ModelRouter()
+    private let api = SentinelAPIClient() // Chat now goes through Python API
     private var currentTask: Task<Void, Never>?
 
     // Stop any in-flight generation and reset flags.
@@ -56,61 +57,25 @@ final class LLMService: ObservableObject {
         streamedResponse = ""
         isGenerating = true
 
-        // Heuristic router decides which local model to use.
-        let modelName = router.routeModel(
-            for: trimmed,
-            preferredModel: preferredModel,
-            autoRoutingEnabled: autoRoutingEnabled,
-            available: availableModels
-        )
-
         currentTask = Task.detached { [weak self] in
             guard let self else { return }
             defer { Task { @MainActor in self.isGenerating = false } }
 
-            guard let url = URL(string: "http://127.0.0.1:11434/api/generate") else {
-                print("[LLMService] Invalid URL")
-                return
-            }
-
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            let body = GenerateRequest(model: modelName, prompt: trimmed, stream: true)
-            // Encode request body as JSON expected by Ollama.
             do {
-                request.httpBody = try JSONEncoder().encode(body)
-            } catch {
-                print("[LLMService] Encoding error: \(error)")
-                return
-            }
-
-            // Start streaming bytes, decoding each line as a GenerateChunk.
-            do {
-                let (bytes, _) = try await URLSession.shared.bytes(for: request)
-                for try await line in bytes.lines {
+                // Use the new Python API streamChat which is context-aware
+                for try await token in self.api.streamChat(prompt: trimmed) {
                     if Task.isCancelled { break }
-                    guard let data = line.data(using: .utf8) else { continue }
-                    do {
-                        let chunk = try JSONDecoder().decode(GenerateChunk.self, from: data)
-                        if let token = chunk.response {
-                            await MainActor.run {
-                                self.streamedResponse += token
-                                onToken(token)
-                            }
-                        }
-                        if chunk.done == true { break }
-                    } catch {
-                        print("[LLMService] Chunk decode error: \(error)")
-                        continue
+                    await MainActor.run {
+                        self.streamedResponse += token
+                        onToken(token)
                     }
                 }
             } catch {
-                if Task.isCancelled {
-                    print("[LLMService] Cancelled")
-                } else {
+                if !Task.isCancelled {
                     print("[LLMService] Request failed: \(error)")
+                    await MainActor.run {
+                        onToken("\n[Error: \(error.localizedDescription)]")
+                    }
                 }
             }
         }

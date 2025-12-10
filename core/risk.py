@@ -5,16 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Dict
 
-try:
-    from PyQt6.QtCore import QObject, pyqtSignal
-except ImportError:
-    class QObject:
-        def __init__(self): pass
-    class pyqtSignal:
-        def __init__(self, *args): pass
-        def emit(self, *args): pass
-        def connect(self, *args, **kwargs): pass
-
+from core.utils.observer import Observable, Signal
 from core.issues_store import issues_store
 
 
@@ -27,8 +18,8 @@ SEVERITY_WEIGHTS = {
 }
 
 
-class RiskEngine(QObject):
-    scores_changed = pyqtSignal()
+class RiskEngine(Observable):
+    scores_changed = Signal()
 
     def __init__(self):
         super().__init__()

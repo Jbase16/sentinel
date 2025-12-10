@@ -2,48 +2,90 @@
 # Validates and dispatches autonomous actions suggested by the AI.
 
 import logging
+import uuid
 from typing import List, Dict, Optional
+from core.utils.observer import Observable, Signal
 
 logger = logging.getLogger(__name__)
 
-class ActionDispatcher:
+class ActionDispatcher(Observable):
     """
     Safety layer for autonomous actions.
-    Prevents infinite loops and validates tool requests.
+    Manages the queue of actions requiring human approval.
     """
     
-    ALLOWED_TOOLS = ["nmap", "nikto", "httpx", "dnsx", "sslscan", "whois"]
-    MAX_DEPTH = 3  # Max recursion depth for autonomous tasks
+    # Tools that can run without prompt
+    SAFE_TOOLS = ["httpx", "dnsx", "sslscan", "whois", "subfinder"]
     
-    def __init__(self):
-        self.history = set() # Track (tool, target_signature) to prevent dupes
+    # Tools that require user confirmation
+    RESTRICTED_TOOLS = ["nmap", "nikto", "nuclei", "gobuster", "feroxbuster", "sqlmap"]
+    
+    action_needed = Signal() # Emits (action_id, action_details)
+    action_approved = Signal() # Emits (action_details)
+    
+    _instance = None
 
-    def validate_action(self, action: Dict, target: str) -> Optional[Dict]:
+    @staticmethod
+    def instance():
+        if ActionDispatcher._instance is None:
+            ActionDispatcher._instance = ActionDispatcher()
+        return ActionDispatcher._instance
+
+    def __init__(self):
+        super().__init__()
+        self.history = set() # Track (tool, target_signature) to prevent dupes
+        self._pending_actions: Dict[str, Dict] = {}
+
+    def request_action(self, action: Dict, target: str) -> Optional[str]:
         """
-        Checks if an action is safe and valid.
-        Returns the validated action dict or None.
+        Processes a requested action.
+        - If safe: returns "AUTO_APPROVED" and emits action_approved.
+        - If restricted: returns "PENDING", stores it, and emits action_needed.
+        - If invalid/dupe: returns "DROPPED".
         """
         tool = action.get("tool", "").lower()
         args = action.get("args", [])
         reason = action.get("reason", "")
         
-        if tool not in self.ALLOWED_TOOLS:
-            logger.warning(f"AI suggested blocked tool: {tool}")
-            return None
-            
-        # Create a signature to detect duplicates
-        # Simple signature: tool + args string
+        # Deduplication
         signature = f"{tool}:{sorted(args)}"
-        
         if signature in self.history:
-            logger.info(f"Skipping duplicate action: {signature}")
-            return None
-            
+            return "DROPPED"
         self.history.add(signature)
-        
-        return {
+
+        full_action = {
+            "id": str(uuid.uuid4()),
             "tool": tool,
             "args": args,
-            "target": target, # In a real app, we might parse target from args if it changed
-            "reason": reason
+            "target": target,
+            "reason": reason,
+            "timestamp": logging.Formatter.formatTime(logging.Formatter(), logging.LogRecord("",0,"","",0,0,0))
         }
+
+        if tool in self.SAFE_TOOLS:
+            self.action_approved.emit(full_action)
+            return "AUTO_APPROVED"
+        
+        if tool in self.RESTRICTED_TOOLS:
+            self._pending_actions[full_action["id"]] = full_action
+            self.action_needed.emit(full_action["id"], full_action)
+            return "PENDING"
+            
+        logger.warning(f"AI suggested unknown tool: {tool}")
+        return "DROPPED"
+
+    def approve_action(self, action_id: str):
+        if action_id in self._pending_actions:
+            action = self._pending_actions.pop(action_id)
+            self.action_approved.emit(action)
+            return True
+        return False
+
+    def deny_action(self, action_id: str):
+        if action_id in self._pending_actions:
+            self._pending_actions.pop(action_id)
+            return True
+        return False
+
+    def get_pending(self) -> List[Dict]:
+        return list(self._pending_actions.values())
