@@ -18,7 +18,7 @@ class ActionDispatcher(Observable):
     SAFE_TOOLS = ["httpx", "dnsx", "sslscan", "whois", "subfinder"]
     
     # Tools that require user confirmation
-    RESTRICTED_TOOLS = ["nmap", "nikto", "nuclei", "gobuster", "feroxbuster", "sqlmap"]
+    RESTRICTED_TOOLS = ["nmap", "nikto", "nuclei", "gobuster", "feroxbuster", "sqlmap", "brew", "pip"]
     
     action_needed = Signal() # Emits (action_id, action_details)
     action_approved = Signal() # Emits (action_details)

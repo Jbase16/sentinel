@@ -116,8 +116,14 @@ class HelixAppState: ObservableObject {
 
     /// Start a scan via the local Python API.
     func startScan(target: String) {
+        print("[AppState] Starting scan for target: \(target)")
         Task {
-            try? await api.startScan(target: target)
+            do {
+                try await api.startScan(target: target)
+                print("[AppState] Scan start request sent successfully")
+            } catch {
+                print("[AppState] Failed to start scan: \(error)")
+            }
         }
     }
 

@@ -1,34 +1,21 @@
-"""
-Sentinel Core API + lightweight local HTTP bridge.
+# core/api.py
+# FastAPI Migration - The F1 Engine
 
-This file is intentionally beginner-friendly and over-commented so it is easy
-to extend. It does two things:
-  1) Exposes a small CoreAPI class for programmatic use.
-  2) Runs a tiny HTTP server (standard library only) so the SwiftUI app can
-     talk to Python over localhost without extra dependencies.
-
-Endpoints (when run as a script, default port 8765):
-  GET  /ping       -> {"status": "ok"}
-  GET  /status     -> engine + AI status (model availability, running scan)
-  POST /scan       -> kicks off a scan in a background thread
-  GET  /logs       -> returns any buffered log lines since last call
-  GET  /results    -> structured findings/issues/killchain/phase_results/evidence
-
-Notes for entry-level contributors:
-- We keep everything JSON-serializable to make Swift ↔ Python IPC simple.
-- Scans run in a separate thread so the HTTP server stays responsive.
-- Log streaming here is pull-based (poll /logs); later you can upgrade to SSE.
-"""
-
-from __future__ import annotations
-
-import http.server
+import asyncio
 import json
-import queue
+import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Dict, List, Optional, Any
+
+import uvicorn
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+import pyperclip
 
 from core.ai_engine import AIEngine
 from core.evidence_store import EvidenceStore
@@ -37,277 +24,87 @@ from core.scan_orchestrator import ScanOrchestrator
 from core.tools import get_installed_tools, TOOLS
 from core.task_router import TaskRouter
 from core.action_dispatcher import ActionDispatcher
-
 from core.reporting import ReportComposer
+from core.pty_manager import PTYManager
+from core.db import Database
 
-# ---------------------------------------------------------------------------
-# Shared state for the in-process API and the HTTP handler.
-# ---------------------------------------------------------------------------
+# --- Models ---
+class ScanRequest(BaseModel):
+    target: str
+    modules: Optional[List[str]] = None
 
-# Queue buffers log lines coming from the orchestrator.
-_log_queue: "queue.Queue[str]" = queue.Queue(maxsize=10_000)
+class ChatRequest(BaseModel):
+    prompt: str
 
-# Global event bus for SSE
-_event_subscribers: List["queue.Queue[str]"] = []
-_subscribers_lock = threading.Lock()
+# --- App Setup ---
+app = FastAPI(title="SentinelForge API")
 
-# Stores the latest scan results snapshot for the UI.
-_latest_result: Dict[str, Any] = {}
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Tracks meta about the most recent scan (target, status, timings).
+# --- State ---
+_log_queue: asyncio.Queue = asyncio.Queue()
 _scan_state: Dict[str, Any] = {}
-
-# Tracks the currently running scan thread (if any).
-_current_scan_thread: Optional[threading.Thread] = None
-
-# Simple lock so we don't start overlapping scans.
-_scan_lock = threading.Lock()
-
-# Flag to request cancellation (best-effort).
 _cancel_requested = threading.Event()
+_scan_lock = asyncio.Lock()
+_active_scan_task: Optional[asyncio.Task] = None
 
-# Shared AI engine singleton for status reporting.
-_ai_engine = AIEngine.instance()
+# --- Helpers ---
 
-def _broadcast_sse(event_type: str, data: Any):
-    """Push an event to all connected SSE clients."""
-    payload = f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
-    with _subscribers_lock:
-        for q in _event_subscribers:
-            try:
-                q.put_nowait(payload)
-            except queue.Full:
-                pass
+async def _log_sink_async(msg: str):
+    await _log_queue.put(msg)
+    # Broadcast to SSE via TaskRouter if needed, or just let SSE listener pick it up
+    # Actually, TaskRouter uses Signals which are synchronous. 
+    # We need a bridge.
+    TaskRouter.instance().ui_event.emit("log", {"line": msg})
 
-def _router_event_listener(event_type: str, payload: dict):
-    """Bridge TaskRouter events to SSE."""
-    _broadcast_sse(event_type, payload)
-
-# Hook up the listener
-TaskRouter.instance().ui_event.connect(_router_event_listener)
-
-# Hook up ActionDispatcher events to SSE
-def _action_needed_listener(action_id: str, action: dict):
-    _broadcast_sse("action_needed", action)
-
-ActionDispatcher.instance().action_needed.connect(_action_needed_listener)
-
-def _log_sink(msg: str) -> None:
-    """Callback passed to ScanOrchestrator to collect log lines."""
+def _log_sink_sync(msg: str):
+    # Bridge sync callback to async queue via loop
     try:
-        _log_queue.put_nowait(msg)
-        # Also broadcast logs via SSE
-        _broadcast_sse("log", {"line": msg})
-    except queue.Full:
+        loop = asyncio.get_running_loop()
+        loop.call_soon_threadsafe(_log_queue.put_nowait, msg)
+        TaskRouter.instance().ui_event.emit("log", {"line": msg})
+    except RuntimeError:
         pass
 
-
 def _ai_status() -> Dict[str, Any]:
-    """Expose AI engine health + available models in a JSON-friendly shape."""
-    try:
-        return _ai_engine.status()
-    except Exception:
-        return {
-            "provider": "unknown",
-            "model": None,
-            "connected": False,
-            "fallback_enabled": True,
-            "available_models": [],
-        }
+    return AIEngine.instance().status()
 
-
-def _evidence_snapshot() -> List[Dict[str, Any]]:
-    """
-    Summarize evidence entries without shipping raw output over IPC.
-    """
-    items: List[Dict[str, Any]] = []
-    evidence = EvidenceStore.instance().get_all()
-    for eid, data in evidence.items():
-        raw = data.get("raw_output") or ""
-        items.append({
-            "id": eid,
-            "tool": data.get("tool"),
-            "summary": data.get("summary"),
-            "metadata": data.get("metadata") or {},
-            "raw_preview": raw[:500],
-            "raw_bytes": len(raw.encode("utf-8")) if raw else 0,
-            "finding_count": len(data.get("findings") or []),
-        })
-    return items
-
-
-def _build_result_envelope(
-    target: str,
-    modules: List[str],
-    ctx,
-    started_at: datetime,
-    finished_at: datetime,
-    cancelled: bool = False,
-) -> Dict[str, Any]:
-    duration_ms = int((finished_at - started_at).total_seconds() * 1000)
-    phase_counts = {name: len(items) for name, items in (ctx.phase_results or {}).items()}
-    reasoning = reasoning_engine.analyze()
-    status = "cancelled" if cancelled else "completed"
-
-    return {
-        "scan": {
-            "target": target,
-            "modules": modules,
-            "status": status,
-            "started_at": started_at.isoformat(),
-            "finished_at": finished_at.isoformat(),
-            "duration_ms": duration_ms,
-        },
-        "summary": {
-            "counts": {
-                "findings": len(ctx.findings or []),
-                "issues": len(ctx.issues or []),
-                "killchain_edges": len(ctx.killchain_edges or []),
-                "logs": len(ctx.logs or []),
-                "phase_results": phase_counts,
-            },
-            "ai": _ai_status(),
-        },
-        "findings": ctx.findings,
-        "issues": ctx.issues,
-        "killchain": {
-            "edges": ctx.killchain_edges,
-            "attack_paths": reasoning.get("attack_paths", []),
-            "degraded_paths": reasoning.get("degraded_paths", []),
-            "recommended_phases": reasoning.get("recommended_phases", []),
-        },
-        "phase_results": ctx.phase_results,
-        "evidence": _evidence_snapshot(),
-        "logs": ctx.logs,
+def _get_latest_results():
+    # In the new architecture, we might just query the Stores directly
+    from core.findings_store import findings_store
+    from core.issues_store import issues_store
+    from core.killchain_store import killchain_store
+    
+    # We construct the envelope dynamically
+    ctx = {
+        "findings": findings_store.get_all(),
+        "issues": issues_store.get_all(),
+        "killchain_edges": killchain_store.get_all(),
+        "scan": _scan_state
     }
+    return ctx # Simplified for now, can expand to full envelope
 
+# --- Routes ---
 
-def _scan_runner(target: str, modules: Optional[Iterable[str]] = None) -> None:
-    """
-    Runs a scan synchronously and stores the latest result snapshot.
-    Executed inside a background thread so HTTP requests stay responsive.
-    """
-    global _latest_result, _scan_state
-    module_list = list(modules) if modules else []
-    started_at = datetime.now(timezone.utc)
-    _scan_state = {
-        "target": target,
-        "modules": module_list,
-        "status": "running",
-        "started_at": started_at.isoformat(),
-    }
-    _cancel_requested.clear()
-    orchestrator = ScanOrchestrator(log_fn=_log_sink)
-    # Pass the cancel flag down so scanner engine can stop launching new tools.
-    try:
-        ctx = orchestrator.run_sync(target, modules=module_list, cancel_flag=_cancel_requested)
-        finished_at = datetime.now(timezone.utc)
-        cancelled = _cancel_requested.is_set()
-        _latest_result = _build_result_envelope(
-            target=target,
-            modules=module_list,
-            ctx=ctx,
-            started_at=started_at,
-            finished_at=finished_at,
-            cancelled=cancelled,
-        )
-        _scan_state.update({
-            "status": "cancelled" if cancelled else "completed",
-            "finished_at": finished_at.isoformat(),
-            "duration_ms": int((finished_at - started_at).total_seconds() * 1000),
-        })
-    except Exception as exc:
-        finished_at = datetime.now(timezone.utc)
-        _latest_result = {
-            "scan": {
-                "target": target,
-                "modules": module_list,
-                "status": "error",
-                "error": str(exc),
-                "started_at": started_at.isoformat(),
-                "finished_at": finished_at.isoformat(),
-            },
-            "summary": {"counts": {}, "ai": _ai_status()},
-            "logs": [],
-        }
-        _scan_state.update({
-            "status": "error",
-            "error": str(exc),
-            "finished_at": finished_at.isoformat(),
-        })
-    finally:
-        _cancel_requested.clear()
+@app.get("/ping")
+async def ping():
+    return {"status": "ok"}
 
-
-def start_scan(target: str, modules: Optional[Iterable[str]] = None) -> None:
-    """
-    Public helper that starts a scan in a background thread.
-    Raises RuntimeError if a scan is already running.
-    """
-    global _current_scan_thread
-    with _scan_lock:
-        if _current_scan_thread and _current_scan_thread.is_alive():
-            raise RuntimeError("A scan is already running")
-
-        thread = threading.Thread(
-            target=_scan_runner,
-            args=(target, modules),
-            daemon=True,
-        )
-        _current_scan_thread = thread
-        thread.start()
-
-
-def cancel_scan() -> bool:
-    """
-    Best-effort cancellation toggle. Scanner engine does not yet expose
-    cooperative cancellation; for now we just set a flag and return whether
-    a scan was in flight.
-    """
-    global _current_scan_thread, _scan_state
-    with _scan_lock:
-        if _current_scan_thread and _current_scan_thread.is_alive():
-            _cancel_requested.set()
-            _scan_state["status"] = "cancelling"
-            return True
-    return False
-
-
-def drain_logs() -> Dict[str, Any]:
-    """
-    Pull any buffered log lines since the last call.
-    Returns a dict to keep HTTP and programmatic consumers consistent.
-    """
-    lines = []
-    while True:
-        try:
-            lines.append(_log_queue.get_nowait())
-        except queue.Empty:
-            break
-    return {"lines": lines}
-
-
-def get_latest_results() -> Dict[str, Any]:
-    """
-    Snapshot of the most recent scan. If no scan has run yet, returns {}.
-    """
-    return dict(_latest_result)
-
-def get_status() -> Dict[str, Any]:
-    """
-    Lightweight health endpoint for the SwiftUI client.
-    """
-    with _scan_lock:
-        running = _current_scan_thread is not None and _current_scan_thread.is_alive()
-
-    # Tool health check
+@app.get("/status")
+async def status():
     installed = get_installed_tools()
     all_tools = list(TOOLS.keys())
     missing = [t for t in all_tools if t not in installed]
-
-    status = {
+    
+    return {
         "status": "ok",
-        "scan_running": running,
+        "scan_running": (_active_scan_task is not None and not _active_scan_task.done()),
         "latest_target": _scan_state.get("target"),
         "ai": _ai_status(),
         "tools": {
@@ -318,261 +115,200 @@ def get_status() -> Dict[str, Any]:
         }
     }
 
-    if _scan_state:
-        status["scan_state"] = dict(_scan_state)
-    if running:
-        status["cancel_requested"] = _cancel_requested.is_set()
+@app.get("/logs")
+async def get_logs():
+    # Legacy poll endpoint support
+    lines = []
+    while not _log_queue.empty():
+        lines.append(_log_queue.get_nowait())
+    return {"lines": lines}
 
-    return status
+@app.get("/results")
+async def get_results():
+    return _get_latest_results()
 
+@app.post("/scan")
+async def start_scan(req: ScanRequest):
+    global _active_scan_task, _scan_state
+    
+    if _active_scan_task and not _active_scan_task.done():
+        return JSONResponse({"error": "Scan already running"}, status_code=409)
 
-# ---------------------------------------------------------------------------
-# Programmatic API class (usable without HTTP).
-# ---------------------------------------------------------------------------
+    _cancel_requested.clear()
+    _scan_state = {
+        "target": req.target,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat()
+    }
 
-class CoreAPI:
+    # Run orchestrator in background task
+    async def _runner():
+        orch = ScanOrchestrator(log_fn=_log_sink_sync)
+        try:
+            # We need to bridge the async run to the sync dispatcher or update orchestrator to be async native
+            # ScanOrchestrator.run IS async!
+            await orch.run(req.target, modules=req.modules, cancel_flag=_cancel_requested)
+            _scan_state["status"] = "completed"
+        except Exception as e:
+            _scan_state["status"] = "error"
+            _scan_state["error"] = str(e)
+            print(f"Scan error: {e}")
+
+    _active_scan_task = asyncio.create_task(_runner())
+    return JSONResponse({"status": "started", "target": req.target}, status_code=202)
+
+@app.post("/cancel")
+async def cancel_scan():
+    if _active_scan_task and not _active_scan_task.done():
+        _cancel_requested.set()
+        return JSONResponse({"status": "cancelling"}, status_code=202)
+    return JSONResponse({"error": "no active scan"}, status_code=409)
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    async def _stream():
+        for token in AIEngine.instance().stream_chat(req.prompt):
+            payload = json.dumps({"token": token})
+            yield f"data: {payload}\n\n"
+        yield "data: [DONE]\n\n"
+    
+    return StreamingResponse(_stream(), media_type="text/event-stream")
+
+@app.get("/events")
+async def events(request: Request):
     """
-    Lightweight façade over the scanner/orchestrator layers.
-    Exposes simple methods that the Swift side can mirror for IPC.
+    SSE Endpoint using an async generator and queue bridge.
     """
-
-    def ping(self) -> Dict[str, str]:
-        return {"status": "ok"}
-
-    def start_scan(self, target: str, modules: Optional[Iterable[str]] = None) -> None:
-        start_scan(target, modules=modules)
-
-    def stream_logs(self) -> Iterable[str]:
-        # This yields and drains buffered log lines.
-        while True:
-            batch = drain_logs()["lines"]
-            if not batch:
-                break
-            for line in batch:
-                yield line
-
-    def latest_results(self) -> Dict[str, Any]:
-        return get_latest_results()
-
-    def cancel_scan(self) -> bool:
-        return cancel_scan()
-
-    def status(self) -> Dict[str, Any]:
-        return get_status()
-
-
-# ---------------------------------------------------------------------------
-# Minimal HTTP server for local IPC (no external deps).
-# ---------------------------------------------------------------------------
-
-class _Handler(http.server.BaseHTTPRequestHandler):
-    """Tiny JSON-only handler with a few endpoints."""
-
-    def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
-        # Silence default stdout logging to avoid clutter.
-        return
-
-    def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/ping":
-            return self._send_json(200, {"status": "ok"})
-
-        if self.path == "/status":
-            return self._send_json(200, get_status())
-
-        if self.path == "/logs":
-            return self._send_json(200, drain_logs())
-
-        if self.path == "/results":
-            result = get_latest_results()
-            status = 200 if result else 204
-            return self._send_json(status, result)
-            
-        if self.path == "/events":
-            # Server-Sent Events (SSE) stream
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-
-            q = queue.Queue(maxsize=100)
-            with _subscribers_lock:
-                _event_subscribers.append(q)
-
+    async def _event_stream():
+        q = asyncio.Queue()
+        
+        # Define a callback to put into our async queue
+        def _cb(event_type, payload):
+            # This runs in sync context (Signal), so we must use loop.call_soon_threadsafe
+            # But wait, we are in an async handler.
+            # We can't await q.put here.
+            # We rely on threadsafe put.
             try:
-                while True:
-                    msg = q.get()
-                    self.wfile.write(msg.encode("utf-8"))
-                    self.wfile.flush()
-            finally:
-                with _subscribers_lock:
-                    if q in _event_subscribers:
-                        _event_subscribers.remove(q)
-            return
-
-        if self.path.startswith("/report/generate"):
-            # Stream specific report section
-            # /report/generate?section=executive_summary
-            try:
-                from urllib.parse import urlparse, parse_qs
-                query = parse_qs(urlparse(self.path).query)
-                section = query.get("section", ["executive_summary"])[0]
-                
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-                
-                composer = ReportComposer()
-                # For now, we generate the whole section at once and send it as one chunk
-                # In a future iteration, ReportComposer could stream tokens too
-                content = composer.generate_section(section)
-                
-                # Split content into smaller chunks to simulate streaming if it's large
-                chunk_size = 1024
-                for i in range(0, len(content), chunk_size):
-                    chunk = content[i:i+chunk_size]
-                    payload = json.dumps({"token": chunk})
-                    msg = f"data: {payload}\n\n"
-                    try:
-                        self.wfile.write(msg.encode("utf-8"))
-                        self.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError):
-                        break
-                        
-                self.wfile.write(b"data: [DONE]\n\n")
-                self.wfile.flush()
-                return
+                loop = asyncio.get_running_loop()
+                data = json.dumps(payload)
+                msg = f"event: {event_type}\ndata: {data}\n\n"
+                loop.call_soon_threadsafe(q.put_nowait, msg)
             except Exception as e:
-                # Log error but can't send JSON if headers already sent
-                print(f"Report generation error: {e}")
-                return
+                print(f"Event bridge error: {e}")
 
-        self._send_json(404, {"error": "not found"})
+        # Connect
+        TaskRouter.instance().ui_event.connect(_cb)
+        
+        # Also hook dispatcher
+        def _action_cb(aid, action):
+            _cb("action_needed", action)
+        ActionDispatcher.instance().action_needed.connect(_action_cb)
 
-    def do_POST() -> None:  # noqa: N802
-        if self.path == "/scan":
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError:
-                length = 0
-            raw = self.rfile.read(length) if length else b""
-            try:
-                data = json.loads(raw or "{}")
-            except json.JSONDecodeError:
-                return self._send_json(400, {"error": "invalid json"})
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                data = await q.get()
+                yield data
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Cleanup
+            TaskRouter.instance().ui_event.disconnect(_cb)
+            ActionDispatcher.instance().action_needed.disconnect(_action_cb)
 
-            target = (data.get("target") or "").strip()
-            if not target:
-                return self._send_json(400, {"error": "target is required"})
+    return StreamingResponse(_event_stream(), media_type="text/event-stream")
 
-            modules_raw = data.get("modules")
-            modules: Optional[List[str]] = None
-            if isinstance(modules_raw, list):
-                modules = [str(item) for item in modules_raw if isinstance(item, str)]
+@app.get("/report/generate")
+async def generate_report(section: str = "executive_summary"):
+    async def _stream():
+        composer = ReportComposer()
+        # ReportComposer is currently sync/blocking (HTTPX is sync in there? No, we updated it to sync generate).
+        # We should ideally run it in a threadpool to not block the event loop.
+        content = await asyncio.to_thread(composer.generate_section, section)
+        
+        chunk_size = 1024
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i:i+chunk_size]
+            payload = json.dumps({"token": chunk})
+            yield f"data: {payload}\n\n"
+        yield "data: [DONE]\n\n"
 
-            try:
-                start_scan(target, modules=modules)
-            except RuntimeError as exc:
-                return self._send_json(409, {"error": str(exc)})
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
-            return self._send_json(202, {"status": "started", "target": target, "modules": modules or []})
-
-        if self.path == "/cancel":
-            if cancel_scan():
-                return self._send_json(202, {"status": "cancelling"})
-            return self._send_json(409, {"error": "no active scan"})
-
-        if self.path == "/chat":
-            # Streaming chat endpoint
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-            except ValueError:
-                length = 0
-            
-            try:
-                raw = self.rfile.read(length) if length else b""
-                try:
-                    data = json.loads(raw or "{}")
-                except json.JSONDecodeError:
-                    return self._send_json(400, {"error": "invalid json"})
-
-                prompt = data.get("prompt", "")
-                
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.end_headers()
-
-                # Stream tokens from AIEngine
-                for token in _ai_engine.stream_chat(prompt):
-                    # SSE format: data: <json_content>\n\n
-                    payload = json.dumps({"token": token})
-                    msg = f"data: {payload}\n\n"
-                    try:
-                        self.wfile.write(msg.encode("utf-8"))
-                        self.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError):
-                        # Client disconnected
-                        break
-                
-                # End of stream
-                self.wfile.write(b"data: [DONE]\n\n")
-                self.wfile.flush()
-                return
-            except Exception as e:
-                # Catch-all to prevent server crash
-                print(f"[API] Chat error: {e}")
-                # Try to send error if headers not sent, otherwise just log
-                # (If headers were sent, we can't cleanly error out to client except via stream)
-                return
-            
-        if self.path.startswith("/actions/"):
-            # Action approval/denial
-            parts = self.path.split("/")
-            if len(parts) >= 4:
-                action_id = parts[2]
-                verb = parts[3] # approve or deny
-                dispatcher = ActionDispatcher.instance()
-                
-                success = False
-                if verb == "approve":
-                    success = dispatcher.approve_action(action_id)
-                elif verb == "deny":
-                    success = dispatcher.deny_action(action_id)
-                
-                if success:
-                    return self._send_json(200, {"status": "ok", "action_id": action_id, "result": verb})
-                else:
-                    return self._send_json(404, {"error": "action not found or already processed"})
-
-        self._send_json(404, {"error": "not found"})
-
-
-def serve(port: int = 8765) -> None:
-    """
-    Start the local HTTP server. Run with:
-      python -m core.api
-    or:
-      python core/api.py
-    """
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), _Handler)
-    print(f"[sentinel-api] listening on http://127.0.0.1:{port}")
+@app.get("/clipboard")
+async def clipboard():
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n[sentinel-api] shutting down...")
-    finally:
-        server.server_close()
+        return {"content": pyperclip.paste()}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
+@app.post("/actions/{action_id}/{verb}")
+async def handle_action(action_id: str, verb: str):
+    dispatcher = ActionDispatcher.instance()
+    success = False
+    if verb == "approve":
+        success = dispatcher.approve_action(action_id)
+    elif verb == "deny":
+        success = dispatcher.deny_action(action_id)
+    
+    if success:
+        return {"status": "ok", "action_id": action_id, "result": verb}
+    return JSONResponse({"error": "action not found"}, status_code=404)
+
+# --- WebSocket Terminal ---
+
+@app.websocket("/ws/terminal")
+async def terminal_websocket(websocket: WebSocket):
+    await websocket.accept()
+    pty_session = PTYManager.instance().get_session()
+    
+    # 1. Reader Loop: PTY -> WebSocket
+    async def read_pty():
+        try:
+            while True:
+                # Non-blocking read
+                data = await asyncio.to_thread(pty_session.read)
+                if data:
+                    await websocket.send_text(data.decode(errors="ignore"))
+                else:
+                    await asyncio.sleep(0.01)
+        except Exception:
+            pass
+
+    # 2. Writer Loop: WebSocket -> PTY
+    reader_task = asyncio.create_task(read_pty())
+    
+    try:
+        while True:
+            # Receive input from UI
+            msg = await websocket.receive_text()
+            # If JSON (resize), handle it
+            if msg.startswith("{"):
+                try:
+                    cmd = json.loads(msg)
+                    if cmd.get("type") == "resize":
+                        pty_session.resize(cmd["rows"], cmd["cols"])
+                        continue
+                except:
+                    pass
+            
+            # Write to PTY
+            pty_session.write(msg)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        reader_task.cancel()
+        # Note: We don't close the PTY session automatically here to allow persistence?
+        # For now, let's keep it persistent per run.
+
+def serve(port: int = 8765):
+    # Initialize DB synchronously-ish (or start task)
+    db = Database.instance()
+    # We can't await here easily, but we can rely on lazy init
+    
+    print(f"[sentinel-api] listening on http://127.0.0.1:{port}")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
 
 if __name__ == "__main__":
     serve()

@@ -2,17 +2,25 @@ import Foundation
 
 /// Tiny HTTP client for talking to the local Sentinel Python bridge.
 /// Endpoints live in `core/api.py` and are intentionally simple + JSON-only.
-struct SentinelAPIClient {
-    let baseURL: URL
+public struct SentinelAPIClient: Sendable {
+    public let baseURL: URL
     private let session: URLSession
 
-    init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!, session: URLSession = .shared) {
+    public init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!, session: URLSession? = nil) {
         self.baseURL = baseURL
-        self.session = session
+        if let session = session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            config.timeoutIntervalForRequest = 120.0 // Increased for slow local LLMs
+            config.timeoutIntervalForResource = 600.0 // Allow very long streams
+            self.session = URLSession(configuration: config)
+        }
     }
 
     // Health check
-    func ping() async -> Bool {
+    public func ping() async -> Bool {
         guard let url = URL(string: "/ping", relativeTo: baseURL) else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -27,7 +35,7 @@ struct SentinelAPIClient {
     }
 
     // Kick off a scan for a given target.
-    func startScan(target: String, modules: [String] = []) async throws {
+    public func startScan(target: String, modules: [String] = []) async throws {
         guard let url = URL(string: "/scan", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -44,7 +52,7 @@ struct SentinelAPIClient {
     }
 
     // Pull any buffered log lines from Python since the last call.
-    func fetchLogs() async throws -> [String] {
+    public func fetchLogs() async throws -> [String] {
         guard let url = URL(string: "/logs", relativeTo: baseURL) else { return [] }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -57,7 +65,7 @@ struct SentinelAPIClient {
     }
 
     // Fetch lightweight engine + AI status (model availability, running scan).
-    func fetchStatus() async throws -> EngineStatus? {
+    public func fetchStatus() async throws -> EngineStatus? {
         guard let url = URL(string: "/status", relativeTo: baseURL) else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -69,7 +77,7 @@ struct SentinelAPIClient {
     }
 
     // Fetch the latest scan snapshot (findings/issues/killchain/phase_results).
-    func fetchResults() async throws -> SentinelResults? {
+    public func fetchResults() async throws -> SentinelResults? {
         guard let url = URL(string: "/results", relativeTo: baseURL) else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -81,7 +89,7 @@ struct SentinelAPIClient {
     }
 
     // Request best-effort scan cancellation.
-    func cancelScan() async throws {
+    public func cancelScan() async throws {
         guard let url = URL(string: "/cancel", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -92,8 +100,9 @@ struct SentinelAPIClient {
     }
 
     // Stream context-aware chat from Python backend
-    func streamChat(prompt: String) -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
+    public func streamChat(prompt: String) -> AsyncThrowingStream<String, Error> {
+        print("[Swift] Attempting to stream chat...")
+        return AsyncThrowingStream { continuation in
             let task = Task {
                 guard let url = URL(string: "/chat", relativeTo: baseURL) else {
                     continuation.finish(throwing: APIError.badStatus)
@@ -105,7 +114,9 @@ struct SentinelAPIClient {
                 let body = ["prompt": prompt]
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                    let (bytes, _) = try await session.bytes(for: request)
+                    let (bytes, response) = try await session.bytes(for: request)
+                    print("[Swift] Received response headers: \(response)")
+                    
                     for try await line in bytes.lines {
                         if line.hasPrefix("data: ") {
                             let jsonStr = String(line.dropFirst(6))
@@ -127,7 +138,7 @@ struct SentinelAPIClient {
     }
 
     // Stream server-sent events (logs, findings, etc.)
-    func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
+    public func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 guard let url = URL(string: "/events", relativeTo: baseURL) else {
@@ -163,7 +174,7 @@ struct SentinelAPIClient {
     }
     
     // Approve a pending action
-    func approveAction(id: String) async throws {
+    public func approveAction(id: String) async throws {
         guard let url = URL(string: "/actions/\(id)/approve", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -174,7 +185,7 @@ struct SentinelAPIClient {
     }
 
     // Deny a pending action
-    func denyAction(id: String) async throws {
+    public func denyAction(id: String) async throws {
         guard let url = URL(string: "/actions/\(id)/deny", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -184,7 +195,7 @@ struct SentinelAPIClient {
         }
     }
     // Stream report section
-    func streamReportSection(section: String) -> AsyncThrowingStream<String, Error> {
+    public func streamReportSection(section: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 guard let url = URL(string: "/report/generate?section=\(section)", relativeTo: baseURL) else {
@@ -217,25 +228,25 @@ struct SentinelAPIClient {
     }
 }
 
-struct SSEEvent {
-    let type: String
-    let data: String
+public struct SSEEvent {
+    public let type: String
+    public let data: String
 }
 
 // MARK: - Models
 
-struct LogBatch: Decodable {
-    let lines: [String]
+public struct LogBatch: Decodable {
+    public let lines: [String]
 }
 
-struct EngineStatus: Decodable {
-    let status: String
-    let scanRunning: Bool
-    let latestTarget: String?
-    let ai: AIStatus?
-    let tools: ToolStatus?
-    let scanState: ScanState?
-    let cancelRequested: Bool?
+public struct EngineStatus: Decodable {
+    public let status: String
+    public let scanRunning: Bool
+    public let latestTarget: String?
+    public let ai: AIStatus?
+    public let tools: ToolStatus?
+    public let scanState: ScanState?
+    public let cancelRequested: Bool?
 
     enum CodingKeys: String, CodingKey {
         case status, ai, tools
@@ -246,11 +257,11 @@ struct EngineStatus: Decodable {
     }
 }
 
-struct ToolStatus: Decodable {
-    let installed: [String]
-    let missing: [String]
-    let countInstalled: Int
-    let countTotal: Int
+public struct ToolStatus: Decodable {
+    public let installed: [String]
+    public let missing: [String]
+    public let countInstalled: Int
+    public let countTotal: Int
     
     enum CodingKeys: String, CodingKey {
         case installed, missing
@@ -259,14 +270,14 @@ struct ToolStatus: Decodable {
     }
 }
 
-struct ScanState: Decodable {
-    let target: String?
-    let modules: [String]?
-    let status: String?
-    let startedAt: String?
-    let finishedAt: String?
-    let durationMs: Int?
-    let error: String?
+public struct ScanState: Decodable {
+    public let target: String?
+    public let modules: [String]?
+    public let status: String?
+    public let startedAt: String?
+    public let finishedAt: String?
+    public let durationMs: Int?
+    public let error: String?
 
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
@@ -276,12 +287,12 @@ struct ScanState: Decodable {
     }
 }
 
-struct AIStatus: Decodable {
-    let provider: String?
-    let model: String?
-    let connected: Bool
-    let fallbackEnabled: Bool
-    let availableModels: [String]?
+public struct AIStatus: Decodable {
+    public let provider: String?
+    public let model: String?
+    public let connected: Bool
+    public let fallbackEnabled: Bool
+    public let availableModels: [String]?
 
     enum CodingKeys: String, CodingKey {
         case provider, model, connected
@@ -290,15 +301,15 @@ struct AIStatus: Decodable {
     }
 }
 
-struct SentinelResults: Decodable {
-    let scan: ScanSummary?
-    let summary: ResultsSummary?
-    let findings: [JSONDict]?
-    let issues: [JSONDict]?
-    let killchain: Killchain?
-    let phaseResults: [String: [JSONDict]]?
-    let evidence: [EvidenceSummary]?
-    let logs: [String]?
+public struct SentinelResults: Decodable {
+    public let scan: ScanSummary?
+    public let summary: ResultsSummary?
+    public let findings: [JSONDict]?
+    public let issues: [JSONDict]?
+    public let killchain: Killchain?
+    public let phaseResults: [String: [JSONDict]]?
+    public let evidence: [EvidenceSummary]?
+    public let logs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case scan, summary, findings, issues, killchain, logs, evidence
@@ -306,14 +317,14 @@ struct SentinelResults: Decodable {
     }
 }
 
-struct ScanSummary: Decodable {
-    let target: String?
-    let modules: [String]?
-    let status: String?
-    let startedAt: String?
-    let finishedAt: String?
-    let durationMs: Int?
-    let error: String?
+public struct ScanSummary: Decodable {
+    public let target: String?
+    public let modules: [String]?
+    public let status: String?
+    public let startedAt: String?
+    public let finishedAt: String?
+    public let durationMs: Int?
+    public let error: String?
 
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
@@ -323,17 +334,17 @@ struct ScanSummary: Decodable {
     }
 }
 
-struct ResultsSummary: Decodable {
-    let counts: ResultCounts?
-    let ai: AIStatus?
+public struct ResultsSummary: Decodable {
+    public let counts: ResultCounts?
+    public let ai: AIStatus?
 }
 
-struct ResultCounts: Decodable {
-    let findings: Int
-    let issues: Int
-    let killchainEdges: Int
-    let logs: Int
-    let phaseResults: [String: Int]
+public struct ResultCounts: Decodable {
+    public let findings: Int
+    public let issues: Int
+    public let killchainEdges: Int
+    public let logs: Int
+    public let phaseResults: [String: Int]
 
     enum CodingKeys: String, CodingKey {
         case findings, issues, logs
@@ -341,7 +352,7 @@ struct ResultCounts: Decodable {
         case phaseResults = "phase_results"
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         findings = try container.decodeIfPresent(Int.self, forKey: .findings) ?? 0
         issues = try container.decodeIfPresent(Int.self, forKey: .issues) ?? 0
@@ -351,11 +362,11 @@ struct ResultCounts: Decodable {
     }
 }
 
-struct Killchain: Decodable {
-    let edges: [JSONDict]?
-    let attackPaths: [[String]]?
-    let degradedPaths: [[String]]?
-    let recommendedPhases: [String]?
+public struct Killchain: Decodable {
+    public let edges: [JSONDict]?
+    public let attackPaths: [[String]]?
+    public let degradedPaths: [[String]]?
+    public let recommendedPhases: [String]?
 
     enum CodingKeys: String, CodingKey {
         case edges
@@ -365,14 +376,14 @@ struct Killchain: Decodable {
     }
 }
 
-struct EvidenceSummary: Decodable {
-    let id: Int
-    let tool: String?
-    let summary: String?
-    let metadata: JSONDict?
-    let rawPreview: String?
-    let rawBytes: Int?
-    let findingCount: Int?
+public struct EvidenceSummary: Decodable {
+    public let id: Int
+    public let tool: String?
+    public let summary: String?
+    public let metadata: JSONDict?
+    public let rawPreview: String?
+    public let rawBytes: Int?
+    public let findingCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, tool, summary, metadata
@@ -383,7 +394,7 @@ struct EvidenceSummary: Decodable {
 }
 
 // Minimal JSON value wrapper to decode arbitrary dictionaries coming from Python.
-enum JSONValue: Decodable {
+public enum JSONValue: Decodable {
     case string(String)
     case number(Double)
     case bool(Bool)
@@ -391,7 +402,7 @@ enum JSONValue: Decodable {
     case array([JSONValue])
     case null
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if container.decodeNil() {
             self = .null
@@ -411,9 +422,9 @@ enum JSONValue: Decodable {
     }
 }
 
-typealias JSONDict = [String: JSONValue]
+public typealias JSONDict = [String: JSONValue]
 
-extension JSONValue {
+public extension JSONValue {
     /// Convenience to unwrap a string if present.
     var stringValue: String? {
         switch self {
@@ -425,6 +436,6 @@ extension JSONValue {
     }
 }
 
-enum APIError: Error {
+public enum APIError: Error {
     case badStatus
 }

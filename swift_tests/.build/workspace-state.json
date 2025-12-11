@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "ui",
+          "kind" : "fileSystem",
+          "location" : "/Users/jason/Developer/sentinelforge/ui",
+          "name" : "SentinelUI"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/jason/Developer/sentinelforge/ui"
+        },
+        "subpath" : "ui"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

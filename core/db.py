@@ -4,6 +4,7 @@ import aiosqlite
 import json
 import logging
 import os
+import asyncio # Added import
 from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
@@ -22,43 +23,56 @@ class Database:
     def __init__(self):
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         self.db_path = DB_PATH
+        self._initialized = False
+        self._init_lock = asyncio.Lock()
 
     async def init(self):
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS findings (
-                    id TEXT PRIMARY KEY,
-                    tool TEXT,
-                    type TEXT,
-                    severity TEXT,
-                    target TEXT,
-                    data JSON,
-                    timestamp TEXT
-                )
-            """)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS issues (
-                    id TEXT PRIMARY KEY,
-                    title TEXT,
-                    severity TEXT,
-                    target TEXT,
-                    data JSON,
-                    timestamp TEXT
-                )
-            """)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS scan_history (
-                    id TEXT PRIMARY KEY,
-                    target TEXT,
-                    status TEXT,
-                    started_at TEXT,
-                    finished_at TEXT,
-                    summary JSON
-                )
-            """)
-            await db.commit()
+        if self._initialized:
+            return
+            
+        async with self._init_lock:
+            if self._initialized:
+                return
+                
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS findings (
+                        id TEXT PRIMARY KEY,
+                        tool TEXT,
+                        type TEXT,
+                        severity TEXT,
+                        target TEXT,
+                        data JSON,
+                        timestamp TEXT
+                    )
+                """)
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS issues (
+                        id TEXT PRIMARY KEY,
+                        title TEXT,
+                        severity TEXT,
+                        target TEXT,
+                        data JSON,
+                        timestamp TEXT
+                    )
+                """)
+                await db.execute("""
+                    CREATE TABLE IF NOT EXISTS scan_history (
+                        id TEXT PRIMARY KEY,
+                        target TEXT,
+                        status TEXT,
+                        started_at TEXT,
+                        finished_at TEXT,
+                        summary JSON
+                    )
+                """)
+                await db.commit()
+            self._initialized = True
 
     async def save_finding(self, finding: Dict[str, Any]):
+        if not self._initialized:
+            await self.init()
+            
         # Deterministic ID based on content to prevent dupes
         import hashlib
         blob = json.dumps(finding, sort_keys=True)
@@ -79,6 +93,9 @@ class Database:
             await db.commit()
 
     async def save_issue(self, issue: Dict[str, Any]):
+        if not self._initialized:
+            await self.init()
+
         iid = issue.get("id") or issue.get("title", "unknown")
         blob = json.dumps(issue)
         

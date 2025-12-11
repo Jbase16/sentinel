@@ -13,7 +13,9 @@ let package = Package(
         .executableTarget(
             name: "SentinelUI",
             path: "Sources",
-            resources: []
+            resources: [
+                .copy("SentinelForgeUI/Resources")
+            ]
         )
     ]
 )

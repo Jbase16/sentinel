@@ -57,13 +57,15 @@ final class LLMService: ObservableObject {
         streamedResponse = ""
         isGenerating = true
 
+        let client = self.api // Capture value type for detached task
+
         currentTask = Task.detached { [weak self] in
             guard let self else { return }
             defer { Task { @MainActor in self.isGenerating = false } }
 
             do {
                 // Use the new Python API streamChat which is context-aware
-                for try await token in self.api.streamChat(prompt: trimmed) {
+                for try await token in client.streamChat(prompt: trimmed) {
                     if Task.isCancelled { break }
                     await MainActor.run {
                         self.streamedResponse += token

@@ -34,7 +34,7 @@ class OllamaClient:
         }
         
         try:
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=300.0) as client:
                 resp = client.post(url, json=payload)
                 if resp.status_code == 200:
                     result = resp.json()
@@ -53,9 +53,16 @@ class OllamaClient:
             "stream": True,
         }
         
+        logger.info(f"Ollama Request: {url} | Model: {self.model}")
+        
         try:
-            with httpx.Client(timeout=60.0) as client:
+            with httpx.Client(timeout=300.0) as client:
                 with client.stream("POST", url, json=payload) as response:
+                    logger.info(f"Ollama Response Status: {response.status_code}")
+                    if response.status_code != 200:
+                        yield f"[Error: Ollama returned {response.status_code}]"
+                        return
+
                     for line in response.iter_lines():
                         if not line: continue
                         try:
@@ -64,8 +71,8 @@ class OllamaClient:
                                 yield chunk["response"]
                             if chunk.get("done"):
                                 break
-                        except:
-                            pass
+                        except Exception as decode_err:
+                            logger.error(f"Chunk decode error: {decode_err} | Line: {line}")
         except Exception as e:
             logger.error(f"Ollama stream error: {e}")
             yield f"[Error: {e}]"
@@ -142,21 +149,45 @@ class AIEngine:
         question = (question or "").strip()
         findings = findings_store.get_all()
         
+        # Self-Knowledge Manifesto
+        manifesto = (
+            "SYSTEM IDENTITY:\n"
+            "You are Sentinel, the AI brain of the SentinelForge offensive security platform. "
+            "You are not a generic chatbot; you are an embedded security operator.\n\n"
+            "YOUR CAPABILITIES:\n"
+            "1. RECON: You can orchestrate scans using Nmap, Httpx, Nikto, and other tools via the Scan Console.\n"
+            "2. VISUALIZATION: You analyze data that feeds into the Force-Directed Attack Graph.\n"
+            "3. AUTONOMY: You can suggest follow-up attacks. If a tool is dangerous (e.g. Nmap), you must request permission via the Action Dispatcher.\n"
+            "4. REPORTING: You are the engine behind the Report Composer, capable of drafting Executive Summaries and Attack Narratives.\n"
+            "5. SYSTEM ACCESS: You can read the user's clipboard if asked, and you can suggest installing tools via 'brew' or 'pip'.\n\n"
+            "OPERATIONAL RULES:\n"
+            "- Be concise, technical, and objective.\n"
+            "- If you see vulnerabilities, explain the business impact.\n"
+            "- If asked about the app, explain your role within SentinelForge.\n"
+        )
+        
         if self.client:
-            # Construct context for the LLM
-            context = "Current Scan Findings:\n"
-            for f in findings[:30]: # Limit context
-                context += f"- [{f.get('severity')}] {f.get('type')}: {f.get('message') or f.get('value')}\n"
+            context_block = ""
+            if findings:
+                context_block = "LIVE SCAN CONTEXT:\n"
+                for f in findings[:30]:
+                    context_block += f"- [{f.get('severity')}] {f.get('type')}: {f.get('message') or f.get('value')}\n"
+                
+                system_prompt = (
+                    f"{manifesto}\n"
+                    "INSTRUCTION:\n"
+                    "Use the provided Live Scan Context to answer the user's question. "
+                    "Connect findings to potential attack paths."
+                )
+            else:
+                system_prompt = (
+                    f"{manifesto}\n"
+                    "INSTRUCTION:\n"
+                    "No active scan data is currently available. "
+                    "Answer questions about your capabilities, security methodology, or help the user start a new scan."
+                )
             
-            system_prompt = (
-                "You are AraUltra, an autonomous security assistant. "
-                "You have access to the current scan findings. "
-                "Answer the user's question based on the provided findings context. "
-                "Be concise, professional, and actionable. "
-                "Do NOT use markdown code blocks for the entire response, just for snippets."
-            )
-            
-            user_prompt = f"{context}\n\nUser Question: {question}"
+            user_prompt = f"{context_block}\n\nUser Question: {question}"
             
             yield from self.client.stream_generate(user_prompt, system_prompt)
             return

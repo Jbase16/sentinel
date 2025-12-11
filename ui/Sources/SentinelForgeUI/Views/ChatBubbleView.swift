@@ -8,6 +8,7 @@ struct ChatBubbleView: View {
         HStack {
             if message.role == .assistant { Spacer() }
             Text(message.text)
+                .textSelection(.enabled) // Allow copying
                 .padding(10)
                 .background(message.role == .user ? Color.blue.opacity(0.2) : Color.green.opacity(0.2))
                 .cornerRadius(10)
