@@ -5,6 +5,7 @@ import logging
 import uuid
 from typing import List, Dict, Optional
 from core.utils.observer import Observable, Signal
+from core.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +14,6 @@ class ActionDispatcher(Observable):
     Safety layer for autonomous actions.
     Manages the queue of actions requiring human approval.
     """
-    
-    # Tools that can run without prompt
-    SAFE_TOOLS = ["httpx", "dnsx", "sslscan", "whois", "subfinder"]
-    
-    # Tools that require user confirmation
-    RESTRICTED_TOOLS = ["nmap", "nikto", "nuclei", "gobuster", "feroxbuster", "sqlmap", "brew", "pip"]
     
     action_needed = Signal() # Emits (action_id, action_details)
     action_approved = Signal() # Emits (action_details)
@@ -43,6 +38,8 @@ class ActionDispatcher(Observable):
         - If restricted: returns "PENDING", stores it, and emits action_needed.
         - If invalid/dupe: returns "DROPPED".
         """
+        config = get_config()
+        
         tool = action.get("tool", "").lower()
         args = action.get("args", [])
         reason = action.get("reason", "")
@@ -62,11 +59,11 @@ class ActionDispatcher(Observable):
             "timestamp": logging.Formatter.formatTime(logging.Formatter(), logging.LogRecord("",0,"","",0,0,0))
         }
 
-        if tool in self.SAFE_TOOLS:
+        if tool in config.scan.safe_tools:
             self.action_approved.emit(full_action)
             return "AUTO_APPROVED"
         
-        if tool in self.RESTRICTED_TOOLS:
+        if tool in config.scan.restricted_tools:
             self._pending_actions[full_action["id"]] = full_action
             self.action_needed.emit(full_action["id"], full_action)
             return "PENDING"

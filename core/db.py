@@ -1,15 +1,16 @@
-# core/db.py — Async SQLite persistence layer
+# core/db.py
+# Async SQLite persistence layer (Hybrid: Config + Robust Init)
 
 import aiosqlite
 import json
 import logging
 import os
-import asyncio # Added import
+import asyncio
 from typing import List, Dict, Optional, Any
 
-logger = logging.getLogger(__name__)
+from core.config import get_config
 
-DB_PATH = os.path.expanduser("~/.sentinelforge/data.db")
+logger = logging.getLogger(__name__)
 
 class Database:
     _instance = None
@@ -21,8 +22,11 @@ class Database:
         return Database._instance
 
     def __init__(self):
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        self.db_path = DB_PATH
+        config = get_config()
+        # Use config path
+        self.db_path = str(config.storage.db_path)
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        
         self._initialized = False
         self._init_lock = asyncio.Lock()
 
@@ -73,7 +77,6 @@ class Database:
         if not self._initialized:
             await self.init()
             
-        # Deterministic ID based on content to prevent dupes
         import hashlib
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
@@ -113,12 +116,16 @@ class Database:
             await db.commit()
 
     async def get_all_findings(self) -> List[Dict]:
+        if not self._initialized:
+            await self.init()
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT data FROM findings ORDER BY timestamp DESC") as cursor:
                 rows = await cursor.fetchall()
                 return [json.loads(row[0]) for row in rows]
 
     async def get_all_issues(self) -> List[Dict]:
+        if not self._initialized:
+            await self.init()
         async with aiosqlite.connect(self.db_path) as db:
             async with db.execute("SELECT data FROM issues ORDER BY timestamp DESC") as cursor:
                 rows = await cursor.fetchall()

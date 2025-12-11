@@ -41,6 +41,14 @@ class FindingsStore(Observable):
             self._findings = loaded
         self.findings_changed.emit()
 
+    async def refresh(self):
+        """Force reload from DB to ensure we have external scan results."""
+        if not self.db._initialized:
+            await self.db.init()
+        loaded = await self.db.get_all_findings()
+        with self._lock:
+            self._findings = loaded
+
     def add_finding(self, finding: dict):
         with self._lock:
             self._findings.append(finding)

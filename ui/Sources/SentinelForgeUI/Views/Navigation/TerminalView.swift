@@ -50,12 +50,12 @@ struct TerminalView: NSViewRepresentable {
               };
 
               ws.onopen = () => {
-                term.write('\x1b[32m[Sentinel Terminal Connected]\x1b[0m\r\n');
+                term.write('\\x1b[32m[Sentinel Terminal Connected]\\x1b[0m\\r\\n');
                 ws.send(JSON.stringify({type: 'resize', cols: term.cols, rows: term.rows}));
               };
               
               ws.onclose = () => {
-                term.write('\r\n\x1b[31m[Connection Lost - Restart Backend]\x1b[0m');
+                term.write('\\r\\n\\x1b[31m[Connection Lost - Restart Backend]\\x1b[0m');
               };
 
               window.addEventListener('resize', () => {

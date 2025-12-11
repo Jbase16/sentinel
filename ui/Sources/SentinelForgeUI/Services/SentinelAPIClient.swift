@@ -40,7 +40,10 @@ public struct SentinelAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        var body: [String: Any] = ["target": target]
+        
+        // Force by default to clean up zombie states
+        var body: [String: Any] = ["target": target, "force": true]
+        
         if !modules.isEmpty {
             body["modules"] = modules
         }

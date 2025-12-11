@@ -159,6 +159,9 @@ class ScannerEngine:
             normalized = self._normalize_findings(all_findings)
             self._last_results = normalized
             
+            # CRITICAL: Populate the global findings store so the AI can see them
+            findings_store.bulk_add(normalized)
+            
             # Build recon edges and update stores
             recon_edges = self._build_recon_edges(normalized)
             self._record_recon_edges(recon_edges)

@@ -177,14 +177,22 @@ class AIEngine:
                     f"{manifesto}\n"
                     "INSTRUCTION:\n"
                     "Use the provided Live Scan Context to answer the user's question. "
-                    "Connect findings to potential attack paths."
+                    "Connect findings to potential attack paths.\n\n"
+                    "COMMAND PROTOCOL:\n"
+                    "To execute a tool or install software, you MUST use this format on a new line:\n"
+                    ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n\n"
+                    "Example: >>> EXEC: {\"tool\": \"brew\", \"args\": [\"install\", \"nmap\"]}\n"
+                    "Only suggest commands supported by the system (nmap, httpx, nikto, brew, pip)."
                 )
             else:
                 system_prompt = (
                     f"{manifesto}\n"
                     "INSTRUCTION:\n"
                     "No active scan data is currently available. "
-                    "Answer questions about your capabilities, security methodology, or help the user start a new scan."
+                    "Answer questions about your capabilities, security methodology, or help the user start a new scan.\n\n"
+                    "COMMAND PROTOCOL:\n"
+                    "To execute a tool or install software, you MUST use this format on a new line:\n"
+                    ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n"
                 )
             
             user_prompt = f"{context_block}\n\nUser Question: {question}"
