@@ -5,8 +5,8 @@ struct MainWindowView: View {
     @State private var selection: SidebarItem? = .dashboard
     
     enum SidebarItem: String, Identifiable, CaseIterable {
-                case dashboard = "Dashboard"
-                case scan = "Target Scan"
+        case dashboard = "Dashboard"
+        case scan = "Target Scan"
         case graph = "Attack Graph"
         case terminal = "System Console"
         case report = "Report Composer"
@@ -76,13 +76,11 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
+        .onAppear {
+            print("MainWindowView appeared")
+            // Safely kick off streams when the UI is actually visible
+            appState.startEventStream()
+            appState.refreshStatus()
+        }
     }
-                        .onAppear {
-                            print("MainWindowView appeared")
-                            // Safely kick off streams when the UI is actually visible
-                            appState.startEventStream()
-                            appState.refreshStatus()
-                        }
-                    }
-                }
-                
+}

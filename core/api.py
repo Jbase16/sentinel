@@ -28,14 +28,6 @@ from core.reporting import ReportComposer
 from core.pty_manager import PTYManager
 from core.db import Database
 
-# --- Models ---
-class ScanRequest(BaseModel):
-    target: str
-    modules: Optional[List[str]] = None
-
-class ChatRequest(BaseModel):
-    prompt: str
-
 # --- App Setup ---
 app = FastAPI(title="SentinelForge API")
 
@@ -90,49 +82,30 @@ def _get_latest_results():
     }
     return ctx # Simplified for now, can expand to full envelope
 
-# --- Routes ---
+# --- Models ---
+class ScanRequest(BaseModel):
+    target: str
+    modules: Optional[List[str]] = None
+    force: bool = False
 
-@app.get("/ping")
-async def ping():
-    return {"status": "ok"}
+class ChatRequest(BaseModel):
+    prompt: str
 
-@app.get("/status")
-async def status():
-    installed = get_installed_tools()
-    all_tools = list(TOOLS.keys())
-    missing = [t for t in all_tools if t not in installed]
-    
-    return {
-        "status": "ok",
-        "scan_running": (_active_scan_task is not None and not _active_scan_task.done()),
-        "latest_target": _scan_state.get("target"),
-        "ai": _ai_status(),
-        "tools": {
-            "installed": list(installed.keys()),
-            "missing": missing,
-            "count_installed": len(installed),
-            "count_total": len(all_tools)
-        }
-    }
-
-@app.get("/logs")
-async def get_logs():
-    # Legacy poll endpoint support
-    lines = []
-    while not _log_queue.empty():
-        lines.append(_log_queue.get_nowait())
-    return {"lines": lines}
-
-@app.get("/results")
-async def get_results():
-    return _get_latest_results()
-
+# --- App Setup ---
 @app.post("/scan")
 async def start_scan(req: ScanRequest):
     global _active_scan_task, _scan_state
     
     if _active_scan_task and not _active_scan_task.done():
-        return JSONResponse({"error": "Scan already running"}, status_code=409)
+        if req.force:
+            print("[API] Force-killing active scan...")
+            _active_scan_task.cancel()
+            try:
+                await _active_scan_task
+            except asyncio.CancelledError:
+                pass
+        else:
+            return JSONResponse({"error": "Scan already running"}, status_code=409)
 
     _cancel_requested.clear()
     _scan_state = {
