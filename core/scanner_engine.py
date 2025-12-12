@@ -7,7 +7,8 @@ from typing import AsyncGenerator, Dict, List
 
 from core.findings import findings_store
 from core.evidence import evidence_store
-from core import raw_classifier
+from core.cortex.scanner_bridge import ScannerBridge
+from core.evidence import evidence_store
 from core.vuln_rules import apply_rules
 from core.issues_store import issues_store
 from core.killchain_store import killchain_store
@@ -337,7 +338,7 @@ class ScannerEngine:
         evidence_store.save_text(tool, target, output_text)
 
         try:
-            return raw_classifier.classify(tool, target, output_text)
+            return ScannerBridge.classify(tool, target, output_text)
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"
             evidence_store.save_text(f"{tool}_classifier_error", target, err)

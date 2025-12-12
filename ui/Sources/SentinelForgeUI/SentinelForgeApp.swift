@@ -23,11 +23,19 @@ struct SentinelApp: App {
     
     // One shared state container for chat + IPC. Keeps UI and LLM in sync.
     @StateObject private var appState = HelixAppState()
+    @StateObject private var backendManager = BackendManager.shared
 
     var body: some Scene {
         WindowGroup {
             MainWindowView()
                 .environmentObject(appState)
+                .task {
+                    // Auto-boot the Neural Core when the window opens
+                    backendManager.start()
+                }
+                .onDisappear {
+                    backendManager.stop()
+                }
         }
         // Ensure standard window commands are available
         .commands {

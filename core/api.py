@@ -20,11 +20,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, validator
 
-import pyperclip
+
 
 from core.config import get_config, setup_logging
 from core.ai_engine import AIEngine
 from core.task_router import TaskRouter
+from core.cortex.reasoning import ReasoningEngine, reasoning_engine
+from core.wraith.evasion import WraithEngine
+from core.ghost.flow import FlowMapper
+from core.forge.compiler import ExploitCompiler
+from core.forge.sandbox import SandboxRunner
+from core.chat.chat_engine import GraphAwareChat
+from core.orchestrator import Orchestrator
 from core.action_dispatcher import ActionDispatcher
 from core.reporting import ReportComposer
 from core.pty_manager import PTYManager
@@ -214,6 +221,118 @@ async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
 async def get_results(_: bool = Depends(verify_token)):
     return _get_latest_results()
 
+@app.get("/cortex/graph")
+async def get_cortex_graph(_: bool = Depends(verify_token)):
+    from core.cortex.memory import KnowledgeGraph
+    return KnowledgeGraph.instance().export_json()
+
+@app.get("/cortex/reasoning")
+async def get_cortex_reasoning(_: bool = Depends(verify_token)):
+    return reasoning_engine.analyze()
+
+# --- God-Tier Endpoints ---
+
+@app.post("/wraith/evade")
+async def wraith_evade(
+    target: str, 
+    payload: str, 
+    _: bool = Depends(verify_token)
+):
+    """
+    Trigger the Autonomous Evasion Loop.
+    """
+    import httpx
+    async with httpx.AsyncClient() as client:
+        return await WraithEngine.instance().stealth_send(client, target, "GET", payload)
+
+@app.post("/ghost/record/{flow_name}")
+async def ghost_record(flow_name: str, _: bool = Depends(verify_token)):
+    """
+    Start recording a user flow for Logic Fuzzing.
+    """
+    fid = FlowMapper.instance().start_recording(flow_name)
+    return {"status": "recording", "flow_id": fid}
+
+@app.post("/forge/compile")
+async def forge_compile(
+    target: str,
+    anomaly: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Trigger the JIT Exploit Compiler.
+    """
+    try:
+        script_path = ExploitCompiler.instance().compile_exploit(target, anomaly)
+        return {"status": "compiled", "script_path": script_path}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.post("/forge/execute")
+async def forge_execute(
+    script_path: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Execute a compiled exploit in the sandbox.
+    """
+    result = await SandboxRunner.run(script_path)
+    return result
+
+# --- Command Deck Endpoints ---
+
+@app.post("/chat/query")
+async def chat_query(
+    question: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Context-Aware RAG Chat.
+    """
+    answer = GraphAwareChat.instance().query(question)
+    return {"response": answer}
+
+@app.post("/mission/start")
+async def mission_start(
+    target: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    The ONE-CLICK Button. Starts the full autonomous loop.
+    """
+    mission_id = await Orchestrator.instance().start_mission(target)
+    return {"status": "started", "mission_id": mission_id}
+
+# --- WebSockets ---
+
+@app.websocket("/ws/graph")
+async def ws_graph_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    from core.cortex.memory import KnowledgeGraph
+    try:
+        while True:
+            # Stream the graph state every 500ms
+            graph_data = KnowledgeGraph.instance().export_json()
+            await websocket.send_json(graph_data)
+            await asyncio.sleep(0.5)
+    except WebSocketDisconnect:
+        logger.info("Graph WS disconnected")
+
+@app.websocket("/ws/terminal")
+async def ws_terminal_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    session = PTYManager.instance().get_session()
+    
+    # Simple loop to pipe PTY output to WS
+    try:
+        while True:
+            output = session.read()
+            if output:
+                await websocket.send_text(output.decode(errors="ignore"))
+            await asyncio.sleep(0.05)
+    except WebSocketDisconnect:
+        pass
+
 @app.post("/scan")
 async def start_scan(
     req: ScanRequest,
@@ -380,11 +499,7 @@ async def generate_report(
 
 @app.get("/clipboard")
 async def get_clipboard(_: bool = Depends(verify_token)):
-    try:
-        content = pyperclip.paste()
-        return {"content": content[:10000]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"content": "Clipboard unavailable in container environment"}
 
 @app.post("/actions/{action_id}/{verb}")
 async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_token)):

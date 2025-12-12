@@ -6,7 +6,7 @@ public struct SentinelAPIClient: Sendable {
     public let baseURL: URL
     private let session: URLSession
 
-    public init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!, session: URLSession? = nil) {
+    public init(baseURL: URL = URL(string: "http://127.0.0.1:8000")!, session: URLSession? = nil) {
         self.baseURL = baseURL
         if let session = session {
             self.session = session
@@ -89,6 +89,68 @@ public struct SentinelAPIClient: Sendable {
         if http.statusCode == 204 { return nil }
         guard http.statusCode == 200 else { throw APIError.badStatus }
         return try JSONDecoder().decode(SentinelResults.self, from: data)
+    }
+
+    // MARK: - God-Tier Endpoints
+
+    public func startMission(target: String) async throws -> String {
+        struct MissionResponse: Decodable {
+            let status: String
+            let mission_id: String
+        }
+        
+        guard let url = URL(string: "/mission/start", relativeTo: baseURL) else { throw APIError.badStatus }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        // Add auth token if we had one (Placeholder)
+        // request.setValue("Bearer ...", forHTTPHeaderField: "Authorization")
+        
+        let pathWithQuery = url.absoluteString + "?target=\(target)"
+        request.url = URL(string: pathWithQuery)
+        
+        let (data, _) = try await session.data(for: request)
+        let response = try JSONDecoder().decode(MissionResponse.self, from: data)
+        return response.mission_id
+    }
+
+    public func chatQuery(question: String) async throws -> String {
+        guard let url = URL(string: "/chat/query", relativeTo: baseURL) else { throw APIError.badStatus }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        let pathWithQuery = url.absoluteString + "?question=\(question.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
+        request.url = URL(string: pathWithQuery)
+        
+        struct ChatResponse: Decodable {
+            let response: String
+        }
+        
+        let (data, _) = try await session.data(for: request)
+        let response = try JSONDecoder().decode(ChatResponse.self, from: data)
+        return response.response
+    }
+    
+    public func compileExploit(target: String, anomaly: String) async throws -> String {
+        guard let url = URL(string: "/forge/compile", relativeTo: baseURL) else { throw APIError.badStatus }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
+        components.queryItems = [
+            URLQueryItem(name: "target", value: target),
+            URLQueryItem(name: "anomaly", value: anomaly)
+        ]
+        request.url = components.url
+        
+        struct ForgeResponse: Decodable {
+            let status: String
+            let script_path: String
+        }
+        
+        let (data, _) = try await session.data(for: request)
+        let response = try JSONDecoder().decode(ForgeResponse.self, from: data)
+        return response.script_path
     }
 
     // Request best-effort scan cancellation.

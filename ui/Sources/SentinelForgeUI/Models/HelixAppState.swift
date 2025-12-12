@@ -8,6 +8,16 @@ class HelixAppState: ObservableObject {
 
     @Published var thread: ChatThread
     @Published var isProcessing: Bool = false
+    @Published var currentTab: SidebarTab = .dashboard
+    @Published var isScanRunning: Bool = false
+    
+    // Services
+    let apiClient: SentinelAPIClient
+    let cortexStream: CortexStream
+    let ptyClient: PTYClient
+    
+    private var cancellables = Set<AnyCancellable>()
+
     @Published var apiLogs: [String] = []          // Buffered logs from Python core
     @Published var apiResults: SentinelResults?    // Latest scan snapshot
     @Published var engineStatus: EngineStatus?
@@ -16,18 +26,31 @@ class HelixAppState: ObservableObject {
     @Published var preferredModel: String = ModelRouter.defaultPreferredModel
     @Published var autoRoutingEnabled: Bool = true
     @Published var pendingActions: [PendingAction] = []
-
+    
     private let llm: LLMService
-    private let api = SentinelAPIClient()
-    private var cancellables = Set<AnyCancellable>()
-    private var pollCancellable: AnyCancellable?
-
+    
     init(llm: LLMService) {
         self.llm = llm
+        
+        // Initialize Services
+        self.apiClient = SentinelAPIClient()
+        self.cortexStream = CortexStream()
+        self.ptyClient = PTYClient()
+        
         self.thread = ChatThread(title: "Main Chat", messages: [])
         self.availableModels = llm.availableModels
         self.preferredModel = llm.preferredModel
         self.autoRoutingEnabled = llm.autoRoutingEnabled
+        
+        // Auto-connect WS using correct scheme
+        // We know baseURL is 127.0.0.1:8000, so we just build the string directly.
+        // In a real app we'd parse baseURL and replace scheme, but this is a prototype.
+        if let wsURL = URL(string: "ws://127.0.0.1:8000/ws/graph") {
+            cortexStream.connect(url: wsURL)
+        }
+        if let ptyURL = URL(string: "ws://127.0.0.1:8000/ws/terminal") {
+            ptyClient.connect(url: ptyURL)
+        }
 
         // Mirror the LLM's generating flag to the UI.
         llm.$isGenerating
@@ -76,6 +99,7 @@ class HelixAppState: ObservableObject {
     }
     
     // Append user message, create an empty assistant bubble, and stream tokens into it.
+    // Append user message, create assistant bubble, and call Backend API
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -89,19 +113,29 @@ class HelixAppState: ObservableObject {
         thread.messages.append(reply)
         let replyID = reply.id
 
-        // Stream tokens directly into the assistant bubble.
-        llm.generate(prompt: trimmed) { [weak self] token in
-            guard let self else { return }
-            if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
-                self.objectWillChange.send()
-                self.thread.messages[idx].text += token
+        // Call God-Tier Chat API
+        Task {
+            do {
+                let response = try await apiClient.chatQuery(question: trimmed)
+                await MainActor.run {
+                    if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
+                        self.objectWillChange.send()
+                        self.thread.messages[idx].text = response
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
+                        self.thread.messages[idx].text = "Error: \(error.localizedDescription)"
+                    }
+                }
             }
         }
     }
 
     // Allows UI Stop button to interrupt generation.
     func cancelGeneration() {
-        llm.cancel()
+        // No-op for API-based chat
     }
 
     func updatePreferredModel(_ model: String) {
@@ -114,15 +148,19 @@ class HelixAppState: ObservableObject {
 
     // MARK: - Core IPC Helpers (HTTP bridge to Python)
 
-    /// Start a scan via the local Python API.
+    /// Start a God-Tier Mission via the local Python API.
     func startScan(target: String) {
-        print("[AppState] Starting scan for target: \(target)")
+        print("[AppState] Starting Mission for target: \(target)")
         Task {
             do {
-                try await api.startScan(target: target)
-                print("[AppState] Scan start request sent successfully")
+                // Use God-Tier "One Click" Mission
+                let missionID = try await apiClient.startMission(target: target)
+                print("[AppState] Mission started successfully. ID: \(missionID)")
+                await MainActor.run {
+                    self.isScanRunning = true
+                }
             } catch {
-                print("[AppState] Failed to start scan: \(error)")
+                print("[AppState] Failed to start mission: \(error)")
             }
         }
     }
@@ -130,7 +168,7 @@ class HelixAppState: ObservableObject {
     /// Poll for new log lines from Python and append to our buffer.
     func refreshLogs() {
         Task {
-            if let lines = try? await api.fetchLogs(), !lines.isEmpty {
+            if let lines = try? await apiClient.fetchLogs(), !lines.isEmpty {
                 await MainActor.run {
                     self.apiLogs.append(contentsOf: lines)
                 }
@@ -141,7 +179,7 @@ class HelixAppState: ObservableObject {
     /// Fetch engine/AI status (model availability + running scan).
     func refreshStatus() {
         Task {
-            if let status = try? await api.fetchStatus() {
+            if let status = try? await apiClient.fetchStatus() {
                 await MainActor.run {
                     self.engineStatus = status
                     if let ai = status.ai {
@@ -161,7 +199,7 @@ class HelixAppState: ObservableObject {
     /// Pull the latest scan snapshot (findings/issues/etc.) from Python.
     func refreshResults() {
         Task {
-            if let results = try? await api.fetchResults() {
+            if let results = try? await apiClient.fetchResults() {
                 await MainActor.run {
                     self.apiResults = results
                 }
@@ -172,7 +210,7 @@ class HelixAppState: ObservableObject {
     /// Ask Python core to cancel any active scan.
     func cancelScan() {
         Task {
-            try? await api.cancelScan()
+            try? await apiClient.cancelScan()
         }
     }
 
@@ -180,7 +218,7 @@ class HelixAppState: ObservableObject {
     func startEventStream() {
         Task {
             do {
-                for try await event in api.streamEvents() {
+                for try await event in apiClient.streamEvents() {
                     // handleSSEEvent is @MainActor but synchronous logic, so await isn't strictly needed 
                     // for suspension, but MainActor isolation requires it if we weren't already on MainActor.
                     // However, since we are inside a Task, we are likely off-main.
@@ -212,7 +250,7 @@ class HelixAppState: ObservableObject {
             self.refreshResults()
         case "action_needed":
             if let data = event.data.data(using: .utf8),
-               let action = try? JSONDecoder().decode(PendingAction.self, from: data) {
+                let action = try? JSONDecoder().decode(PendingAction.self, from: data) {
                 // Avoid duplicates
                 if !self.pendingActions.contains(where: { $0.id == action.id }) {
                     self.pendingActions.append(action)
@@ -225,7 +263,7 @@ class HelixAppState: ObservableObject {
     
     func approveAction(_ action: PendingAction) {
         Task {
-            try? await api.approveAction(id: action.id)
+            try? await apiClient.approveAction(id: action.id)
             await MainActor.run {
                 self.pendingActions.removeAll { $0.id == action.id }
             }
@@ -234,7 +272,7 @@ class HelixAppState: ObservableObject {
 
     func denyAction(_ action: PendingAction) {
         Task {
-            try? await api.denyAction(id: action.id)
+            try? await apiClient.denyAction(id: action.id)
             await MainActor.run {
                 self.pendingActions.removeAll { $0.id == action.id }
             }
@@ -249,4 +287,13 @@ struct PendingAction: Identifiable, Decodable {
     let reason: String?
     let target: String?
     let timestamp: String?
+}
+
+enum SidebarTab: String, CaseIterable, Identifiable {
+    case dashboard = "Dashboard"
+    case chat = "Command Deck"
+    case graph = "Neural Graph"
+    case settings = "Settings"
+    
+    var id: String { rawValue }
 }

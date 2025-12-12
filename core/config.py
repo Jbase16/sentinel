@@ -186,7 +186,10 @@ def setup_logging(config: Optional[SentinelConfig] = None) -> None:
 
 
 # Legacy compatibility aliases
-AI_PROVIDER = property(lambda self: get_config().ai.provider)
-OLLAMA_URL = property(lambda self: get_config().ai.ollama_url)
-AI_MODEL = property(lambda self: get_config().ai.model)
-AI_FALLBACK_ENABLED = property(lambda self: get_config().ai.fallback_enabled)
+# Legacy compatibility aliases
+# We must evaluate these to values, not return property objects, because module-level properties don't work like class properties.
+_cfg = get_config()
+AI_PROVIDER = _cfg.ai.provider
+OLLAMA_URL = _cfg.ai.ollama_url
+AI_MODEL = _cfg.ai.model
+AI_FALLBACK_ENABLED = _cfg.ai.fallback_enabled
