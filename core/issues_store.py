@@ -10,9 +10,10 @@ class IssuesStore(Observable):
 
     issues_changed = Signal()
 
-    def __init__(self):
+    def __init__(self, session_id: str = None):
         super().__init__()
         self._issues = []
+        self.session_id = session_id
         self.db = Database.instance()
         try:
             asyncio.get_running_loop()
@@ -23,13 +24,16 @@ class IssuesStore(Observable):
     async def _init_load(self):
         # DB init is idempotent/shared
         await self.db.init()
-        loaded = await self.db.get_all_issues()
+        if self.session_id:
+            loaded = await self.db.get_issues(self.session_id)
+        else:
+            loaded = await self.db.get_all_issues()
         self._issues = loaded
         self.issues_changed.emit()
 
     def add_issue(self, issue: dict):
         self._issues.append(issue)
-        asyncio.create_task(self.db.save_issue(issue))
+        asyncio.create_task(self.db.save_issue(issue, self.session_id))
         self.issues_changed.emit()
 
     def get_all(self):

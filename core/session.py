@@ -1,0 +1,53 @@
+"""
+core/session.py
+
+Defines the ScanSession Context.
+This object encapsulates ALL state related to a specific scan/mission.
+It replaces global singletons to allow concurrent scanning and robust isolation.
+"""
+
+import uuid
+import time
+from typing import Optional, Dict
+
+# Import store classes (we will refactor them to be instantiable)
+from core.findings_store import FindingsStore
+from core.issues_store import IssuesStore
+from core.killchain_store import KillchainStore
+from core.evidence_store import EvidenceStore
+
+class ScanSession:
+    """
+    A single "Mission" or "Scan" context.
+    Owns its own data stores, preventing cross-contamination between concurrent scans.
+    """
+    def __init__(self, target: str):
+        self.id = str(uuid.uuid4())
+        self.target = target
+        self.start_time = time.time()
+        self.status = "Created"
+        
+        # Each session gets its own isolated stores, linked to DB ID
+        self.findings = FindingsStore(session_id=self.id)
+        self.issues = IssuesStore(session_id=self.id)
+        self.killchain = KillchainStore() # Killchain is transient/derived mostly, but could be persisted
+        self.evidence = EvidenceStore()   # EvidenceStore update pending... needs refactor to accept ID too 
+        
+        # Session-local logs
+        self.logs = []
+
+    def log(self, message: str):
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        entry = f"[{timestamp}] {message}"
+        self.logs.append(entry)
+        # We could also emit a signal here for real-time UI updates specific to this session
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id,
+            "target": self.target,
+            "status": self.status,
+            "findings_count": len(self.findings.get_all()),
+            "issues_count": len(self.issues.get_all()),
+            "start_time": self.start_time
+        }

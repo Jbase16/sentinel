@@ -76,17 +76,41 @@ class PayloadMutator:
             f"/*{payload}*/" # Comment wrapping
         ]
 
+    @staticmethod
+    def _hex_encode(payload: str) -> str:
+        return "".join(f"%{ord(c):02x}" for c in payload)
+
+    @staticmethod
+    def _unicode_bypass(payload: str) -> str:
+        # Replace common characters with lookalikes (basic set)
+        replacements = {'<': '＜', '>': '＞', "'": '＇', '"': '＂'}
+        return "".join(replacements.get(c, c) for c in payload)
+
     def evolve(self, payload: str, type: str = "generic") -> List[str]:
         """
         Main entry point. Returns a list of mutated candidates.
+        Uses layered mutation (Mutation Chains).
         """
-        pool = []
-        if type == "sql":
-            pool.extend(self.mutate_sql(payload))
-        elif type == "xss":
-            pool.extend(self.mutate_xss(payload))
-            
-        pool.extend(self.generic_obfuscation(payload))
+        pool = set([payload])
         
-        # Dedup
-        return list(set(pool))
+        # 1. Primary Mutations
+        if type == "sql":
+            pool.update(self.mutate_sql(payload))
+        elif type == "xss":
+            pool.update(self.mutate_xss(payload))
+            
+        pool.update(self.generic_obfuscation(payload))
+        
+        # 2. Layered Mutations (Chain 2 strategies)
+        # E.g. Case Toggle -> URL Encode
+        layers = list(pool)
+        for base_mutant in layers[:5]: # Mutate top 5 candidates further
+             # Apply hex encoding
+             pool.add(self._hex_encode(base_mutant))
+             # Apply double encoding
+             pool.add(urllib.parse.quote(base_mutant))
+        
+        # 3. Unicode Anomalies (Experimental)
+        pool.add(self._unicode_bypass(payload))
+        
+        return list(pool)

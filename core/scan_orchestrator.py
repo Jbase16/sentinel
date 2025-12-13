@@ -32,9 +32,12 @@ class ScanContext:
 class ScanOrchestrator:
     """Wrapper that sequences the end-to-end pipeline for a target."""
 
-    def __init__(self, log_fn: Optional[LogCallback] = None):
+    def __init__(self, session=None, log_fn: Optional[LogCallback] = None):
+        self.session = session
         self.log = log_fn or (lambda msg: None)
-        self.scanner = ScannerEngine()
+        
+        # Pass session to engine for isolated data storage
+        self.scanner = ScannerEngine(session=session)
         self.dispatcher = ActionDispatcher.instance()
         
         # We need to listen to TaskRouter events to trigger new scans
@@ -44,12 +47,21 @@ class ScanOrchestrator:
         # Listen for approved actions (both auto and manual)
         self.dispatcher.action_approved.connect(self._on_action_approved)
         
-        self.current_target = ""
+        self.current_target = session.target if session else ""
 
     def _on_action_approved(self, action: dict):
         """
         Executed when an action is greenlit (either auto or by user).
+        CRITICAL: Filter by session target to avoid cross-talk.
         """
+        target = action.get("target") or self.current_target
+        
+        # Safety check: Is this action for 'us'?
+        # If we have a session, ensure the action targets our scope.
+        if self.session and target != self.session.target:
+             # This event belongs to another concurrent scan
+             return
+
         tool = action["tool"]
         args = action["args"]
         reason = action.get("reason", "")
@@ -58,6 +70,8 @@ class ScanOrchestrator:
 
     def _on_router_event(self, event_type: str, payload: dict):
         if event_type == "findings_update":
+            # If session is active, ensure this update relates to our findings
+            # (optimization: strictly we should check payload origin, currently implicit)
             self._handle_autonomous_actions(payload)
 
     def _handle_autonomous_actions(self, payload: dict):

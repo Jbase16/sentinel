@@ -13,6 +13,7 @@ class EvidenceStore(Observable):
 
     @staticmethod
     def instance():
+        """Legacy global singleton access."""
         if EvidenceStore._instance is None:
             EvidenceStore._instance = EvidenceStore()
         return EvidenceStore._instance

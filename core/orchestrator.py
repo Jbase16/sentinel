@@ -68,14 +68,21 @@ class Orchestrator:
 
     async def _run_recon(self, target: str):
         from core.scan_orchestrator import ScanOrchestrator
+        from core.session import ScanSession
         
         logger.info(f"    [Orchestrator] Launching ScanOrchestrator for {target}...")
+        
+        # Create a new isolated session for this scan
+        session = ScanSession(target)
+        self.active_missions[session.id] = session # Track it
         
         # Use a simple logger adapter
         def adptor(msg):
              logger.info(f"      [Scanner] {msg}")
+             session.log(msg) # Persist to session log
 
-        orch = ScanOrchestrator(log_fn=adptor)
+        # Inject session into orchestrator
+        orch = ScanOrchestrator(session=session, log_fn=adptor)
         
         # Run the scan (triggers tools, updates findings_store/knowledge_graph)
         try:

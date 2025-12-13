@@ -20,32 +20,24 @@ class ScannerEngine:
 
     MAX_CONCURRENT_TOOLS = 2
 
-    TOOLS: Dict[str, Dict[str, object]] = {
-        "nmap": {
-            "cmd": ["nmap", "-sV", "-T4", "{target}"],
-        },
-        "whatweb": {
-            "cmd": ["whatweb", "--log-json=-", "{target}"],
-        },
-        "wafw00f": {
-            "cmd": ["wafw00f", "{target}", "-f", "json"],
-        },
-    }
-
-    # Placeholder “weaponization” block (non-operational on macOS)
-    WEAPONIZATION = {
-        "placeholder": {
-            "description": "Simulated exploitation logic — disabled for macOS safety.",
-            "enabled": True,
-        }
-    }
-
-    def __init__(self):
+    def __init__(self, session=None):
+        """
+        Args:
+            session: Optional ScanSession. If None, uses legacy global behavior or temp state.
+        """
+        self.session = session
         self._last_results: List[dict] = []
         self._fingerprint_cache: set[str] = set()
         self._installed_meta: Dict[str, Dict[str, object]] = {}
         self._recon_edges: List[dict] = []
         self._recon_edge_keys: set[tuple] = set()
+        
+        # Task management state
+        self._pending_tasks = []
+        self._running_tasks = {}
+        self._queue = asyncio.Queue()
+        self._results_map = {}
+        self._procs = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -53,17 +45,18 @@ class ScannerEngine:
     async def scan(self, target: str, selected_tools: List[str] | None = None, cancel_flag=None) -> AsyncGenerator[str, None]:
         """
         Async generator that yields log-style strings while the supported tools run.
-        Each tool's raw output is saved to the evidence store and parsed into findings.
         """
         installed = self._detect_installed()
         self._installed_meta = installed
+        
+        # Reset state for this run
         self._last_results = []
-        self._fingerprint_cache = set()
         self._recon_edges = []
-        self._recon_edge_keys = set()
-        self._procs: Dict[str, asyncio.subprocess.Process] = {}
-
+        self._procs = {}
+        self._pending_tasks = []
+        
         selected_clean = [t for t in (selected_tools or []) if t in TOOLS]
+        # ... logic continues ...
         tools_to_run = list(installed.keys())
         missing: List[str] = []
         if selected_clean:
@@ -159,8 +152,12 @@ class ScannerEngine:
             normalized = self._normalize_findings(all_findings)
             self._last_results = normalized
             
-            # CRITICAL: Populate the global findings store so the AI can see them
-            findings_store.bulk_add(normalized)
+            # CRITICAL: Populate findings store (Session-Scoped or Global)
+            if self.session:
+                self.session.findings.bulk_add(normalized)
+            else:
+                # Fallback for legacy calls
+                findings_store.bulk_add(normalized)
             
             # Build recon edges and update stores
             recon_edges = self._build_recon_edges(normalized)

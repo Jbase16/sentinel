@@ -16,10 +16,11 @@ class FindingsStore(Observable):
 
     findings_changed = Signal()
 
-    def __init__(self):
+    def __init__(self, session_id: str = None):
         super().__init__()
         self._lock = threading.Lock()
         self._findings = []
+        self.session_id = session_id
         self.db = Database.instance()
         
         # Initialize DB in background if loop exists
@@ -27,25 +28,28 @@ class FindingsStore(Observable):
             asyncio.get_running_loop()
             asyncio.create_task(self._init_load())
         except RuntimeError:
-            pass # No loop yet, will be loaded on first async access or by app startup
+            pass # No loop yet
 
-    async def ensure_loaded(self):
-        """Call this to ensure DB is loaded if it wasn't during init"""
-        if not self._findings:
-            await self._init_load()
+    # ... Ensure loaded ...
 
     async def _init_load(self):
         await self.db.init()
-        loaded = await self.db.get_all_findings()
+        # Load only for this session if ID provided
+        if self.session_id:
+            loaded = await self.db.get_findings(self.session_id)
+        else:
+            loaded = await self.db.get_all_findings()
         with self._lock:
             self._findings = loaded
         self.findings_changed.emit()
 
     async def refresh(self):
-        """Force reload from DB to ensure we have external scan results."""
         if not self.db._initialized:
             await self.db.init()
-        loaded = await self.db.get_all_findings()
+        if self.session_id:
+            loaded = await self.db.get_findings(self.session_id)
+        else:
+            loaded = await self.db.get_all_findings()
         with self._lock:
             self._findings = loaded
 
@@ -53,8 +57,8 @@ class FindingsStore(Observable):
         with self._lock:
             self._findings.append(finding)
         
-        # Persist asynchronously
-        asyncio.create_task(self.db.save_finding(finding))
+        # Persist asynchronously with session ID
+        asyncio.create_task(self.db.save_finding(finding, self.session_id))
         self.findings_changed.emit()
 
     def add(self, finding: dict):
