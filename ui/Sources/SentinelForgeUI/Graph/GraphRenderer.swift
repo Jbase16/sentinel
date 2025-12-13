@@ -223,30 +223,19 @@ class GraphRenderer: NSObject {
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
 
         // Safe Drawing
-        if let vBuffer = vertexBuffer, !nodes.isEmpty {
-            encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
-            encoder.drawPrimitives(
-                type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
-        } else {
-            // Debug: Force Draw a Center Point if nodes are empty
-            // This proves the render pipeline works even without data
-            struct DummyVertex {
-                var pos: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
-                var col: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)  // White
-                var size: Float = 50.0
-            }
-            var dummy = DummyVertex()
-            encoder.setVertexBytes(&dummy, length: MemoryLayout<DummyVertex>.stride, index: 0)
-            // Note: Vertex shader expects buffer 0 to have layout.
-            // Usually we need a buffer, but `setVertexBytes` works for small data < 4KB.
-            // However, our pipeline expects a specific VertexDescriptor layout.
-            // setVertexBytes might not play nice with VertexDescriptor bufferIndex 0 if strict.
-            // Let's just create a tiny temp buffer if strictly needed, or just skip.
-            // Given the crash risk with strict descriptors, better to just log.
+        guard !nodes.isEmpty, let vBuffer = vertexBuffer else {
             if frameCount % 60 == 0 {
                 print("GraphRenderer: Nodes empty. Skipping draw primitives.")
             }
+            encoder.endEncoding()
+            commandBuffer.present(drawable)
+            commandBuffer.commit()
+            return
         }
+
+        encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
+        encoder.drawPrimitives(
+            type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)

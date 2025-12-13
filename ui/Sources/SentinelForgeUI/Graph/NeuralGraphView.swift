@@ -6,12 +6,12 @@
 //  Wraps the Metal Renderer for SwiftUI.
 //
 
-import SwiftUI
 import MetalKit
+import SwiftUI
 
 struct NeuralGraphView: NSViewRepresentable {
     var nodes: [CortexStream.NodeModel]
-    
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
@@ -21,27 +21,30 @@ struct NeuralGraphView: NSViewRepresentable {
         mtkView.delegate = context.coordinator
         mtkView.preferredFramesPerSecond = 60
         mtkView.enableSetNeedsDisplay = true
-        
+
         mtkView.device = MTLCreateSystemDefaultDevice()
-        
+
         mtkView.framebufferOnly = false
+        mtkView.colorPixelFormat = .bgra8Unorm  // Explicitly match Pipeline
+        mtkView.depthStencilPixelFormat = .invalid  // No depth buffer used
         mtkView.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.1, alpha: 1.0)
         mtkView.drawableSize = mtkView.frame.size
-        
+
         if let device = mtkView.device {
             context.coordinator.renderer = GraphRenderer(device: device)
         }
-        
+
         // Listen for interaction (Simple Bus)
-        NotificationCenter.default.addObserver(forName: .cameraMove, object: nil, queue: .main) { note in
+        NotificationCenter.default.addObserver(forName: .cameraMove, object: nil, queue: .main) {
+            note in
             if let delta = note.userInfo?["delta"] as? CGSize {
                 context.coordinator.updateInput(drag: delta, zoom: 0)
             }
         }
-        
+
         // Initial data
         context.coordinator.update(nodes: nodes)
-        
+
         return mtkView
     }
 
@@ -58,11 +61,11 @@ struct NeuralGraphView: NSViewRepresentable {
             self.parent = parent
             super.init()
         }
-        
+
         func update(nodes: [CortexStream.NodeModel]) {
             renderer?.updateNodes(nodes)
         }
-        
+
         func updateInput(drag: CGSize, zoom: CGFloat) {
             // Convert pixels to rotation radians
             let sens: Float = 0.01
@@ -87,7 +90,7 @@ struct NeuralGraphView: NSViewRepresentable {
 struct InteractiveGraphContainer: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var lastDrag = CGSize.zero
-    
+
     var body: some View {
         NeuralGraphView(nodes: appState.cortexStream.nodes)
             .gesture(
