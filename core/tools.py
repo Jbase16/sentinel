@@ -138,7 +138,6 @@ TOOLS: Dict[str, Dict] = {
         "cmd": ["testssl", "{target}"],
         "aggressive": False,
         "target_type": "host",
-        "target_type": "host",
     },
     "whatweb": {
         "label": "whatweb (fingerprint tech stack)",
@@ -183,7 +182,6 @@ TOOLS: Dict[str, Dict] = {
         "cmd": ["assetfinder", "-subs-only", "{target}"],
         "aggressive": False,
         "target_type": "domain",
-        "target_type": "domain",
     },
     "hakrawler": {
         "label": "hakrawler (endpoint crawler)",
@@ -193,7 +191,6 @@ TOOLS: Dict[str, Dict] = {
         ],
         "aggressive": False,
         "target_type": "url",
-        "binary": "hakrawler",
         "binary": "hakrawler",
     },
     "naabu": {
@@ -210,7 +207,6 @@ TOOLS: Dict[str, Dict] = {
         ],
         "aggressive": False,
         "target_type": "domain",
-        "binary": "dnsx",
         "binary": "dnsx",
     },
     "masscan": {
@@ -230,20 +226,17 @@ TOOLS: Dict[str, Dict] = {
         "cmd": ["subjack", "-d", "{target}", "-ssl"],
         "aggressive": True,
         "target_type": "domain",
-        "target_type": "domain",
     },
     "sslyze": {
         "label": "sslyze (TLS scanner)",
         "cmd": ["sslyze", "{target}"],
         "aggressive": False,
         "target_type": "host",
-        "target_type": "host",
     },
     "wfuzz": {
         "label": "wfuzz (parameter fuzzing)",
         "cmd": ["wfuzz", "-c", "-w", COMMON_WORDLIST, "{target}/FUZZ"],
         "aggressive": True,
-        "target_type": "url",
         "target_type": "url",
     },
     "httprobe": {
@@ -255,13 +248,11 @@ TOOLS: Dict[str, Dict] = {
         "aggressive": False,
         "target_type": "host",
         "binary": "httprobe",
-        "binary": "httprobe",
     },
     "pshtt": {
         "label": "pshtt (HTTPS observatory)",
         "cmd": ["pshtt", "{target}"],
         "aggressive": False,
-        "target_type": "domain",
         "target_type": "domain",
     },
     "eyewitness": {

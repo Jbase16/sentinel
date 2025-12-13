@@ -89,24 +89,45 @@ class Orchestrator:
         """
         The God-Tier Logic. Decides WHICH engine to deploy.
         """
+        import httpx
+        
         for op in opportunities:
             tool = op.get("tool")
             sub_target = op.get("target") or main_target
+            payload = op.get("payload", "")
+            context = op.get("context", "")
             
-            if tool == "wraith_evasion":
-                # Deploy Wraith
-                logger.info(f"      [Wraith] Deploying Evasion against {sub_target}")
-                # await WraithEngine.instance().stealth_send(...)
-                
-            elif tool == "ghost_logic":
-                # Deploy Ghost
-                logger.info(f"      [Ghost] Fuzzing Logic on {sub_target}")
-                # fid = FlowMapper.instance().start_recording(...)
-                
-            elif tool == "forge_exploit":
-                # Deploy Forge
-                logger.info(f"      [Forge] Compiling Zero-Day for {sub_target}")
-                # ExploitCompiler.instance().compile_exploit(...)
-                
-            else:
-                logger.info(f"      [Standard] Running {tool} against {sub_target}")
+            try:
+                if tool == "wraith_evasion":
+                    # Deploy Wraith for WAF bypass
+                    logger.info(f"      [Wraith] Deploying Evasion against {sub_target}")
+                    async with httpx.AsyncClient(timeout=30.0) as client:
+                        result = await WraithEngine.instance().stealth_send(
+                            client=client,
+                            url=sub_target,
+                            method="GET",
+                            base_payload=payload or "<script>alert(1)</script>",
+                            payload_type=op.get("payload_type", "xss")
+                        )
+                        logger.info(f"      [Wraith] Result: {result.get('status')}")
+                    
+                elif tool == "ghost_logic":
+                    # Deploy Ghost for flow recording/fuzzing
+                    logger.info(f"      [Ghost] Recording Flow on {sub_target}")
+                    flow_id = FlowMapper.instance().start_recording(f"flow_{sub_target}")
+                    logger.info(f"      [Ghost] Started flow recording: {flow_id}")
+                    
+                elif tool == "forge_exploit":
+                    # Deploy Forge to generate exploit
+                    logger.info(f"      [Forge] Compiling Zero-Day for {sub_target}")
+                    exploit_path = ExploitCompiler.instance().compile_exploit(
+                        target=sub_target,
+                        anomaly_context=context or f"Target endpoint: {sub_target}"
+                    )
+                    logger.info(f"      [Forge] Generated exploit at: {exploit_path}")
+                    
+                else:
+                    logger.info(f"      [Standard] Running {tool} against {sub_target}")
+                    
+            except Exception as e:
+                logger.error(f"      [Engagement] Failed {tool} on {sub_target}: {e}")

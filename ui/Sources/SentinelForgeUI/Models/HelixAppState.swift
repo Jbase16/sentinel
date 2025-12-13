@@ -44,23 +44,29 @@ class HelixAppState: ObservableObject {
         
         // Wait for BackendManager to signal readiness
         NotificationCenter.default.addObserver(forName: .backendReady, object: nil, queue: .main) { [weak self] _ in
-            self?.connectServices()
+            Task { @MainActor in
+                self?.connectServices()
+            }
         }
+        
+        // Setup Combine bindings for LLM state
+        setupLLMBindings()
     }
     
     private func connectServices() {
         print("[AppState] Backend Ready. Connecting Services...")
-        if let wsURL = URL(string: "ws://127.0.0.1:8000/ws/graph") {
+        if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
             cortexStream.connect(url: wsURL)
         }
-        if let ptyURL = URL(string: "ws://127.0.0.1:8000/ws/terminal") {
+        if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/terminal") {
             ptyClient.connect(url: ptyURL)
         }
         // Kick off HTTP streams
         self.startEventStream()
         self.refreshStatus()
     }
-
+    
+    private func setupLLMBindings() {
         // Mirror the LLM's generating flag to the UI.
         llm.$isGenerating
             .receive(on: DispatchQueue.main)
@@ -89,8 +95,6 @@ class HelixAppState: ObservableObject {
                 self?.availableModels = models
             }
             .store(in: &cancellables)
-
-        // Initialization is now lazy via onAppear in the View
     }
 
     convenience init() {

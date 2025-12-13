@@ -1,6 +1,10 @@
 import AppKit
 import Foundation
 
+extension Notification.Name {
+    static let backendReady = Notification.Name("backendReady")
+}
+
 /// Manages the lifecycle of the Python Backend (Neuro-Symbolic Core).
 /// Allows the app to be self-contained during development.
 class BackendManager: ObservableObject {
@@ -14,7 +18,7 @@ class BackendManager: ObservableObject {
 
     func start() {
         Task {
-            if await checkPort8000() {
+            if await checkPort8765() {
                 await MainActor.run {
                     self.status = "Core Connected (External)"
                     self.isRunning = true
@@ -32,9 +36,9 @@ class BackendManager: ObservableObject {
         process = nil
     }
 
-    private func checkPort8000() async -> Bool {
+    private func checkPort8765() async -> Bool {
         // Simple TCP check (simulated via URLSession for now)
-        let url = URL(string: "http://127.0.0.1:8000/ping")!
+        let url = URL(string: "http://127.0.0.1:8765/ping")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 1.0
         do {
@@ -90,7 +94,7 @@ class BackendManager: ObservableObject {
         }
 
         p.currentDirectoryURL = repoPath
-        p.arguments = ["-m", "uvicorn", "core.api:app", "--host", "127.0.0.1", "--port", "8000"]
+        p.arguments = ["-m", "uvicorn", "core.api:app", "--host", "127.0.0.1", "--port", "8765"]
 
         // 3. Capture Output
         let pipe = Pipe()

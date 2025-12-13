@@ -6,9 +6,8 @@ from urllib.parse import urlparse
 from typing import AsyncGenerator, Dict, List
 
 from core.findings import findings_store
-from core.evidence import evidence_store
+from core.evidence_store import EvidenceStore
 from core.cortex.scanner_bridge import ScannerBridge
-from core.evidence import evidence_store
 from core.vuln_rules import apply_rules
 from core.issues_store import issues_store
 from core.killchain_store import killchain_store
@@ -305,12 +304,12 @@ class ScannerEngine:
             self._procs[tool] = proc
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
-            evidence_store.save_text(f"{tool}_error", target, msg)
+            EvidenceStore.instance().add_evidence(tool, msg, {"target": target, "error": "not_found"})
             await queue.put(msg)
             return []
         except Exception as exc:
             msg = f"[{tool}] failed to start: {exc}"
-            evidence_store.save_text(f"{tool}_error", target, msg)
+            EvidenceStore.instance().add_evidence(tool, msg, {"target": target, "error": str(exc)})
             await queue.put(msg)
             return []
 
@@ -335,13 +334,17 @@ class ScannerEngine:
         self._procs.pop(tool, None)
 
         output_text = "\n".join(output_lines)
-        evidence_store.save_text(tool, target, output_text)
+        EvidenceStore.instance().add_evidence(tool, output_text, {
+            "target": target,
+            "exit_code": exit_code,
+            "lines": len(output_lines)
+        })
 
         try:
             return ScannerBridge.classify(tool, target, output_text)
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"
-            evidence_store.save_text(f"{tool}_classifier_error", target, err)
+            EvidenceStore.instance().add_evidence(f"{tool}_classifier_error", err, {"target": target})
             await queue.put(err)
             return []
 

@@ -23,15 +23,16 @@ class OllamaClient:
         self.base_url = base_url.rstrip('/')
         self.model = model
 
-    def generate(self, prompt: str, system: str = "") -> Optional[str]:
+    def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": self.model,
             "prompt": prompt,
             "system": system,
             "stream": False,
-            "format": "json"  # Force JSON response
         }
+        if force_json:
+            payload["format"] = "json"
         
         try:
             with httpx.Client(timeout=300.0) as client:
@@ -43,6 +44,10 @@ class OllamaClient:
             logger.error(f"Ollama API error: {e}")
             return None
         return None
+
+    def generate_text(self, prompt: str, system: str = "") -> Optional[str]:
+        """Generate plain text response without JSON formatting."""
+        return self.generate(prompt, system, force_json=False)
 
     def stream_generate(self, prompt: str, system: str = "") -> Generator[str, None, None]:
         url = f"{self.base_url}/api/generate"
@@ -534,34 +539,17 @@ class AIEngine:
                 context += f"- [{f.get('severity')}] {f.get('type')}: {f.get('value')}\n"
             
             system_prompt = (
-                "You are AraUltra, an autonomous security assistant. "
+                "You are Sentinel, an autonomous security assistant. "
                 "Answer the user's question based on the provided findings context. "
                 "Be concise, professional, and actionable."
             )
             
             user_prompt = f"{context}\n\nUser Question: {question}"
             
-            response = self.client.generate(user_prompt, system_prompt)
+            # Use generate_text for natural language responses (no JSON forcing)
+            response = self.client.generate_text(user_prompt, system_prompt)
             if response:
-                # Clean up JSON string if the model returned JSON by mistake (since we force JSON mode in generate, we might need to adjust generate for chat)
-                # Actually, for chat we probably don't want JSON format.
-                # Let's make a separate generate_text method or just parse the value.
-                # Since generate() forces JSON, let's try to extract a 'response' key or similar if the model follows instruction, 
-                # but for chat we might want free text.
-                # For now, let's assume the model puts the answer in a key or we adjust the client.
-                # Let's adjust the client to allow non-json format.
-                pass 
-                # Re-implementing chat with a dedicated non-JSON call would be better, 
-                # but for now let's stick to the plan. 
-                # I'll just return the raw JSON value if it's a simple string, or parse it.
-                try:
-                    # If the model returned a JSON object with "response" or similar
-                    data = json.loads(response)
-                    if isinstance(data, dict):
-                        return str(list(data.values())[0])
-                    return str(data)
-                except:
-                    return response
+                return response
 
         # Fallback to old deterministic chat
         return self._chat_fallback(question, evidence, findings)

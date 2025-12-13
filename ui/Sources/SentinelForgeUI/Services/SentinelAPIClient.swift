@@ -6,7 +6,7 @@ public struct SentinelAPIClient: Sendable {
     public let baseURL: URL
     private let session: URLSession
 
-    public init(baseURL: URL = URL(string: "http://127.0.0.1:8000")!, session: URLSession? = nil) {
+    public init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!, session: URLSession? = nil) {
         self.baseURL = baseURL
         if let session = session {
             self.session = session

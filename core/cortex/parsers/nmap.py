@@ -15,15 +15,23 @@ class NmapParser(SignalParser):
         # Ensure Asset Node Exists
         self.graph.add_node(target, NodeType.ASSET, {"tool": tool_name})
         
-        # Regex for '22/tcp open ssh' etc
-        # Matches: PORT_NUM/PROTO STATE SERVICE VERSION
-        port_re = re.compile(r"^(\d+)/(\w+)\s+(\w+)\s+(.*)$", re.MULTILINE)
+        # Multiple regex patterns to handle various nmap output formats:
+        # Format 1: "22/tcp   open  ssh     OpenSSH 8.0"
+        # Format 2: "22/tcp open ssh"
+        # Format 3: "PORT     STATE SERVICE  VERSION" header followed by data
+        
+        # Pattern that handles varying whitespace in nmap output
+        port_re = re.compile(
+            r"^(\d+)/(tcp|udp)\s+(open|filtered|closed)\s+(\S+)(?:\s+(.*))?$",
+            re.MULTILINE | re.IGNORECASE
+        )
         
         for match in port_re.finditer(output):
             port = match.group(1)
-            proto = match.group(2)
-            state = match.group(3)
-            service_line = match.group(4).strip()
+            proto = match.group(2).lower()
+            state = match.group(3).lower()
+            service_name = match.group(4).strip() if match.group(4) else "unknown"
+            version_info = match.group(5).strip() if match.group(5) else ""
             
             if state != "open":
                 continue
@@ -41,12 +49,6 @@ class NmapParser(SignalParser):
             self.graph.add_edge(target, port_id, EdgeType.HAS_PORT)
             
             # 3. Create Service Node if detected
-            # Simple heuristic: split service line
-            # "http Apache httpd 2.4.41" -> "http", "Apache httpd 2.4.41"
-            parts = service_line.split(" ", 1)
-            service_name = parts[0]
-            version_info = parts[1] if len(parts) > 1 else ""
-            
             service_id = f"{target}:{port}:{service_name}"
             self.graph.add_node(service_id, NodeType.SERVICE, {
                 "name": service_name,
@@ -56,11 +58,30 @@ class NmapParser(SignalParser):
             # 4. Link Port -> Service
             self.graph.add_edge(port_id, service_id, EdgeType.RUNS)
             
+            # 5. Detect tech stack from version info
+            if version_info:
+                tech_id = f"tech:{service_name}"
+                self.graph.add_node(tech_id, NodeType.TECH, {
+                    "name": service_name,
+                    "version": version_info
+                })
+                self.graph.add_edge(target, tech_id, EdgeType.USES_TECH)
+            
             findings.append({
                 "type": "open_port",
                 "severity": "LOW",
-                "value": f"Port {port}/{proto} is open ({service_name})",
-                "technical_details": f"Version: {version_info}"
+                "tool": tool_name,
+                "target": target,
+                "message": f"Port {port}/{proto} is open ({service_name})",
+                "proof": f"{port}/{proto} open {service_name} {version_info}".strip(),
+                "tags": ["exposure", "port-scan"],
+                "families": ["exposure"],
+                "metadata": {
+                    "port": int(port),
+                    "proto": proto,
+                    "service": service_name,
+                    "version": version_info
+                }
             })
             
         return findings

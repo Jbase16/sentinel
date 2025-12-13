@@ -13,7 +13,7 @@ from core.findings_store import findings_store
 from core.issues_store import issues_store
 from core.killchain_store import killchain_store
 from core.risk import risk_engine
-from core.reasoning import reasoning_engine
+from core.cortex.reasoning import reasoning_engine
 from core.ai_engine import AIEngine
 
 logger = logging.getLogger(__name__)

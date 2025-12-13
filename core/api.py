@@ -404,26 +404,27 @@ async def chat(
                 if await request.is_disconnected():
                     break
                 
-                # Buffer for EXEC parsing
                 full_response += token
-                lines = full_response.splitlines()
-                for line in lines:
-                    if ">>> EXEC:" in line:
-                        try:
-                            clean_line = line.strip()
-                            if clean_line.startswith(">>> EXEC:") and clean_line.endswith("}"):
-                                json_str = clean_line.replace(">>> EXEC:", "").strip()
-                                action = json.loads(json_str)
-                                dispatcher = ActionDispatcher.instance()
-                                target = _scan_state.get("target") or "manual-interaction"
-                                status = dispatcher.request_action(action, target)
-                                if status != "DROPPED":
-                                    logger.info(f"Action Requested: {action} -> {status}")
-                        except:
-                            pass
-
                 payload = json.dumps({"token": token})
                 yield f"data: {payload}\n\n"
+            
+            # Parse EXEC commands only after streaming completes
+            # This avoids issues with JSON split across tokens
+            for line in full_response.splitlines():
+                if ">>> EXEC:" in line:
+                    try:
+                        clean_line = line.strip()
+                        if clean_line.startswith(">>> EXEC:"):
+                            json_str = clean_line.replace(">>> EXEC:", "").strip()
+                            action = json.loads(json_str)
+                            dispatcher = ActionDispatcher.instance()
+                            target = _scan_state.get("target") or "manual-interaction"
+                            status = dispatcher.request_action(action, target)
+                            if status != "DROPPED":
+                                logger.info(f"Action Requested: {action} -> {status}")
+                    except json.JSONDecodeError:
+                        pass
+            
             yield "data: [DONE]\n\n"
         except Exception as e:
             logger.error(f"Chat error: {e}")
@@ -514,8 +515,10 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
         raise HTTPException(status_code=404, detail="Action not found")
     return {"status": "ok", "action_id": action_id, "result": verb}
 
-@app.websocket("/ws/terminal")
-async def terminal_websocket(websocket: WebSocket):
+# Terminal WebSocket endpoint with config check
+@app.websocket("/ws/pty")
+async def terminal_websocket_pty(websocket: WebSocket):
+    """Alternative terminal endpoint at /ws/pty for PTY access."""
     config = get_config()
     if not config.security.terminal_enabled:
         await websocket.close(code=4003)
@@ -532,7 +535,7 @@ async def terminal_websocket(websocket: WebSocket):
                     await websocket.send_text(data.decode(errors="ignore"))
                 else:
                     await asyncio.sleep(0.01)
-        except:
+        except Exception:
             pass
     
     reader_task = asyncio.create_task(read_pty())
@@ -545,7 +548,7 @@ async def terminal_websocket(websocket: WebSocket):
                     if cmd.get("type") == "resize":
                         pty_session.resize(cmd.get("rows", 24), cmd.get("cols", 80))
                         continue
-                except:
+                except json.JSONDecodeError:
                     pass
             pty_session.write(msg)
     except WebSocketDisconnect:
