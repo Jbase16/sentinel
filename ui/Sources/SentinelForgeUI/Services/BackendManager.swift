@@ -6,97 +6,139 @@ extension Notification.Name {
 }
 
 /// Manages the lifecycle of the Python Backend (Neuro-Symbolic Core).
-/// Allows the app to be self-contained during development.
+/// Automatically starts the FastAPI server when the app launches and terminates it on quit.
 class BackendManager: ObservableObject {
     static let shared = BackendManager()
 
     @Published var status: String = "Initializing..."
     @Published var isRunning: Bool = false
+    @Published var pythonPath: String = ""
 
     private var process: Process?
     private var pipe: Pipe?
+    private var healthCheckTask: Task<Void, Never>?
+    
+    private let maxStartupRetries = 30  // 30 seconds max wait
+    private let healthCheckInterval: UInt64 = 1_000_000_000  // 1 second
 
     func start() {
         Task {
-            if await checkPort8765() {
+            // Check if backend is already running externally
+            if await checkBackendHealth() {
                 await MainActor.run {
                     self.status = "Core Connected (External)"
                     self.isRunning = true
                     NotificationCenter.default.post(name: .backendReady, object: nil)
                 }
+                startHealthMonitor()
                 return
             }
 
+            // Launch our own server
             await launchIntegratedServer()
         }
     }
 
     func stop() {
-        process?.terminate()
+        healthCheckTask?.cancel()
+        healthCheckTask = nil
+        
+        if let p = process, p.isRunning {
+            print("[BackendManager] Terminating backend process...")
+            p.terminate()
+            p.waitUntilExit()
+        }
         process = nil
+        pipe = nil
+        
+        Task { @MainActor in
+            self.isRunning = false
+            self.status = "Core Stopped"
+        }
     }
 
-    private func checkPort8765() async -> Bool {
-        // Simple TCP check (simulated via URLSession for now)
+    private func checkBackendHealth() async -> Bool {
         let url = URL(string: "http://127.0.0.1:8765/ping")!
         var request = URLRequest(url: url)
-        request.timeoutInterval = 1.0
+        request.timeoutInterval = 2.0
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
+            // Verify it's actually our API
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               json["status"] as? String == "ok" {
+                return true
+            }
         } catch {
-            return false
+            // Connection refused or timeout
+        }
+        return false
+    }
+    
+    /// Monitors backend health and updates UI status
+    private func startHealthMonitor() {
+        healthCheckTask = Task {
+            while !Task.isCancelled {
+                let healthy = await checkBackendHealth()
+                await MainActor.run {
+                    if !healthy && self.isRunning {
+                        self.status = "Core Disconnected"
+                        self.isRunning = false
+                    }
+                }
+                try? await Task.sleep(nanoseconds: healthCheckInterval * 5)  // Check every 5 seconds
+            }
         }
     }
 
     private func launchIntegratedServer() async {
-        await MainActor.run { self.status = "Booting Neural Core..." }
-
-        // 1. Locate the Repository Root
-        // We assume we are running from DerivedData, so we look for the source root.
-        // Helper: In Xcode, we can pass environment variables, but here we'll try to guess.
+        await MainActor.run { self.status = "Locating Neural Core..." }
 
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
+        
+        // Find the repository root (contains core/api.py)
         let possiblePaths = [
-            // Standard Dev paths
             home.appendingPathComponent("Developer/sentinelforge"),
             home.appendingPathComponent("Developer/sentinel"),
-            // If running from within the repo
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
-            // Common location for this user
-            URL(fileURLWithPath: "/Users/jason/Developer/sentinelforge"),
         ]
 
-        guard let repoPath = possiblePaths.first(where: { fileManager.fileExists(atPath: $0.path) })
-        else {
-            await MainActor.run { self.status = "Error: Repo not found" }
+        guard let repoPath = possiblePaths.first(where: { path in
+            fileManager.fileExists(atPath: path.appendingPathComponent("core/api.py").path)
+        }) else {
+            await MainActor.run { self.status = "Error: Repository not found" }
             return
         }
 
-        print("[BackendManager] Detected Repo at: \(repoPath.path)")
+        print("[BackendManager] Repository: \(repoPath.path)")
 
-        // 2. Prepare Process
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-
-        // We assume the user has dependencies installed locally or in a venv.
-        // If venv exists, use it.
-        let venvPython = repoPath.appendingPathComponent("venv/bin/python3")
-        if fileManager.fileExists(atPath: venvPython.path) {
-            p.executableURL = venvPython
-        } else {
-            // Fallback: Check for homebrew python
-            let brewPython = URL(fileURLWithPath: "/opt/homebrew/bin/python3")
-            if fileManager.fileExists(atPath: brewPython.path) {
-                p.executableURL = brewPython
-            }
+        // Find Python executable (prefer venv)
+        let pythonExecutable = findPythonExecutable(in: repoPath)
+        guard let python = pythonExecutable else {
+            await MainActor.run { self.status = "Error: Python not found" }
+            return
         }
+        
+        await MainActor.run {
+            self.pythonPath = python.path
+            self.status = "Booting Neural Core..."
+        }
+        print("[BackendManager] Python: \(python.path)")
 
+        // Create and configure the process
+        let p = Process()
+        p.executableURL = python
         p.currentDirectoryURL = repoPath
         p.arguments = ["-m", "uvicorn", "core.api:app", "--host", "127.0.0.1", "--port", "8765"]
+        
+        // Inherit PYTHONPATH so imports work
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONPATH"] = repoPath.path
+        env["PYTHONUNBUFFERED"] = "1"  // Disable output buffering
+        p.environment = env
 
-        // 3. Capture Output
+        // Capture output for debugging
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = pipe
@@ -104,21 +146,101 @@ class BackendManager: ObservableObject {
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             if let str = String(data: data, encoding: .utf8), !str.isEmpty {
-                print("[Core] \(str.trimmingCharacters(in: .whitespacesAndNewlines))")
+                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    print("[Core] \(trimmed)")
+                }
             }
         }
 
         self.process = p
         self.pipe = pipe
 
+        // Launch the process
         do {
             try p.run()
+            print("[BackendManager] Process started (PID: \(p.processIdentifier))")
             await MainActor.run {
-                self.status = "Core Running (PID: \(p.processIdentifier))"
-                self.isRunning = true
+                self.status = "Core Starting (PID: \(p.processIdentifier))..."
             }
         } catch {
-            await MainActor.run { self.status = "Boot Failed: \(error.localizedDescription)" }
+            await MainActor.run {
+                self.status = "Boot Failed: \(error.localizedDescription)"
+            }
+            return
         }
+
+        // Wait for the server to become healthy
+        await waitForServerReady()
+    }
+    
+    /// Polls the health endpoint until the server is ready
+    private func waitForServerReady() async {
+        for attempt in 1...maxStartupRetries {
+            if await checkBackendHealth() {
+                await MainActor.run {
+                    self.status = "Core Online"
+                    self.isRunning = true
+                    NotificationCenter.default.post(name: .backendReady, object: nil)
+                }
+                print("[BackendManager] Server ready after \(attempt) attempt(s)")
+                startHealthMonitor()
+                return
+            }
+            
+            // Check if process died
+            if let p = process, !p.isRunning {
+                await MainActor.run {
+                    self.status = "Core Crashed (exit: \(p.terminationStatus))"
+                    self.isRunning = false
+                }
+                return
+            }
+            
+            await MainActor.run {
+                self.status = "Core Starting (\(attempt)/\(self.maxStartupRetries))..."
+            }
+            
+            try? await Task.sleep(nanoseconds: healthCheckInterval)
+        }
+        
+        await MainActor.run {
+            self.status = "Core Timeout - Check Logs"
+            self.isRunning = false
+        }
+    }
+    
+    /// Finds Python executable, preferring virtual environment
+    private func findPythonExecutable(in repoPath: URL) -> URL? {
+        let fileManager = FileManager.default
+        
+        // Check for virtual environments (in order of preference)
+        let venvPaths = [
+            repoPath.appendingPathComponent(".venv/bin/python3"),
+            repoPath.appendingPathComponent("venv/bin/python3"),
+            repoPath.appendingPathComponent(".venv/bin/python"),
+            repoPath.appendingPathComponent("venv/bin/python"),
+        ]
+        
+        for venv in venvPaths {
+            if fileManager.fileExists(atPath: venv.path) {
+                return venv
+            }
+        }
+        
+        // Fallback to system Python
+        let systemPaths = [
+            URL(fileURLWithPath: "/opt/homebrew/bin/python3"),  // Apple Silicon Homebrew
+            URL(fileURLWithPath: "/usr/local/bin/python3"),     // Intel Homebrew
+            URL(fileURLWithPath: "/usr/bin/python3"),           // System Python
+        ]
+        
+        for path in systemPaths {
+            if fileManager.fileExists(atPath: path.path) {
+                return path
+            }
+        }
+        
+        return nil
     }
 }
