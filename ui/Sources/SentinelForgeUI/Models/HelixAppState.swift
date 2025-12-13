@@ -126,9 +126,15 @@ class HelixAppState: ObservableObject {
         let replyID = reply.id
         
         isProcessing = true
+        BackendManager.shared.isActiveOperation = true  // Tell health monitor we're busy
 
         // Use streaming chat for real-time token display
         Task {
+            defer {
+                Task { @MainActor in
+                    BackendManager.shared.isActiveOperation = false
+                }
+            }
             do {
                 var accumulated = ""
                 for try await token in apiClient.streamChat(prompt: trimmed) {
@@ -172,7 +178,13 @@ class HelixAppState: ObservableObject {
     /// Start a God-Tier Mission via the local Python API.
     func startScan(target: String) {
         print("[AppState] Starting Mission for target: \(target)")
+        BackendManager.shared.isActiveOperation = true  // Scans can be long-running
         Task {
+            defer {
+                Task { @MainActor in
+                    BackendManager.shared.isActiveOperation = false
+                }
+            }
             do {
                 // Use God-Tier "One Click" Mission
                 let missionID = try await apiClient.startMission(target: target)

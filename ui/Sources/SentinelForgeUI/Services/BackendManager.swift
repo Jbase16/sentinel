@@ -13,6 +13,14 @@ class BackendManager: ObservableObject {
     @Published var status: String = "Initializing..."
     @Published var isRunning: Bool = false
     @Published var pythonPath: String = ""
+    
+    /// Set to true when app is actively making requests (chat, scan, etc.)
+    /// Health monitor won't mark as disconnected during active operations
+    var isActiveOperation: Bool = false
+    
+    /// Count consecutive health check failures before marking disconnected
+    private var consecutiveFailures: Int = 0
+    private let maxConsecutiveFailures = 3
 
     private var process: Process?
     private var pipe: Pipe?
@@ -76,14 +84,35 @@ class BackendManager: ObservableObject {
     private func startHealthMonitor() {
         healthCheckTask = Task {
             while !Task.isCancelled {
+                // Skip health check if there's an active operation
+                // (LLM requests can take 60+ seconds and block /ping)
+                if isActiveOperation {
+                    consecutiveFailures = 0
+                    try? await Task.sleep(nanoseconds: healthCheckInterval * 10)  // Check less frequently during operations
+                    continue
+                }
+                
                 let healthy = await checkBackendHealth()
                 await MainActor.run {
-                    if !healthy && self.isRunning {
-                        self.status = "Core Disconnected"
-                        self.isRunning = false
+                    if healthy {
+                        self.consecutiveFailures = 0
+                        if !self.isRunning {
+                            // Reconnected!
+                            self.status = "Core Online"
+                            self.isRunning = true
+                        }
+                    } else if self.isRunning {
+                        self.consecutiveFailures += 1
+                        if self.consecutiveFailures >= self.maxConsecutiveFailures {
+                            self.status = "Core Disconnected"
+                            self.isRunning = false
+                        } else {
+                            // Show warning but don't disconnect yet
+                            self.status = "Core Slow (\(self.consecutiveFailures)/\(self.maxConsecutiveFailures))..."
+                        }
                     }
                 }
-                try? await Task.sleep(nanoseconds: healthCheckInterval * 5)  // Check every 5 seconds
+                try? await Task.sleep(nanoseconds: healthCheckInterval * 10)  // Check every 10 seconds
             }
         }
     }
