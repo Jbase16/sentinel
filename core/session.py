@@ -35,6 +35,23 @@ class ScanSession:
         
         # Session-local logs
         self.logs = []
+        
+        # Ghost Protocol (Traffic Interceptor)
+        self.ghost = None
+
+    def start_ghost(self, port: int = 8080):
+        """Activates the Ghost Protocol traffic interceptor."""
+        from core.ghost.proxy import GhostInterceptor
+        self.ghost = GhostInterceptor(self, port)
+        # We need to run the async start method. 
+        # Since we are likely in an async context, we can await it or create a task.
+        import asyncio
+        asyncio.create_task(self.ghost.start())
+
+    def stop_ghost(self):
+        if self.ghost:
+            self.ghost.stop()
+            self.ghost = None
 
     def log(self, message: str):
         timestamp = time.strftime("%H:%M:%S", time.localtime())
@@ -49,5 +66,6 @@ class ScanSession:
             "status": self.status,
             "findings_count": len(self.findings.get_all()),
             "issues_count": len(self.issues.get_all()),
-            "start_time": self.start_time
+            "start_time": self.start_time,
+            "ghost_active": self.ghost is not None
         }

@@ -39,8 +39,15 @@ class FindingsStore(Observable):
             loaded = await self.db.get_findings(self.session_id)
         else:
             loaded = await self.db.get_all_findings()
+        
         with self._lock:
-            self._findings = loaded
+            # Race Condition Fix: Preserve findings added while loading
+            if self._findings:
+                # Deduplicate? For now, just append loaded to existing (or vice versa)
+                # Ideally, loaded is 'old' state, _findings is 'new' state.
+                self._findings = loaded + self._findings
+            else:
+                self._findings = loaded
         self.findings_changed.emit()
 
     async def refresh(self):
