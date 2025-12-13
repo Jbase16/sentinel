@@ -27,23 +27,23 @@ struct Uniforms {
 // --- Vertex Shader ---
 vertex VertexOut vertex_main(
     VertexIn in [[stage_in]],
-    constant Uniforms &uniforms [[buffer(1)]]
+    constant float4x4 &viewProjectionMatrix [[buffer(1)]],
+    constant float4x4 &modelMatrix [[buffer(2)]],
+    constant float &time [[buffer(3)]]
 ) {
     VertexOut out;
     
     // Animate Position (Subtle "Breathing" Data)
-    // Animate Position (Subtle "Breathing" Data)
     float3 pos = in.position.xyz; // Unpack xyz
     float size = in.position.w;   // Unpack size
     
-    float breath = sin(uniforms.time * 1.5 + pos.x * 5.0 + pos.y * 3.0) * 0.05;
+    float breath = sin(time * 1.5 + pos.x * 5.0 + pos.y * 3.0) * 0.05;
     pos *= (1.0 + breath * 0.2);
     
     // Project to Screen
-    out.position = uniforms.view_projection_matrix * float4(pos, 1.0);
+    out.position = viewProjectionMatrix * float4(pos, 1.0);
     
     // Size attenuation based on depth
-    // float depth = out.position.z; 
     out.size = max(5.0, size * (100.0 / (out.position.w + 0.1)));
     
     out.color = in.color;

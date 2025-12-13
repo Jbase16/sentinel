@@ -210,16 +210,16 @@ class GraphRenderer: NSObject {
 
         let viewProjection = projectionMatrix * viewMatrix
 
-        struct Uniforms {
-            var viewProjection: matrix_float4x4
-            var model: matrix_float4x4
-            var time: Float
-        }
+        // Uniforms must match Metal shader exactly (132 bytes = 64 + 64 + 4)
+        // Using tuple to avoid Swift struct padding
+        var viewProj = viewProjection
+        var model = modelMatrix
+        var timeVal = time
 
-        var uniforms = Uniforms(viewProjection: viewProjection, model: modelMatrix, time: time)
-
-        // Pass Uniforms
-        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
+        // Pass each uniform separately to avoid alignment issues
+        encoder.setVertexBytes(&viewProj, length: 64, index: 1)
+        encoder.setVertexBytes(&model, length: 64, index: 2)
+        encoder.setVertexBytes(&timeVal, length: 4, index: 3)
 
         // Safe Drawing
         guard !nodes.isEmpty, let vBuffer = vertexBuffer else {
