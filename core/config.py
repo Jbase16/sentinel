@@ -98,7 +98,8 @@ class SentinelConfig:
     def from_env(cls) -> "SentinelConfig":
         ai = AIConfig(
             provider=os.getenv("SENTINEL_AI_PROVIDER", "ollama"),
-            ollama_url=os.getenv("SENTINEL_OLLAMA_URL", "http://localhost:11434"),
+            # AI Config - defaults to Sentinel Brain (local fine-tuned model)
+            ollama_url=os.getenv("SENTINEL_OLLAMA_URL", "http://localhost:8009"),
             model=os.getenv("SENTINEL_AI_MODEL", "llama3:latest"),
             fallback_enabled=os.getenv("SENTINEL_AI_FALLBACK", "true").lower() == "true",
             request_timeout=float(os.getenv("SENTINEL_AI_TIMEOUT", "300")),

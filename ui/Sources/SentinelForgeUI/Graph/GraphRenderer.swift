@@ -165,7 +165,6 @@ class GraphRenderer: NSObject {
 
         // Watchdog: Log every 60 frames (approx 1 sec)
         frameCount += 1
-        let currentTime = Date().timeIntervalSince1970
         if frameCount % 60 == 0 {
             print("GraphRenderer: Watchdog - Drawing frame \(frameCount). Nodes: \(nodes.count)")
         }

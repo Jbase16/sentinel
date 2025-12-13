@@ -73,7 +73,7 @@ class ScannerBridge:
             # Create a finding node
             finding_id = f"{target}:{tool}:{finding_type}"
             graph.add_node(finding_id, NodeType.FINDING, {
-                "type": finding_type,
+                "finding_type": finding_type,  # Use finding_type to avoid conflict with NodeType parameter
                 "severity": severity,
                 "tool": tool,
                 "message": finding.get("message", "")[:200]

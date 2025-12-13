@@ -119,7 +119,12 @@ class KnowledgeGraph:
 
     def export_json(self) -> Dict:
         with self._lock:
-            return nx.node_link_data(self._graph)
+            data = nx.node_link_data(self._graph)
+            # Fix for Swift decoding: Ensure 'weight' is a STRING, not a float/int
+            for link in data.get("links", []):
+                if "weight" in link:
+                    link["weight"] = str(link["weight"])
+            return data
 
     def import_json(self, data: Dict):
         with self._lock:

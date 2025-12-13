@@ -1,40 +1,66 @@
 """
 core/cortex/reasoning.py
-The Logic Core: Derives attack opportunities from the Knowledge Graph.
+The Logic Core: Neural Reasoning via Sentinel-9B (over AIEngine).
 """
 
 import logging
+import json
 from typing import List, Dict, Set
 from core.cortex.memory import KnowledgeGraph, NodeType, EdgeType
+from core.ai_engine import AIEngine
 
 logger = logging.getLogger(__name__)
 
-# Tech patterns that warrant further scanning
-VULNERABLE_TECH_PATTERNS = {
-    "php": {"tool": "nuclei", "args": ["-t", "cves/", "-t", "vulnerabilities/"], "reason": "PHP detected - check for known CVEs"},
-    "wordpress": {"tool": "nuclei", "args": ["-t", "technologies/wordpress/"], "reason": "WordPress detected - check for plugin/core vulnerabilities"},
-    "apache": {"tool": "nuclei", "args": ["-t", "cves/"], "reason": "Apache detected - check for known CVEs"},
-    "nginx": {"tool": "nuclei", "args": ["-t", "cves/"], "reason": "Nginx detected - check for misconfigurations"},
-    "tomcat": {"tool": "nuclei", "args": ["-t", "technologies/tomcat/"], "reason": "Tomcat detected - check for manager/host-manager exposure"},
-    "iis": {"tool": "nuclei", "args": ["-t", "technologies/iis/"], "reason": "IIS detected - check for shortname disclosure and misconfigs"},
-}
+# 🛡️ MINDSET PRIMING
+SYSTEM_PROMPT = """You are Sentinel, an autonomous AI Bug Bounty Hunter. 
+Your goal is to identify high-impact security vulnerabilities by reasoning like a human researcher.
+Analyze the provided Attack Surface Context and think step-by-step:
+1. Identify the most critical assets and technologies.
+2. Correlate open ports with potential service misconfigurations.
+3. Recall specific CVEs or exploit classes relevant to the stack (e.g., Apache, PHP, IoT).
+4. Propose a precise, actionable plan using the available tools:
+   - 'nmap': Port scanning
+   - 'nikto': Web server scanning
+   - 'nuclei': Vulnerability scanning (Give specific args like -t cves/)
+   - 'gobuster': Directory enumeration
+   - 'wraith_evasion': Stealthy probing
+   - 'ghost_logic': Flow analysis
+
+FORMAT OUTPUT AS JSON ONLY:
+[
+  {"tool": "tool_name", "target": "target_ip_or_url", "args": ["arg1", "arg2"], "reason": "Detailed technical justification"}
+]
+Do not output markdown code blocks. Just the raw JSON string.
+"""
 
 class ReasoningEngine:
     """
-    Analyzes the Knowledge Graph to suggest 'Next Best Actions'.
-    Implements rule-based reasoning to derive attack opportunities from scan data.
+    Analyzes the Knowledge Graph using Sentinel-9B (via AIEngine) to derive 'Next Best Actions'.
     """
     
     def __init__(self):
         self.graph = KnowledgeGraph.instance()
-        self._proposed_actions: Set[str] = set()  # Track proposed actions to avoid duplicates
+        self.ai = AIEngine.instance()
+        self._proposed_actions: Set[str] = set()
 
     def analyze(self) -> Dict[str, object]:
         """
         Main analysis loop.
-        Returns opportunities and graph stats.
+        Constructs context -> Neural Inference -> Opportunities.
         """
-        opportunities = self._derive_opportunities()
+        context_str = self._get_graph_context_str()
+        
+        opportunities = []
+        
+        # Call Neural Brain if available
+        if self.ai.client:
+            opportunities = self._neural_reasoning(context_str)
+        
+        # Fallback / Augment with heuristics
+        if not opportunities:
+            logger.info("[ReasoningEngine] Neural output empty or failed, falling back to heuristics.")
+            opportunities = self._heuristic_reasoning()
+        
         risks = self._assess_risks()
         
         return {
@@ -46,143 +72,101 @@ class ReasoningEngine:
             }
         }
 
-    def _derive_opportunities(self) -> List[Dict]:
-        """
-        Rule-based logic to suggest tools based on Graph state.
-        """
-        ops = []
-        
-        # Get all assets as our primary targets
+    def _get_graph_context_str(self) -> str:
+        """Summarize graph state for the LLM."""
         assets = self.graph.find_all(NodeType.ASSET)
+        ports = self.graph.find_all(NodeType.PORT)
+        techs = self.graph.find_all(NodeType.TECH)
         
-        # 1. Find HTTP services that should be web-scanned
-        ops.extend(self._analyze_http_services())
+        summary = "ATTACK SURFACE CONTEXT:\n"
         
-        # 2. Find technologies with known vulnerability patterns
-        ops.extend(self._analyze_technologies())
-        
-        # 3. Analyze findings for follow-up opportunities
-        ops.extend(self._analyze_findings())
-        
-        logger.info(f"[ReasoningEngine] Derived {len(ops)} opportunities from {len(assets)} assets")
-        return ops
+        if not assets:
+            return summary + "No assets found yet."
+            
+        for asset in assets:
+            a_id = asset.get('id', 'unknown')
+            summary += f"- Asset: {a_id}\n"
+            
+            # Find related ports
+            asset_ports = []
+            for p in ports:
+                if p['id'].startswith(a_id): 
+                    asset_ports.append(f"{p.get('port')}/{p.get('protocol', 'tcp')}")
+            if asset_ports:
+                summary += f"  Open Ports: {', '.join(asset_ports)}\n"
+                
+            # Find related tech
+            asset_techs = []
+            neighbors = self.graph.get_neighbors(a_id, EdgeType.USES_TECH)
+            for n in neighbors:
+                asset_techs.append(f"{n.get('name')} {n.get('version', '')}")
+            if asset_techs:
+                summary += f"  Technologies: {', '.join(asset_techs)}\n"
 
-    def _analyze_http_services(self) -> List[Dict]:
-        """Find HTTP services that warrant further scanning."""
+        return summary
+
+    def _neural_reasoning(self, context_str: str) -> List[Dict]:
+        """Query Sentinel-9B for the next move."""
+        if not self.ai.client:
+            return []
+            
+        logger.info("[ReasoningEngine] Engaging Neural Synapse...")
+        try:
+            # We use the raw generate method which returns a string (possibly JSON)
+            # System prompt primes the JSON format.
+            response = self.ai.client.generate(prompt=context_str, system=SYSTEM_PROMPT, force_json=True)
+            
+            if not response:
+                return []
+
+            logger.info(f"[ReasoningEngine] Neural Thought: {response[:100]}...") 
+            
+            # Sanitize response
+            clean_response = response.strip()
+            if clean_response.startswith("```json"):
+                clean_response = clean_response[7:]
+            if clean_response.endswith("```"):
+                clean_response = clean_response[:-3]
+            
+            ops = json.loads(clean_response)
+            
+            # Validate format
+            valid_ops = []
+            for op in ops:
+                if "tool" in op and "target" in op:
+                    action_key = f"{op['tool']}:{op['target']}:{op.get('args', [])}"
+                    if action_key not in self._proposed_actions:
+                        self._proposed_actions.add(action_key)
+                        valid_ops.append(op)
+            
+            return valid_ops
+            
+        except Exception as e:
+            logger.error(f"[ReasoningEngine] Neural Inference failed: {e}")
+            return []
+
+    def _heuristic_reasoning(self) -> List[Dict]:
+        """Legacy rule-based logic (Scan Logic v1)"""
         ops = []
-        http_ports = self.graph.find_all(NodeType.PORT)
-        
-        for port_node in http_ports:
-            port_id = port_node.get('id', '')
-            port_num = port_node.get('port', 0)
-            
-            # Extract target from port_id (format: "target:port")
-            parts = port_id.split(':') if port_id else []
-            target = parts[0] if parts else ''
-            
-            if not target or not port_num:
-                continue
-            
-            # Check if this port runs an HTTP service
-            neighbors = self.graph.get_neighbors(port_id, EdgeType.RUNS)
-            service_names = [n.get("name", "").lower() for n in neighbors]
-            is_http = any(svc in ['http', 'https', 'http-proxy', 'https-alt'] or 'http' in svc for svc in service_names)
-            
-            # Also consider common HTTP ports
-            http_ports_common = {80, 443, 8080, 8443, 8000, 8888, 3000, 5000}
-            if is_http or port_num in http_ports_common:
-                action_key = f"nikto:{target}:{port_num}"
+        ports = self.graph.find_all(NodeType.PORT)
+        for p in ports:
+            port = p.get('port')
+            if port in [80, 443, 8080]:
+                target = p.get('id', '').split(':')[0]
+                action_key = f"nikto:{target}:{port}"
                 if action_key not in self._proposed_actions:
                     self._proposed_actions.add(action_key)
                     ops.append({
-                        "tool": "nikto",
-                        "target": target,
-                        "args": ["-h", target, "-p", str(port_num)],
-                        "reason": f"HTTP service on port {port_num} - running web vulnerability scanner"
+                        "tool": "nikto", 
+                        "target": target, 
+                        "args": ["-h", target], 
+                        "reason": "Heuristic fallback: HTTP port detected"
                     })
-        
-        return ops
-
-    def _analyze_technologies(self) -> List[Dict]:
-        """Find technologies that warrant CVE/vulnerability scanning."""
-        ops = []
-        tech_nodes = self.graph.find_all(NodeType.TECH)
-        
-        for tech_node in tech_nodes:
-            tech_id = tech_node.get('id', '')
-            tech_name = tech_node.get('name', '').lower()
-            tech_version = tech_node.get('version', '')
-            
-            # Find the asset this tech is associated with
-            # Tech ID format is typically "tech:name", need to find linked asset
-            target = None
-            
-            # Search for assets that link to this tech
-            assets = self.graph.find_all(NodeType.ASSET)
-            for asset in assets:
-                neighbors = self.graph.get_neighbors(asset['id'], EdgeType.USES_TECH)
-                if any(n.get('id') == tech_id for n in neighbors):
-                    target = asset['id']
-                    break
-            
-            if not target:
-                # Fallback: try to extract from tech_id
-                if ':' in tech_id and not tech_id.startswith('tech:'):
-                    target = tech_id.split(':')[0]
-                else:
-                    continue
-            
-            # Check if this tech matches any vulnerable patterns
-            for pattern, config in VULNERABLE_TECH_PATTERNS.items():
-                if pattern in tech_name:
-                    action_key = f"{config['tool']}:{target}:{pattern}"
-                    if action_key not in self._proposed_actions:
-                        self._proposed_actions.add(action_key)
-                        ops.append({
-                            "tool": config['tool'],
-                            "target": target,
-                            "args": config['args'] + ["-target", target],
-                            "reason": f"{config['reason']} (version: {tech_version or 'unknown'})"
-                        })
-        
-        return ops
-
-    def _analyze_findings(self) -> List[Dict]:
-        """Analyze existing findings to propose follow-up actions."""
-        ops = []
-        findings = self.graph.find_all(NodeType.FINDING)
-        
-        for finding in findings:
-            finding_type = finding.get('type', '').lower()
-            severity = finding.get('severity', 'INFO').upper()
-            target = finding.get('id', '').split(':')[0] if ':' in finding.get('id', '') else ''
-            
-            if not target:
-                continue
-            
-            # High severity findings warrant deeper investigation
-            if severity in ['HIGH', 'CRITICAL']:
-                # Suggest directory brute force for interesting findings
-                if 'exposure' in finding_type or 'endpoint' in finding_type:
-                    action_key = f"gobuster:{target}"
-                    if action_key not in self._proposed_actions:
-                        self._proposed_actions.add(action_key)
-                        ops.append({
-                            "tool": "gobuster",
-                            "target": target,
-                            "args": ["dir", "-u", f"https://{target}", "-w", "/usr/share/wordlists/dirb/common.txt"],
-                            "reason": f"High severity finding detected - running directory enumeration"
-                        })
-        
         return ops
 
     def _assess_risks(self) -> List[Dict]:
-        """
-        Aggregates high-severity findings from the graph.
-        """
         risks = []
         findings = self.graph.find_all(NodeType.FINDING)
-        
         for finding in findings:
             severity = finding.get('severity', 'INFO').upper()
             if severity in ['HIGH', 'CRITICAL']:
@@ -193,11 +177,9 @@ class ReasoningEngine:
                     "message": finding.get('message', '')[:200],
                     "tool": finding.get('tool', 'unknown')
                 })
-        
         return risks
     
     def clear_proposed_actions(self):
-        """Clear the set of proposed actions (useful between scans)."""
         self._proposed_actions.clear()
 
 reasoning_engine = ReasoningEngine()

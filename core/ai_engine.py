@@ -126,14 +126,18 @@ class AIEngine:
             "available_models": [],
         }
         if connected:
-            status["available_models"] = self.available_models()
+            try:
+                status["available_models"] = self.available_models()
+            except Exception as e:
+                logger.warning(f"Failed to fetch available models: {e}")
+                status["available_models"] = []
         return status
 
     def available_models(self) -> List[str]:
         if not self.client:
             return []
         try:
-            with httpx.Client(timeout=4.0) as client:
+            with httpx.Client(timeout=1.0) as client:
                 resp = client.get(f"{self.client.base_url}/api/tags")
                 payload = resp.json()
             models = payload.get("models") or []

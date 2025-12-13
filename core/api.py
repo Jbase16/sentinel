@@ -1,10 +1,3 @@
-async def _get_latest_results() -> Dict[str, Any]:
-    ""Return snapshot: \(scan,\n            "findings": findings_store.get_all(),
-            "issues": issues_store.get_all(),
-            "killchain_edges": killchain_store.get_all(),
-            "scan": _scan_state,
-        "return _get_latest_results_sync()
-
 # core/api.py
 # Production-grade FastAPI server (Hybrid Version)
 
