@@ -12,8 +12,8 @@ import simd
 
 class GraphRenderer: NSObject {
     var device: MTLDevice
-    var commandQueue: MTLCommandQueue!
-    var pipelineState: MTLRenderPipelineState!
+    var commandQueue: MTLCommandQueue?  // Changed from ! to ? for safety
+    var pipelineState: MTLRenderPipelineState?  // Changed from ! to ?
     var vertexBuffer: MTLBuffer?
     var uniformsBuffer: MTLBuffer?
 
@@ -150,11 +150,20 @@ class GraphRenderer: NSObject {
         defer { lock.unlock() }
 
         guard let drawable = view.currentDrawable,
-            let descriptor = view.currentRenderPassDescriptor,
-            let pipelineState = pipelineState
+              let descriptor = view.currentRenderPassDescriptor,
+              let commandQueue = commandQueue,
+              let pipelineState = self.pipelineState
         else {
             return
         }
+
+        guard let commandBuffer = commandQueue.makeCommandBuffer(),
+            let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
+        else {
+            return
+        }
+        
+        encoder.setRenderPipelineState(pipelineState)
 
         // Update Time
         time += 0.015
@@ -185,18 +194,14 @@ class GraphRenderer: NSObject {
 
         var uniforms = Uniforms(viewProjection: viewProjection, model: modelMatrix, time: time)
 
-        let commandBuffer = commandQueue.makeCommandBuffer()!
-        let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)!
-
-        encoder.setRenderPipelineState(pipelineState)
-
         // Pass Uniforms
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
 
         // Safe Drawing
         if let vBuffer = vertexBuffer, !nodes.isEmpty {
             encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
-            encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: nodes.count)
+            encoder.drawPrimitives(
+                type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
         }
 
         encoder.endEncoding()

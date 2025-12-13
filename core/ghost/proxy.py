@@ -94,11 +94,29 @@ class GhostInterceptor:
     """
     Manages the background mitmproxy instance.
     """
-    def __init__(self, session: ScanSession, port: int = 8080):
+    def __init__(self, session: ScanSession, port: int = 0):
+        """
+        Initialize Ghost interceptor.
+        
+        Args:
+            session: The scan session for logging and findings
+            port: Port to listen on. 0 means find a free port dynamically.
+        """
         self.session = session
-        self.port = port
+        self.port = port if port > 0 else self._find_free_port()
         self.master: Optional[DumpMaster] = None
         self._thread: Optional[threading.Thread] = None
+        self._task = None
+
+    @staticmethod
+    def _find_free_port() -> int:
+        """Find an available port for the proxy."""
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            s.listen(1)
+            port = s.getsockname()[1]
+        return port
 
     async def start(self):
         """
@@ -111,16 +129,22 @@ class GhostInterceptor:
         logger.info(f"[*] Ghost Protocol Active on 127.0.0.1:{self.port}")
         self.session.log(f"Ghost Proxy listening on port {self.port}...")
 
-        # Run as async task
-        self._task = asyncio.create_task(self.master.run())
+        # Run as async task with error handling
+        self._task = asyncio.create_task(self._run_master())
+
+    async def _run_master(self):
+        """Run the mitmproxy master with error handling."""
+        try:
+            await self.master.run()
+        except Exception as e:
+            logger.error(f"[Ghost] Proxy error: {e}")
+            self.session.log(f"Ghost Proxy error: {e}")
 
     def stop(self):
+        """Shutdown the proxy gracefully."""
         if self.master:
             self.master.shutdown()
-        logger.info("[*] Ghost Protocol Deactivated.")
-
-    def stop(self):
-        if self.master:
-            self.master.shutdown()
+        if self._task and not self._task.done():
+            self._task.cancel()
         logger.info("[*] Ghost Protocol Deactivated.")
 

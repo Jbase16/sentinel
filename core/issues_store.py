@@ -1,6 +1,10 @@
 from core.utils.observer import Observable, Signal
 from core.db import Database
 import asyncio
+import logging
+from core.utils.async_helpers import create_safe_task
+
+logger = logging.getLogger(__name__)
 
 class IssuesStore(Observable):
     """
@@ -17,7 +21,7 @@ class IssuesStore(Observable):
         self.db = Database.instance()
         try:
             asyncio.get_running_loop()
-            asyncio.create_task(self._init_load())
+            create_safe_task(self._init_load(), name="issues_init_load")
         except RuntimeError:
             pass
 
@@ -33,7 +37,14 @@ class IssuesStore(Observable):
 
     def add_issue(self, issue: dict):
         self._issues.append(issue)
-        asyncio.create_task(self.db.save_issue(issue, self.session_id))
+        try:
+            asyncio.get_running_loop()
+            create_safe_task(
+                self.db.save_issue(issue, self.session_id),
+                name="save_issue"
+            )
+        except RuntimeError:
+            logger.warning("[IssuesStore] No event loop for async save")
         self.issues_changed.emit()
 
     def get_all(self):
@@ -47,8 +58,15 @@ class IssuesStore(Observable):
     def replace_all(self, issues: list):
         """Replace all issues with a new list"""
         self._issues = list(issues)
-        for issue in issues:
-            asyncio.create_task(self.db.save_issue(issue))
+        try:
+            asyncio.get_running_loop()
+            for issue in issues:
+                create_safe_task(
+                    self.db.save_issue(issue, self.session_id),
+                    name="replace_save_issue"
+                )
+        except RuntimeError:
+            logger.warning("[IssuesStore] No event loop for async replace_all")
         self.issues_changed.emit()
 
 

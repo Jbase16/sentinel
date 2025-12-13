@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from urllib.parse import urlparse
 from typing import AsyncGenerator, Dict, List
 
@@ -13,12 +15,9 @@ from core.issues_store import issues_store
 from core.killchain_store import killchain_store
 from core.runner import PhaseRunner
 from core.tools import TOOLS, get_tool_command, get_installed_tools
+from core.task_router import TaskRouter
 
-
-class ScannerEngine:
-    """Runs supported scanning tools on macOS (no unsupported tool errors)."""
-
-import os
+logger = logging.getLogger(__name__)
 
 # Try to import psutil for resource awareness
 try:
@@ -60,6 +59,10 @@ def calculate_concurrent_limit() -> int:
 
 # Calculate actual limit at module load
 MAX_CONCURRENT_TOOLS = calculate_concurrent_limit()
+
+
+class ScannerEngine:
+    """Runs supported scanning tools on macOS (no unsupported tool errors)."""
 
     def __init__(self, session=None):
         """
@@ -407,7 +410,23 @@ MAX_CONCURRENT_TOOLS = calculate_concurrent_limit()
         })
 
         try:
-            return ScannerBridge.classify(tool, target, output_text)
+            findings = ScannerBridge.classify(tool, target, output_text)
+            
+            # CRITICAL: Wire tool output to TaskRouter for AI analysis and event emission
+            # This triggers AI analysis, findings_update events, and autonomous next steps
+            try:
+                router = TaskRouter.instance()
+                router.handle_tool_output(
+                    tool_name=tool,
+                    stdout=output_text,
+                    stderr="",
+                    rc=exit_code,
+                    metadata={"target": target, "findings_count": len(findings)}
+                )
+            except Exception as router_err:
+                logger.warning(f"[{tool}] TaskRouter processing error: {router_err}")
+            
+            return findings
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"
             evidence_store = self.session.evidence if self.session else EvidenceStore.instance()

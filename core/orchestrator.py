@@ -14,6 +14,8 @@ from core.wraith.evasion import WraithEngine
 from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
 from core.findings_store import findings_store
+from core.task_router import TaskRouter
+from core.utils.async_helpers import create_safe_task
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,7 @@ class Orchestrator:
 
     def __init__(self):
         self.scanner = ScannerEngine()
+        self.router = TaskRouter.instance()
         self.active_missions = {}
 
     async def start_mission(self, target: str) -> str:
@@ -38,31 +41,62 @@ class Orchestrator:
         The 'Link Start' button.
         """
         mission_id = f"mission_{target}_{asyncio.get_event_loop().time()}"
-        self.active_missions[mission_id] = "Running"
+        self.active_missions[mission_id] = {"status": "Running", "phase": "init", "target": target}
         
-        # Spawn the autonomous loop
-        asyncio.create_task(self._mission_loop(target, mission_id))
+        # Emit mission started event
+        self._emit_progress(mission_id, "started", "Mission initialized", phase="init")
+        
+        # Spawn the autonomous loop with error handling
+        create_safe_task(self._mission_loop(target, mission_id), name=f"mission_{mission_id}")
         
         return mission_id
+    
+    def _emit_progress(self, mission_id: str, status: str, message: str, phase: str = None, details: dict = None):
+        """Emit mission progress events to UI via TaskRouter."""
+        payload = {
+            "mission_id": mission_id,
+            "status": status,
+            "message": message,
+            "phase": phase,
+            "details": details or {}
+        }
+        if mission_id in self.active_missions:
+            self.active_missions[mission_id]["status"] = status
+            if phase:
+                self.active_missions[mission_id]["phase"] = phase
+        self.router.emit("mission_progress", payload)
 
     async def _mission_loop(self, target: str, mission_id: str):
         logger.info(f"[*] Mission {mission_id} Initialized for {target}")
         
-        # Phase 1: Recon (Cortex Ingestion)
-        logger.info("    > Phase 1: Deep Recon")
-        await self._run_recon(target) 
-        
-        # Phase 2: Reasoning (Synapse)
-        logger.info("    > Phase 2: Neural Reasoning")
-        analysis = reasoning_engine.analyze()
-        opportunities = analysis.get("opportunities", [])
-        
-        # Phase 3: Autonomous Exploitation (Wraith/Ghost/Forge)
-        logger.info("    > Phase 3: Engagement")
-        await self._engage_targets(target, opportunities)
-        
-        logger.info(f"[*] Mission {mission_id} Complete.")
-        self.active_missions[mission_id] = "Complete"
+        try:
+            # Phase 1: Recon (Cortex Ingestion)
+            logger.info("    > Phase 1: Deep Recon")
+            self._emit_progress(mission_id, "running", "Starting deep reconnaissance", phase="recon")
+            await self._run_recon(target)
+            self._emit_progress(mission_id, "running", "Reconnaissance complete", phase="recon", 
+                              details={"findings": len(self.first_pass_context.findings) if self.first_pass_context else 0})
+            
+            # Phase 2: Reasoning (Synapse)
+            logger.info("    > Phase 2: Neural Reasoning")
+            self._emit_progress(mission_id, "running", "Analyzing attack surface", phase="reasoning")
+            analysis = reasoning_engine.analyze()
+            opportunities = analysis.get("opportunities", [])
+            risks = analysis.get("risks", [])
+            self._emit_progress(mission_id, "running", f"Found {len(opportunities)} opportunities, {len(risks)} risks", 
+                              phase="reasoning", details={"opportunities": len(opportunities), "risks": len(risks)})
+            
+            # Phase 3: Autonomous Exploitation (Wraith/Ghost/Forge)
+            logger.info("    > Phase 3: Engagement")
+            self._emit_progress(mission_id, "running", f"Engaging {len(opportunities)} targets", phase="engagement")
+            await self._engage_targets(target, opportunities, mission_id)
+            
+            logger.info(f"[*] Mission {mission_id} Complete.")
+            self._emit_progress(mission_id, "complete", "Mission completed successfully", phase="complete")
+            
+        except Exception as e:
+            logger.error(f"[*] Mission {mission_id} Failed: {e}")
+            self._emit_progress(mission_id, "failed", f"Mission failed: {str(e)}", phase="error")
 
     first_pass_context = None
 
@@ -100,17 +134,23 @@ class Orchestrator:
         except Exception as e:
              logger.error(f"    [Orchestrator] Scan failed: {e}") 
 
-    async def _engage_targets(self, main_target: str, opportunities: List[Dict]):
+    async def _engage_targets(self, main_target: str, opportunities: List[Dict], mission_id: str = None):
         """
         The God-Tier Logic. Decides WHICH engine to deploy.
         """
         import httpx
         
-        for op in opportunities:
+        total = len(opportunities)
+        for idx, op in enumerate(opportunities, 1):
             tool = op.get("tool")
             sub_target = op.get("target") or main_target
             payload = op.get("payload", "")
             context = op.get("context", "")
+            
+            # Emit per-engagement progress
+            if mission_id:
+                self._emit_progress(mission_id, "running", f"Engaging target {idx}/{total}: {tool}", 
+                                  phase="engagement", details={"tool": tool, "target": sub_target, "progress": f"{idx}/{total}"})
             
             try:
                 if tool == "wraith_evasion":
@@ -146,3 +186,6 @@ class Orchestrator:
                     
             except Exception as e:
                 logger.error(f"      [Engagement] Failed {tool} on {sub_target}: {e}")
+                if mission_id:
+                    self._emit_progress(mission_id, "warning", f"Engagement failed: {tool} on {sub_target}",
+                                      phase="engagement", details={"error": str(e), "tool": tool})

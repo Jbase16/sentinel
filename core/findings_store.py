@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import threading
 import asyncio
+import logging
 from core.utils.observer import Observable, Signal
 from core.db import Database
+from core.utils.async_helpers import create_safe_task
+
+logger = logging.getLogger(__name__)
 
 class FindingsStore(Observable):
     """
@@ -26,9 +30,9 @@ class FindingsStore(Observable):
         # Initialize DB in background if loop exists
         try:
             asyncio.get_running_loop()
-            asyncio.create_task(self._init_load())
+            create_safe_task(self._init_load(), name="findings_init_load")
         except RuntimeError:
-            pass # No loop yet
+            pass  # No loop yet
 
     # ... Ensure loaded ...
 
@@ -64,8 +68,15 @@ class FindingsStore(Observable):
         with self._lock:
             self._findings.append(finding)
         
-        # Persist asynchronously with session ID
-        asyncio.create_task(self.db.save_finding(finding, self.session_id))
+        # Persist asynchronously with session ID (with error logging)
+        try:
+            asyncio.get_running_loop()
+            create_safe_task(
+                self.db.save_finding(finding, self.session_id),
+                name="save_finding"
+            )
+        except RuntimeError:
+            logger.warning("[FindingsStore] No event loop for async save")
         self.findings_changed.emit()
 
     def add(self, finding: dict):
@@ -77,8 +88,15 @@ class FindingsStore(Observable):
         with self._lock:
             self._findings.extend(items)
         
-        for item in items:
-            asyncio.create_task(self.db.save_finding(item))
+        try:
+            asyncio.get_running_loop()
+            for item in items:
+                create_safe_task(
+                    self.db.save_finding(item, self.session_id),
+                    name="bulk_save_finding"
+                )
+        except RuntimeError:
+            logger.warning("[FindingsStore] No event loop for async bulk save")
             
         self.findings_changed.emit()
 

@@ -101,6 +101,41 @@ _cancel_requested = threading.Event()
 _active_scan_task: Optional[asyncio.Task] = None
 _scan_lock = asyncio.Lock()
 
+# --- SSE Event Buffer for late-connecting clients ---
+
+class EventBuffer:
+    """Circular buffer to store recent SSE events for replay to late-connecting clients."""
+    
+    def __init__(self, max_size: int = 100):
+        self.max_size = max_size
+        self._buffer: List[Dict[str, Any]] = []
+        self._lock = threading.Lock()
+    
+    def add(self, event_type: str, payload: dict) -> None:
+        """Add an event to the buffer."""
+        with self._lock:
+            self._buffer.append({
+                "type": event_type,
+                "payload": payload,
+                "timestamp": time.time()
+            })
+            # Keep buffer size in check
+            if len(self._buffer) > self.max_size:
+                self._buffer = self._buffer[-self.max_size:]
+    
+    def get_recent(self, since_timestamp: float = 0, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get recent events, optionally filtered by timestamp."""
+        with self._lock:
+            events = [e for e in self._buffer if e["timestamp"] > since_timestamp]
+            return events[-limit:]
+    
+    def clear(self) -> None:
+        """Clear all buffered events."""
+        with self._lock:
+            self._buffer.clear()
+
+_event_buffer = EventBuffer(max_size=200)
+
 # --- Session Manager ---
 
 _session_manager: Dict[str, Any] = {}
@@ -183,8 +218,10 @@ def _log_sink_sync(msg: str) -> None:
         pass
     
     try:
-        # Bridge to TaskRouter for SSE
-        TaskRouter.instance().ui_event.emit("log", {"line": msg})
+        # Bridge to TaskRouter for SSE AND buffer for late-connecting clients
+        event_payload = {"line": msg}
+        TaskRouter.instance().ui_event.emit("log", event_payload)
+        _event_buffer.add("log", event_payload)
     except Exception:
         pass
 
@@ -194,7 +231,19 @@ def _ai_status() -> Dict[str, Any]:
     except Exception as e:
         return {"connected": False, "error": str(e)}
 
-def _get_latest_results() -> Dict[str, Any]:
+def _get_latest_results_sync() -> Dict[str, Any]:
+    """Synchronous version for non-async contexts."""
+    from core.findings_store import findings_store
+    from core.issues_store import issues_store
+    from core.killchain_store import killchain_store
+    return {
+        "findings": findings_store.get_all(),
+        "issues": issues_store.get_all(),
+        "killchain_edges": killchain_store.get_all(),
+        "scan": _scan_state,
+    }
+
+async def _get_latest_results() -> Dict[str, Any]:
     from core.findings_store import findings_store
     from core.issues_store import issues_store
     from core.killchain_store import killchain_store
@@ -213,23 +262,14 @@ def _get_latest_results() -> Dict[str, Any]:
                 "scan": _scan_state,
                 "session_id": session_id,
             }
-        else:
-            # Session not found (possibly completed), fallback to global stores
-            return {
-                "findings": findings_store.get_all(),
-                "issues": issues_store.get_all(),
-                "killchain_edges": killchain_store.get_all(),
-                "scan": _scan_state,
-                "session_id": session_id,
-            }
-    else:
-        # Fallback to global stores (legacy behavior)
-        return {
-            "findings": findings_store.get_all(),
-            "issues": issues_store.get_all(),
-            "killchain_edges": killchain_store.get_all(),
-            "scan": _scan_state,
-        }
+    
+    # Fallback to global stores (legacy behavior or no session)
+    return {
+        "findings": findings_store.get_all(),
+        "issues": issues_store.get_all(),
+        "killchain_edges": killchain_store.get_all(),
+        "scan": _scan_state,
+    }
 
 # --- Routes ---
 
@@ -277,7 +317,7 @@ async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
 
 @app.get("/results")
 async def get_results(_: bool = Depends(verify_token)):
-    return _get_latest_results()
+    return await _get_latest_results()
 
 @app.get("/cortex/graph")
 async def get_cortex_graph(_: bool = Depends(verify_token)):
@@ -524,6 +564,7 @@ async def chat(
 async def events(request: Request, _: bool = Depends(verify_token)):
     async def _event_stream():
         q: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        connection_time = time.time()
         
         def _cb(event_type: str, payload: dict) -> None:
             try:
@@ -531,17 +572,31 @@ async def events(request: Request, _: bool = Depends(verify_token)):
                 data = json.dumps(payload, default=str)
                 msg = f"event: {event_type}\ndata: {data}\n\n"
                 loop.call_soon_threadsafe(lambda: q.put_nowait(msg) if not q.full() else None)
+                # Also buffer for other late-connecting clients
+                _event_buffer.add(event_type, payload)
             except Exception:
                 pass
         
         def _action_cb(aid: str, action: dict) -> None:
             _cb("action_needed", action)
+            # Buffer action_needed events too
+            _event_buffer.add("action_needed", action)
             
         TaskRouter.instance().ui_event.connect(_cb)
         ActionDispatcher.instance().action_needed.connect(_action_cb)
         
         try:
+            # Send initial connection event
             yield "event: connected\ndata: {}\n\n"
+            
+            # CRITICAL: Replay recent buffered events for late-connecting clients
+            # Get events from the last 60 seconds (scan might have started before we connected)
+            recent_events = _event_buffer.get_recent(since_timestamp=connection_time - 60, limit=50)
+            for evt in recent_events:
+                data = json.dumps(evt["payload"], default=str)
+                yield f"event: {evt['type']}\ndata: {data}\n\n"
+            
+            # Now stream live events
             while True:
                 if await request.is_disconnected():
                     break

@@ -181,3 +181,83 @@ class Database:
 
     async def get_all_issues(self) -> List[Dict]:
         return await self.get_issues(None)
+
+    # -------- Evidence Methods --------
+    
+    async def save_evidence(self, evidence: Dict[str, Any], session_id: Optional[str] = None):
+        """Save evidence data to database."""
+        if not self._initialized: await self.init()
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO evidence (session_id, tool, raw_output, metadata, timestamp)
+                VALUES (?, ?, ?, ?, datetime('now'))
+            """, (
+                session_id,
+                evidence.get("tool", "unknown"),
+                evidence.get("raw_output", ""),
+                json.dumps(evidence.get("metadata", {}))
+            ))
+            await db.commit()
+
+    async def update_evidence(self, evidence_id: int, summary: Optional[str] = None, 
+                              findings: Optional[List] = None, session_id: Optional[str] = None):
+        """Update evidence with summary and findings."""
+        if not self._initialized: await self.init()
+        
+        # Build update query dynamically based on what's provided
+        updates = []
+        params = []
+        
+        if summary is not None:
+            updates.append("metadata = json_set(metadata, '$.summary', ?)")
+            params.append(summary)
+        if findings is not None:
+            updates.append("metadata = json_set(metadata, '$.findings', ?)")
+            params.append(json.dumps(findings))
+        
+        if not updates:
+            return
+        
+        params.append(evidence_id)
+        params.append(session_id)
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ? AND (session_id = ? OR ? IS NULL)"
+            params.append(session_id)  # For the OR condition
+            await db.execute(query, tuple(params))
+            await db.commit()
+
+    async def get_evidence(self, session_id: Optional[str] = None) -> List[Dict]:
+        """Get evidence for a session."""
+        if not self._initialized: await self.init()
+        
+        query = "SELECT id, tool, raw_output, metadata, timestamp FROM evidence"
+        params = ()
+        
+        if session_id is not None:
+            query += " WHERE session_id = ?"
+            params = (session_id,)
+        
+        query += " ORDER BY timestamp DESC"
+        
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+                results = []
+                for row in rows:
+                    metadata = json.loads(row[3]) if row[3] else {}
+                    results.append({
+                        "id": row[0],
+                        "tool": row[1],
+                        "raw_output": row[2],
+                        "metadata": metadata,
+                        "summary": metadata.get("summary"),
+                        "findings": metadata.get("findings", []),
+                        "timestamp": row[4]
+                    })
+                return results
+
+    async def get_all_evidence(self) -> List[Dict]:
+        """Get all evidence regardless of session."""
+        return await self.get_evidence(None)

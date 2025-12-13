@@ -14,6 +14,7 @@ from core.killchain_store import killchain_store
 from core.findings import findings_store
 from core.action_dispatcher import ActionDispatcher
 from core.task_router import TaskRouter
+from core.cortex.reasoning import ReasoningEngine
 
 
 LogCallback = Callable[[str], None]
@@ -34,7 +35,7 @@ class ScanOrchestrator:
 
     def __init__(self, session=None, log_fn: Optional[LogCallback] = None):
         self.session = session
-        self.log = log_fn or (lambda msg: None)
+        self._external_log = log_fn or (lambda msg: None)
         
         # If we have a session, create a combined log function that logs to both session and external log
         if self.session:
@@ -42,8 +43,10 @@ class ScanOrchestrator:
                 # Log to session
                 self.session.log(msg)
                 # Log to external callback
-                self.log(msg)
+                self._external_log(msg)
             self.log = session_and_external_log
+        else:
+            self.log = self._external_log
         
         # Initialize queues before any event handlers can call queue_task
         self._pending_tasks_initialized = False
@@ -74,14 +77,15 @@ class ScanOrchestrator:
              # This event belongs to another concurrent scan
              return
         
+        tool = action["tool"]
+        args = action["args"]
+        reason = action.get("reason", "")
+        
         # CRITICAL FIX: Only queue task if scanner is running and queues are initialized
         if not self._pending_tasks_initialized:
             self.log(f"[AUTONOMOUS] Action received outside of active scan: {tool}")
             return
-
-        tool = action["tool"]
-        args = action["args"]
-        reason = action.get("reason", "")
+        
         self.log(f"[AUTONOMOUS] Executing approved action: {tool} ({reason})")
         self.scanner.queue_task(tool, args)
 
@@ -128,6 +132,9 @@ class ScanOrchestrator:
         phase_runner = PhaseRunner(target, lambda msg: self._log(msg, logs))
         phase_results = await phase_runner.run_all_phases()
 
+        # Analyze knowledge graph and dispatch opportunities as actions
+        await self._analyze_and_dispatch_opportunities()
+
         findings = self.scanner.get_last_results()
         # Use session-scoped stores when available; fallback to global singletons
         if self.session:
@@ -153,3 +160,52 @@ class ScanOrchestrator:
     def _log(self, msg: str, logs: List[str]):
         logs.append(msg)
         self.log(msg)
+
+    async def _analyze_and_dispatch_opportunities(self):
+        """
+        Run the ReasoningEngine to analyze the knowledge graph
+        and dispatch derived opportunities to the ActionDispatcher.
+        """
+        try:
+            reasoning = ReasoningEngine()
+            analysis = reasoning.analyze()
+            
+            opportunities = analysis.get("opportunities", [])
+            risks = analysis.get("risks", [])
+            graph_summary = analysis.get("graph_summary", {})
+            
+            self.log(f"[REASONING] Graph: {graph_summary.get('nodes', 0)} nodes, {graph_summary.get('edges', 0)} edges")
+            self.log(f"[REASONING] Derived {len(opportunities)} opportunities, {len(risks)} high-risk findings")
+            
+            # Emit risks to UI via TaskRouter
+            if risks:
+                self.router.emit("risk_assessment", {
+                    "risks": risks,
+                    "target": self.current_target
+                })
+            
+            # Dispatch each opportunity as an action request
+            for opp in opportunities:
+                tool = opp.get("tool")
+                target = opp.get("target", self.current_target)
+                args = opp.get("args", [])
+                reason = opp.get("reason", "Derived from knowledge graph analysis")
+                
+                action = {
+                    "tool": tool,
+                    "target": target,
+                    "args": args,
+                    "reason": reason,
+                    "source": "reasoning_engine"
+                }
+                
+                status = self.dispatcher.request_action(action, target)
+                if status == "APPROVED":
+                    self.log(f"[REASONING] Auto-approved action: {tool}")
+                elif status == "PENDING":
+                    self.log(f"[REASONING] Action queued for approval: {tool} - {reason}")
+                else:
+                    self.log(f"[REASONING] Action rejected or duplicate: {tool}")
+                    
+        except Exception as e:
+            self.log(f"[REASONING] Analysis failed: {e}")
