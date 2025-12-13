@@ -21,11 +21,10 @@ class GraphRenderer: NSObject {
     var time: Float = 0.0
     var viewportSize: CGSize = CGSize(width: 800, height: 600)
 
-    // Data Model (Simulated for this file, usually injected)
+    // Data Model: Directly maps to Metal Layout (32 bytes aligned)
     struct Node {
-        var position: SIMD3<Float>
+        var position: SIMD4<Float>  // xyz = pos, w = size
         var color: SIMD4<Float>
-        var size: Float
     }
 
     var nodes: [Node] = []
@@ -63,23 +62,22 @@ class GraphRenderer: NSObject {
         pipelineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
         pipelineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
 
-        // Define Vertex Layout
+        // Define Vertex Layout (Strict 32-byte Stride)
         let vertexDescriptor = MTLVertexDescriptor()
-        // Pos
-        vertexDescriptor.attributes[0].format = .float3
+
+        // Attribute 0: Position + Size (float4) -> 16 bytes
+        vertexDescriptor.attributes[0].format = .float4
         vertexDescriptor.attributes[0].offset = 0
         vertexDescriptor.attributes[0].bufferIndex = 0
-        // Color
-        vertexDescriptor.attributes[1].format = .float4
-        vertexDescriptor.attributes[1].offset = MemoryLayout<SIMD3<Float>>.stride
-        vertexDescriptor.attributes[1].bufferIndex = 0
-        // Size
-        vertexDescriptor.attributes[2].format = .float
-        vertexDescriptor.attributes[2].offset =
-            MemoryLayout<SIMD3<Float>>.stride + MemoryLayout<SIMD4<Float>>.stride
-        vertexDescriptor.attributes[2].bufferIndex = 0
 
-        vertexDescriptor.layouts[0].stride = MemoryLayout<Node>.stride
+        // Attribute 1: Color (float4) -> 16 bytes
+        vertexDescriptor.attributes[1].format = .float4
+        vertexDescriptor.attributes[1].offset = 16  // MemoryLayout<SIMD4<Float>>.stride
+        vertexDescriptor.attributes[1].bufferIndex = 0
+
+        // Attributes 2 removed (packed into pos.w)
+
+        vertexDescriptor.layouts[0].stride = 32  // 16 + 16
 
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
 
@@ -102,7 +100,8 @@ class GraphRenderer: NSObject {
             let isRed = Bool.random()
             let color = isRed ? SIMD4<Float>(1.0, 0.0, 0.5, 0.8) : SIMD4<Float>(0.0, 0.8, 1.0, 0.8)
 
-            nodes.append(Node(position: SIMD3<Float>(x, y, z), color: color, size: 20.0))
+            // Pack size into w (20.0)
+            nodes.append(Node(position: SIMD4<Float>(x, y, z, 20.0), color: color))
         }
 
         // Upload to GPU
@@ -131,7 +130,8 @@ class GraphRenderer: NSObject {
             // Ensure alpha is sufficient for visibility
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
 
-            return Node(position: SIMD3<Float>(x, y, z), color: color, size: 30.0)
+            // Pack size (30.0)
+            return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color)
         }
 
         let dataSize = nodes.count * MemoryLayout<Node>.stride

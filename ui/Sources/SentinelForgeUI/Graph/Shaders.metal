@@ -8,9 +8,8 @@ Renders pulsating nodes and data-flow edges.
 using namespace metal;
 
 struct VertexIn {
-    float3 position [[attribute(0)]];
+    float4 position [[attribute(0)]]; // xyz = pos, w = size
     float4 color [[attribute(1)]];
-    float size [[attribute(2)]];
 };
 
 struct VertexOut {
@@ -33,7 +32,10 @@ vertex VertexOut vertex_main(
     VertexOut out;
     
     // Animate Position (Subtle "Breathing" Data)
-    float3 pos = in.position;
+    // Animate Position (Subtle "Breathing" Data)
+    float3 pos = in.position.xyz; // Unpack xyz
+    float size = in.position.w;   // Unpack size
+    
     float breath = sin(uniforms.time * 1.5 + pos.x * 5.0 + pos.y * 3.0) * 0.05;
     pos *= (1.0 + breath * 0.2);
     
@@ -42,7 +44,7 @@ vertex VertexOut vertex_main(
     
     // Size attenuation based on depth
     // float depth = out.position.z; 
-    out.size = max(5.0, in.size * (100.0 / (out.position.w + 0.1)));
+    out.size = max(5.0, size * (100.0 / (out.position.w + 0.1)));
     
     out.color = in.color;
     return out;
