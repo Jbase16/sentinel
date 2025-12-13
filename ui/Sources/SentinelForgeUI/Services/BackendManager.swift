@@ -57,7 +57,7 @@ class BackendManager: ObservableObject {
     private func checkBackendHealth() async -> Bool {
         let url = URL(string: "http://127.0.0.1:8765/ping")!
         var request = URLRequest(url: url)
-        request.timeoutInterval = 2.0
+        request.timeoutInterval = 10.0  // Allow more time for slow responses
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }

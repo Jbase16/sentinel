@@ -111,8 +111,7 @@ class HelixAppState: ObservableObject {
         thread = ChatThread(title: "Main Chat", messages: [])
     }
     
-    // Append user message, create an empty assistant bubble, and stream tokens into it.
-    // Append user message, create assistant bubble, and call Backend API
+    // Append user message, create assistant bubble, and stream response from backend
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -125,22 +124,31 @@ class HelixAppState: ObservableObject {
         objectWillChange.send()
         thread.messages.append(reply)
         let replyID = reply.id
+        
+        isProcessing = true
 
-        // Call God-Tier Chat API
+        // Use streaming chat for real-time token display
         Task {
             do {
-                let response = try await apiClient.chatQuery(question: trimmed)
-                await MainActor.run {
-                    if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
-                        self.objectWillChange.send()
-                        self.thread.messages[idx].text = response
+                var accumulated = ""
+                for try await token in apiClient.streamChat(prompt: trimmed) {
+                    accumulated += token
+                    await MainActor.run {
+                        if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
+                            self.objectWillChange.send()
+                            self.thread.messages[idx].text = accumulated
+                        }
                     }
+                }
+                await MainActor.run {
+                    self.isProcessing = false
                 }
             } catch {
                 await MainActor.run {
                     if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
                         self.thread.messages[idx].text = "Error: \(error.localizedDescription)"
                     }
+                    self.isProcessing = false
                 }
             }
         }
