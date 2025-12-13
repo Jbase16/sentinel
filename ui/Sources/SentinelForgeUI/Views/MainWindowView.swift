@@ -112,23 +112,81 @@ struct BackendStatusBadge: View {
     @StateObject var backend = BackendManager.shared
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("NEURO-SYMBOLIC CORE")
-                .font(.caption2)
-                .foregroundColor(.gray)
+        VStack(alignment: .leading, spacing: 8) {
+            // Backend Status
+            VStack(alignment: .leading, spacing: 4) {
+                Text("BACKEND")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
 
-            HStack {
-                Circle()
-                    .fill(backend.isRunning ? Color.green : Color.red)
-                    .frame(width: 6, height: 6)
-                    .shadow(color: backend.isRunning ? .green : .clear, radius: 4)
+                HStack(spacing: 6) {
+                    if backend.isRunning {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: .green, radius: 4)
+                    } else {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                    }
 
-                Text(backend.status)
-                    .font(.caption)
-                    .foregroundColor(backend.isRunning ? .white : .red)
-                    .lineLimit(1)
+                    Text(backend.status)
+                        .font(.caption)
+                        .foregroundColor(backend.isRunning ? .white : .orange)
+                        .lineLimit(1)
+                }
             }
             .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.4))
+            .cornerRadius(4)
+            
+            // AI Status
+            VStack(alignment: .leading, spacing: 4) {
+                Text("AI ENGINE")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+
+                HStack(spacing: 6) {
+                    let aiConnected = appState.aiStatus?.connected ?? false
+                    
+                    if aiConnected {
+                        Circle()
+                            .fill(appState.isProcessing ? Color.blue : Color.green)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: appState.isProcessing ? .blue : .green, radius: 4)
+                    } else if backend.isRunning {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                    } else {
+                        Circle()
+                            .fill(Color.gray)
+                            .frame(width: 6, height: 6)
+                    }
+
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(appState.aiStatus?.model ?? "Waiting...")
+                            .font(.caption)
+                            .foregroundColor(aiConnected ? .white : .gray)
+                            .lineLimit(1)
+                        
+                        if appState.isProcessing {
+                            Text("Processing...")
+                                .font(.caption2)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+                
+                // Show progress bar when AI is processing
+                if appState.isProcessing {
+                    IndeterminateProgressBar(color: .blue)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.black.opacity(0.4))
             .cornerRadius(4)
         }

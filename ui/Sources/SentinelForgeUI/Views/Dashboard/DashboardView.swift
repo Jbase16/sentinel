@@ -2,31 +2,59 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var appState: HelixAppState
+    @StateObject var backend = BackendManager.shared
     
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
+                // Connection status
+                ConnectionStatusBanner()
+                
+                // Status Cards Row
+                HStack(spacing: 16) {
+                    // Backend Status
+                    SystemStatusCard(
+                        title: "Backend",
+                        isConnected: backend.isRunning,
+                        statusText: backend.status,
+                        icon: "server.rack"
+                    )
+                    
+                    // AI Status
+                    SystemStatusCard(
+                        title: "AI Engine",
+                        isConnected: appState.aiStatus?.connected ?? false,
+                        statusText: appState.aiStatus?.model ?? "Offline",
+                        icon: "cpu"
+                    )
+                }
+                .padding(.horizontal)
+                
                 // Top Stats Row
                 HStack(spacing: 20) {
                     StatCard(
                         title: "Risk Score",
                         value: calculateRisk(),
                         icon: "exclamationmark.shield",
-                        color: riskColor()
+                        color: riskColor(),
+                        isLoading: !backend.isRunning
                     )
                     
                     StatCard(
                         title: "Findings",
                         value: "\(appState.apiResults?.summary?.counts?.findings ?? 0)",
                         icon: "magnifyingglass",
-                        color: .blue
+                        color: .blue,
+                        isLoading: !backend.isRunning
                     )
                     
                     StatCard(
                         title: "Active Tasks",
                         value: appState.engineStatus?.scanRunning == true ? "Running" : "Idle",
                         icon: "cpu",
-                        color: appState.engineStatus?.scanRunning == true ? .green : .gray
+                        color: appState.engineStatus?.scanRunning == true ? .green : .gray,
+                        isLoading: !backend.isRunning,
+                        showProgress: appState.engineStatus?.scanRunning == true
                     )
                 }
                 .padding(.horizontal)
@@ -121,6 +149,8 @@ struct StatCard: View {
     let value: String
     let icon: String
     let color: Color
+    var isLoading: Bool = false
+    var showProgress: Bool = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -129,10 +159,28 @@ struct StatCard: View {
                     .foregroundColor(color)
                     .font(.title2)
                 Spacer()
+                if showProgress {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                }
             }
             
-            Text(value)
-                .font(.system(size: 28, weight: .bold))
+            if isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text("Loading...")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else {
+                Text(value)
+                    .font(.system(size: 28, weight: .bold))
+            }
+            
+            if showProgress {
+                IndeterminateProgressBar(color: color)
+            }
             
             Text(title)
                 .font(.caption)
@@ -143,6 +191,49 @@ struct StatCard: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(12)
         .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+    }
+}
+
+// MARK: - System Status Card
+struct SystemStatusCard: View {
+    let title: String
+    let isConnected: Bool
+    let statusText: String
+    let icon: String
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(isConnected ? .green : .orange)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                
+                HStack(spacing: 4) {
+                    if !isConnected {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                    } else {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 6, height: 6)
+                    }
+                    Text(statusText)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                }
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .frame(maxWidth: .infinity)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
     }
 }
 

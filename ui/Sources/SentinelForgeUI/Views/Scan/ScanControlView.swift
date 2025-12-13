@@ -2,13 +2,26 @@ import SwiftUI
 
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
+    @StateObject var backend = BackendManager.shared
     @State private var scanTarget: String = ""
     @FocusState private var isFocused: Bool
     
+    private var isScanning: Bool {
+        appState.engineStatus?.scanRunning == true || appState.isScanRunning
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
+            // Connection status
+            ConnectionStatusBanner()
+            
             // Permission Requests
             ActionRequestView()
+            
+            // Scan Progress Header
+            if isScanning {
+                ScanProgressHeader(logsCount: appState.apiLogs.count)
+            }
             
             // Header / Input
             HStack {
@@ -17,21 +30,26 @@ struct ScanControlView: View {
                     .font(.body)
                     .focused($isFocused)
                     .onSubmit {
-                        if !scanTarget.isEmpty {
+                        if !scanTarget.isEmpty && backend.isRunning {
                             appState.startScan(target: scanTarget)
                         }
                     }
+                    .disabled(!backend.isRunning || isScanning)
                 
-                if appState.engineStatus?.scanRunning == true {
+                if isScanning {
                     Button(action: { appState.cancelScan() }) {
-                        Label("Stop", systemImage: "stop.fill")
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                            Text("Stop")
+                        }
                     }
                     .tint(.red)
                 } else {
                     Button(action: { appState.startScan(target: scanTarget) }) {
                         Label("Start Scan", systemImage: "play.fill")
                     }
-                    .disabled(scanTarget.isEmpty)
+                    .disabled(scanTarget.isEmpty || !backend.isRunning)
                 }
             }
             .padding()
@@ -50,6 +68,56 @@ struct ScanControlView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Scan Progress Header
+struct ScanProgressHeader: View {
+    let logsCount: Int
+    @State private var elapsedTime: Int = 0
+    @State private var timer: Timer?
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .foregroundColor(.blue)
+                Text("Scan In Progress")
+                    .font(.headline)
+                Spacer()
+                Text(formattedTime)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+            }
+            
+            IndeterminateProgressBar(color: .blue)
+            
+            HStack {
+                Text("\(logsCount) log entries")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Spacer()
+                ProgressView()
+                    .scaleEffect(0.6)
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.1))
+        .onAppear {
+            timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                elapsedTime += 1
+            }
+        }
+        .onDisappear {
+            timer?.invalidate()
+        }
+    }
+    
+    private var formattedTime: String {
+        let mins = elapsedTime / 60
+        let secs = elapsedTime % 60
+        return String(format: "%02d:%02d", mins, secs)
     }
 }
 
