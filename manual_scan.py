@@ -32,7 +32,13 @@ async def main():
     cancel_event = asyncio.Event()
     
     try:
-        results = await engine.scan(target, modules=["nmap_discovery"], cancel_flag=cancel_event)
+        # Use run_all to consume generator and get results
+        # Note: run_all signature in ScannerEngine: run_all(target) -> List[dict]
+        # But we want to see logs too. 
+        # Actually proper usage is: async for line in scan(): print(line)
+        # But to match signature mismatch let's just use run_all for validity check.
+        results_list = await engine.run_all(target)
+        results = {"findings": results_list}
         print("--- Scan Complete ---")
         print("Findings:", len(results.get("findings", [])))
         print(results)

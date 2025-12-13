@@ -29,6 +29,8 @@ class Database:
         
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        self._db_connection = None
+        self._db_lock = asyncio.Lock()
 
     async def init(self):
         if self._initialized:
@@ -38,63 +40,79 @@ class Database:
             if self._initialized:
                 return
                 
-            async with aiosqlite.connect(self.db_path) as db:
-                # Sessions Table (New)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS sessions (
-                        id TEXT PRIMARY KEY,
-                        target TEXT,
-                        status TEXT,
-                        start_time REAL,
-                        end_time REAL,
-                        logs TEXT
-                    )
-                """)
+            # Create shared connection
+            self._db_connection = await aiosqlite.connect(self.db_path)
+            db = self._db_connection
+            
+            # Enable WAL mode for better concurrency
+            await db.execute("PRAGMA journal_mode=WAL")
+            await db.execute("PRAGMA synchronous=NORMAL")
                 
-                # Findings (Updated with session_id)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS findings (
-                        id TEXT PRIMARY KEY,
-                        session_id TEXT,
-                        tool TEXT,
-                        type TEXT,
-                        severity TEXT,
-                        target TEXT,
-                        data JSON,
-                        timestamp TEXT,
-                        FOREIGN KEY(session_id) REFERENCES sessions(id)
-                    )
-                """)
-                
-                # Issues (Updated with session_id)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS issues (
-                        id TEXT PRIMARY KEY,
-                        session_id TEXT,
-                        title TEXT,
-                        severity TEXT,
-                        target TEXT,
-                        data JSON,
-                        timestamp TEXT,
-                        FOREIGN KEY(session_id) REFERENCES sessions(id)
-                    )
-                """)
-                
-                # Evidence (New)
-                await db.execute("""
-                    CREATE TABLE IF NOT EXISTS evidence (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT,
-                        tool TEXT,
-                        raw_output TEXT,
-                        metadata JSON,
-                        timestamp TEXT,
-                        FOREIGN KEY(session_id) REFERENCES sessions(id)
-                    )
-                """)
-                
-                await db.commit()
+            # Create tables
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id TEXT PRIMARY KEY,
+                    target TEXT,
+                    status TEXT,
+                    start_time REAL,
+                    end_time REAL,
+                    logs TEXT
+                )
+            """)
+            
+            # Findings (Updated with session_id)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS findings (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    tool TEXT,
+                    type TEXT,
+                    severity TEXT,
+                    target TEXT,
+                    data JSON,
+                    timestamp TEXT,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id)
+                )
+            """)
+            
+            # Issues (Updated with session_id)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS issues (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT,
+                    title TEXT,
+                    severity TEXT,
+                    target TEXT,
+                    data JSON,
+                    timestamp TEXT,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id)
+                )
+            """)
+            
+            # Evidence (New)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS evidence (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT,
+                    tool TEXT,
+                    raw_output TEXT,
+                    metadata JSON,
+                    timestamp TEXT,
+                    FOREIGN KEY(session_id) REFERENCES sessions(id)
+                )
+            """)
+            
+            await db.commit()
             self._initialized = True
+    
+    async def execute(self, query, params=()):
+        """Execute a query using the shared connection."""
+        if not self._initialized: await self.init()
+        
+        async with self._db_lock:
+            if self._db_connection is None:
+                return None
+            return await self._db_connection.execute(query, params)
 
     async def save_session(self, session_data: Dict[str, Any]):
         if not self._initialized: await self.init()
@@ -117,38 +135,43 @@ class Database:
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
         
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                INSERT OR REPLACE INTO findings (id, session_id, tool, type, severity, target, data, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                fid,
-                session_id,
-                finding.get("tool", "unknown"),
-                finding.get("type", "unknown"),
-                finding.get("severity", "INFO"),
-                finding.get("target", "unknown"),
-                blob
-            ))
-            await db.commit()
+        await self.execute("""
+            INSERT OR REPLACE INTO findings (id, session_id, tool, type, severity, target, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (
+            fid,
+            session_id,
+            finding.get("tool", "unknown"),
+            finding.get("type", "unknown"),
+            finding.get("severity", "INFO"),
+            finding.get("target", "unknown"),
+            blob
+        ))
+        
+        async with self._db_lock:
+            if self._db_connection:
+                await self._db_connection.commit()
 
     async def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None):
         if not self._initialized: await self.init()
         iid = issue.get("id") or issue.get("title", "unknown")
         blob = json.dumps(issue)
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                INSERT OR REPLACE INTO issues (id, session_id, title, severity, target, data, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-            """, (
-                iid,
-                session_id,
-                issue.get("title", "unknown"),
-                issue.get("severity", "INFO"),
-                issue.get("target", "unknown"),
-                blob
-            ))
-            await db.commit()
+        
+        await self.execute("""
+            INSERT OR REPLACE INTO issues (id, session_id, title, severity, target, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (
+            iid,
+            session_id,
+            issue.get("title", "unknown"),
+            issue.get("severity", "INFO"),
+            issue.get("target", "unknown"),
+            blob
+        ))
+        
+        async with self._db_lock:
+            if self._db_connection:
+                await self._db_connection.commit()
 
     async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
         if not self._initialized: await self.init()
@@ -184,21 +207,23 @@ class Database:
 
     # -------- Evidence Methods --------
     
-    async def save_evidence(self, evidence: Dict[str, Any], session_id: Optional[str] = None):
+    async def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
         """Save evidence data to database."""
         if not self._initialized: await self.init()
         
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                INSERT INTO evidence (session_id, tool, raw_output, metadata, timestamp)
-                VALUES (?, ?, ?, ?, datetime('now'))
-            """, (
-                session_id,
-                evidence.get("tool", "unknown"),
-                evidence.get("raw_output", ""),
-                json.dumps(evidence.get("metadata", {}))
-            ))
-            await db.commit()
+        await self.execute("""
+            INSERT INTO evidence (session_id, tool, raw_output, metadata, timestamp)
+            VALUES (?, ?, ?, ?, datetime('now'))
+        """, (
+            session_id,
+            evidence_data.get("tool", "unknown"),
+            evidence_data.get("raw_output", ""),
+            json.dumps(evidence_data.get("metadata", {}))
+        ))
+        
+        async with self._db_lock:
+            if self._db_connection:
+                await self._db_connection.commit()
 
     async def update_evidence(self, evidence_id: int, summary: Optional[str] = None, 
                               findings: Optional[List] = None, session_id: Optional[str] = None):
@@ -220,13 +245,14 @@ class Database:
             return
         
         params.append(evidence_id)
-        params.append(session_id)
         
-        async with aiosqlite.connect(self.db_path) as db:
-            query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ? AND (session_id = ? OR ? IS NULL)"
-            params.append(session_id)  # For the OR condition
-            await db.execute(query, tuple(params))
-            await db.commit()
+        query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ?"
+        
+        await self.execute(query, tuple(params))
+        
+        async with self._db_lock:
+            if self._db_connection:
+                await self._db_connection.commit()
 
     async def get_evidence(self, session_id: Optional[str] = None) -> List[Dict]:
         """Get evidence for a session."""

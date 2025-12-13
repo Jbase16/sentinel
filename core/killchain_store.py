@@ -21,6 +21,11 @@ class KillchainStore(Observable):
 
     def get_all(self):
         return list(self._edges)
+    
+    def add_phase(self, phase: dict):
+        """Add a phase edge to the killchain."""
+        self._edges.append(phase)
+        self.edges_changed.emit()
 
 # Singleton
 killchain_store = KillchainStore()

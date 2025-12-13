@@ -31,17 +31,27 @@ class GraphRenderer: NSObject {
     var nodes: [Node] = []
 
     init(device: MTLDevice) {
+        print("GraphRenderer: init() called")
         self.device = device
         super.init()
         self.commandQueue = device.makeCommandQueue()
+        print("GraphRenderer: commandQueue created: \(self.commandQueue != nil)")
         buildPipeline()
-        generateDummyData()  // For visual testing
+        generateDummyData()
+        print("GraphRenderer: init() complete")
     }
 
     private func buildPipeline() {
-        guard let library = device.makeDefaultLibrary() else { return }
+        print("GraphRenderer: buildPipeline()")
+        guard let library = device.makeDefaultLibrary() else {
+            print("GraphRenderer: Default library not found")
+            return
+        }
         let vertexFunction = library.makeFunction(name: "vertex_main")
         let fragmentFunction = library.makeFunction(name: "fragment_main")
+        print(
+            "GraphRenderer: Functions loaded: v=\(vertexFunction != nil) f=\(fragmentFunction != nil)"
+        )
 
         let pipelineDescriptor = MTLRenderPipelineDescriptor()
         pipelineDescriptor.vertexFunction = vertexFunction
@@ -75,6 +85,7 @@ class GraphRenderer: NSObject {
 
         do {
             pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+            print("GraphRenderer: Pipeline State created successfully")
         } catch {
             print("Failed to create pipeline: \(error)")
         }
@@ -146,13 +157,14 @@ class GraphRenderer: NSObject {
     }
 
     func draw(in view: MTKView) {
+        // print("GraphRenderer: draw start") // Commented out to avoid spam
         lock.lock()
         defer { lock.unlock() }
 
         guard let drawable = view.currentDrawable,
-              let descriptor = view.currentRenderPassDescriptor,
-              let commandQueue = commandQueue,
-              let pipelineState = self.pipelineState
+            let descriptor = view.currentRenderPassDescriptor,
+            let commandQueue = commandQueue,
+            let pipelineState = self.pipelineState
         else {
             return
         }
@@ -162,7 +174,7 @@ class GraphRenderer: NSObject {
         else {
             return
         }
-        
+
         encoder.setRenderPipelineState(pipelineState)
 
         // Update Time
