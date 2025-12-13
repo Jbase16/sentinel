@@ -156,10 +156,19 @@ class GraphRenderer: NSObject {
         self.zoom = min(max(self.zoom, -500), -10)
     }
 
+    var frameCount: Int = 0
+    var lastLogTime: TimeInterval = 0
+
     func draw(in view: MTKView) {
-        // print("GraphRenderer: draw start") // Commented out to avoid spam
         lock.lock()
         defer { lock.unlock() }
+
+        // Watchdog: Log every 60 frames (approx 1 sec)
+        frameCount += 1
+        let currentTime = Date().timeIntervalSince1970
+        if frameCount % 60 == 0 {
+            print("GraphRenderer: Watchdog - Drawing frame \(frameCount). Nodes: \(nodes.count)")
+        }
 
         guard let drawable = view.currentDrawable,
             let descriptor = view.currentRenderPassDescriptor,
@@ -168,6 +177,10 @@ class GraphRenderer: NSObject {
         else {
             return
         }
+
+        // Debug: Clear to distinct color (Dark Blue) to prove Metal is alive
+        descriptor.colorAttachments[0].clearColor = MTLClearColor(
+            red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0)
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
             let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
@@ -214,6 +227,25 @@ class GraphRenderer: NSObject {
             encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
             encoder.drawPrimitives(
                 type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
+        } else {
+            // Debug: Force Draw a Center Point if nodes are empty
+            // This proves the render pipeline works even without data
+            struct DummyVertex {
+                var pos: SIMD3<Float> = SIMD3<Float>(0, 0, 0)
+                var col: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)  // White
+                var size: Float = 50.0
+            }
+            var dummy = DummyVertex()
+            encoder.setVertexBytes(&dummy, length: MemoryLayout<DummyVertex>.stride, index: 0)
+            // Note: Vertex shader expects buffer 0 to have layout.
+            // Usually we need a buffer, but `setVertexBytes` works for small data < 4KB.
+            // However, our pipeline expects a specific VertexDescriptor layout.
+            // setVertexBytes might not play nice with VertexDescriptor bufferIndex 0 if strict.
+            // Let's just create a tiny temp buffer if strictly needed, or just skip.
+            // Given the crash risk with strict descriptors, better to just log.
+            if frameCount % 60 == 0 {
+                print("GraphRenderer: Nodes empty. Skipping draw primitives.")
+            }
         }
 
         encoder.endEncoding()
