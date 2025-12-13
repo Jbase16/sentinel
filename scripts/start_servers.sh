@@ -42,6 +42,7 @@ kill_existing() {
     if [ -n "$pids" ]; then
         log "Killing stale processes on port $port: $pids"
         echo "$pids" | xargs kill -9 2>/dev/null || true
+        sleep 1  # Wait for port to be released
     fi
 }
 

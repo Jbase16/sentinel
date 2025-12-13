@@ -26,7 +26,18 @@ class CortexStream: ObservableObject {
 
     struct GraphData: Decodable {
         let nodes: [NodeModel]
-        let edges: [[String: String]]  // simplified
+        // networkx format uses 'links', some formats use 'edges'
+        // Use AnyCodable-like approach to handle both
+
+        enum CodingKeys: String, CodingKey {
+            case nodes, links, edges, directed, multigraph, graph
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            // Nodes might be empty array
+            self.nodes = (try? container.decode([NodeModel].self, forKey: .nodes)) ?? []
+        }
     }
 
     func connect(url: URL) {

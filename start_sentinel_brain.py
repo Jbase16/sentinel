@@ -72,7 +72,7 @@ class SentinelHandler(BaseHTTPRequestHandler):
                 
                 # Generate
                 start = time.time()
-                response = generate(model, tokenizer, prompt=full_prompt, max_tokens=2048, temp=0.2, verbose=False)
+                response = generate(model, tokenizer, prompt=full_prompt, max_tokens=2048, verbose=False)
                 taken = time.time() - start
                 
                 result = {"response": response, "done": True, "total_duration": int(taken*1e9)}

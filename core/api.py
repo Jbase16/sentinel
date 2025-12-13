@@ -258,7 +258,7 @@ async def _get_latest_results() -> Dict[str, Any]:
             return {
                 "findings": session.findings.get_all(),
                 "issues": session.issues.get_all(),
-                "killchain_edges": session.killchain.get_all(),
+                "killchain": {"edges": session.killchain.get_all()},  # Nested to match Swift
                 "scan": _scan_state,
                 "session_id": session_id,
             }
@@ -267,7 +267,7 @@ async def _get_latest_results() -> Dict[str, Any]:
     return {
         "findings": findings_store.get_all(),
         "issues": issues_store.get_all(),
-        "killchain_edges": killchain_store.get_all(),
+        "killchain": {"edges": killchain_store.get_all()},  # Nested to match Swift Killchain struct
         "scan": _scan_state,
     }
 

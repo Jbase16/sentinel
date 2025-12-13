@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class AIConfig:
     provider: str = "ollama"
     ollama_url: str = "http://localhost:11434"
-    model: str = "llama3:latest"
+    model: str = "sentinel-9b-god-tier"
     fallback_enabled: bool = True
     request_timeout: float = 300.0
     max_concurrent_requests: int = 2
@@ -100,7 +100,7 @@ class SentinelConfig:
             provider=os.getenv("SENTINEL_AI_PROVIDER", "ollama"),
             # AI Config - defaults to Sentinel Brain (local fine-tuned model)
             ollama_url=os.getenv("SENTINEL_OLLAMA_URL", "http://localhost:8009"),
-            model=os.getenv("SENTINEL_AI_MODEL", "llama3:latest"),
+            model=os.getenv("SENTINEL_AI_MODEL", "sentinel-9b-god-tier"),
             fallback_enabled=os.getenv("SENTINEL_AI_FALLBACK", "true").lower() == "true",
             request_timeout=float(os.getenv("SENTINEL_AI_TIMEOUT", "300")),
             max_concurrent_requests=int(os.getenv("SENTINEL_AI_MAX_CONCURRENT", "2")),

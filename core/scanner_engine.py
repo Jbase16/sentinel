@@ -28,7 +28,7 @@ except ImportError:
 
 # Configurable concurrency limit based on system resources
 MIN_CONCURRENT_TOOLS = 1
-MAX_CONCURRENT_TOOLS_BASE = 2  # Base value for small systems
+MAX_CONCURRENT_TOOLS_BASE = 10  # Base value for small systems
 
 def calculate_concurrent_limit() -> int:
     """Calculate optimal concurrency based on available system resources."""
