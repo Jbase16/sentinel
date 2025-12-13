@@ -2,8 +2,8 @@ import SwiftUI
 
 struct MainWindowView: View {
     @EnvironmentObject var appState: HelixAppState
-    @State private var selection: SidebarItem? = .dashboard
-    
+    @State private var selection: SidebarItem? = .graph  // Default to Graph to show off 3D
+
     enum SidebarItem: String, Identifiable, CaseIterable {
         case dashboard = "Dashboard"
         case scan = "Target Scan"
@@ -11,9 +11,8 @@ struct MainWindowView: View {
         case terminal = "System Console"
         case report = "Report Composer"
         case chat = "AI Assistant"
-        
+
         var id: String { rawValue }
-        
         var icon: String {
             switch self {
             case .dashboard: return "gauge"
@@ -27,60 +26,111 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(SidebarItem.allCases, selection: $selection) { item in
-                NavigationLink(value: item) {
-                    Label(item.rawValue, systemImage: item.icon)
-                        .padding(.vertical, 4)
-                }
-            }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
-            
-            Spacer()
-            
-            // Mini Status Footer in Sidebar
-            VStack(alignment: .leading, spacing: 4) {
-                Divider()
-                if let ai = appState.aiStatus {
-                    Label {
-                        Text(ai.model ?? "Unknown Model")
-                            .font(.caption)
-                    } icon: {
-                        Circle()
-                            .fill(ai.connected ? Color.green : Color.red)
-                            .frame(width: 6, height: 6)
+        ZStack {
+            // Background: Deep Space / Cyberpunk
+            Color(red: 0.05, green: 0.05, blue: 0.08)
+                .edgesIgnoringSafeArea(.all)
+
+            HStack(spacing: 0) {
+                // Cyberpunk Sidebar
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("SENTINEL")
+                        .font(.system(size: 20, weight: .black, design: .monospaced))
+                        .foregroundColor(.cyberCyan)
+                        .padding(.top, 30)
+                        .padding(.leading, 20)
+
+                    Divider().background(Color.cyberCyan.opacity(0.3))
+
+                    ForEach(SidebarItem.allCases) { item in
+                        Button(action: { selection = item }) {
+                            HStack {
+                                Image(systemName: item.icon)
+                                    .frame(width: 24)
+                                Text(item.rawValue)
+                                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                Spacer()
+                            }
+                            .foregroundColor(selection == item ? .white : .gray)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .background(
+                                selection == item ? Color.cyberBlue.opacity(0.2) : Color.clear
+                            )
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.horizontal, 10)
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 8)
+
+                    Spacer()
+
+                    // Status Footer
+                    BackendStatusBadge()
+                        .padding()
                 }
-            }
-            .padding(.bottom)
-            
-        } detail: {
-            switch selection {
-            case .dashboard:
-                DashboardView()
-            case .scan:
-                ScanControlView()
-            case .graph:
-                NetworkGraphView()
-            case .terminal:
-                TerminalView()
-            case .report:
-                ReportComposerView()
-            case .chat:
-                ChatView()
-            case .none:
-                Text("Select an item")
+                .frame(width: 240)
+                .background(.ultraThinMaterial)
+                .overlay(
+                    Rectangle()
+                        .frame(width: 1)
+                        .foregroundColor(Color.white.opacity(0.1)),
+                    alignment: .trailing
+                )
+
+                // Main Content Area
+                ZStack {
+                    switch selection {
+                    case .dashboard: DashboardView()
+                    case .scan: ScanControlView()
+                    case .graph: NetworkGraphView()  // Metal 3D
+                    case .terminal: TerminalView()
+                    case .report: ReportComposerView()
+                    case .chat: ChatView()
+                    case .none: Text("Offline")
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1000, minHeight: 700)
         .onAppear {
-            print("MainWindowView appeared")
-            // Safely kick off streams when the UI is actually visible
             appState.startEventStream()
             appState.refreshStatus()
+        }
+    }
+}
+
+// Minimal Theme Extensions
+extension Color {
+    static let cyberCyan = Color(red: 0.0, green: 0.9, blue: 1.0)
+    static let cyberBlue = Color(red: 0.0, green: 0.4, blue: 1.0)
+}
+
+struct BackendStatusBadge: View {
+    @EnvironmentObject var appState: HelixAppState
+    @StateObject var backend = BackendManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("NEURO-SYMBOLIC CORE")
+                .font(.caption2)
+                .foregroundColor(.gray)
+
+            HStack {
+                Circle()
+                    .fill(backend.isRunning ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: backend.isRunning ? .green : .clear, radius: 4)
+
+                Text(backend.status)
+                    .font(.caption)
+                    .foregroundColor(backend.isRunning ? .white : .red)
+                    .lineLimit(1)
+            }
+            .padding(8)
+            .background(Color.black.opacity(0.4))
+            .cornerRadius(4)
         }
     }
 }

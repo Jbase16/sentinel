@@ -7,7 +7,7 @@ struct NetworkGraphView: View {
         ZStack {
             // The Metal View (Interactive)
             InteractiveGraphContainer()
-                .edgesIgnoringSafeArea(.all)
+                .ignoresSafeArea()
             
             // Overlay HUD
             VStack {

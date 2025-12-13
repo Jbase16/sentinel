@@ -42,15 +42,24 @@ class HelixAppState: ObservableObject {
         self.preferredModel = llm.preferredModel
         self.autoRoutingEnabled = llm.autoRoutingEnabled
         
-        // Auto-connect WS using correct scheme
-        // We know baseURL is 127.0.0.1:8000, so we just build the string directly.
-        // In a real app we'd parse baseURL and replace scheme, but this is a prototype.
+        // Wait for BackendManager to signal readiness
+        NotificationCenter.default.addObserver(forName: .backendReady, object: nil, queue: .main) { [weak self] _ in
+            self?.connectServices()
+        }
+    }
+    
+    private func connectServices() {
+        print("[AppState] Backend Ready. Connecting Services...")
         if let wsURL = URL(string: "ws://127.0.0.1:8000/ws/graph") {
             cortexStream.connect(url: wsURL)
         }
         if let ptyURL = URL(string: "ws://127.0.0.1:8000/ws/terminal") {
             ptyClient.connect(url: ptyURL)
         }
+        // Kick off HTTP streams
+        self.startEventStream()
+        self.refreshStatus()
+    }
 
         // Mirror the LLM's generating flag to the UI.
         llm.$isGenerating

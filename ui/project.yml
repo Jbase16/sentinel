@@ -1,0 +1,29 @@
+name: SentinelForge
+options:
+  bundleIdPrefix: com.sentinel
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  role: Editor
+
+targets:
+  SentinelForge:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/SentinelForgeUI
+      - path: ../core
+        group: Core (Python)
+        buildPhase: none
+    frameworks:
+      - framework: Metal.framework
+      - framework: MetalKit.framework
+      - framework: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_NAME: SentinelForge
+        INFOPLIST_FILE: Info.plist
+        ENABLE_PREVIEWS: YES
+        SWIFT_VERSION: 5.0
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        CODE_SIGN_STYLE: Automatic

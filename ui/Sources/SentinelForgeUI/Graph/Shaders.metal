@@ -41,7 +41,7 @@ vertex VertexOut vertex_main(
     out.position = uniforms.view_projection_matrix * float4(pos, 1.0);
     
     // Size attenuation based on depth
-    float depth = out.position.z; // 0..1 range roughly
+    // float depth = out.position.z; 
     out.size = max(5.0, in.size * (100.0 / (out.position.w + 0.1)));
     
     out.color = in.color;

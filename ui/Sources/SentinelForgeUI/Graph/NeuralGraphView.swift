@@ -39,6 +39,9 @@ struct NeuralGraphView: NSViewRepresentable {
             }
         }
         
+        // Initial data
+        context.coordinator.update(nodes: nodes)
+        
         return mtkView
     }
 
@@ -54,13 +57,6 @@ struct NeuralGraphView: NSViewRepresentable {
         init(_ parent: NeuralGraphView) {
             self.parent = parent
             super.init()
-        }
-        
-        func setupRenderer(mtkView: MTKView) {
-            if let device = mtkView.device {
-                renderer = GraphRenderer(device: device)
-                mtkView.delegate = self
-            }
         }
         
         func update(nodes: [CortexStream.NodeModel]) {
@@ -85,4 +81,35 @@ struct NeuralGraphView: NSViewRepresentable {
             renderer?.draw(in: view)
         }
     }
+}
+
+// MARK: - Interactive Wrapper
+struct InteractiveGraphContainer: View {
+    @EnvironmentObject var appState: HelixAppState
+    @State private var lastDrag = CGSize.zero
+    
+    var body: some View {
+        NeuralGraphView(nodes: appState.cortexStream.nodes)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        let delta = CGSize(
+                            width: value.translation.width - lastDrag.width,
+                            height: value.translation.height - lastDrag.height
+                        )
+                        // Local bridging
+                        NotificationCenter.default.post(
+                            name: .cameraMove,
+                            object: nil,
+                            userInfo: ["delta": delta]
+                        )
+                        lastDrag = value.translation
+                    }
+                    .onEnded { _ in lastDrag = .zero }
+            )
+    }
+}
+
+extension Notification.Name {
+    static let cameraMove = Notification.Name("cameraMove")
 }

@@ -12,3 +12,12 @@ __pycache__/
 # Logs and temporary files
 *.log
 *.tmp
+
+# Xcode Generation
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+
+# Swift Package Manager (if unused)
+.swiftpm/
