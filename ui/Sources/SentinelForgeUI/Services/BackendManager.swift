@@ -167,6 +167,24 @@ class BackendManager: ObservableObject {
         var env = ProcessInfo.processInfo.environment
         env["PYTHONPATH"] = repoPath.path
         env["PYTHONUNBUFFERED"] = "1"  // Disable output buffering
+
+        // CRITICAL: Inject Homebrew/System paths so Core can find tools (nmap, nuclei)
+        // Even with SIP disabled, GUI apps don't inherit the full shell PATH.
+        let extraPaths = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+            // Add user's go/bin if possible, though hard to resolve strictly from here
+            "\(home.path)/go/bin",
+            "\(home.path)/.local/bin",
+        ]
+        let currentPath = env["PATH"] ?? ""
+        let newPath = (extraPaths + [currentPath]).joined(separator: ":")
+        env["PATH"] = newPath
+
         p.environment = env
 
         // Capture output for debugging

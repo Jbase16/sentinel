@@ -65,7 +65,11 @@ class ScannerEngine:
         if selected_clean:
             yield f"[scanner] Selected tools: {', '.join(selected_clean)}"
         if missing:
-            yield f"[scanner] Skipping (not installed): {', '.join(missing)}"
+            msg = f"[scanner] ⚠️ WARNING: The following tools were requested but NOT found in PATH: {', '.join(missing)}"
+            yield msg
+            # Also log to console for debugging
+            print(msg)
+            print(f"[scanner] Current PATH: {os.environ.get('PATH')}")
 
         if not tools_to_run:
             yield "[scanner] No supported tools available in PATH. Skipping tool phase."

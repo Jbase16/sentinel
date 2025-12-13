@@ -103,7 +103,13 @@ class GraphRenderer: NSObject {
         self.viewportSize = size
     }
 
+    // Thread Safety
+    private let lock = NSLock()
+
     func updateNodes(_ newNodes: [CortexStream.NodeModel]) {
+        lock.lock()
+        defer { lock.unlock() }
+
         self.nodes = newNodes.map { node in
             // Use server coords or fallback to random
             let x = node.x ?? Float.random(in: -1...1)
@@ -111,13 +117,16 @@ class GraphRenderer: NSObject {
             let z = node.z ?? Float.random(in: -0.5...0.5)
 
             // Use pre-computed color or fallback
-            let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.5)
+            // Ensure alpha is sufficient for visibility
+            let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
 
             return Node(position: SIMD3<Float>(x, y, z), color: color, size: 30.0)
         }
 
         let dataSize = nodes.count * MemoryLayout<Node>.stride
         if dataSize > 0 {
+            // Create a new buffer explicitly
+            // (In a real engine, we'd use triple buffering, but this prevents the crash)
             vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
         }
     }
@@ -128,6 +137,8 @@ class GraphRenderer: NSObject {
     var zoom: Float = -200.0  // Move back to see the scene
 
     func updateCamera(rotationX: Float, rotationY: Float, zoomDelta: Float) {
+        lock.lock()
+        defer { lock.unlock() }
         self.rotationX += rotationX
         self.rotationY += rotationY
         self.zoom += zoomDelta * 5.0
@@ -135,6 +146,9 @@ class GraphRenderer: NSObject {
     }
 
     func draw(in view: MTKView) {
+        lock.lock()
+        defer { lock.unlock() }
+
         guard let drawable = view.currentDrawable,
             let descriptor = view.currentRenderPassDescriptor,
             let pipelineState = pipelineState
@@ -176,11 +190,10 @@ class GraphRenderer: NSObject {
 
         encoder.setRenderPipelineState(pipelineState)
 
-        // Enable Depth Testing if we had a depth buffer (omitted for pure additive particle look)
-        // For cyber particles, additive blending (set in pipeline) handles "depth" sorting visually.
-
+        // Pass Uniforms
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.size, index: 1)
 
+        // Safe Drawing
         if let vBuffer = vertexBuffer, !nodes.isEmpty {
             encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
             encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: nodes.count)
