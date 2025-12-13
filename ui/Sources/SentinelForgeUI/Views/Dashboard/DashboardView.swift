@@ -3,13 +3,13 @@ import SwiftUI
 struct DashboardView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
-    
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 // Connection status
                 ConnectionStatusBanner()
-                
+
                 // Status Cards Row
                 HStack(spacing: 16) {
                     // Backend Status
@@ -19,7 +19,7 @@ struct DashboardView: View {
                         statusText: backend.status,
                         icon: "server.rack"
                     )
-                    
+
                     // AI Status
                     SystemStatusCard(
                         title: "AI Engine",
@@ -29,7 +29,7 @@ struct DashboardView: View {
                     )
                 }
                 .padding(.horizontal)
-                
+
                 // Top Stats Row
                 HStack(spacing: 20) {
                     StatCard(
@@ -39,7 +39,7 @@ struct DashboardView: View {
                         color: riskColor(),
                         isLoading: !backend.isRunning
                     )
-                    
+
                     StatCard(
                         title: "Findings",
                         value: "\(appState.apiResults?.summary?.counts?.findings ?? 0)",
@@ -47,7 +47,7 @@ struct DashboardView: View {
                         color: .blue,
                         isLoading: !backend.isRunning
                     )
-                    
+
                     StatCard(
                         title: "Active Tasks",
                         value: appState.engineStatus?.scanRunning == true ? "Running" : "Idle",
@@ -58,13 +58,52 @@ struct DashboardView: View {
                     )
                 }
                 .padding(.horizontal)
-                
+
+                // MISSION CONTROL (Added to fix "No Start Mission")
+                VStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: "scope")
+                            .font(.title2)
+                            .foregroundColor(.red)
+                        Text("Mission Control")
+                            .font(.headline)
+                        Spacer()
+                    }
+
+                    HStack {
+                        TextField(
+                            "Enter Target URL (e.g. http://testphp.vulnweb.com)", text: $targetInput
+                        )
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .font(.system(.body, design: .monospaced))
+
+                        Button(action: startMission) {
+                            HStack {
+                                Image(systemName: "play.fill")
+                                Text("Start Mission")
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                        }
+                        .disabled(
+                            !backend.isRunning || appState.isScanRunning || targetInput.isEmpty
+                        )
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(12)
+                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+                .padding(.horizontal)
+
                 // Critical Issues
                 VStack(alignment: .leading) {
                     Text("Critical Issues")
                         .font(.headline)
                         .padding(.horizontal)
-                    
+
                     if let issues = appState.apiResults?.issues, !issues.isEmpty {
                         ForEach(issues.prefix(5).indices, id: \.self) { idx in
                             let issue = issues[idx]
@@ -80,13 +119,13 @@ struct DashboardView: View {
                             .padding(.horizontal)
                     }
                 }
-                
+
                 // Tool Health
                 VStack(alignment: .leading) {
                     Text("System Status")
                         .font(.headline)
                         .padding(.horizontal)
-                    
+
                     if let tools = appState.engineStatus?.tools {
                         HStack {
                             VStack(alignment: .leading) {
@@ -125,17 +164,17 @@ struct DashboardView: View {
             .padding(.vertical)
         }
     }
-    
+
     func calculateRisk() -> String {
         // Placeholder for real risk score from Python
         let issues = appState.apiResults?.issues ?? []
         let criticals = issues.filter { $0["severity"]?.stringValue == "CRITICAL" }.count
         let highs = issues.filter { $0["severity"]?.stringValue == "HIGH" }.count
-        
+
         let score = (criticals * 10) + (highs * 5)
         return "\(score)"
     }
-    
+
     func riskColor() -> Color {
         let score = Int(calculateRisk()) ?? 0
         if score > 50 { return .red }
@@ -151,7 +190,7 @@ struct StatCard: View {
     let color: Color
     var isLoading: Bool = false
     var showProgress: Bool = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -164,7 +203,7 @@ struct StatCard: View {
                         .scaleEffect(0.7)
                 }
             }
-            
+
             if isLoading {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -177,11 +216,11 @@ struct StatCard: View {
                 Text(value)
                     .font(.system(size: 28, weight: .bold))
             }
-            
+
             if showProgress {
                 IndeterminateProgressBar(color: color)
             }
-            
+
             Text(title)
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -200,18 +239,18 @@ struct SystemStatusCard: View {
     let isConnected: Bool
     let statusText: String
     let icon: String
-    
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .font(.title2)
                 .foregroundColor(isConnected ? .green : .orange)
-            
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                
+
                 HStack(spacing: 4) {
                     if !isConnected {
                         ProgressView()
@@ -227,7 +266,7 @@ struct SystemStatusCard: View {
                         .lineLimit(1)
                 }
             }
-            
+
             Spacer()
         }
         .padding()
@@ -239,14 +278,14 @@ struct SystemStatusCard: View {
 
 struct IssueRow: View {
     let issue: JSONDict
-    
+
     var body: some View {
         HStack {
             let severity = issue["severity"]?.stringValue ?? "INFO"
             Circle()
                 .fill(severityColor(severity))
                 .frame(width: 8, height: 8)
-            
+
             VStack(alignment: .leading) {
                 Text(issue["title"]?.stringValue ?? "Unknown Issue")
                     .font(.body)
@@ -267,7 +306,7 @@ struct IssueRow: View {
         .cornerRadius(8)
         .padding(.horizontal)
     }
-    
+
     func severityColor(_ sev: String) -> Color {
         switch sev {
         case "CRITICAL": return .purple

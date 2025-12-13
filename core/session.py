@@ -38,6 +38,10 @@ class ScanSession:
         
         # Ghost Protocol (Traffic Interceptor)
         self.ghost = None
+        
+        # Wraith Automator (The Hand)
+        from core.wraith.automator import WraithAutomator
+        self.wraith = WraithAutomator(self)
 
     def start_ghost(self, port: int = 8080):
         """Activates the Ghost Protocol traffic interceptor."""

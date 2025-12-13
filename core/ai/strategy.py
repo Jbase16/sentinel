@@ -6,6 +6,7 @@ Uses Gemma 9B to analyze Ghost Traffic and dream up specific attack vectors.
 
 import json
 import logging
+import asyncio
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
@@ -120,3 +121,11 @@ class StrategyEngine:
                     "url": flow_data.get("url")
                 }
             })
+            
+            # TRIGGER WRAITH (The Hand)
+            # Auto-verification of the hypothesis
+            asyncio.create_task(self.session.wraith.on_hypothesis({
+                 "type": f"hypothesis::{vec.vuln_class.lower()}",
+                 "target": flow_data.get("host", "unknown"),
+                 "metadata": {"payloads": vec.suggested_payloads}
+            }))

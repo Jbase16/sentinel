@@ -138,7 +138,7 @@ def startup_event():
     
     # Async DB Init
     db = Database.instance()
-    # await db.init() # This needs to be awaited in an async context
+    await db.init() # Ensure DB is ready before requests
 
 def setup_cors():
     config = get_config()

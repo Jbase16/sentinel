@@ -76,6 +76,14 @@ class Orchestrator:
         session = ScanSession(target)
         self.active_missions[session.id] = session # Track it
         
+        # ACTIVATE GHOST PROTOCOL (The Eyes)
+        # We use a fixed port for the demo, but in prod we'd find a free port
+        try:
+             session.start_ghost(port=8080)
+             logger.info("    [Orchestrator] Ghost Protocol ACTIVE on :8080")
+        except Exception as e:
+             logger.warning(f"    [Orchestrator] Generic Ghost startup failed: {e}")
+        
         # Use a simple logger adapter
         def adptor(msg):
              logger.info(f"      [Scanner] {msg}")

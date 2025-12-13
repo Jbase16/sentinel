@@ -83,10 +83,20 @@ class CortexStream: ObservableObject {
                 if n.z == nil { n.z = Float.random(in: -50...50) }
 
                 // Color based on type
+                // Color based on type (Neural/Ghost Support)
                 switch n.type {
-                case "target": n.color = SIMD4<Float>(1, 0, 0, 1)  // Red
-                case "port": n.color = SIMD4<Float>(0, 1, 0, 1)  // Green
-                default: n.color = SIMD4<Float>(0, 0.5, 1, 1)  // Blue
+                case "target":
+                    n.color = SIMD4<Float>(1, 0.2, 0.2, 1)  // Red (Base)
+                case "port":
+                    n.color = SIMD4<Float>(0, 1, 0, 1)  // Green
+                case let t where t.starts(with: "hypothesis"):
+                    n.color = SIMD4<Float>(0.6, 0, 1, 1)  // Purple (AI Logic)
+                case "endpoint_discovery":
+                    n.color = SIMD4<Float>(1, 0.5, 0, 0.8)  // Orange (Ghost Traffic), slightly transparent?
+                case let t where t.contains("vuln"):
+                    n.color = SIMD4<Float>(1, 0, 0, 1)  // Bright Red (Confirmed)
+                default:
+                    n.color = SIMD4<Float>(0, 0.5, 1, 1)  // Blue
                 }
                 return n
             }
