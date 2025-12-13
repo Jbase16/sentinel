@@ -3,26 +3,26 @@ import SwiftUI
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
-    @State private var scanTarget: String = ""
+    @State private var scanTarget: String = "http://testphp.vulnweb.com"
     @FocusState private var isFocused: Bool
-    
+
     private var isScanning: Bool {
         appState.engineStatus?.scanRunning == true || appState.isScanRunning
     }
-    
+
     var body: some View {
         VStack(spacing: 0) {
             // Connection status
             ConnectionStatusBanner()
-            
+
             // Permission Requests
             ActionRequestView()
-            
+
             // Scan Progress Header
             if isScanning {
                 ScanProgressHeader(logsCount: appState.apiLogs.count)
             }
-            
+
             // Header / Input
             HStack {
                 TextField("Target (e.g., https://example.com)", text: $scanTarget)
@@ -35,7 +35,7 @@ struct ScanControlView: View {
                         }
                     }
                     .disabled(!backend.isRunning || isScanning)
-                
+
                 if isScanning {
                     Button(action: { appState.cancelScan() }) {
                         HStack(spacing: 4) {
@@ -54,15 +54,15 @@ struct ScanControlView: View {
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
-            
+
             Divider()
-            
+
             // Two-pane layout: Findings List | Logs
             GeometryReader { geo in
                 HSplitView {
                     FindingsListView()
                         .frame(minWidth: 300)
-                    
+
                     LogConsoleView()
                         .frame(minWidth: 300)
                 }
@@ -76,7 +76,7 @@ struct ScanProgressHeader: View {
     let logsCount: Int
     @State private var elapsedTime: Int = 0
     @State private var timer: Timer?
-    
+
     var body: some View {
         VStack(spacing: 8) {
             HStack {
@@ -90,9 +90,9 @@ struct ScanProgressHeader: View {
                     .foregroundColor(.secondary)
                     .monospacedDigit()
             }
-            
+
             IndeterminateProgressBar(color: .blue)
-            
+
             HStack {
                 Text("\(logsCount) log entries")
                     .font(.caption2)
@@ -113,7 +113,7 @@ struct ScanProgressHeader: View {
             timer?.invalidate()
         }
     }
-    
+
     private var formattedTime: String {
         let mins = elapsedTime / 60
         let secs = elapsedTime % 60
@@ -123,7 +123,7 @@ struct ScanProgressHeader: View {
 
 struct FindingsListView: View {
     @EnvironmentObject var appState: HelixAppState
-    
+
     var body: some View {
         List {
             Section(header: Text("Findings")) {
@@ -143,7 +143,7 @@ struct FindingsListView: View {
 
 struct FindingRow: View {
     let finding: JSONDict
-    
+
     var body: some View {
         VStack(alignment: .leading) {
             HStack {
@@ -164,7 +164,7 @@ struct FindingRow: View {
 
 struct LogConsoleView: View {
     @EnvironmentObject var appState: HelixAppState
-    
+
     var body: some View {
         VStack(alignment: .leading) {
             HStack {
@@ -180,7 +180,7 @@ struct LogConsoleView: View {
             }
             .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
-            
+
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     ForEach(appState.apiLogs, id: \.self) { line in

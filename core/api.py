@@ -131,14 +131,14 @@ async def check_ai_rate_limit(request: Request) -> None:
         raise HTTPException(status_code=429, detail="AI rate limit exceeded")
 
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     config = get_config()
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
     
     # Async DB Init
     db = Database.instance()
-    await db.init() # Ensure DB is ready before requests
+    await db.init()  # Ensure DB is ready before requests
 
 def setup_cors():
     config = get_config()
@@ -280,6 +280,19 @@ async def forge_execute(
     return result
 
 # --- Command Deck Endpoints ---
+
+class InstallRequest(BaseModel):
+    tools: List[str]
+
+@app.post("/tools/install")
+async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
+    """
+    Install selected tools using Homebrew or pip (best-effort).
+    Returns per-tool status. The process output tail is included for diagnostics.
+    """
+    from core.tools import install_tools
+    results = await install_tools(req.tools)
+    return {"results": results}
 
 @app.post("/chat/query")
 async def chat_query(

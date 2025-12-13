@@ -59,45 +59,6 @@ struct DashboardView: View {
                 }
                 .padding(.horizontal)
 
-                // MISSION CONTROL (Added to fix "No Start Mission")
-                VStack(spacing: 12) {
-                    HStack {
-                        Image(systemName: "scope")
-                            .font(.title2)
-                            .foregroundColor(.red)
-                        Text("Mission Control")
-                            .font(.headline)
-                        Spacer()
-                    }
-
-                    HStack {
-                        TextField(
-                            "Enter Target URL (e.g. http://testphp.vulnweb.com)", text: $targetInput
-                        )
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .font(.system(.body, design: .monospaced))
-
-                        Button(action: startMission) {
-                            HStack {
-                                Image(systemName: "play.fill")
-                                Text("Start Mission")
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                        }
-                        .disabled(
-                            !backend.isRunning || appState.isScanRunning || targetInput.isEmpty
-                        )
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                    }
-                }
-                .padding()
-                .background(Color(NSColor.controlBackgroundColor))
-                .cornerRadius(12)
-                .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-                .padding(.horizontal)
-
                 // Critical Issues
                 VStack(alignment: .leading) {
                     Text("Critical Issues")

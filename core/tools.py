@@ -265,6 +265,74 @@ TOOLS: Dict[str, Dict] = {
 }
 
 # -------------------------------------------------------------------
+# Install helpers (best-effort; macOS Homebrew-first)
+# -------------------------------------------------------------------
+INSTALLERS: Dict[str, Dict] = {
+    # Homebrew formulas (brew tap projectdiscovery/tap for nuclei, naabu, etc.)
+    "nmap": {"cmd": ["brew", "install", "nmap"]},
+    "subfinder": {"cmd": ["brew", "tap", "projectdiscovery/tap/subfinder", "||", "brew", "install", "subfinder"]},
+    "httpx": {"cmd": ["brew", "tap", "projectdiscovery/tap/httpx", "||", "brew", "install", "httpx"]},
+    "nuclei": {"cmd": ["brew", "tap", "projectdiscovery/tap/nuclei", "||", "brew", "install", "nuclei"]},
+    "nikto": {"cmd": ["brew", "install", "nikto"]},
+    "naabu": {"cmd": ["brew", "tap", "projectdiscovery/tap/naabu", "||", "brew", "install", "naabu"]},
+    "whatweb": {"cmd": ["pip", "install", "whatweb"]},
+    "wafw00f": {"cmd": ["pip", "install", "wafw00f"]},
+    "assetfinder": {"cmd": ["brew", "tap", "tomnomnom/tools", "&&", "brew", "install", "assetfinder"]},
+    "hakrawler": {"cmd": ["pip", "install", "hakrawler"]},
+    "dnsx": {"cmd": ["brew", "tap", "projectdiscovery/tap/dnsx", "||", "brew", "install", "dnsx"]},
+    "amass": {"cmd": ["brew", "install", "amass"]},
+    "subjack": {"cmd": ["pip", "install", "subjack"]},
+    "sslyze": {"cmd": ["brew", "install", "sslyze"]},
+    "httprobe": {"cmd": ["pip", "install", "httprobe"]},
+    # Python/pip utilities
+    "dirsearch": {"cmd": ["pip", "install", "dirsearch"]},
+    "feroxbuster": {"cmd": ["brew", "install", "feroxbuster"]},
+    "gobuster": {"cmd": ["brew", "install", "gobuster"]},
+    "jaeles": {"cmd": ["pip", "install", "jaeles"]},
+    "pshtt": {"cmd": ["pip", "install", "pshtt"]},
+    "wfuzz": {"cmd": ["pip", "install", "wfuzz"]},
+    "testssl": {"cmd": ["brew", "install", "testssl"]},
+    "hakrevdns": {"cmd": ["pip", "install", "hakrevdns"]},
+    "eyewitness": {"cmd": ["pip", "install", "eyewitness"]},
+    "masscan": {"cmd": ["brew", "install", "masscan"]},
+}
+
+async def install_tool(name: str) -> Dict[str, str]:
+    import asyncio
+    import shutil
+    import subprocess
+    spec = INSTALLERS.get(name)
+    if not spec:
+        return {"tool": name, "status": "unknown", "message": "No installer mapping"}
+    cmd = spec["cmd"]
+    # Handle shell pipes in command (e.g. "||" for fallback)
+    cmd_str = " ".join(cmd)
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd_str,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            shell=True
+        )
+        out, _ = await proc.communicate()
+        output = out.decode(errors="ignore")[-500:] if out else ""
+        if proc.returncode == 0:
+            return {"tool": name, "status": "installed", "message": output}
+        # Check if tool actually exists after install attempt
+        if shutil.which(name):
+            return {"tool": name, "status": "installed", "message": f"Successfully installed {name}"}
+        return {"tool": name, "status": "error", "message": output or f"Installation failed for {name}"}
+    except Exception as e:
+        return {"tool": name, "status": "error", "message": str(e)}
+
+async def install_tools(names: List[str]) -> List[Dict[str, str]]:
+    """Install multiple tools sequentially (not in parallel) to avoid resource contention."""
+    results = []
+    for n in names:
+        results.append(await install_tool(n))
+    return results
+
+# -------------------------------------------------------------------
 # API exposed to the scanner/engine
 # -------------------------------------------------------------------
 def get_installed_tools() -> Dict[str, Dict]:

@@ -7,17 +7,18 @@ extension Notification.Name {
 
 /// Manages the lifecycle of the Python Backend (Neuro-Symbolic Core).
 /// Automatically starts the FastAPI server when the app launches and terminates it on quit.
+@MainActor
 class BackendManager: ObservableObject {
     static let shared = BackendManager()
 
     @Published var status: String = "Initializing..."
     @Published var isRunning: Bool = false
     @Published var pythonPath: String = ""
-    
+
     /// Set to true when app is actively making requests (chat, scan, etc.)
     /// Health monitor won't mark as disconnected during active operations
     var isActiveOperation: Bool = false
-    
+
     /// Count consecutive health check failures before marking disconnected
     private var consecutiveFailures: Int = 0
     private let maxConsecutiveFailures = 3
@@ -25,7 +26,7 @@ class BackendManager: ObservableObject {
     private var process: Process?
     private var pipe: Pipe?
     private var healthCheckTask: Task<Void, Never>?
-    
+
     private let maxStartupRetries = 30  // 30 seconds max wait
     private let healthCheckInterval: UInt64 = 1_000_000_000  // 1 second
 
@@ -50,7 +51,7 @@ class BackendManager: ObservableObject {
     func stop() {
         healthCheckTask?.cancel()
         healthCheckTask = nil
-        
+
         if let p = process, p.isRunning {
             print("[BackendManager] Terminating backend process...")
             p.terminate()
@@ -71,7 +72,8 @@ class BackendManager: ObservableObject {
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
             // Verify it's actually our API
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               json["status"] as? String == "ok" {
+                json["status"] as? String == "ok"
+            {
                 return true
             }
         } catch {
@@ -79,7 +81,7 @@ class BackendManager: ObservableObject {
         }
         return false
     }
-    
+
     /// Monitors backend health and updates UI status
     private func startHealthMonitor() {
         healthCheckTask = Task {
@@ -91,7 +93,7 @@ class BackendManager: ObservableObject {
                     try? await Task.sleep(nanoseconds: healthCheckInterval * 10)  // Check less frequently during operations
                     continue
                 }
-                
+
                 let healthy = await checkBackendHealth()
                 await MainActor.run {
                     if healthy {
@@ -108,7 +110,8 @@ class BackendManager: ObservableObject {
                             self.isRunning = false
                         } else {
                             // Show warning but don't disconnect yet
-                            self.status = "Core Slow (\(self.consecutiveFailures)/\(self.maxConsecutiveFailures))..."
+                            self.status =
+                                "Core Slow (\(self.consecutiveFailures)/\(self.maxConsecutiveFailures))..."
                         }
                     }
                 }
@@ -122,7 +125,7 @@ class BackendManager: ObservableObject {
 
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
-        
+
         // Find the repository root (contains core/api.py)
         let possiblePaths = [
             home.appendingPathComponent("Developer/sentinelforge"),
@@ -130,9 +133,11 @@ class BackendManager: ObservableObject {
             URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
         ]
 
-        guard let repoPath = possiblePaths.first(where: { path in
-            fileManager.fileExists(atPath: path.appendingPathComponent("core/api.py").path)
-        }) else {
+        guard
+            let repoPath = possiblePaths.first(where: { path in
+                fileManager.fileExists(atPath: path.appendingPathComponent("core/api.py").path)
+            })
+        else {
             await MainActor.run { self.status = "Error: Repository not found" }
             return
         }
@@ -145,7 +150,7 @@ class BackendManager: ObservableObject {
             await MainActor.run { self.status = "Error: Python not found" }
             return
         }
-        
+
         await MainActor.run {
             self.pythonPath = python.path
             self.status = "Booting Neural Core..."
@@ -157,7 +162,7 @@ class BackendManager: ObservableObject {
         p.executableURL = python
         p.currentDirectoryURL = repoPath
         p.arguments = ["-m", "uvicorn", "core.api:app", "--host", "127.0.0.1", "--port", "8765"]
-        
+
         // Inherit PYTHONPATH so imports work
         var env = ProcessInfo.processInfo.environment
         env["PYTHONPATH"] = repoPath.path
@@ -199,7 +204,7 @@ class BackendManager: ObservableObject {
         // Wait for the server to become healthy
         await waitForServerReady()
     }
-    
+
     /// Polls the health endpoint until the server is ready
     private func waitForServerReady() async {
         for attempt in 1...maxStartupRetries {
@@ -213,7 +218,7 @@ class BackendManager: ObservableObject {
                 startHealthMonitor()
                 return
             }
-            
+
             // Check if process died
             if let p = process, !p.isRunning {
                 await MainActor.run {
@@ -222,24 +227,24 @@ class BackendManager: ObservableObject {
                 }
                 return
             }
-            
+
             await MainActor.run {
                 self.status = "Core Starting (\(attempt)/\(self.maxStartupRetries))..."
             }
-            
+
             try? await Task.sleep(nanoseconds: healthCheckInterval)
         }
-        
+
         await MainActor.run {
             self.status = "Core Timeout - Check Logs"
             self.isRunning = false
         }
     }
-    
+
     /// Finds Python executable, preferring virtual environment
     private func findPythonExecutable(in repoPath: URL) -> URL? {
         let fileManager = FileManager.default
-        
+
         // Check for virtual environments (in order of preference)
         let venvPaths = [
             repoPath.appendingPathComponent(".venv/bin/python3"),
@@ -247,26 +252,26 @@ class BackendManager: ObservableObject {
             repoPath.appendingPathComponent(".venv/bin/python"),
             repoPath.appendingPathComponent("venv/bin/python"),
         ]
-        
+
         for venv in venvPaths {
             if fileManager.fileExists(atPath: venv.path) {
                 return venv
             }
         }
-        
+
         // Fallback to system Python
         let systemPaths = [
             URL(fileURLWithPath: "/opt/homebrew/bin/python3"),  // Apple Silicon Homebrew
-            URL(fileURLWithPath: "/usr/local/bin/python3"),     // Intel Homebrew
-            URL(fileURLWithPath: "/usr/bin/python3"),           // System Python
+            URL(fileURLWithPath: "/usr/local/bin/python3"),  // Intel Homebrew
+            URL(fileURLWithPath: "/usr/bin/python3"),  // System Python
         ]
-        
+
         for path in systemPaths {
             if fileManager.fileExists(atPath: path.path) {
                 return path
             }
         }
-        
+
         return nil
     }
 }

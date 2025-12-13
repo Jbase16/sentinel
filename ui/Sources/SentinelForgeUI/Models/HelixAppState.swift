@@ -1,5 +1,5 @@
-import SwiftUI
 import Combine
+import SwiftUI
 
 // Holds shared UI + LLM state.
 // ObservableObject means any @Published changes will re-render SwiftUI views.
@@ -10,49 +10,50 @@ class HelixAppState: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var currentTab: SidebarTab = .dashboard
     @Published var isScanRunning: Bool = false
-    
+
     // Services
     let apiClient: SentinelAPIClient
     let cortexStream: CortexStream
     let ptyClient: PTYClient
-    
+
     private var cancellables = Set<AnyCancellable>()
 
-    @Published var apiLogs: [String] = []          // Buffered logs from Python core
-    @Published var apiResults: SentinelResults?    // Latest scan snapshot
+    @Published var apiLogs: [String] = []  // Buffered logs from Python core
+    @Published var apiResults: SentinelResults?  // Latest scan snapshot
     @Published var engineStatus: EngineStatus?
     @Published var aiStatus: AIStatus?
     @Published var availableModels: [String] = ModelRouter.defaultCandidates
     @Published var preferredModel: String = ModelRouter.defaultPreferredModel
     @Published var autoRoutingEnabled: Bool = true
     @Published var pendingActions: [PendingAction] = []
-    
+
     private let llm: LLMService
-    
+
     init(llm: LLMService) {
         self.llm = llm
-        
+
         // Initialize Services
         self.apiClient = SentinelAPIClient()
         self.cortexStream = CortexStream()
         self.ptyClient = PTYClient()
-        
+
         self.thread = ChatThread(title: "Main Chat", messages: [])
         self.availableModels = llm.availableModels
         self.preferredModel = llm.preferredModel
         self.autoRoutingEnabled = llm.autoRoutingEnabled
-        
+
         // Wait for BackendManager to signal readiness
-        NotificationCenter.default.addObserver(forName: .backendReady, object: nil, queue: .main) { [weak self] _ in
+        NotificationCenter.default.addObserver(forName: .backendReady, object: nil, queue: .main) {
+            [weak self] _ in
             Task { @MainActor in
                 self?.connectServices()
             }
         }
-        
+
         // Setup Combine bindings for LLM state
         setupLLMBindings()
     }
-    
+
     private func connectServices() {
         print("[AppState] Backend Ready. Connecting Services...")
         if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
@@ -65,7 +66,7 @@ class HelixAppState: ObservableObject {
         self.startEventStream()
         self.refreshStatus()
     }
-    
+
     private func setupLLMBindings() {
         // Mirror the LLM's generating flag to the UI.
         llm.$isGenerating
@@ -110,7 +111,7 @@ class HelixAppState: ObservableObject {
     func clear() {
         thread = ChatThread(title: "Main Chat", messages: [])
     }
-    
+
     // Append user message, create assistant bubble, and stream response from backend
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -124,7 +125,7 @@ class HelixAppState: ObservableObject {
         objectWillChange.send()
         thread.messages.append(reply)
         let replyID = reply.id
-        
+
         isProcessing = true
         BackendManager.shared.isActiveOperation = true  // Tell health monitor we're busy
 
@@ -175,9 +176,9 @@ class HelixAppState: ObservableObject {
 
     // MARK: - Core IPC Helpers (HTTP bridge to Python)
 
-    /// Start a God-Tier Mission via the local Python API.
+    /// Start a scan via the core /scan endpoint (supports logs + cancellation)
     func startScan(target: String) {
-        print("[AppState] Starting Mission for target: \(target)")
+        print("[AppState] Starting Scan for target: \(target)")
         BackendManager.shared.isActiveOperation = true  // Scans can be long-running
         Task {
             defer {
@@ -186,14 +187,26 @@ class HelixAppState: ObservableObject {
                 }
             }
             do {
-                // Use God-Tier "One Click" Mission
-                let missionID = try await apiClient.startMission(target: target)
-                print("[AppState] Mission started successfully. ID: \(missionID)")
+                try await apiClient.startScan(target: target)
                 await MainActor.run {
                     self.isScanRunning = true
                 }
+                // Light polling loop to keep UI fresh in case SSE misses events
+                // Poll logs and results every 2s until scanRunning goes false
+                Task { [weak self] in
+                    while let self = self, self.isScanRunning {
+                        self.refreshLogs()
+                        self.refreshResults()
+                        try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
+                        // Optionally refresh status to detect completion
+                        self.refreshStatus()
+                        if let running = self.engineStatus?.scanRunning, running == false {
+                            self.isScanRunning = false
+                        }
+                    }
+                }
             } catch {
-                print("[AppState] Failed to start mission: \(error)")
+                print("[AppState] Failed to start scan: \(error)")
             }
         }
     }
@@ -252,7 +265,7 @@ class HelixAppState: ObservableObject {
         Task {
             do {
                 for try await event in apiClient.streamEvents() {
-                    // handleSSEEvent is @MainActor but synchronous logic, so await isn't strictly needed 
+                    // handleSSEEvent is @MainActor but synchronous logic, so await isn't strictly needed
                     // for suspension, but MainActor isolation requires it if we weren't already on MainActor.
                     // However, since we are inside a Task, we are likely off-main.
                     // The warning "No async operations" suggests swift compiler sees it as synchronous.
@@ -273,17 +286,19 @@ class HelixAppState: ObservableObject {
     private func handleSSEEvent(_ event: SSEEvent) {
         switch event.type {
         case "log":
-             if let data = event.data.data(using: .utf8),
+            if let data = event.data.data(using: .utf8),
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let line = json["line"] as? String {
-                 self.apiLogs.append(line)
-             }
+                let line = json["line"] as? String
+            {
+                self.apiLogs.append(line)
+            }
         case "findings_update", "evidence_update":
             // For now, just trigger a full refresh of results to keep it simple and consistent
             self.refreshResults()
         case "action_needed":
             if let data = event.data.data(using: .utf8),
-                let action = try? JSONDecoder().decode(PendingAction.self, from: data) {
+                let action = try? JSONDecoder().decode(PendingAction.self, from: data)
+            {
                 // Avoid duplicates
                 if !self.pendingActions.contains(where: { $0.id == action.id }) {
                     self.pendingActions.append(action)
@@ -293,7 +308,7 @@ class HelixAppState: ObservableObject {
             break
         }
     }
-    
+
     func approveAction(_ action: PendingAction) {
         Task {
             try? await apiClient.approveAction(id: action.id)
@@ -327,6 +342,6 @@ enum SidebarTab: String, CaseIterable, Identifiable {
     case chat = "Command Deck"
     case graph = "Neural Graph"
     case settings = "Settings"
-    
+
     var id: String { rawValue }
 }

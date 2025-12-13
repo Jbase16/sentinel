@@ -91,6 +91,21 @@ public struct SentinelAPIClient: Sendable {
         return try JSONDecoder().decode(SentinelResults.self, from: data)
     }
 
+    // Install selected tools
+    public func installTools(_ tools: [String]) async throws -> [InstallResult] {
+        struct InstallResponse: Decodable { let results: [InstallResult] }
+        guard let url = URL(string: "/tools/install", relativeTo: baseURL) else { throw APIError.badStatus }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = ["tools": tools]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.badStatus }
+        let decoded = try JSONDecoder().decode(InstallResponse.self, from: data)
+        return decoded.results
+    }
+
     // MARK: - God-Tier Endpoints
 
     public func startMission(target: String) async throws -> String {
@@ -291,6 +306,13 @@ public struct SentinelAPIClient: Sendable {
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
+}
+
+public struct InstallResult: Decodable, Identifiable {
+    public var id: String { tool }
+    public let tool: String
+    public let status: String
+    public let message: String?
 }
 
 public struct SSEEvent {

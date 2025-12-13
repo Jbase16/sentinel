@@ -10,6 +10,7 @@ struct MainWindowView: View {
         case graph = "Attack Graph"
         case terminal = "System Console"
         case report = "Report Composer"
+        case tools = "Tool Bank"
         case chat = "AI Assistant"
 
         var id: String { rawValue }
@@ -20,6 +21,7 @@ struct MainWindowView: View {
             case .graph: return "network"
             case .terminal: return "command.square.fill"
             case .report: return "doc.text.fill"
+            case .tools: return "wrench.and.screwdriver.fill"
             case .chat: return "bubble.left.and.bubble.right.fill"
             }
         }
@@ -86,6 +88,7 @@ struct MainWindowView: View {
                     case .graph: NetworkGraphView()  // Metal 3D
                     case .terminal: TerminalView()
                     case .report: ReportComposerView()
+                    case .tools: ToolsBankView()
                     case .chat: ChatView()
                     case .none: Text("Offline")
                     }
