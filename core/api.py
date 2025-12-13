@@ -101,6 +101,27 @@ _cancel_requested = threading.Event()
 _active_scan_task: Optional[asyncio.Task] = None
 _scan_lock = asyncio.Lock()
 
+# --- Session Manager ---
+
+_session_manager: Dict[str, Any] = {}
+_session_manager_lock = asyncio.Lock()
+
+async def register_session(session_id: str, session) -> None:
+    """Register a session for tracking."""
+    async with _session_manager_lock:
+        _session_manager[session_id] = session
+
+async def get_session(session_id: str):
+    """Get a session by ID."""
+    async with _session_manager_lock:
+        return _session_manager.get(session_id)
+
+async def unregister_session(session_id: str) -> None:
+    """Unregister a session."""
+    async with _session_manager_lock:
+        if session_id in _session_manager:
+            del _session_manager[session_id]
+
 # --- Middleware & Auth ---
 
 def get_client_ip(request: Request) -> str:
@@ -177,12 +198,38 @@ def _get_latest_results() -> Dict[str, Any]:
     from core.findings_store import findings_store
     from core.issues_store import issues_store
     from core.killchain_store import killchain_store
-    return {
-        "findings": findings_store.get_all(),
-        "issues": issues_store.get_all(),
-        "killchain_edges": killchain_store.get_all(),
-        "scan": _scan_state,
-    }
+    
+    # Use session-scoped stores if available, otherwise fallback to global singletons
+    session_id = _scan_state.get("session_id")
+    
+    if session_id:
+        # Session-based query using session manager
+        session = await get_session(session_id)
+        if session:
+            return {
+                "findings": session.findings.get_all(),
+                "issues": session.issues.get_all(),
+                "killchain_edges": session.killchain.get_all(),
+                "scan": _scan_state,
+                "session_id": session_id,
+            }
+        else:
+            # Session not found (possibly completed), fallback to global stores
+            return {
+                "findings": findings_store.get_all(),
+                "issues": issues_store.get_all(),
+                "killchain_edges": killchain_store.get_all(),
+                "scan": _scan_state,
+                "session_id": session_id,
+            }
+    else:
+        # Fallback to global stores (legacy behavior)
+        return {
+            "findings": findings_store.get_all(),
+            "issues": issues_store.get_all(),
+            "killchain_edges": killchain_store.get_all(),
+            "scan": _scan_state,
+        }
 
 # --- Routes ---
 
@@ -213,6 +260,17 @@ async def get_status(_: bool = Depends(verify_token)):
 @app.get("/logs")
 async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
     lines = []
+    session_id = _scan_state.get("session_id")
+    
+    # First try to get session-specific logs
+    if session_id:
+        session = await get_session(session_id)
+        if session and hasattr(session, "logs"):
+            # Return session logs (most recent first, respecting limit)
+            lines = session.logs[-limit:] if len(session.logs) > limit else session.logs
+            return {"lines": lines, "session_id": session_id}
+    
+    # Fallback to global queue for legacy behavior
     while not _log_queue.empty() and len(lines) < limit:
         lines.append(_log_queue.get_nowait())
     return {"lines": lines}
@@ -377,17 +435,33 @@ async def start_scan(
         
         async def _runner():
             from core.scan_orchestrator import ScanOrchestrator
-            orch = ScanOrchestrator(log_fn=_log_sink_sync)
+            from core.session import ScanSession
+            
+            # Create a session for this scan to isolate data
+            session = ScanSession(req.target)
+            _scan_state["session_id"] = session.id
+            
+            # Register the session with the session manager
+            await register_session(session.id, session)
+            
+            orch = ScanOrchestrator(session=session, log_fn=_log_sink_sync)
             try:
                 await orch.run(req.target, modules=req.modules, cancel_flag=_cancel_requested)
                 _scan_state["status"] = "completed"
                 _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+                # Store session summary in scan state
+                _scan_state["summary"] = session.to_dict()
             except asyncio.CancelledError:
                 _scan_state["status"] = "cancelled"
+                _scan_state["summary"] = session.to_dict()
             except Exception as e:
                 _scan_state["status"] = "error"
                 _scan_state["error"] = str(e)
+                _scan_state["summary"] = session.to_dict()
                 logger.error(f"Scan error: {e}", exc_info=True)
+            finally:
+                # Unregister session when scan is complete
+                await unregister_session(session.id)
 
         _active_scan_task = asyncio.create_task(_runner())
         return JSONResponse(

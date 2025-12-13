@@ -18,7 +18,48 @@ from core.tools import TOOLS, get_tool_command, get_installed_tools
 class ScannerEngine:
     """Runs supported scanning tools on macOS (no unsupported tool errors)."""
 
-    MAX_CONCURRENT_TOOLS = 2
+import os
+
+# Try to import psutil for resource awareness
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
+# Configurable concurrency limit based on system resources
+MIN_CONCURRENT_TOOLS = 1
+MAX_CONCURRENT_TOOLS_BASE = 2  # Base value for small systems
+
+def calculate_concurrent_limit() -> int:
+    """Calculate optimal concurrency based on available system resources."""
+    try:
+        cpu_count = os.cpu_count() or 2
+        
+        # Get available memory in GB if psutil is available
+        if HAS_PSUTIL:
+            memory_info = psutil.virtual_memory()
+            available_memory_gb = memory_info.available / (1024**3)
+            
+            # Calculate limit based on resources
+            # Use 1 tool per 2GB of available RAM, up to CPU count
+            memory_based = max(1, int(available_memory_gb / 2))
+            cpu_based = max(1, cpu_count // 2)
+            
+            # Use the smaller of the two to avoid overload
+            calculated = min(memory_based, cpu_based)
+            
+            # Ensure at least the minimum and not too high
+            return max(MIN_CONCURRENT_TOOLS, min(calculated, MAX_CONCURRENT_TOOLS_BASE * 2))
+        else:
+            # Fallback when psutil is not available: use CPU count with cap
+            return max(MIN_CONCURRENT_TOOLS, min(cpu_count // 2, MAX_CONCURRENT_TOOLS_BASE * 2))
+    except Exception:
+        # Ultimate fallback if detection fails
+        return MAX_CONCURRENT_TOOLS_BASE
+
+# Calculate actual limit at module load
+MAX_CONCURRENT_TOOLS = calculate_concurrent_limit()
 
     def __init__(self, session=None):
         """
@@ -96,7 +137,7 @@ class ScannerEngine:
                     self._pending_tasks.clear()
                     break
 
-                while self._pending_tasks and len(self._running_tasks) < self.MAX_CONCURRENT_TOOLS:
+                while self._pending_tasks and len(self._running_tasks) < MAX_CONCURRENT_TOOLS:
                     task_def = self._pending_tasks.pop(0)
                     # Handle both simple strings (legacy) and dicts (dynamic args)
                     if isinstance(task_def, str):
@@ -132,6 +173,7 @@ class ScannerEngine:
                     # If cancellation was requested mid-run, try to wait for running tasks to finish.
                     if cancel_flag is not None and cancel_flag.is_set():
                         # Best-effort: terminate running subprocesses and wait for tasks to notice.
+                        await self._queue.put("[scanner]Cancellation detected - terminating running tools...")
                         for name, proc in list(self._procs.items()):
                             if proc.returncode is None:
                                 try:
@@ -139,8 +181,20 @@ class ScannerEngine:
                                     await self._queue.put(f"[{name}] terminated due to cancellation")
                                 except ProcessLookupError:
                                     pass
-                        await self._queue.put("[scanner] cancellation requested; waiting for running tasks to finish")
-                    await asyncio.sleep(0.05)
+                        
+                        # Give subprocesses a moment to terminate
+                        await asyncio.sleep(0.2)
+                        
+                        # Force kill any stubborn processes
+                        for name, proc in list(self._procs.items()):
+                            if proc.returncode is None:
+                                try:
+                                    proc.kill()
+                                    await self._queue.put(f"[{name}] force-killed after termination timeout")
+                                except ProcessLookupError:
+                                    pass
+                        
+                        await self._queue.put("[scanner] All tools terminated due to cancellation")
             
             
             while not self._queue.empty():
@@ -271,9 +325,15 @@ class ScannerEngine:
         else:
             enriched, killchain_edges = [], []
 
-        issues_store.replace_all(enriched)
-        combined_edges = list(killchain_edges) + list(self._recon_edges)
-        killchain_store.replace_all(combined_edges)
+        # Use session-scoped stores when available; fallback to global singletons
+        if self.session:
+            self.session.issues.replace_all(enriched)
+            combined_edges = list(killchain_edges) + list(self._recon_edges)
+            self.session.killchain.replace_all(combined_edges)
+        else:
+            issues_store.replace_all(enriched)
+            combined_edges = list(killchain_edges) + list(self._recon_edges)
+            killchain_store.replace_all(combined_edges)
         return len(enriched), len(combined_edges)
 
     async def _run_tool_task(
@@ -305,12 +365,15 @@ class ScannerEngine:
             self._procs[tool] = proc
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
-            EvidenceStore.instance().add_evidence(tool, msg, {"target": target, "error": "not_found"})
+            # Use session-scoped evidence store if available, otherwise global singleton
+            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
+            evidence_store.add_evidence(tool, msg, {"target": target, "error": "not_found"})
             await queue.put(msg)
             return []
         except Exception as exc:
             msg = f"[{tool}] failed to start: {exc}"
-            EvidenceStore.instance().add_evidence(tool, msg, {"target": target, "error": str(exc)})
+            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
+            evidence_store.add_evidence(tool, msg, {"target": target, "error": str(exc)})
             await queue.put(msg)
             return []
 
@@ -335,7 +398,9 @@ class ScannerEngine:
         self._procs.pop(tool, None)
 
         output_text = "\n".join(output_lines)
-        EvidenceStore.instance().add_evidence(tool, output_text, {
+        # Use session-scoped evidence store if available, otherwise global singleton
+        evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
+        evidence_store.add_evidence(tool, output_text, {
             "target": target,
             "exit_code": exit_code,
             "lines": len(output_lines)
@@ -345,7 +410,8 @@ class ScannerEngine:
             return ScannerBridge.classify(tool, target, output_text)
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"
-            EvidenceStore.instance().add_evidence(f"{tool}_classifier_error", err, {"target": target})
+            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
+            evidence_store.add_evidence(f"{tool}_classifier_error", err, {"target": target})
             await queue.put(err)
             return []
 

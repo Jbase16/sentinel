@@ -8,7 +8,8 @@ It replaces global singletons to allow concurrent scanning and robust isolation.
 
 import uuid
 import time
-from typing import Optional, Dict
+from threading import Lock
+from typing import Optional, Dict, List
 
 # Import store classes (we will refactor them to be instantiable)
 from core.findings_store import FindingsStore
@@ -30,11 +31,13 @@ class ScanSession:
         # Each session gets its own isolated stores, linked to DB ID
         self.findings = FindingsStore(session_id=self.id)
         self.issues = IssuesStore(session_id=self.id)
-        self.killchain = KillchainStore() # Killchain is transient/derived mostly, but could be persisted
-        self.evidence = EvidenceStore()   # EvidenceStore update pending... needs refactor to accept ID too 
+        self.killchain = KillchainStore(session_id=self.id) # Killchain is transient/derived mostly, but could be persisted
+        self.evidence = EvidenceStore(session_id=self.id)   # Now supports session-scoping
         
-        # Session-local logs
-        self.logs = []
+        # Session-local logs (thread-safe)
+        self.logs: List[str] = []
+        self._logs_lock = Lock()
+        self._external_log_sink = None  # Will be set by ScanOrchestrator
         
         # Ghost Protocol (Traffic Interceptor)
         self.ghost = None
@@ -60,8 +63,20 @@ class ScanSession:
     def log(self, message: str):
         timestamp = time.strftime("%H:%M:%S", time.localtime())
         entry = f"[{timestamp}] {message}"
-        self.logs.append(entry)
+        
+        # Thread-safe logging
+        with self._logs_lock:
+            self.logs.append(entry)
+            
+        # Also send to external log sink for UI streaming if available
+        if self._external_log_sink:
+            self._external_log_sink(entry)
+        
         # We could also emit a signal here for real-time UI updates specific to this session
+    
+    def set_external_log_sink(self, log_fn):
+        """Set the external log sink function."""
+        self._external_log_sink = log_fn
 
     def to_dict(self) -> Dict:
         return {

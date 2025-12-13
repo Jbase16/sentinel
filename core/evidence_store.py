@@ -5,6 +5,7 @@ class EvidenceStore(Observable):
     """
     Stores all evidence generated from tool output before and after AI analysis.
     Emits signals for UI updates.
+    Can be instantiated for session-specific use or accessed as global singleton.
     """
 
     evidence_changed = Signal()
@@ -20,10 +21,11 @@ class EvidenceStore(Observable):
 
     # ---------------------------------------------------------
 
-    def __init__(self):
+    def __init__(self, session_id: str = None):
         super().__init__()
         self._evidence = {}
         self._counter = 0
+        self.session_id = session_id
 
     def add_evidence(self, tool: str, raw_output: str, metadata: dict):
         self._counter += 1
