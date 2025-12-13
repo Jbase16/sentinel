@@ -46,15 +46,12 @@ class BackendManager: ObservableObject {
         if let p = process, p.isRunning {
             print("[BackendManager] Terminating backend process...")
             p.terminate()
-            p.waitUntilExit()
+            // Don't block - let the process die asynchronously
         }
         process = nil
         pipe = nil
-        
-        Task { @MainActor in
-            self.isRunning = false
-            self.status = "Core Stopped"
-        }
+        isRunning = false
+        status = "Core Stopped"
     }
 
     private func checkBackendHealth() async -> Bool {

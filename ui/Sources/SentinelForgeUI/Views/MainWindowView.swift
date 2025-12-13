@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MainWindowView: View {
     @EnvironmentObject var appState: HelixAppState
-    @State private var selection: SidebarItem? = .graph  // Default to Graph to show off 3D
+    @State private var selection: SidebarItem? = .chat  // Default to Chat for usability
 
     enum SidebarItem: String, Identifiable, CaseIterable {
         case dashboard = "Dashboard"
@@ -93,7 +93,7 @@ struct MainWindowView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(minWidth: 1000, minHeight: 700)
+        .frame(minWidth: 800, idealWidth: 1000, minHeight: 500, idealHeight: 700)
         .onAppear {
             appState.startEventStream()
             appState.refreshStatus()

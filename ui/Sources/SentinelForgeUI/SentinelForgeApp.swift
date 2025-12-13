@@ -15,6 +15,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
         }
     }
+    
+    func applicationWillTerminate(_ notification: Notification) {
+        // Ensure backend is stopped when app quits
+        BackendManager.shared.stop()
+    }
+    
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
 }
 
 @main
@@ -33,11 +42,9 @@ struct SentinelApp: App {
                     // Auto-boot the Neural Core when the window opens
                     backendManager.start()
                 }
-                .onDisappear {
-                    backendManager.stop()
-                }
         }
-        // Ensure standard window commands are available
+        .windowResizability(.contentSize)
+        .defaultSize(width: 1000, height: 700)
         .commands {
             SidebarCommands()
             TextEditingCommands()

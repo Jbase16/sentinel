@@ -25,10 +25,6 @@ struct ChatView: View {
                     }
                 }
             }
-            // Close keyboard on scroll (optional, mostly mobile behavior but good practice)
-            .onTapGesture {
-                isFocused = false
-            }
             
             Divider()
             
