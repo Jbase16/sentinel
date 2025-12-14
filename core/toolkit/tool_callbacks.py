@@ -1,4 +1,4 @@
-from .task_router import TaskRouter
+from core.base.task_router import TaskRouter
 
 def tool_callback_factory(tool_name: str):
     def callback(stdout, stderr, rc, metadata):

@@ -3,7 +3,7 @@
 
 from core.utils.observer import Observable, Signal
 
-from .ai_engine import AIEngine
+from core.ai.ai_engine import AIEngine
 # from .findings_store import findings_store
 # from .killchain_store import killchain_store
 

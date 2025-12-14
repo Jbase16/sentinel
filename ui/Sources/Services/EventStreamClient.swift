@@ -188,9 +188,9 @@ class EventStreamClient: ObservableObject {
 
     /// Stop consuming and disconnect
     nonisolated func disconnect() {
-        task?.cancel()
-        task = nil
         Task { @MainActor in
+            self.task?.cancel()
+            self.task = nil
             self.isConnected = false
         }
     }
@@ -252,7 +252,6 @@ class EventStreamClient: ObservableObject {
         print("[EventStreamClient] Connected, replaying from sequence \(lastSequence)")
 
         // Parse SSE stream
-        var eventType: String?
         var dataBuffer = ""
 
         for try await line in bytes.lines {
@@ -265,10 +264,7 @@ class EventStreamClient: ObservableObject {
                 {
                     await handleEvent(event)
                 }
-                eventType = nil
                 dataBuffer = ""
-            } else if line.hasPrefix("event:") {
-                eventType = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
             } else if line.hasPrefix("data:") {
                 let dataLine = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
                 dataBuffer += dataLine

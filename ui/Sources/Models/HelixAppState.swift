@@ -1,6 +1,11 @@
 import Combine
 import SwiftUI
 
+struct LogItem: Identifiable, Equatable {
+    let id: Int
+    let text: String
+}
+
 // Holds shared UI + LLM state.
 // ObservableObject means any @Published changes will re-render SwiftUI views.
 @MainActor
@@ -10,8 +15,10 @@ class HelixAppState: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var currentTab: SidebarTab = .dashboard
     @Published var isScanRunning: Bool = false
+    @Published var apiLogItems: [LogItem] = []  // Stable-identity log items (Option A)
 
     // Services
+    let eventClient = EventStreamClient()
     let apiClient: SentinelAPIClient
     let cortexStream: CortexStream
     let ptyClient: PTYClient
@@ -65,6 +72,21 @@ class HelixAppState: ObservableObject {
         // Kick off HTTP streams
         self.startEventStream()
         self.refreshStatus()
+
+        // Connect unified event stream (provides sequence IDs)
+        eventClient.connect()
+
+        // Subscribe to log events and map to stable-identity items
+        eventClient.logEventPublisher
+            .receive(on: RunLoop.main)
+            .sink { [weak self] event in
+                // Prefer 'message' (EventStore LOG_EMITTED), fallback to 'line' (legacy), else type
+                let text = event.payload["message"]?.stringValue
+                    ?? event.payload["line"]?.stringValue
+                    ?? event.type
+                self?.apiLogItems.append(LogItem(id: event.sequence, text: text))
+            }
+            .store(in: &cancellables)
     }
 
     private func setupLLMBindings() {
@@ -345,3 +367,4 @@ enum SidebarTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 }
+

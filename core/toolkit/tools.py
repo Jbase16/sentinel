@@ -305,8 +305,14 @@ async def install_tool(name: str) -> Dict[str, str]:
     if not spec:
         return {"tool": name, "status": "unknown", "message": "No installer mapping"}
     cmd = spec["cmd"]
+    
+    # Prepend environment variables for non-interactive mode
+    env_vars = "NONINTERACTIVE=1 "
+    
     # Handle shell pipes in command (e.g. "||" for fallback)
-    cmd_str = " ".join(cmd)
+    # We prepend the env var to the command string
+    cmd_str = env_vars + " ".join(cmd)
+    
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd_str,
@@ -315,13 +321,16 @@ async def install_tool(name: str) -> Dict[str, str]:
             shell=True
         )
         out, _ = await proc.communicate()
-        output = out.decode(errors="ignore")[-500:] if out else ""
+        output = out.decode(errors="ignore")[-1000:] if out else "" # Capture last 1000 chars
+        
         if proc.returncode == 0:
             return {"tool": name, "status": "installed", "message": output}
+        
         # Check if tool actually exists after install attempt
         if shutil.which(name):
-            return {"tool": name, "status": "installed", "message": f"Successfully installed {name}"}
-        return {"tool": name, "status": "error", "message": output or f"Installation failed for {name}"}
+            return {"tool": name, "status": "installed", "message": f"Successfully installed {name}\nLogs:\n{output}"}
+            
+        return {"tool": name, "status": "error", "message": f"Installation failed (rc={proc.returncode}):\n{output}"}
     except Exception as e:
         return {"tool": name, "status": "error", "message": str(e)}
 
@@ -359,7 +368,7 @@ def get_tool_command(name: str, target: str, override: Dict | None = None) -> Li
 # -------------------------------------------------------------------
 # Callback plumbing
 # -------------------------------------------------------------------
-from .task_router import TaskRouter
+from core.base.task_router import TaskRouter
 
 def tool_callback_factory(tool_name: str):
     def callback(stdout, stderr, rc, metadata):

@@ -176,6 +176,7 @@ struct StatCard: View {
             } else {
                 Text(value)
                     .font(.system(size: 28, weight: .bold))
+                    .textSelection(.enabled)
             }
 
             if showProgress {
@@ -266,6 +267,7 @@ struct IssueRow: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(8)
         .padding(.horizontal)
+        .textSelection(.enabled)
     }
 
     func severityColor(_ sev: String) -> Color {

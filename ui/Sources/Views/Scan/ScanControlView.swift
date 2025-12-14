@@ -20,7 +20,7 @@ struct ScanControlView: View {
 
             // Scan Progress Header
             if isScanning {
-                ScanProgressHeader(logsCount: appState.apiLogs.count)
+                ScanProgressHeader(logCount: appState.apiLogItems.count)
             }
 
             // Header / Input
@@ -73,7 +73,7 @@ struct ScanControlView: View {
 
 // MARK: - Scan Progress Header
 struct ScanProgressHeader: View {
-    let logsCount: Int
+    let logCount: Int
     @State private var elapsedTime: Int = 0
     @State private var timer: Timer?
 
@@ -94,7 +94,7 @@ struct ScanProgressHeader: View {
             IndeterminateProgressBar(color: .blue)
 
             HStack {
-                Text("\(logsCount) log entries")
+                Text("\(logCount) log entries")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 Spacer()
@@ -159,6 +159,7 @@ struct FindingRow: View {
                 .lineLimit(2)
         }
         .padding(.vertical, 4)
+        .textSelection(.enabled)
     }
 }
 
@@ -183,8 +184,8 @@ struct LogConsoleView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(appState.apiLogs, id: \.self) { line in
-                        Text(line)
+                    ForEach(appState.apiLogItems) { item in
+                        Text(item.text)
                             .font(.system(size: 11, design: .monospaced))
                             .textSelection(.enabled)
                     }

@@ -1,4 +1,4 @@
-from .executor import ExecutionEngine
+from core.engine.executor import ExecutionEngine
 from .tool_callbacks import tool_callback_factory
 
 class ToolBase:
