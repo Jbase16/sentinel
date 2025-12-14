@@ -10,6 +10,31 @@ import Metal
 import MetalKit
 import simd
 
+// Minimal graph event types used by the renderer (bridges SSE/graph events)
+enum GraphEventType: String {
+    case nodeAdded = "node_added"
+    case edgeAdded = "edge_added"
+    case findingDiscovered = "finding_discovered"
+    case scanStarted = "scan_started"
+    case scanCompleted = "scan_completed"
+    case unknown
+}
+
+struct GraphEvent {
+    let eventType: GraphEventType
+    let payload: [String: JSONValue]
+
+    init(eventType: GraphEventType, payload: [String: JSONValue]) {
+        self.eventType = eventType
+        self.payload = payload
+    }
+
+    init(typeString: String, payload: [String: JSONValue]) {
+        self.eventType = GraphEventType(rawValue: typeString) ?? .unknown
+        self.payload = payload
+    }
+}
+
 class GraphRenderer: NSObject {
     var device: MTLDevice
     var commandQueue: MTLCommandQueue?  // Changed from ! to ? for safety
@@ -88,25 +113,193 @@ class GraphRenderer: NSObject {
             print("Failed to create pipeline: \(error)")
         }
     }
+    // MARK: - Live Event Integration
 
+    /// Node tracking for event-driven updates
+    private var nodePositions: [String: Int] = [:]  // node_id -> index
+    private var nodeCount: Int = 0
+
+    /// Initialize with a single placeholder node (will be replaced by live data)
     private func generateDummyData() {
-        // Create a "Cyberpunk Cloud" of nodes
-        for _ in 0..<100 {
-            let x = Float.random(in: -1...1)
-            let y = Float.random(in: -1...1)
-            let z = Float.random(in: -0.5...0.5)
+        // Placeholder: Single "scanning" node until real events arrive
+        let placeholderNode = Node(
+            position: SIMD4<Float>(0, 0, 0, 25.0),
+            color: SIMD4<Float>(0.3, 0.3, 0.3, 0.5)
+        )
+        nodes = [placeholderNode]
+        uploadToGPU()
+    }
 
-            // Neon Cyan / Magenta theme
-            let isRed = Bool.random()
-            let color = isRed ? SIMD4<Float>(1.0, 0.0, 0.5, 0.8) : SIMD4<Float>(0.0, 0.8, 1.0, 0.8)
+    /// Handle a live graph event from EventStreamClient
+    func handleGraphEvent(_ event: GraphEvent) {
+        switch event.eventType {
+        case .nodeAdded:
+            addNodeFromEvent(event)
+        case .edgeAdded:
+            // For now, edges are visual links - could animate
+            break
+        case .findingDiscovered:
+            addFindingNode(event)
+        case .scanStarted:
+            resetGraph()
+            addScanTargetNode(event)
+        case .scanCompleted:
+            // Could trigger a "completion" animation
+            break
+        default:
+            break
+        }
+    }
 
-            // Pack size into w (20.0)
-            nodes.append(Node(position: SIMD4<Float>(x, y, z, 20.0), color: color))
+    /// Add a node from a NODE_ADDED event
+    private func addNodeFromEvent(_ event: GraphEvent) {
+        guard let nodeId = event.payload["node_id"]?.stringValue,
+            let nodeType = event.payload["node_type"]?.stringValue
+        else {
+            return
         }
 
-        // Upload to GPU
+        // Skip if already added
+        if nodePositions[nodeId] != nil { return }
+
+        // Position based on type (ring layout)
+        let angle = Float(nodeCount) * 0.618 * 2 * .pi  // Golden angle
+        let radius: Float = 0.3 + Float(nodeCount) * 0.05
+        let x = cos(angle) * radius
+        let y = sin(angle) * radius
+        let z = Float.random(in: -0.1...0.1)
+
+        // Color based on node type
+        let color = colorForNodeType(nodeType)
+        let size: Float = sizeForNodeType(nodeType)
+
+        let newNode = Node(
+            position: SIMD4<Float>(x, y, z, size),
+            color: color
+        )
+
+        lock.lock()
+        nodePositions[nodeId] = nodes.count
+        nodes.append(newNode)
+        nodeCount += 1
+        lock.unlock()
+
+        uploadToGPU()
+    }
+
+    /// Add a finding as a prominent node
+    private func addFindingNode(_ event: GraphEvent) {
+        guard let findingId = event.payload["finding_id"]?.stringValue,
+            let severity = event.payload["severity"]?.stringValue
+        else {
+            return
+        }
+
+        if nodePositions[findingId] != nil { return }
+
+        // Findings appear in outer ring
+        let angle = Float(nodeCount) * 0.618 * 2 * .pi
+        let radius: Float = 0.8
+        let x = cos(angle) * radius
+        let y = sin(angle) * radius
+
+        // Color by severity
+        let color = colorForSeverity(severity)
+
+        let newNode = Node(
+            position: SIMD4<Float>(x, y, 0, 35.0),
+            color: color
+        )
+
+        lock.lock()
+        nodePositions[findingId] = nodes.count
+        nodes.append(newNode)
+        nodeCount += 1
+        lock.unlock()
+
+        uploadToGPU()
+    }
+
+    /// Add the scan target as the central node
+    private func addScanTargetNode(_ event: GraphEvent) {
+        guard let target = event.payload["target"]?.stringValue else { return }
+
+        let targetNode = Node(
+            position: SIMD4<Float>(0, 0, 0, 50.0),
+            color: SIMD4<Float>(1.0, 0.3, 0.3, 1.0)  // Red center
+        )
+
+        lock.lock()
+        nodePositions[target] = 0
+        nodes = [targetNode]
+        nodeCount = 1
+        lock.unlock()
+
+        uploadToGPU()
+    }
+
+    /// Reset the graph for a new scan
+    func resetGraph() {
+        lock.lock()
+        nodes.removeAll()
+        nodePositions.removeAll()
+        nodeCount = 0
+        lock.unlock()
+    }
+
+    /// Upload current nodes to GPU
+    private func uploadToGPU() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !nodes.isEmpty else { return }
         let dataSize = nodes.count * MemoryLayout<Node>.stride
         vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
+    }
+
+    // MARK: - Visual Mapping
+
+    private func colorForNodeType(_ type: String) -> SIMD4<Float> {
+        switch type {
+        case "asset":
+            return SIMD4<Float>(0.0, 0.8, 1.0, 1.0)  // Cyan
+        case "port":
+            return SIMD4<Float>(0.5, 1.0, 0.5, 0.9)  // Green
+        case "service":
+            return SIMD4<Float>(1.0, 0.8, 0.0, 0.9)  // Orange
+        case "tech":
+            return SIMD4<Float>(0.8, 0.5, 1.0, 0.9)  // Purple
+        case "finding":
+            return SIMD4<Float>(1.0, 0.3, 0.3, 1.0)  // Red
+        default:
+            return SIMD4<Float>(0.7, 0.7, 0.7, 0.8)  // Gray
+        }
+    }
+
+    private func sizeForNodeType(_ type: String) -> Float {
+        switch type {
+        case "asset": return 40.0
+        case "port": return 20.0
+        case "service": return 25.0
+        case "tech": return 22.0
+        case "finding": return 35.0
+        default: return 20.0
+        }
+    }
+
+    private func colorForSeverity(_ severity: String) -> SIMD4<Float> {
+        switch severity.uppercased() {
+        case "CRITICAL":
+            return SIMD4<Float>(1.0, 0.0, 0.0, 1.0)  // Bright red
+        case "HIGH":
+            return SIMD4<Float>(1.0, 0.4, 0.0, 1.0)  // Orange-red
+        case "MEDIUM":
+            return SIMD4<Float>(1.0, 0.8, 0.0, 0.9)  // Yellow
+        case "LOW":
+            return SIMD4<Float>(0.3, 0.8, 1.0, 0.8)  // Blue
+        default:
+            return SIMD4<Float>(0.5, 0.5, 0.5, 0.7)  // Gray
+        }
     }
 
     func resize(size: CGSize) {

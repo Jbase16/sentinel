@@ -26,6 +26,7 @@ from core.config import get_config, setup_logging
 from core.ai_engine import AIEngine
 from core.task_router import TaskRouter
 from core.cortex.reasoning import ReasoningEngine, reasoning_engine
+from core.cortex.events import EventStore, get_event_store, GraphEventType
 from core.wraith.evasion import WraithEngine
 from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
@@ -297,6 +298,25 @@ async def get_status(_: bool = Depends(verify_token)):
         },
     }
 
+@app.get("/tools/status")
+async def tools_status(_: bool = Depends(verify_token)):
+    from core.tools import get_installed_tools, TOOLS
+    installed = get_installed_tools()
+    all_tools = list(TOOLS.keys())
+    missing = [t for t in all_tools if t not in installed]
+    payload = {
+        "installed": list(installed.keys()),
+        "missing": missing,
+        "count_installed": len(installed),
+        "count_total": len(all_tools),
+    }
+    # Also emit a UI event so the Tools tab can update via SSE if connected
+    try:
+        TaskRouter.instance().emit_ui_event("tools_status", payload)
+    except Exception:
+        pass
+    return {"tools": payload}
+
 @app.get("/logs")
 async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
     lines = []
@@ -388,9 +408,34 @@ async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
     Install selected tools using Homebrew or pip (best-effort).
     Returns per-tool status. The process output tail is included for diagnostics.
     """
-    from core.tools import install_tools
+    from core.tools import install_tools, get_installed_tools, TOOLS
+    # Notify UI: installation started
+    try:
+        TaskRouter.instance().emit_ui_event("tools_install_started", {"tools": req.tools})
+    except Exception:
+        pass
+
     results = await install_tools(req.tools)
-    return {"results": results}
+
+    # Compute updated tool status
+    installed = get_installed_tools()
+    all_tools = list(TOOLS.keys())
+    missing = [t for t in all_tools if t not in installed]
+    status_payload = {
+        "installed": list(installed.keys()),
+        "missing": missing,
+        "count_installed": len(installed),
+        "count_total": len(all_tools),
+    }
+
+    # Emit UI events so the Tools tab updates live
+    try:
+        TaskRouter.instance().emit_ui_event("tools_install_result", {"results": results})
+        TaskRouter.instance().emit_ui_event("tools_status", status_payload)
+    except Exception:
+        pass
+
+    return {"results": results, "tools": status_payload}
 
 @app.post("/chat/query")
 async def chat_query(
@@ -476,6 +521,9 @@ async def start_scan(
         async def _runner():
             from core.scan_orchestrator import ScanOrchestrator
             from core.session import ScanSession
+            from core.cortex.events import get_event_bus
+            
+            event_bus = get_event_bus()
             
             # Create a session for this scan to isolate data
             session = ScanSession(req.target)
@@ -484,21 +532,42 @@ async def start_scan(
             # Register the session with the session manager
             await register_session(session.id, session)
             
+            # Emit SCAN_STARTED event
+            event_bus.emit_scan_started(req.target, req.modules or [], session.id)
+            
             orch = ScanOrchestrator(session=session, log_fn=_log_sink_sync)
+            start_time = time.time()
             try:
                 await orch.run(req.target, modules=req.modules, cancel_flag=_cancel_requested)
                 _scan_state["status"] = "completed"
                 _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
                 # Store session summary in scan state
                 _scan_state["summary"] = session.to_dict()
+                
+                # Emit SCAN_COMPLETED event
+                duration = time.time() - start_time
+                event_bus.emit_scan_completed("completed", len(session.findings), duration)
+                
             except asyncio.CancelledError:
                 _scan_state["status"] = "cancelled"
                 _scan_state["summary"] = session.to_dict()
+                
+                duration = time.time() - start_time
+                event_bus.emit_scan_completed("cancelled", len(session.findings), duration)
+                
             except Exception as e:
                 _scan_state["status"] = "error"
                 _scan_state["error"] = str(e)
                 _scan_state["summary"] = session.to_dict()
                 logger.error(f"Scan error: {e}", exc_info=True)
+                
+                # Emit error via event store
+                event_bus._store.append(
+                    GraphEventType.SCAN_ERROR,
+                    {"error": str(e), "target": req.target},
+                    source="orchestrator"
+                )
+                
             finally:
                 # Unregister session when scan is complete
                 await unregister_session(session.id)
@@ -615,6 +684,71 @@ async def events(request: Request, _: bool = Depends(verify_token)):
                 pass
 
     return StreamingResponse(_event_stream(), media_type="text/event-stream")
+
+
+# ============================================================================
+# Event-Sourced Reactive Graph Stream (ESRG)
+# ============================================================================
+
+@app.get("/events/stream")
+async def events_stream(
+    request: Request,
+    since: int = Query(default=0, description="Sequence number to replay from"),
+    _: bool = Depends(verify_token),
+):
+    """
+    Unified SSE stream for all graph events.
+    
+    This is the primary real-time API for the UI. It:
+    1. Replays missed events from `since` sequence
+    2. Streams new events as they occur
+    3. Sends keepalives every 15s to maintain connection
+    
+    Event format:
+        event: <event_type>
+        data: {"id": "...", "type": "...", "sequence": N, "payload": {...}}
+    
+    The client should track the highest `sequence` received and use it
+    as the `since` parameter on reconnection.
+    """
+    event_store = get_event_store()
+    
+    async def _generate():
+        try:
+            # Phase 1: Replay missed events
+            missed_events = event_store.get_since(since)
+            for event in missed_events:
+                if await request.is_disconnected():
+                    return
+                yield f"event: {event.type.value}\ndata: {event.to_json()}\n\n"
+            
+            # Phase 2: Stream live events
+            async for event in event_store.subscribe():
+                if await request.is_disconnected():
+                    break
+                yield f"event: {event.type.value}\ndata: {event.to_json()}\n\n"
+                
+        except asyncio.CancelledError:
+            logger.debug("[EventStream] Client disconnected")
+        except Exception as e:
+            logger.error(f"[EventStream] Error: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
+
+
+@app.get("/events/stats")
+async def events_stats(_: bool = Depends(verify_token)):
+    """Return diagnostic stats about the event store."""
+    return get_event_store().stats()
 
 @app.get("/report/generate")
 async def generate_report(

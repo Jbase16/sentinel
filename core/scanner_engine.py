@@ -60,6 +60,11 @@ def calculate_concurrent_limit() -> int:
 # Calculate actual limit at module load
 MAX_CONCURRENT_TOOLS = calculate_concurrent_limit()
 
+# Timeout configuration (can be overridden via environment variables)
+DEFAULT_TOOL_TIMEOUT_SECONDS = 300          # 5 minutes per tool hard cap
+DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS = 60      # 1 minute without output => consider stuck
+DEFAULT_GLOBAL_SCAN_TIMEOUT_SECONDS = 900   # 15 minutes overall cap
+
 
 class ScannerEngine:
     """Runs supported scanning tools on macOS (no unsupported tool errors)."""
@@ -82,6 +87,75 @@ class ScannerEngine:
         self._queue = asyncio.Queue()
         self._results_map = {}
         self._procs = {}
+
+    @staticmethod
+    def _get_env_seconds(name: str, default: int) -> int:
+        """Parse an integer number of seconds from environment, falling back to default.
+        Returns 0 or negative to mean 'disabled' if provided as such.
+        """
+        val = os.environ.get(name)
+        if not val:
+            return default
+        try:
+            return int(val)
+        except ValueError:
+            return default
+
+    def _tool_timeout_seconds(self) -> int:
+        """Per-tool wall-clock timeout in seconds (0 disables)."""
+        return self._get_env_seconds("SCANNER_TOOL_TIMEOUT", DEFAULT_TOOL_TIMEOUT_SECONDS)
+
+    def _tool_idle_timeout_seconds(self) -> int:
+        """Per-tool idle-output timeout in seconds (0 disables)."""
+        return self._get_env_seconds("SCANNER_TOOL_IDLE_TIMEOUT", DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS)
+
+    def _global_scan_timeout_seconds(self) -> int:
+        """Global scan timeout in seconds (0 disables)."""
+        return self._get_env_seconds("SCANNER_GLOBAL_TIMEOUT", DEFAULT_GLOBAL_SCAN_TIMEOUT_SECONDS)
+
+    async def _global_timeout_runner(self, timeout_secs: int, cancel_flag, queue: asyncio.Queue[str]):
+        """Watchdog that enforces a global scan timeout by triggering cancellation and
+        attempting to terminate/kill any running subprocesses.
+        """
+        try:
+            await asyncio.sleep(max(0, timeout_secs))
+        except asyncio.CancelledError:
+            return
+        # If already canceled, do nothing
+        try:
+            is_canceled = cancel_flag.is_set()
+        except Exception:
+            is_canceled = False
+        if is_canceled:
+            return
+        # Signal cancellation
+        try:
+            cancel_flag.set()
+        except Exception:
+            # If cancel_flag doesn't support set(), we still proceed with termination best-effort
+            pass
+        await queue.put(f"[scanner] ⏱️ Global timeout {timeout_secs}s reached; canceling scan and terminating tools...")
+        # Best-effort termination of running subprocesses
+        for name, proc in list(self._procs.items()):
+            if proc.returncode is None:
+                try:
+                    proc.terminate()
+                    await queue.put(f"[{name}] terminated due to global timeout")
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    await queue.put(f"[{name}] termination error on timeout: {exc}")
+        # Give them a moment, then force-kill stubborn ones
+        await asyncio.sleep(0.2)
+        for name, proc in list(self._procs.items()):
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                    await queue.put(f"[{name}] force-killed after global timeout")
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    await queue.put(f"[{name}] force-kill error on timeout: {exc}")
 
     # ------------------------------------------------------------------
     # Public API
@@ -131,11 +205,18 @@ class ScannerEngine:
             self._queue = queue
             self._results_map = results_map
 
+            # Cancellation and global timeout setup
+            local_cancel = cancel_flag or asyncio.Event()
+            watchdog_task = None
+            global_timeout = self._global_scan_timeout_seconds()
+            if global_timeout and global_timeout > 0:
+                watchdog_task = asyncio.create_task(self._global_timeout_runner(global_timeout, local_cancel, self._queue))
+
             # FIXED: Wait for ALL tasks to complete, not just until slots fill
             while self._pending_tasks or self._running_tasks:
                 # Fill available slots
                 # Check for cancellation before launching new tasks
-                if cancel_flag is not None and cancel_flag.is_set():
+                if local_cancel.is_set():
                     await self._queue.put("[scanner] cancellation requested; stopping new tasks")
                     self._pending_tasks.clear()
                     break
@@ -151,7 +232,7 @@ class ScannerEngine:
                          args = task_def.get("args")
 
                     self._running_tasks[tool] = asyncio.create_task(
-                        self._run_tool_task(tool, target, self._queue, args, cancel_flag)
+                        self._run_tool_task(tool, target, self._queue, args, local_cancel)
                     )
                     await self._queue.put(f"[scanner] Started {tool} (dynamic launch)")
 
@@ -174,7 +255,7 @@ class ScannerEngine:
                 
                 if not done:
                     # If cancellation was requested mid-run, try to wait for running tasks to finish.
-                    if cancel_flag is not None and cancel_flag.is_set():
+                    if local_cancel.is_set():
                         # Best-effort: terminate running subprocesses and wait for tasks to notice.
                         await self._queue.put("[scanner]Cancellation detected - terminating running tools...")
                         for name, proc in list(self._procs.items()):
@@ -199,6 +280,12 @@ class ScannerEngine:
                         
                         await self._queue.put("[scanner] All tools terminated due to cancellation")
             
+            # Stop global watchdog if running
+            if 'watchdog_task' in locals() and watchdog_task is not None:
+                try:
+                    watchdog_task.cancel()
+                except Exception:
+                    pass
             
             while not self._queue.empty():
                 yield self._queue.get_nowait()
@@ -348,6 +435,9 @@ class ScannerEngine:
         cancel_flag=None,
     ) -> List[dict]:
         meta_override = self._installed_meta.get(tool)
+
+        tool_timeout = self._tool_timeout_seconds()
+        idle_timeout = self._tool_idle_timeout_seconds()
         
         if custom_args:
             # Use custom args directly if provided (for autonomous actions)
@@ -380,22 +470,65 @@ class ScannerEngine:
             await queue.put(msg)
             return []
 
+        start_time = asyncio.get_running_loop().time()
+        timed_out_reason = None
+
         output_lines: List[str] = []
         assert proc.stdout is not None
         while True:
+            # Cooperative cancellation: terminate and break
             if cancel_flag is not None and cancel_flag.is_set():
-                # Stop reading further; process may be terminated by caller.
+                try:
+                    if proc.returncode is None:
+                        proc.terminate()
+                except ProcessLookupError:
+                    pass
                 break
-            line = await proc.stdout.readline()
+            # Read a line with optional idle timeout
+            try:
+                if idle_timeout and idle_timeout > 0:
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=idle_timeout)
+                else:
+                    line = await proc.stdout.readline()
+            except asyncio.TimeoutError:
+                timed_out_reason = "idle"
+                await queue.put(f"[{tool}] idle timeout after {idle_timeout}s without output; terminating")
+                try:
+                    if proc.returncode is None:
+                        proc.terminate()
+                except ProcessLookupError:
+                    pass
+                break
             if not line:
                 break
             text = line.decode("utf-8", errors="ignore").rstrip()
             if not text:
+                # Even empty lines count as activity for idle timeout because we received a line
                 continue
             output_lines.append(text)
             await queue.put(f"[{tool}] {text}")
+            # Check wall-clock timeout
+            if tool_timeout and tool_timeout > 0:
+                now = asyncio.get_running_loop().time()
+                if (now - start_time) > tool_timeout:
+                    timed_out_reason = "wall-clock"
+                    await queue.put(f"[{tool}] time limit {tool_timeout}s exceeded; terminating")
+                    try:
+                        if proc.returncode is None:
+                            proc.terminate()
+                    except ProcessLookupError:
+                        pass
+                    break
 
-        exit_code = await proc.wait()
+        # Ensure the process exits; force-kill if needed
+        try:
+            exit_code = await asyncio.wait_for(proc.wait(), timeout=2)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            exit_code = await proc.wait()
         await queue.put(f"[{tool}] Exit code: {exit_code}")
         # Cleanup tracked proc
         self._procs.pop(tool, None)
@@ -406,7 +539,10 @@ class ScannerEngine:
         evidence_store.add_evidence(tool, output_text, {
             "target": target,
             "exit_code": exit_code,
-            "lines": len(output_lines)
+            "lines": len(output_lines),
+            "timed_out": bool(timed_out_reason),
+            "timeout_reason": timed_out_reason,
+            "canceled": bool(cancel_flag and getattr(cancel_flag, 'is_set', lambda: False)())
         })
 
         try:

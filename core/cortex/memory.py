@@ -14,6 +14,9 @@ from enum import Enum
 
 import networkx as nx
 
+# Event-sourced graph updates
+from core.cortex.events import EventBus, get_event_bus
+
 logger = logging.getLogger(__name__)
 
 class NodeType(str, Enum):
@@ -52,13 +55,16 @@ class KnowledgeGraph:
     def __init__(self):
         self._graph = nx.DiGraph()
         self._dirty = False
+        self._event_bus: EventBus = get_event_bus()
 
     def add_node(self, node_id: str, type: NodeType, attributes: Dict[str, Any] = None):
         """
-        idempotent add_node.
+        Idempotent add_node with event emission.
         """
+        is_new = False
         with self._lock:
             if not self._graph.has_node(node_id):
+                is_new = True
                 self._graph.add_node(
                     node_id, 
                     type=type, 
@@ -72,12 +78,21 @@ class KnowledgeGraph:
                     current.update(attributes)
                     current["updated_at"] = datetime.now(timezone.utc).isoformat()
             self._dirty = True
+        
+        # Emit event outside of lock to prevent deadlocks
+        if is_new:
+            self._event_bus.emit_node_added(node_id, type.value, attributes or {})
 
     def add_edge(self, source_id: str, target_id: str, type: EdgeType, weight: float = 1.0, meta: Dict = None):
+        edge_created = False
         with self._lock:
             if not self._graph.has_node(source_id) or not self._graph.has_node(target_id):
                 logger.warning(f"Attempted to link missing nodes: {source_id} -> {target_id}")
                 return
+            
+            # Only emit if edge is new
+            if not self._graph.has_edge(source_id, target_id):
+                edge_created = True
             
             self._graph.add_edge(
                 source_id, 
@@ -88,6 +103,10 @@ class KnowledgeGraph:
                 **(meta or {})
             )
             self._dirty = True
+        
+        # Emit event outside of lock
+        if edge_created:
+            self._event_bus.emit_edge_added(source_id, target_id, type.value, weight)
 
     def get_neighbors(self, node_id: str, relation: EdgeType = None) -> List[Dict]:
         with self._lock:
