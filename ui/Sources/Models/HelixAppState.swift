@@ -34,6 +34,11 @@ class HelixAppState: ObservableObject {
     @Published var autoRoutingEnabled: Bool = true
     @Published var pendingActions: [PendingAction] = []
 
+    // Report State (Persisted)
+    @Published var reportContent: [String: String] = [:]
+    @Published var reportIsGenerating: Bool = false
+    @Published var selectedSection: String = "executive_summary"
+
     private let llm: LLMService
 
     init(llm: LLMService) {
@@ -196,11 +201,43 @@ class HelixAppState: ObservableObject {
         llm.updateAutoRouting(enabled)
     }
 
+    // MARK: - Report Generation
+    
+    func generateReport(section: String) {
+        guard !reportIsGenerating else { return }
+        reportIsGenerating = true
+        reportContent[section] = "" // Clear previous content
+        
+        Task {
+            defer {
+                Task { @MainActor in
+                    self.reportIsGenerating = false
+                }
+            }
+            do {
+                for try await token in apiClient.streamReportSection(section: section) {
+                    await MainActor.run {
+                        self.reportContent[section, default: ""] += token
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self.reportContent[section, default: ""] += "\n[Error: \(error.localizedDescription)]"
+                }
+            }
+        }
+    }
+
     // MARK: - Core IPC Helpers (HTTP bridge to Python)
 
+    func clearLogs() {
+        self.apiLogs.removeAll()
+        self.apiLogItems.removeAll()
+    }
+
     /// Start a scan via the core /scan endpoint (supports logs + cancellation)
-    func startScan(target: String) {
-        print("[AppState] Starting Scan for target: \(target)")
+    func startScan(target: String, modules: [String] = []) {
+        print("[AppState] Starting Scan for target: \(target) with modules: \(modules)")
         BackendManager.shared.isActiveOperation = true  // Scans can be long-running
         Task {
             defer {
@@ -209,7 +246,7 @@ class HelixAppState: ObservableObject {
                 }
             }
             do {
-                try await apiClient.startScan(target: target)
+                try await apiClient.startScan(target: target, modules: modules)
                 await MainActor.run {
                     self.isScanRunning = true
                 }

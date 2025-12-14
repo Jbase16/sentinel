@@ -301,6 +301,14 @@ async def install_tool(name: str) -> Dict[str, str]:
     import asyncio
     import shutil
     import subprocess
+    from core.base.task_router import TaskRouter
+
+    # Notify UI: Installation starting
+    try:
+        TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "installing"})
+    except Exception:
+        pass
+
     spec = INSTALLERS.get(name)
     if not spec:
         return {"tool": name, "status": "unknown", "message": "No installer mapping"}
@@ -323,14 +331,25 @@ async def install_tool(name: str) -> Dict[str, str]:
         out, _ = await proc.communicate()
         output = out.decode(errors="ignore")[-1000:] if out else "" # Capture last 1000 chars
         
+        status = "error"
+        msg = f"Installation failed (rc={proc.returncode}):\n{output}"
+
         if proc.returncode == 0:
-            return {"tool": name, "status": "installed", "message": output}
+            status = "installed"
+            msg = output
         
         # Check if tool actually exists after install attempt
         if shutil.which(name):
-            return {"tool": name, "status": "installed", "message": f"Successfully installed {name}\nLogs:\n{output}"}
+            status = "installed"
+            msg = f"Successfully installed {name}\nLogs:\n{output}"
             
-        return {"tool": name, "status": "error", "message": f"Installation failed (rc={proc.returncode}):\n{output}"}
+        # Notify UI: Result
+        try:
+            TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": status})
+        except Exception:
+            pass
+
+        return {"tool": name, "status": status, "message": msg}
     except Exception as e:
         return {"tool": name, "status": "error", "message": str(e)}
 
@@ -339,6 +358,63 @@ async def install_tools(names: List[str]) -> List[Dict[str, str]]:
     results = []
     for n in names:
         results.append(await install_tool(n))
+    return results
+
+async def uninstall_tool(name: str) -> Dict[str, str]:
+    import asyncio
+    from core.base.task_router import TaskRouter
+    
+    # Notify UI
+    try:
+        TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "uninstalling"})
+    except Exception:
+        pass
+
+    spec = INSTALLERS.get(name)
+    if not spec:
+        return {"tool": name, "status": "unknown", "message": "No installer mapping found to infer uninstaller"}
+    
+    install_cmd = spec["cmd"]
+    uninstall_cmd = []
+    
+    # Heuristic to derive uninstall command
+    if "brew" in install_cmd:
+        uninstall_cmd = ["brew", "uninstall", name]
+    elif "pip" in install_cmd:
+        uninstall_cmd = ["pip", "uninstall", "-y", name]
+    else:
+        return {"tool": name, "status": "error", "message": "Cannot determine uninstaller for this tool"}
+
+    cmd_str = "NONINTERACTIVE=1 " + " ".join(uninstall_cmd)
+    
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd_str,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            shell=True
+        )
+        out, _ = await proc.communicate()
+        output = out.decode(errors="ignore")[-500:]
+        
+        status = "error"
+        if proc.returncode == 0:
+            status = "uninstalled"
+        
+        # Notify UI
+        try:
+            TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": status})
+        except Exception:
+            pass
+
+        return {"tool": name, "status": status, "message": output}
+    except Exception as e:
+        return {"tool": name, "status": "error", "message": str(e)}
+
+async def uninstall_tools(names: List[str]) -> List[Dict[str, str]]:
+    results = []
+    for n in names:
+        results.append(await uninstall_tool(n))
     return results
 
 # -------------------------------------------------------------------

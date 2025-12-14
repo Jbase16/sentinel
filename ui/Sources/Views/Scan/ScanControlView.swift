@@ -1,10 +1,15 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
     @State private var scanTarget: String = "http://testphp.vulnweb.com"
     @FocusState private var isFocused: Bool
+    
+    // Scan Config
+    @State private var selectedTools: Set<String> = []
+    @State private var showToolConfig = false
 
     private var isScanning: Bool {
         appState.engineStatus?.scanRunning == true || appState.isScanRunning
@@ -30,11 +35,23 @@ struct ScanControlView: View {
                     .font(.body)
                     .focused($isFocused)
                     .onSubmit {
-                        if !scanTarget.isEmpty && backend.isRunning {
-                            appState.startScan(target: scanTarget)
-                        }
+                        startScan()
                     }
                     .disabled(!backend.isRunning || isScanning)
+                
+                // Tool Configuration
+                Button(action: { showToolConfig.toggle() }) {
+                    Image(systemName: "gearshape")
+                        .foregroundColor(selectedTools.isEmpty ? .secondary : .blue)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showToolConfig) {
+                    ToolSelectionView(
+                        installed: appState.engineStatus?.tools?.installed ?? [],
+                        selection: $selectedTools
+                    )
+                }
+                .disabled(isScanning)
 
                 if isScanning {
                     Button(action: { appState.cancelScan() }) {
@@ -46,7 +63,7 @@ struct ScanControlView: View {
                     }
                     .tint(.red)
                 } else {
-                    Button(action: { appState.startScan(target: scanTarget) }) {
+                    Button(action: startScan) {
                         Label("Start Scan", systemImage: "play.fill")
                     }
                     .disabled(scanTarget.isEmpty || !backend.isRunning)
@@ -68,6 +85,70 @@ struct ScanControlView: View {
                 }
             }
         }
+    }
+    
+    private func startScan() {
+        if !scanTarget.isEmpty && backend.isRunning {
+            // If selection is empty, it means "All" (default behavior) logic, 
+            // OR it means "None selected".
+            // Let's assume empty selection = Run All (default).
+            // But if user explicitly deselected all... that's tricky.
+            // For now, let's treat empty as "Default/All".
+            // If they want specific, they select specific.
+            appState.startScan(target: scanTarget, modules: Array(selectedTools))
+        }
+    }
+}
+
+// MARK: - Subviews
+
+struct ToolSelectionView: View {
+    let installed: [String]
+    @Binding var selection: Set<String>
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text("Select Tools")
+                .font(.headline)
+                .padding(.bottom, 4)
+            
+            HStack {
+                Button("All") {
+                    selection = Set(installed)
+                }
+                Button("None") {
+                    selection.removeAll()
+                }
+            }
+            .buttonStyle(.link)
+            .font(.caption)
+            
+            Divider() 
+            
+            List {
+                ForEach(installed, id: \.self) { tool in
+                    HStack {
+                        Image(systemName: selection.contains(tool) ? "checkmark.square" : "square")
+                        Text(tool)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if selection.contains(tool) {
+                            selection.remove(tool)
+                        } else {
+                            selection.insert(tool)
+                        }
+                    }
+                }
+            }
+            .frame(minWidth: 250, minHeight: 300)
+            
+            Text("\(selection.count) selected")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding()
     }
 }
 
@@ -165,6 +246,8 @@ struct FindingRow: View {
 
 struct LogConsoleView: View {
     @EnvironmentObject var appState: HelixAppState
+    @State private var showingExporter = false
+    @State private var logContentForExport: String = ""
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -174,25 +257,72 @@ struct LogConsoleView: View {
                     .bold()
                 Spacer()
                 Button("Clear") {
-                    // appState.clearLogs() // To be implemented
+                    appState.clearLogs()
                 }
                 .buttonStyle(.plain)
                 .font(.caption)
+                
+                Button("Export") {
+                    // Extract text from log items
+                    logContentForExport = appState.apiLogItems.map { $0.text }.joined(separator: "\n")
+                    showingExporter = true
+                }
+                .buttonStyle(.plain)
+                .font(.caption)
+                .disabled(appState.apiLogItems.isEmpty)
             }
             .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(appState.apiLogItems) { item in
-                        Text(item.text)
-                            .font(.system(size: 11, design: .monospaced))
-                            .textSelection(.enabled)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(appState.apiLogItems) { item in
+                            Text(item.text)
+                                .font(.system(size: 11, design: .monospaced))
+                                .textSelection(.enabled)
+                                .id(item.id)
+                        }
+                    }
+                    .padding(8)
+                }
+                .onChange(of: appState.apiLogItems.count) { _, _ in
+                    if let last = appState.apiLogItems.last {
+                        withAnimation {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
                     }
                 }
-                .padding(8)
             }
         }
         .background(Color.black)
+        .fileExporter(
+            isPresented: $showingExporter,
+            document: PlainTextDocument(content: logContentForExport),
+            contentType: .plainText,
+            defaultFilename: "sentinel_logs.txt"
+        ) { result in
+            // Handle result (optional)
+        }
     }
 }
+
+// Minimal FileDocument implementation
+struct PlainTextDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText] }
+    var content: String
+
+    init(content: String) {
+        self.content = content
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        // We only export, not import in this view
+        content = ""
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        return FileWrapper(regularFileWithContents: content.data(using: .utf8)!)
+    }
+}
+

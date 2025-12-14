@@ -3,9 +3,6 @@ import SwiftUI
 struct ReportComposerView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
-    @State private var selectedSection: String = "executive_summary"
-    @State private var reportContent: [String: String] = [:]
-    @State private var isGenerating: Bool = false
     @State private var generationProgress: String = ""
     @State private var elapsedTime: Int = 0
     @State private var timer: Timer?
@@ -35,10 +32,10 @@ struct ReportComposerView: View {
                             Image(systemName: "doc.text")
                             Text(title)
                             Spacer()
-                            if isGenerating && selectedSection == key {
+                            if appState.reportIsGenerating && appState.selectedSection == key {
                                 ProgressView()
                                     .scaleEffect(0.6)
-                            } else if reportContent[key] != nil && !reportContent[key]!.isEmpty {
+                            } else if appState.reportContent[key] != nil && !appState.reportContent[key]!.isEmpty {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(.green)
                                     .font(.caption)
@@ -47,9 +44,9 @@ struct ReportComposerView: View {
                         .padding(.vertical, 4)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            selectedSection = key
+                            appState.selectedSection = key
                         }
-                        .background(selectedSection == key ? Color.blue.opacity(0.2) : Color.clear)
+                        .background(appState.selectedSection == key ? Color.blue.opacity(0.2) : Color.clear)
                         .cornerRadius(6)
                     }
                     .listStyle(.sidebar)
@@ -58,7 +55,7 @@ struct ReportComposerView: View {
                     
                     // Progress summary
                     VStack(alignment: .leading, spacing: 4) {
-                        let completed = sections.filter { reportContent[$0.1] != nil && !reportContent[$0.1]!.isEmpty }.count
+                        let completed = sections.filter { appState.reportContent[$0.1] != nil && !appState.reportContent[$0.1]!.isEmpty }.count
                         Text("\(completed) / \(sections.count) sections complete")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -70,19 +67,19 @@ struct ReportComposerView: View {
                     
                     Button(action: generateAll) {
                         HStack {
-                            if isGenerating {
+                            if appState.reportIsGenerating {
                                 ProgressView()
                                     .scaleEffect(0.7)
                             }
-                            Text(isGenerating ? "Generating..." : "Generate Full Report")
-                            if !isGenerating {
+                            Text(appState.reportIsGenerating ? "Generating..." : "Generate Full Report")
+                            if !appState.reportIsGenerating {
                                 Image(systemName: "wand.and.stars")
                             }
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isGenerating || !backend.isRunning)
+                    .disabled(appState.reportIsGenerating || !backend.isRunning)
                     .padding()
                 }
                 .frame(minWidth: 200, maxWidth: 300)
@@ -92,13 +89,13 @@ struct ReportComposerView: View {
                 VStack(spacing: 0) {
                     // Header with status
                     HStack {
-                        Text(sectionTitle(for: selectedSection))
+                        Text(sectionTitle(for: appState.selectedSection))
                             .font(.title2)
                             .bold()
                         
                         Spacer()
                         
-                        if isGenerating {
+                        if appState.reportIsGenerating {
                             HStack(spacing: 8) {
                                 Text(formattedTime)
                                     .font(.caption)
@@ -109,24 +106,24 @@ struct ReportComposerView: View {
                             }
                         }
                         
-                        Button(action: { generateSection(selectedSection) }) {
+                        Button(action: { appState.generateReport(section: appState.selectedSection) }) {
                             HStack(spacing: 4) {
-                                if isGenerating {
+                                if appState.reportIsGenerating {
                                     ProgressView()
                                         .scaleEffect(0.6)
                                 } else {
                                     Image(systemName: "play.fill")
                                 }
-                                Text(isGenerating ? "Generating..." : "Generate")
+                                Text(appState.reportIsGenerating ? "Generating..." : "Generate")
                             }
                         }
-                        .disabled(isGenerating || !backend.isRunning)
+                        .disabled(appState.reportIsGenerating || !backend.isRunning)
                     }
                     .padding()
                     .background(Color(NSColor.windowBackgroundColor))
                     
                     // Progress bar when generating
-                    if isGenerating {
+                    if appState.reportIsGenerating {
                         IndeterminateProgressBar(color: .purple)
                     }
                     
@@ -135,15 +132,15 @@ struct ReportComposerView: View {
                     // Content area
                     ZStack {
                         TextEditor(text: Binding(
-                            get: { reportContent[selectedSection] ?? "" },
-                            set: { reportContent[selectedSection] = $0 }
+                            get: { appState.reportContent[appState.selectedSection] ?? "" },
+                            set: { appState.reportContent[appState.selectedSection] = $0 }
                         ))
                         .font(.system(.body, design: .monospaced))
                         .padding()
                         .background(Color(NSColor.textBackgroundColor))
                         
                         // Empty state
-                        if (reportContent[selectedSection] ?? "").isEmpty && !isGenerating {
+                        if (appState.reportContent[appState.selectedSection] ?? "").isEmpty && !appState.reportIsGenerating {
                             EmptyStateView(
                                 icon: "doc.text",
                                 title: "No Content Yet",
@@ -153,6 +150,19 @@ struct ReportComposerView: View {
                         }
                     }
                 }
+            }
+        }
+        .onReceive(appState.$reportIsGenerating) { generating in
+            if generating {
+                if timer == nil {
+                    elapsedTime = 0
+                    timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                        elapsedTime += 1
+                    }
+                }
+            } else {
+                timer?.invalidate()
+                timer = nil
             }
         }
     }
@@ -167,52 +177,23 @@ struct ReportComposerView: View {
         sections.first(where: { $0.1 == key })?.0 ?? "Unknown"
     }
     
+    // Legacy helper - simpler now to just use AppState
     private func generateSection(_ section: String) {
-        isGenerating = true
-        elapsedTime = 0
-        reportContent[section] = "" // Clear previous content
-        
-        // Start timer
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            elapsedTime += 1
-        }
-        
-        Task {
-            let client = SentinelAPIClient()
-            do {
-                for try await chunk in client.streamReportSection(section: section) {
-                    await MainActor.run {
-                        reportContent[section, default: ""] += chunk
-                    }
-                }
-            } catch {
-                await MainActor.run {
-                    reportContent[section] = "Error generating report: \(error.localizedDescription)"
-                }
-            }
-            await MainActor.run {
-                isGenerating = false
-                timer?.invalidate()
-                timer = nil
-            }
-        }
+        appState.generateReport(section: section)
     }
     
     private func generateAll() {
         Task {
             for (_, key) in sections {
-                selectedSection = key
-                // Sequential generation to avoid overwhelming the backend
-                // In production, you might parallelize this or use a single "full report" endpoint
-                isGenerating = true
-                reportContent[key] = ""
-                let client = SentinelAPIClient()
-                for try await chunk in client.streamReportSection(section: key) {
-                    await MainActor.run {
-                        reportContent[key, default: ""] += chunk
-                    }
+                await MainActor.run {
+                    appState.selectedSection = key
+                    appState.generateReport(section: key)
                 }
-                isGenerating = false
+                // Wait for generation to finish before starting next
+                // This is a naive polling wait
+                while appState.reportIsGenerating {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
             }
         }
     }

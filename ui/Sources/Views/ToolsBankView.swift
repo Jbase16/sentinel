@@ -5,6 +5,7 @@ struct ToolsBankView: View {
     @State private var selectedMissing: Set<String> = []
     @State private var installing = false
     @State private var lastResults: [InstallResult] = []
+    @State private var processingTool: String? = nil // Which tool is being acted on (for uninstall)
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -13,27 +14,50 @@ struct ToolsBankView: View {
                     .font(.title2).bold()
                 Spacer()
                 Button(action: installSelected) {
-                    Label("Install Selected", systemImage: "arrow.down.circle.fill")
+                    if installing {
+                        ProgressView().scaleEffect(0.6)
+                    } else {
+                        Label("Install Selected", systemImage: "arrow.down.circle.fill")
+                    }
                 }
-                .disabled(selectedMissing.isEmpty || installing)
+                .disabled(selectedMissing.isEmpty || installing || processingTool != nil)
             }
             .padding(.bottom, 8)
 
             HStack(alignment: .top) {
+                // Installed Column
                 VStack(alignment: .leading) {
                     Text("Installed (") + Text("\(appState.engineStatus?.tools?.installed.count ?? 0)") + Text(")")
                     List(appState.engineStatus?.tools?.installed ?? [], id: \.self) { name in
-                        HStack { Image(systemName: "checkmark.circle.fill").foregroundColor(.green); Text(name) }
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                            Text(name)
+                            Spacer()
+                            if processingTool == name {
+                                ProgressView().scaleEffect(0.5)
+                            } else {
+                                Button(action: { uninstall(name) }) {
+                                    Image(systemName: "trash")
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(installing || processingTool != nil)
+                            }
+                        }
                     }
                 }.frame(maxWidth: .infinity)
 
+                // Missing Column
                 VStack(alignment: .leading) {
                     Text("Missing (") + Text("\(appState.engineStatus?.tools?.missing.count ?? 0)") + Text(") – select to install")
                     List(selection: $selectedMissing) {
                         ForEach(appState.engineStatus?.tools?.missing ?? [], id: \.self) { name in
-                            HStack { Image(systemName: selectedMissing.contains(name) ? "checkmark.square" : "square"); Text(name) }
-                                .contentShape(Rectangle())
-                                .onTapGesture { toggle(name) }
+                            HStack {
+                                Image(systemName: selectedMissing.contains(name) ? "checkmark.square" : "square")
+                                Text(name)
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture { toggle(name) }
                         }
                     }
                 }.frame(maxWidth: .infinity)
@@ -41,19 +65,20 @@ struct ToolsBankView: View {
 
             if !lastResults.isEmpty {
                 Divider().padding(.vertical, 8)
-                Text("Last Installation Results")
+                Text("Last Results")
                     .font(.headline)
                 List(lastResults) { res in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(res.tool).bold()
                             Spacer()
-                            Text(res.status.uppercased())
-                                .font(.caption)
-                                .foregroundColor(res.status == "installed" ? .green : .orange)
+                            StatusBadge(status: res.status)
                         }
                         if let msg = res.message, !msg.isEmpty {
-                            Text(msg).font(.caption2).foregroundColor(.secondary).lineLimit(3)
+                            Text(msg)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .textSelection(.enabled) // Enable copy
                         }
                     }
                 }.frame(minHeight: 120)
@@ -75,12 +100,45 @@ struct ToolsBankView: View {
                 let results = try await appState.apiClient.installTools(Array(selectedMissing))
                 self.lastResults = results
                 self.selectedMissing.removeAll()
-                // Refresh status to update installed/missing lists
                 self.appState.refreshStatus()
             } catch {
-                self.lastResults = [InstallResult(tool: "(batch)", status: "error", message: error.localizedDescription)]
+                self.lastResults = [InstallResult(tool: "Batch", status: "error", message: error.localizedDescription)]
             }
             installing = false
+        }
+    }
+
+    private func uninstall(_ name: String) {
+        processingTool = name
+        Task { @MainActor in
+            do {
+                let results = try await appState.apiClient.uninstallTools([name])
+                self.lastResults = results
+                self.appState.refreshStatus()
+            } catch {
+                self.lastResults = [InstallResult(tool: name, status: "error", message: error.localizedDescription)]
+            }
+            processingTool = nil
+        }
+    }
+}
+
+struct StatusBadge: View {
+    let status: String
+    var body: some View {
+        Text(status.uppercased())
+            .font(.caption)
+            .padding(4)
+            .background(color.opacity(0.2))
+            .foregroundColor(color)
+            .cornerRadius(4)
+    }
+    
+    var color: Color {
+        switch status {
+        case "installed", "uninstalled": return .green
+        case "error": return .red
+        default: return .orange
         }
     }
 }

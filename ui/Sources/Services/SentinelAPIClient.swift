@@ -106,6 +106,21 @@ public struct SentinelAPIClient: Sendable {
         return decoded.results
     }
 
+    // Uninstall selected tools
+    public func uninstallTools(_ tools: [String]) async throws -> [InstallResult] {
+        struct InstallResponse: Decodable { let results: [InstallResult] }
+        guard let url = URL(string: "/tools/uninstall", relativeTo: baseURL) else { throw APIError.badStatus }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body = ["tools": tools]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: req)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.badStatus }
+        let decoded = try JSONDecoder().decode(InstallResponse.self, from: data)
+        return decoded.results
+    }
+
     // MARK: - God-Tier Endpoints
 
     public func startMission(target: String) async throws -> String {

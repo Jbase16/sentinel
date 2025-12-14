@@ -437,6 +437,34 @@ async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
 
     return {"results": results, "tools": status_payload}
 
+@app.post("/tools/uninstall")
+async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_token)):
+    """
+    Uninstall selected tools using Homebrew or pip (best-effort).
+    """
+    from core.toolkit.tools import uninstall_tools, get_installed_tools, TOOLS
+    
+    results = await uninstall_tools(req.tools)
+
+    # Compute updated tool status
+    installed = get_installed_tools()
+    all_tools = list(TOOLS.keys())
+    missing = [t for t in all_tools if t not in installed]
+    status_payload = {
+        "installed": list(installed.keys()),
+        "missing": missing,
+        "count_installed": len(installed),
+        "count_total": len(all_tools),
+    }
+
+    # Emit UI events
+    try:
+        TaskRouter.instance().emit_ui_event("tools_status", status_payload)
+    except Exception:
+        pass
+
+    return {"results": results, "tools": status_payload}
+
 @app.post("/chat/query")
 async def chat_query(
     question: str,
