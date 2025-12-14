@@ -11,7 +11,7 @@ from typing import Optional
 
 from mitmproxy import options, http
 from mitmproxy.tools.dump import DumpMaster
-from core.session import ScanSession
+from core.base.session import ScanSession
 from core.ai.strategy import StrategyEngine
 
 logger = logging.getLogger(__name__)

@@ -156,7 +156,7 @@ CAL bindings for Sentinel's scanner agents.
 from typing import List
 from core.cal.bindings import AgentBinding, capability
 from core.cal.types import Observation, ObservationType
-from core.scanner_engine import ScannerEngine
+from core.engine.scanner_engine import ScannerEngine
 
 
 @AgentBinding("Scanner::Nmap")
@@ -203,7 +203,7 @@ class NmapAgentBinding:
     def _parse_nmap_output(self, stdout: str) -> List[dict]:
         """Parse nmap output into structured port info."""
         # Reuse existing parsing logic from raw_classifier.py
-        from core.raw_classifier import parse_nmap_output
+        from core.toolkit.raw_classifier import parse_nmap_output
         return parse_nmap_output(stdout)
 
 
@@ -263,7 +263,7 @@ CAL bindings for Sentinel's AI reasoning agents.
 from typing import List, Dict
 from core.cal.bindings import AgentBinding, capability
 from core.cal.types import Claim, Evidence, AnalysisResult
-from core.ai_engine import AIEngine
+from core.ai.ai_engine import AIEngine
 from core.cortex.synapse import Synapse
 
 
@@ -391,7 +391,7 @@ from typing import List, Optional, Dict
 from datetime import datetime
 from uuid import uuid4
 
-from core.findings_store import findings_store
+from core.data.findings_store import findings_store
 from core.cortex.memory import KnowledgeGraph, NodeType, EdgeType
 from core.cal.types import Claim, ClaimStatus, ClaimEvent
 

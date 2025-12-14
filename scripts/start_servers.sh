@@ -68,7 +68,7 @@ start_api() {
     kill_existing $API_PORT $API_PID_FILE
     
     cd "$PROJECT_ROOT"
-    nohup "$VENV_PYTHON" -m uvicorn core.api:app --host 127.0.0.1 --port $API_PORT > /tmp/sentinelforge_api.log 2>&1 &
+    nohup "$VENV_PYTHON" -m uvicorn core.server.api:app --host 127.0.0.1 --port $API_PORT > /tmp/sentinelforge_api.log 2>&1 &
     echo $! > "$API_PID_FILE"
     log "API started (PID: $(cat $API_PID_FILE))"
 }
@@ -78,7 +78,7 @@ start_brain() {
     kill_existing $BRAIN_PORT $BRAIN_PID_FILE
     
     cd "$PROJECT_ROOT"
-    nohup "$MLX_PYTHON" start_sentinel_brain.py > /tmp/sentinelforge_brain.log 2>&1 &
+    nohup "$MLX_PYTHON" scripts/start_sentinel_brain.py > /tmp/sentinelforge_brain.log 2>&1 &
     echo $! > "$BRAIN_PID_FILE"
     log "Brain started (PID: $(cat $BRAIN_PID_FILE))"
 }

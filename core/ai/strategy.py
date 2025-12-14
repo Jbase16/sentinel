@@ -10,8 +10,8 @@ import asyncio
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 
-from core.ai_engine import AIEngine
-from core.session import ScanSession
+from core.ai.ai_engine import AIEngine
+from core.base.session import ScanSession
 
 logger = logging.getLogger(__name__)
 

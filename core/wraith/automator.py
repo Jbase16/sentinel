@@ -7,8 +7,8 @@ Listens for AI Hypotheses and automatically executes verification strikes.
 import logging
 import asyncio
 from typing import Dict
-from core.session import ScanSession
-from core.action_dispatcher import ActionDispatcher
+from core.base.session import ScanSession
+from core.base.action_dispatcher import ActionDispatcher
 
 logger = logging.getLogger(__name__)
 

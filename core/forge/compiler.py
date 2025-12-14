@@ -8,8 +8,8 @@ import os
 import uuid
 import logging
 import json
-from core.ai_engine import AIEngine
-from core.config import get_config
+from core.ai.ai_engine import AIEngine
+from core.base.config import get_config
 
 logger = logging.getLogger(__name__)
 

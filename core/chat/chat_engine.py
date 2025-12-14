@@ -6,9 +6,9 @@ It knows the state of the Knowledge Graph.
 
 import json
 from typing import Dict, List, Any
-from core.ai_engine import AIEngine
+from core.ai.ai_engine import AIEngine
 from core.cortex.memory import KnowledgeGraph, NodeType
-from core.findings_store import findings_store
+from core.data.findings_store import findings_store
 
 class GraphAwareChat:
     _instance = None

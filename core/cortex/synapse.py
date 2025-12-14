@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import json
 from typing import Dict, Optional
-from core.ai_engine import AIEngine
+from core.ai.ai_engine import AIEngine
 
 logger = logging.getLogger(__name__)
 

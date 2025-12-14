@@ -8,7 +8,7 @@ for graph updates.
 import logging
 from typing import List, Dict
 
-from core.raw_classifier import classify as raw_classify
+from core.toolkit.raw_classifier import classify as raw_classify
 from core.cortex.parsers.nmap import NmapParser
 from core.cortex.parsers.httpx import HttpxParser
 from core.cortex.memory import KnowledgeGraph, NodeType, EdgeType
