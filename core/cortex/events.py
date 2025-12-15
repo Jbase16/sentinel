@@ -179,7 +179,9 @@ class EventStore:
         self._events: deque[GraphEvent] = deque(maxlen=max_events)
         self._sequence = 0
         self._lock = threading.RLock()
-        self._subscribers: Set[asyncio.Queue] = set()
+        # Each subscriber is a per-event-loop queue pair so producers can safely broadcast
+        # from any thread via `loop.call_soon_threadsafe(...)`.
+        self._subscribers: Set[tuple[asyncio.AbstractEventLoop, asyncio.Queue[GraphEvent]]] = set()
         self._subscriber_lock = threading.Lock()
         
         # Checkpoint support: last known sequence per client
@@ -263,10 +265,12 @@ class EventStore:
             async for event in event_store.subscribe():
                 process(event)
         """
+        loop = asyncio.get_running_loop()
         queue: asyncio.Queue[GraphEvent] = asyncio.Queue()
-        
+        subscriber = (loop, queue)
+
         with self._subscriber_lock:
-            self._subscribers.add(queue)
+            self._subscribers.add(subscriber)
         
         try:
             while True:
@@ -274,7 +278,7 @@ class EventStore:
                 yield event
         finally:
             with self._subscriber_lock:
-                self._subscribers.discard(queue)
+                self._subscribers.discard(subscriber)
     
     def _broadcast(self, event: GraphEvent) -> None:
         """
@@ -283,12 +287,39 @@ class EventStore:
         Non-blocking: if a subscriber's queue is full, the event is dropped
         for that subscriber (back-pressure handling).
         """
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
         with self._subscriber_lock:
-            for queue in self._subscribers:
+            subscribers = list(self._subscribers)
+
+        stale: list[tuple[asyncio.AbstractEventLoop, asyncio.Queue[GraphEvent]]] = []
+        for loop, queue in subscribers:
+            def _deliver(
+                queue: asyncio.Queue[GraphEvent] = queue,
+                event: GraphEvent = event,
+            ) -> None:
                 try:
                     queue.put_nowait(event)
                 except asyncio.QueueFull:
-                    logger.warning(f"[EventStore] Subscriber queue full, dropping event {event.sequence}")
+                    logger.warning(
+                        f"[EventStore] Subscriber queue full, dropping event {event.sequence}"
+                    )
+
+            try:
+                if running_loop is loop:
+                    _deliver()
+                else:
+                    loop.call_soon_threadsafe(_deliver)
+            except Exception:
+                stale.append((loop, queue))
+
+        if stale:
+            with self._subscriber_lock:
+                for sub in stale:
+                    self._subscribers.discard(sub)
     
     # -------------------------------------------------------------------------
     # Checkpoint Management

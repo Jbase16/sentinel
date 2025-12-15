@@ -654,19 +654,20 @@ class ScannerEngine:
         try:
             findings = ScannerBridge.classify(tool, target, output_text)
             
-            # CRITICAL: Wire tool output to TaskRouter for AI analysis and event emission
-            # This triggers AI analysis, findings_update events, and autonomous next steps
-            try:
-                router = TaskRouter.instance()
-                router.handle_tool_output(
-                    tool_name=tool,
-                    stdout=output_text,
-                    stderr="",
-                    rc=exit_code,
-                    metadata={"target": target, "findings_count": len(findings)}
-                )
-            except Exception as router_err:
-                logger.warning(f"[{tool}] TaskRouter processing error: {router_err}")
+            # Session-scoped scans own their lifecycle via the canonical EventBus path.
+            # Avoid global TaskRouter side effects (global stores / non-session DB writes).
+            if self.session is None:
+                try:
+                    router = TaskRouter.instance()
+                    router.handle_tool_output(
+                        tool_name=tool,
+                        stdout=output_text,
+                        stderr="",
+                        rc=exit_code,
+                        metadata={"target": target, "findings_count": len(findings)},
+                    )
+                except Exception as router_err:
+                    logger.warning(f"[{tool}] TaskRouter processing error: {router_err}")
             
             return findings
         except Exception as exc:

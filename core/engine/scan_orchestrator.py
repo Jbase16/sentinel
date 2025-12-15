@@ -20,16 +20,19 @@
 core/engine/scan_orchestrator.py
 Lightweight orchestrator that wraps ScannerEngine with Strategos integration.
 This is the bridge between the API and the intelligent scheduler.
+
+DEPRECATED:
+The canonical, UI-visible scan lifecycle now lives in `core/server/api.py` under
+POST `/scan` (and `/mission/start` is an alias). That path is responsible for:
+- Emitting EventBus events into `/events/stream`
+- Streaming logs, graph mutations, and tool lifecycle to the UI
+
+This module is kept only as a compatibility stub to prevent split-brain scan execution.
 """
 
-import asyncio
 import logging
 from typing import List, Optional, Callable, Dict
 from dataclasses import dataclass, field
-
-from core.engine.scanner_engine import ScannerEngine
-from core.scheduler.strategos import Strategos
-from core.scheduler.modes import ScanMode
 
 logger = logging.getLogger(__name__)
 
@@ -64,12 +67,13 @@ class ScanOrchestrator:
         """
         self.session = session
         self.log_fn = log_fn or (lambda msg: logger.info(msg))
-        self.engine = ScannerEngine(session=session)
         self._last_result: Optional[ScanResult] = None
     
     def _detect_installed(self) -> Dict[str, str]:
         """Detect installed tools. Returns dict of tool_name -> path."""
-        return self.engine._detect_installed()
+        raise RuntimeError(
+            "ScanOrchestrator is deprecated. Use GET /tools/status (API) or POST /scan."
+        )
     
     async def run(
         self, 
@@ -90,84 +94,8 @@ class ScanOrchestrator:
         Returns:
             ScanResult with findings and logs.
         """
-        # Convert string mode to ScanMode enum
-        scan_mode = ScanMode.STANDARD
-        if mode == "bug_bounty":
-            scan_mode = ScanMode.BUG_BOUNTY
-        elif mode == "stealth":
-            scan_mode = ScanMode.STEALTH
-        
-        self.log_fn(f"[ScanOrchestrator] Starting scan: {target} (mode={scan_mode.value})")
-        
-        result = ScanResult(target=target, mode=mode, modules=modules or [])
-        
-        # Detect available tools
-        installed_tools = list(self._detect_installed().keys())
-        self.log_fn(f"[ScanOrchestrator] Detected {len(installed_tools)} installed tools")
-        
-        # If specific modules requested, filter to only those
-        if modules:
-            available_tools = [t for t in modules if t in installed_tools]
-            self.log_fn(f"[ScanOrchestrator] Using {len(available_tools)} requested tools")
-        else:
-            available_tools = installed_tools
-        
-        # Create Strategos brain
-        brain = Strategos()
-        
-        # Define the dispatch callback - this is how Strategos runs tools
-        async def dispatch_tool(tool: str) -> List[Dict]:
-            """
-            Runs a single tool via ScannerEngine.
-            Returns findings list for Strategos to ingest.
-            """
-            self.log_fn(f"[ScanOrchestrator] Dispatching: {tool}")
-            
-            try:
-                # Run the tool
-                async for log_line in self.engine.scan(target, selected_tools=[tool], cancel_flag=cancel_flag):
-                    self.log_fn(log_line)
-                    result.logs.append(log_line)
-                
-                # Get findings from this tool run
-                tool_findings = self.engine.get_last_results() or []
-                return tool_findings
-                
-            except asyncio.CancelledError:
-                self.log_fn(f"[ScanOrchestrator] Tool {tool} cancelled")
-                return []
-            except Exception as e:
-                self.log_fn(f"[ScanOrchestrator] Tool {tool} error: {e}")
-                return []
-        
-        # Run the Strategos mission
-        try:
-            mission_result = await brain.run_mission(
-                target=target,
-                available_tools=available_tools,
-                mode=scan_mode,
-                dispatch_tool=dispatch_tool
-            )
-            
-            result.status = "completed"
-            result.reason = mission_result.reason
-            result.findings = brain.context.findings if brain.context else []
-            
-            self.log_fn(f"[ScanOrchestrator] Mission complete: {mission_result.reason}")
-            
-        except asyncio.CancelledError:
-            result.status = "cancelled"
-            result.reason = "User cancelled"
-            self.log_fn("[ScanOrchestrator] Scan cancelled by user")
-            raise
-        except Exception as e:
-            result.status = "error"
-            result.reason = str(e)
-            self.log_fn(f"[ScanOrchestrator] Scan error: {e}")
-            raise
-        
-        self._last_result = result
-        self.log_fn(f"[ScanOrchestrator] Scan complete. Findings: {len(result.findings)}")
-        
-        return result
-
+        raise RuntimeError(
+            "ScanOrchestrator has been superseded by the canonical scan lifecycle. "
+            "Use POST /scan (core/server/api.py) so all scan activity emits EventBus "
+            "events for /events/stream."
+        )

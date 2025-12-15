@@ -24,7 +24,6 @@ import logging
 import sys
 from typing import List
 
-from core.engine.scan_orchestrator import ScanOrchestrator
 from core.ai.reporting import create_report_bundle
 
 # Configure logging to stdout
@@ -37,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 class HeadlessRunner:
     def __init__(self):
-        self.orchestrator = ScanOrchestrator(log_fn=self._log_callback)
+        raise RuntimeError(
+            "HeadlessRunner has been superseded by the canonical scan lifecycle. "
+            "Start the backend (or use POST /scan) so all scan activity emits EventBus "
+            "events for /events/stream."
+        )
 
     def _log_callback(self, msg: str):
         print(msg)

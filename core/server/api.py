@@ -50,7 +50,6 @@ from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
 from core.forge.sandbox import SandboxRunner
 from core.chat.chat_engine import GraphAwareChat
-from core.engine.orchestrator import Orchestrator
 from core.base.action_dispatcher import ActionDispatcher
 from core.ai.reporting import ReportComposer
 from core.engine.pty_manager import PTYManager
@@ -116,6 +115,7 @@ _ai_rate_limiter = RateLimiter(requests_per_minute=10)
 # --- State ---
 
 _log_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
+_api_loop: Optional[asyncio.AbstractEventLoop] = None
 _scan_state: Dict[str, Any] = {}
 _cancel_requested = threading.Event()
 _active_scan_task: Optional[asyncio.Task] = None
@@ -177,6 +177,176 @@ async def unregister_session(session_id: str) -> None:
         if session_id in _session_manager:
             del _session_manager[session_id]
 
+
+async def _begin_scan(req: ScanRequest) -> str:
+    """Start a scan using the single canonical, event-emitting path.
+
+    Returns the created session id.
+    """
+    global _active_scan_task, _scan_state
+
+    from core.base.session import ScanSession
+    from core.cortex.events import get_event_bus
+    from core.engine.scanner_engine import ScannerEngine
+    from core.scheduler.modes import ScanMode as StrategosMode
+    from core.scheduler.strategos import Strategos
+    from core.toolkit.tools import get_installed_tools
+
+    async with _scan_lock:
+        if _active_scan_task and not _active_scan_task.done():
+            if req.force:
+                logger.info("Force-killing active scan...")
+                _cancel_requested.set()
+                _active_scan_task.cancel()
+                try:
+                    await _active_scan_task
+                except asyncio.CancelledError:
+                    pass
+                _active_scan_task = None
+            else:
+                raise HTTPException(status_code=409, detail="Scan already running")
+
+        # Ensure any previous session is no longer addressable via /results.
+        previous_session_id = _scan_state.get("session_id")
+        if previous_session_id:
+            try:
+                await unregister_session(previous_session_id)
+            except Exception:
+                pass
+
+        _cancel_requested.clear()
+
+        session = ScanSession(req.target)
+        session.set_external_log_sink(_log_sink_sync)
+        await register_session(session.id, session)
+
+        # Compute tool allowlist up-front so the UI can trust SCAN_STARTED payload immediately.
+        installed_tools = list(get_installed_tools().keys())
+        requested_tools = list(dict.fromkeys(req.modules or []))
+        allowed_tools = (
+            [t for t in requested_tools if t in installed_tools]
+            if requested_tools
+            else installed_tools
+        )
+        missing_tools = [t for t in requested_tools if t not in installed_tools]
+
+        _scan_state = {
+            "target": req.target,
+            "modules": req.modules,
+            "mode": req.mode,  # Strategos mode
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "session_id": session.id,
+        }
+
+        event_bus = get_event_bus()
+
+        session.log(f"[Strategos] Installed tools: {len(installed_tools)}")
+        if requested_tools:
+            session.log(f"[Strategos] Custom tool whitelist: {', '.join(allowed_tools) or '(none)'}")
+        if missing_tools:
+            session.log(f"[Strategos] ⚠️ Requested tools not installed: {', '.join(missing_tools)}")
+
+        event_bus.emit_scan_started(req.target, allowed_tools, session.id)
+
+        async def _runner() -> None:
+            start_time = time.time()
+            try:
+                try:
+                    mode = StrategosMode(req.mode)
+                except ValueError:
+                    mode = StrategosMode.STANDARD
+
+                brain = Strategos(log_fn=session.log)
+
+                async def dispatch_tool(tool: str) -> List[Dict]:
+                    findings: List[Dict] = []
+                    exit_code = 0
+                    session.log(f"[Strategos] Dispatching tool: {tool}")
+                    engine = ScannerEngine(session=session)
+
+                    try:
+                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[])
+
+                        if _cancel_requested.is_set():
+                            exit_code = 130
+                            return []
+
+                        async for log_line in engine.scan(
+                            req.target, selected_tools=[tool], cancel_flag=_cancel_requested
+                        ):
+                            session.log(log_line)
+
+                        findings = engine.get_last_results() or []
+                        exit_code = 130 if _cancel_requested.is_set() else 0
+                        return findings
+                    except asyncio.CancelledError:
+                        _cancel_requested.set()
+                        exit_code = 130
+                        try:
+                            await engine.shutdown(reason="cancelled")
+                        except Exception:
+                            pass
+                        raise
+                    except Exception as exc:
+                        exit_code = 1
+                        session.log(f"[Strategos] Tool failed ({tool}): {exc}")
+                        try:
+                            await engine.shutdown(reason="error")
+                        except Exception:
+                            pass
+                        return []
+                    finally:
+                        try:
+                            event_bus.emit_tool_completed(
+                                tool=tool, exit_code=exit_code, findings_count=len(findings)
+                            )
+                        except Exception as emit_exc:
+                            logger.error(
+                                f"[EventBus] Failed to emit tool_completed for {tool}: {emit_exc}",
+                                exc_info=True,
+                            )
+
+                mission = await brain.run_mission(
+                    target=req.target,
+                    available_tools=allowed_tools,
+                    mode=mode,
+                    dispatch_tool=dispatch_tool,
+                )
+                session.log(f"[Strategos] {mission.reason}")
+
+                _scan_state["status"] = "completed"
+                _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
+                _scan_state["summary"] = session.to_dict()
+
+                duration = time.time() - start_time
+                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration)
+
+            except asyncio.CancelledError:
+                _scan_state["status"] = "cancelled"
+                _scan_state["summary"] = session.to_dict()
+
+                duration = time.time() - start_time
+                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration)
+
+            except Exception as e:
+                _scan_state["status"] = "error"
+                _scan_state["error"] = str(e)
+                _scan_state["summary"] = session.to_dict()
+                logger.error(f"Scan error: {e}", exc_info=True)
+
+                try:
+                    event_bus._store.append(
+                        GraphEventType.SCAN_ERROR,
+                        {"error": str(e), "target": req.target},
+                        source="orchestrator",
+                    )
+                except Exception:
+                    pass
+
+        _active_scan_task = asyncio.create_task(_runner())
+        return session.id
+
 # --- Middleware & Auth ---
 
 def get_client_ip(request: Request) -> str:
@@ -208,9 +378,15 @@ async def check_ai_rate_limit(request: Request) -> None:
 
 @app.on_event("startup")
 async def startup_event():
+    global _api_loop
     config = get_config()
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
+
+    try:
+        _api_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _api_loop = None
     
     # Async DB Init
     db = Database.instance()
@@ -231,11 +407,19 @@ setup_cors()
 # --- Helpers ---
 
 def _log_sink_sync(msg: str) -> None:
+    loop: Optional[asyncio.AbstractEventLoop] = None
     try:
         loop = asyncio.get_running_loop()
-        loop.call_soon_threadsafe(lambda: _log_queue.put_nowait(msg) if not _log_queue.full() else None)
-    except Exception:
-        pass
+    except RuntimeError:
+        loop = _api_loop
+
+    if loop is not None:
+        try:
+            loop.call_soon_threadsafe(
+                lambda: _log_queue.put_nowait(msg) if not _log_queue.full() else None
+            )
+        except Exception:
+            pass
 
     # Also emit into the event-sourced stream so the UI console can rely on `/events/stream`.
     try:
@@ -543,13 +727,20 @@ async def chat_query(
 @app.post("/mission/start")
 async def mission_start(
     target: str,
-    _: bool = Depends(verify_token)
+    mode: str = "standard",
+    force: bool = True,
+    _: bool = Depends(verify_token),
+    __: None = Depends(check_rate_limit),
 ):
     """
     The ONE-CLICK Button. Starts the full autonomous loop.
     """
-    mission_id = await Orchestrator.instance().start_mission(target)
-    return {"status": "started", "mission_id": mission_id}
+    req = ScanRequest(target=target, modules=None, force=force, mode=mode)
+    session_id = await _begin_scan(req)
+    return JSONResponse(
+        {"status": "started", "mission_id": session_id, "session_id": session_id, "target": req.target},
+        status_code=202,
+    )
 
 # --- WebSockets ---
 
@@ -587,174 +778,11 @@ async def start_scan(
     _: bool = Depends(verify_token),
     __: None = Depends(check_rate_limit),
 ):
-    global _active_scan_task, _scan_state
-    
-    async with _scan_lock:
-        if _active_scan_task and not _active_scan_task.done():
-            if req.force:
-                logger.info("Force-killing active scan...")
-                _active_scan_task.cancel()
-                try:
-                    await _active_scan_task
-                except asyncio.CancelledError:
-                    pass
-                _active_scan_task = None
-            else:
-                raise HTTPException(status_code=409, detail="Scan already running")
-        
-        _cancel_requested.clear()
-        _scan_state = {
-            "target": req.target,
-            "modules": req.modules,
-            "mode": req.mode,  # Strategos mode
-            "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
-        
-        async def _runner():
-            from core.base.session import ScanSession
-            from core.cortex.events import get_event_bus
-            from core.engine.scanner_engine import ScannerEngine
-            from core.scheduler.modes import ScanMode as StrategosMode
-            from core.scheduler.strategos import Strategos
-            from core.toolkit.tools import get_installed_tools
-
-            event_bus = get_event_bus()
-
-            # Create a session for this scan to isolate data
-            session = ScanSession(req.target)
-            _scan_state["session_id"] = session.id
-
-            # Stream scan logs through the session (so `/logs` works) and mirror to UI/event streams.
-            session.set_external_log_sink(_log_sink_sync)
-
-            # Register the session with the session manager
-            await register_session(session.id, session)
-
-            # Emit SCAN_STARTED event
-            installed_tools = list(get_installed_tools().keys())
-            requested_tools = list(dict.fromkeys(req.modules or []))
-            allowed_tools = (
-                [t for t in requested_tools if t in installed_tools]
-                if requested_tools
-                else installed_tools
-            )
-            missing_tools = [t for t in requested_tools if t not in installed_tools]
-
-            session.log(f"[Strategos] Installed tools: {len(installed_tools)}")
-            if requested_tools:
-                session.log(f"[Strategos] Custom tool whitelist: {', '.join(allowed_tools) or '(none)'}")
-            if missing_tools:
-                session.log(f"[Strategos] ⚠️ Requested tools not installed: {', '.join(missing_tools)}")
-
-            event_bus.emit_scan_started(req.target, allowed_tools, session.id)
-
-            start_time = time.time()
-            try:
-                try:
-                    mode = StrategosMode(req.mode)
-                except ValueError:
-                    mode = StrategosMode.STANDARD
-
-                brain = Strategos(log_fn=session.log)
-
-                async def dispatch_tool(tool: str) -> List[Dict]:
-                    # Best-effort early stop; cancellation will also interrupt via task cancellation.
-                    if _cancel_requested.is_set():
-                        return []
-
-                    session.log(f"[Strategos] Dispatching tool: {tool}")
-                    try:
-                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[])
-                    except Exception:
-                        pass
-
-                    # Execute the concrete tool run directly. Strategos decides *what* to run;
-                    # ScannerEngine handles *how* to run it and stream output.
-                    engine = ScannerEngine(session=session)
-                    try:
-                        async for log_line in engine.scan(
-                            req.target, selected_tools=[tool], cancel_flag=_cancel_requested
-                        ):
-                            session.log(log_line)
-
-                        findings = engine.get_last_results() or []
-                        try:
-                            event_bus.emit_tool_completed(
-                                tool=tool, exit_code=0, findings_count=len(findings)
-                            )
-                        except Exception:
-                            pass
-                        return findings
-                    except asyncio.CancelledError:
-                        _cancel_requested.set()
-                        try:
-                            await engine.shutdown(reason="cancelled")
-                        except Exception:
-                            pass
-                        try:
-                            event_bus.emit_tool_completed(tool=tool, exit_code=130, findings_count=0)
-                        except Exception:
-                            pass
-                        raise
-                    except Exception as exc:
-                        session.log(f"[Strategos] Tool failed ({tool}): {exc}")
-                        try:
-                            await engine.shutdown(reason="error")
-                        except Exception:
-                            pass
-                        try:
-                            event_bus.emit_tool_completed(tool=tool, exit_code=1, findings_count=0)
-                        except Exception:
-                            pass
-                        return []
-
-                mission = await brain.run_mission(
-                    target=req.target,
-                    available_tools=allowed_tools,
-                    mode=mode,
-                    dispatch_tool=dispatch_tool,
-                )
-                session.log(f"[Strategos] {mission.reason}")
-
-                _scan_state["status"] = "completed"
-                _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-                # Store session summary in scan state
-                _scan_state["summary"] = session.to_dict()
-
-                # Emit SCAN_COMPLETED event
-                duration = time.time() - start_time
-                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration)
-
-            except asyncio.CancelledError:
-                _scan_state["status"] = "cancelled"
-                _scan_state["summary"] = session.to_dict()
-
-                duration = time.time() - start_time
-                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration)
-
-            except Exception as e:
-                _scan_state["status"] = "error"
-                _scan_state["error"] = str(e)
-                _scan_state["summary"] = session.to_dict()
-                logger.error(f"Scan error: {e}", exc_info=True)
-
-                # Emit error via event store
-                event_bus._store.append(
-                    GraphEventType.SCAN_ERROR,
-                    {"error": str(e), "target": req.target},
-                    source="orchestrator"
-                )
-
-            finally:
-                # Unregister session when scan is complete
-                await unregister_session(session.id)
-
-        _active_scan_task = asyncio.create_task(_runner())
-        return JSONResponse(
-            {"status": "started", "target": req.target},
-            status_code=202,
-        )
+    session_id = await _begin_scan(req)
+    return JSONResponse(
+        {"status": "started", "target": req.target, "session_id": session_id},
+        status_code=202,
+    )
 
 @app.post("/cancel")
 async def cancel_scan(_: bool = Depends(verify_token)):
@@ -812,10 +840,10 @@ async def events(request: Request, _: bool = Depends(verify_token)):
     async def _event_stream():
         q: asyncio.Queue = asyncio.Queue(maxsize=1000)
         connection_time = time.time()
+        loop = asyncio.get_running_loop()
         
         def _cb(event_type: str, payload: dict) -> None:
             try:
-                loop = asyncio.get_running_loop()
                 data = json.dumps(payload, default=str)
                 msg = f"event: {event_type}\ndata: {data}\n\n"
                 loop.call_soon_threadsafe(lambda: q.put_nowait(msg) if not q.full() else None)
@@ -1016,4 +1044,3 @@ def serve(port: Optional[int] = None, host: Optional[str] = None):
 
 if __name__ == "__main__":
     serve()
-
