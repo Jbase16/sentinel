@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Models/ChatModels.swift
+// Chatmodels Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: ChatModels]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import Foundation
 
 // Minimal chat primitives borrowed from Helix so the UI can render streaming text.

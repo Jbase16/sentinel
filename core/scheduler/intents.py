@@ -1,3 +1,31 @@
+# ============================================================================
+# core/scheduler/intents.py
+# Intent Detection - Understanding Scan Objectives
+# ============================================================================
+#
+# PURPOSE:
+# Translates high-level user intent ("find SQLi vulns") into concrete scan tasks.
+# Maps goals to actionable tool executions.
+#
+# INTENT TYPES:
+# - **Reconnaissance**: "Map the attack surface"
+# - **Vulnerability Discovery**: "Find security flaws"
+# - **Exploitation**: "Validate vulnerabilities"
+# - **Post-Exploitation**: "Assess impact of compromise"
+#
+# INTENT → ACTION MAPPING:
+# - "Find SQLi" → Run sqlmap on discovered forms
+# - "Check for XSS" → Fuzz input fields with XSS payloads
+# - "Discover subdomains" → Run subfinder, amass, crt.sh
+# - "Map API endpoints" → Use proxy mode + crawler
+#
+# KEY CONCEPTS:
+# - **Intent Recognition**: Understanding what user wants
+# - **Task Decomposition**: Breaking goals into tool executions
+# - **Context Awareness**: Different intents for web vs. infrastructure
+#
+# ============================================================================
+
 """
 core/scheduler/intents.py
 The Intent Vocabulary for Strategos.

@@ -1,3 +1,21 @@
+# ============================================================================
+# core/forge/compiler.py
+# Compiler Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the forge package in SentinelForge.
+# [Specific purpose based on module name: compiler]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/forge/compiler.py
 The JIT Exploit Compiler.

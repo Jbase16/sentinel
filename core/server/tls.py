@@ -1,3 +1,21 @@
+# ============================================================================
+# core/server/tls.py
+# Tls Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the server package in SentinelForge.
+# [Specific purpose based on module name: tls]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 
 import ssl
 import socket

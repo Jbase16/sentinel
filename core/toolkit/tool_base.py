@@ -1,3 +1,21 @@
+# ============================================================================
+# core/toolkit/tool_base.py
+# Tool Base Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the toolkit package in SentinelForge.
+# [Specific purpose based on module name: tool_base]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 from core.engine.executor import ExecutionEngine
 from .tool_callbacks import tool_callback_factory
 

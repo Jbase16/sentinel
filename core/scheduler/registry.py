@@ -1,3 +1,21 @@
+# ============================================================================
+# core/scheduler/registry.py
+# Registry Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the scheduler package in SentinelForge.
+# [Specific purpose based on module name: registry]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/scheduler/registry.py
 The Enhanced Tool Registry for Strategos.

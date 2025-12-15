@@ -1,3 +1,21 @@
+# ============================================================================
+# core/toolkit/raw_classifier.py
+# Raw Classifier Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the toolkit package in SentinelForge.
+# [Specific purpose based on module name: raw_classifier]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/raw_classifier.py
 # Normalizes raw tool output into structured findings for downstream engines.
 

@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/verification/verify_neural_loop.py
+# Verify Neural Loop Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the verification package in SentinelForge.
+# [Specific purpose based on module name: verify_neural_loop]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 tests/verify_neural_loop.py
 Verifies that the StrategyEngine correctly processes traffic and creates Hypotheses Findings.

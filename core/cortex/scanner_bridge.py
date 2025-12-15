@@ -1,3 +1,21 @@
+# ============================================================================
+# core/cortex/scanner_bridge.py
+# Scanner Bridge Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the cortex package in SentinelForge.
+# [Specific purpose based on module name: scanner_bridge]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/cortex/scanner_bridge.py
 The Bridge: Routes tool output from ScannerEngine -> Cortex Parsers.

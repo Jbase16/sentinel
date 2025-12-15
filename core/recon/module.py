@@ -1,3 +1,21 @@
+# ============================================================================
+# core/recon/module.py
+# Module Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the recon package in SentinelForge.
+# [Specific purpose based on module name: module]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 Simple recon module entry point.
 

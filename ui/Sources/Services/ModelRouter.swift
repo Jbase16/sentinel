@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Services/ModelRouter.swift
+// Modelrouter Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: ModelRouter]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import Foundation
 
 // Extremely simple heuristic model selector.

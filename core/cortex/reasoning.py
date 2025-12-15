@@ -1,3 +1,21 @@
+# ============================================================================
+# core/cortex/reasoning.py
+# Reasoning Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the cortex package in SentinelForge.
+# [Specific purpose based on module name: reasoning]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/reasoning.py — derives attack paths and phase recommendations
 
 from __future__ import annotations

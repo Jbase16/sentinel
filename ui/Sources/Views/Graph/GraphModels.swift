@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Views/Graph/GraphModels.swift
+// Graphmodels Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: GraphModels]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import Foundation
 import SwiftUI
 import Combine

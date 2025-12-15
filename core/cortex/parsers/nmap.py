@@ -1,3 +1,21 @@
+# ============================================================================
+# core/cortex/parsers/nmap.py
+# Nmap Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the parsers package in SentinelForge.
+# [Specific purpose based on module name: nmap]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/cortex/parsers/nmap.py
 Parses Nmap output into Graph Nodes (Port, Service).

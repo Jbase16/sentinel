@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/integration/test_scan_flow.py
+# Test Scan Flow Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the integration package in SentinelForge.
+# [Specific purpose based on module name: test_scan_flow]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 import requests
 import json
 import time

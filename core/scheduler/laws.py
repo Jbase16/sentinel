@@ -1,3 +1,21 @@
+# ============================================================================
+# core/scheduler/laws.py
+# Laws Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the scheduler package in SentinelForge.
+# [Specific purpose based on module name: laws]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/scheduler/laws.py
 The Constitution of Strategos.

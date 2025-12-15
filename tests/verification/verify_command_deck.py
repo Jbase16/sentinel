@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/verification/verify_command_deck.py
+# Verify Command Deck Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the verification package in SentinelForge.
+# [Specific purpose based on module name: verify_command_deck]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 tests/verify_command_deck.py
 Verifies the Chat and Orchestrator.

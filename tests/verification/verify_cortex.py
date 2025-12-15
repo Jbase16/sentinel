@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/verification/verify_cortex.py
+# Verify Cortex Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the verification package in SentinelForge.
+# [Specific purpose based on module name: verify_cortex]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 tests/verify_cortex.py
 Verifies that the Neuro-Symbolic Core is actually working.

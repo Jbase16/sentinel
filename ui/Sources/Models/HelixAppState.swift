@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Models/HelixAppState.swift
+// Helixappstate Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: HelixAppState]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import Combine
 import SwiftUI
 
@@ -51,6 +69,7 @@ class HelixAppState: ObservableObject {
     @Published var autoRoutingEnabled: Bool = true
     @Published var pendingActions: [PendingAction] = []
     @Published var isGhostActive: Bool = false
+    @Published var ghostPort: Int? = nil
 
     // Report State (Persisted)
     @Published var reportContent: [String: String] = [:]
@@ -446,12 +465,20 @@ class HelixAppState: ObservableObject {
     func toggleGhost() {
         Task {
             if isGhostActive {
-                // Backend has no stop endpoint; just toggle UI state off
-                await MainActor.run { self.isGhostActive = false }
+                _ = try? await apiClient.stopGhost()
+                await MainActor.run {
+                    self.isGhostActive = false
+                    self.ghostPort = nil
+                }
             } else {
-                // Start recording a flow with a default name
-                if try await apiClient.startGhostRecording(flowName: "default") {
-                    await MainActor.run { self.isGhostActive = true }
+                do {
+                    let port = try await apiClient.startGhost(port: 8080)
+                    await MainActor.run {
+                        self.isGhostActive = true
+                        self.ghostPort = port
+                    }
+                } catch {
+                    print("[AppState] Failed to start Ghost Protocol: \(error)")
                 }
             }
         }

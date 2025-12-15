@@ -1,3 +1,21 @@
+# ============================================================================
+# core/chat/chat_engine.py
+# Chat Engine Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the chat package in SentinelForge.
+# [Specific purpose based on module name: chat_engine]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/chat/chat_engine.py
 The Context-Aware AI Chat.

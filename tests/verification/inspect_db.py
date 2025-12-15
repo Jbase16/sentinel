@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/verification/inspect_db.py
+# Inspect Db Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the verification package in SentinelForge.
+# [Specific purpose based on module name: inspect_db]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 import sqlite3
 import os
 import json

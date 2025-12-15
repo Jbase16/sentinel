@@ -1,3 +1,21 @@
+# ============================================================================
+# core/toolkit/tool_callbacks.py
+# Tool Callbacks Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the toolkit package in SentinelForge.
+# [Specific purpose based on module name: tool_callbacks]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 from core.base.task_router import TaskRouter
 
 def tool_callback_factory(tool_name: str):

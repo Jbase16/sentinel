@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/SentinelForgeApp.swift
+// Sentinelforgeapp Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: SentinelForgeApp]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 // Sentinel entry point for the SwiftUI UI layer.
 // This stays tiny on purpose: create shared app state, inject into views.
 import SwiftUI

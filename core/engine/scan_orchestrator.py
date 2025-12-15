@@ -1,3 +1,21 @@
+# ============================================================================
+# core/engine/scan_orchestrator.py
+# Scan Orchestrator Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the engine package in SentinelForge.
+# [Specific purpose based on module name: scan_orchestrator]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/engine/scan_orchestrator.py
 Lightweight orchestrator that wraps ScannerEngine with Strategos integration.

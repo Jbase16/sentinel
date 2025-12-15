@@ -1,3 +1,21 @@
+# ============================================================================
+# core/cortex/synapse.py
+# Synapse Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the cortex package in SentinelForge.
+# [Specific purpose based on module name: synapse]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/cortex/synapse.py
 The Neural Interface: Connects the symbolic Knowledge Graph to the LLM for semantic verification.

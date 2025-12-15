@@ -1,3 +1,21 @@
+# ============================================================================
+# core/ghost/logic.py
+# Logic Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the ghost package in SentinelForge.
+# [Specific purpose based on module name: logic]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/ghost/logic.py
 The Business Logic Fuzzer.

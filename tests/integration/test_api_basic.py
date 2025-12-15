@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/integration/test_api_basic.py
+# Test Api Basic Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the integration package in SentinelForge.
+# [Specific purpose based on module name: test_api_basic]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 import sys
 import os
 import time

@@ -1,3 +1,21 @@
+# ============================================================================
+# core/forge/sandbox.py
+# Sandbox Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the forge package in SentinelForge.
+# [Specific purpose based on module name: sandbox]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/forge/sandbox.py
 The Exploit Execution Sandbox.

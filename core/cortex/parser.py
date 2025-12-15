@@ -1,3 +1,21 @@
+# ============================================================================
+# core/cortex/parser.py
+# Parser Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the cortex package in SentinelForge.
+# [Specific purpose based on module name: parser]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/cortex/parser.py
 Abstract Base Class for Neuro-Symbolic Parsers.

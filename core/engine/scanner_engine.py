@@ -1,3 +1,21 @@
+# ============================================================================
+# core/engine/scanner_engine.py
+# Scanner Engine Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the engine package in SentinelForge.
+# [Specific purpose based on module name: scanner_engine]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/scanner_engine.py — macOS-compatible active scanner engine
 from __future__ import annotations
 

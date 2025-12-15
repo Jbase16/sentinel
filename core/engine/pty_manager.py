@@ -1,3 +1,21 @@
+# ============================================================================
+# core/engine/pty_manager.py
+# Pty Manager Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the engine package in SentinelForge.
+# [Specific purpose based on module name: pty_manager]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/pty_manager.py
 # Manages pseudo-terminal (PTY) sessions for the web terminal.
 

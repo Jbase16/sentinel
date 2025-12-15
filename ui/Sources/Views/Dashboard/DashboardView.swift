@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Views/Dashboard/DashboardView.swift
+// Dashboardview Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: DashboardView]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import SwiftUI
 
 struct DashboardView: View {
@@ -33,7 +51,9 @@ struct DashboardView: View {
                         SystemStatusCard(
                             title: "Ghost Protocol",
                             isConnected: appState.isGhostActive,
-                            statusText: appState.isGhostActive ? "Active (8080)" : "Inactive",
+                            statusText: appState.isGhostActive
+                                ? (appState.ghostPort.map { "Active (\($0))" } ?? "Active")
+                                : "Inactive",
                             icon: "eye"
                         )
                     }

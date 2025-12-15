@@ -1,3 +1,32 @@
+# ============================================================================
+# core/scheduler/strategos.py
+# Strategos - Strategic Scan Planning and Coordination
+# ============================================================================
+#
+# PURPOSE:
+# High-level strategic planning for security scans. Named after Greek "strategos"
+# (military general), this module decides WHAT to scan and WHEN.
+#
+# WHAT STRATEGOS DOES:
+# - Analyzes target to determine appropriate scanning strategy
+# - Selects which tools to run based on target characteristics
+# - Sequences tool execution for maximum efficiency
+# - Adapts strategy based on intermediate findings
+# - Manages resource allocation (rate limiting, parallelization)
+#
+# STRATEGIC DECISIONS:
+# - Passive vs. Active: When to stay quiet vs. make noise
+# - Breadth vs. Depth: Scan many targets shallowly or few deeply
+# - Tool Selection: Use nmap for ports, httpx for web, etc.
+# - Timing: Sequential (slow, stealthy) vs. Parallel (fast, noisy)
+#
+# KEY CONCEPTS:
+# - **Strategy**: High-level plan (what and when to scan)
+# - **Tactics**: Low-level execution (how to run each tool)
+# - **Adaptive Planning**: Adjust strategy based on discoveries
+#
+# ============================================================================
+
 """
 core/scheduler/strategos.py
 The Mind of the Scanner.

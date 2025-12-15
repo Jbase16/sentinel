@@ -1,3 +1,21 @@
+# ============================================================================
+# scripts/test_tools_install.py
+# Test Tools Install Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the scripts package in SentinelForge.
+# [Specific purpose based on module name: test_tools_install]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 #!/usr/bin/env python3
 """Quick test for the tools install API endpoint"""
 import asyncio

@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Views/ChatBubbleView.swift
+// Chatbubbleview Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: ChatBubbleView]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import SwiftUI
 
 // Minimal bubble renderer; colors differentiate user vs assistant.

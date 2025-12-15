@@ -1,3 +1,21 @@
+# ============================================================================
+# core/recon/behavioral.py
+# Behavioral Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the recon package in SentinelForge.
+# [Specific purpose based on module name: behavioral]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/recon.py — Reconnaissance and behavioral probes
 
 from __future__ import annotations

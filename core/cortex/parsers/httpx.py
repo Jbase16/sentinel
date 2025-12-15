@@ -1,3 +1,21 @@
+# ============================================================================
+# core/cortex/parsers/httpx.py
+# Httpx Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the parsers package in SentinelForge.
+# [Specific purpose based on module name: httpx]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/cortex/parsers/httpx.py
 Parses HTTPX output into Tech Nodes and Vulnerabilities.

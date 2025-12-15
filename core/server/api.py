@@ -1,3 +1,21 @@
+# ============================================================================
+# core/server/api.py
+# Api Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the server package in SentinelForge.
+# [Specific purpose based on module name: api]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/api.py
 # Production-grade FastAPI server (Hybrid Version)
 
@@ -404,7 +422,7 @@ async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
     if not hasattr(app.state, "ghost"):
         app.state.ghost = GhostInterceptor(session, port=port)
         await app.state.ghost.start()
-        return {"status": "started", "port": port}
+        return {"status": "started", "port": app.state.ghost.port}
     else:
         return {"status": "already_running", "port": app.state.ghost.port}
 

@@ -1,3 +1,21 @@
+# ============================================================================
+# scripts/manual_scan.py
+# Manual Scan Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the scripts package in SentinelForge.
+# [Specific purpose based on module name: manual_scan]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 
 import asyncio
 import logging

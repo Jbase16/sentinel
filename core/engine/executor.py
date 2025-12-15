@@ -1,3 +1,21 @@
+# ============================================================================
+# core/engine/executor.py
+# Executor Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the engine package in SentinelForge.
+# [Specific purpose based on module name: executor]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 import subprocess
 import threading
 import uuid

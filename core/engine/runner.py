@@ -1,3 +1,21 @@
+# ============================================================================
+# core/engine/runner.py
+# Runner Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the engine package in SentinelForge.
+# [Specific purpose based on module name: runner]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/runner.py
 # Tool execution + recon phase orchestrator
 

@@ -1,3 +1,21 @@
+# ============================================================================
+# core/toolkit/vuln_rules.py
+# Vuln Rules Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the toolkit package in SentinelForge.
+# [Specific purpose based on module name: vuln_rules]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 # core/vuln_rules.py
 # Higher-order vulnerability correlation engine
 

@@ -1,3 +1,21 @@
+# ============================================================================
+# core/scheduler/events.py
+# Events Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the scheduler package in SentinelForge.
+# [Specific purpose based on module name: events]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/scheduler/events.py
 Event Types for the Agent Loop.

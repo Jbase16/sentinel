@@ -1,3 +1,21 @@
+# ============================================================================
+# core/ghost/proxy.py
+# Proxy Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the ghost package in SentinelForge.
+# [Specific purpose based on module name: proxy]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/ghost/proxy.py
 The Passive Interceptor (Ghost Protocol).

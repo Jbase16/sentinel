@@ -1,3 +1,21 @@
+# ============================================================================
+# core/engine/orchestrator.py
+# Orchestrator Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the engine package in SentinelForge.
+# [Specific purpose based on module name: orchestrator]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 core/orchestrator.py
 The Command Deck Orchestrator.

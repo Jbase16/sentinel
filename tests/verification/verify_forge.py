@@ -1,3 +1,21 @@
+# ============================================================================
+# tests/verification/verify_forge.py
+# Verify Forge Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the verification package in SentinelForge.
+# [Specific purpose based on module name: verify_forge]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 """
 tests/verify_forge.py
 Verifies the JIT Exploit Forge (Mocked LLM).

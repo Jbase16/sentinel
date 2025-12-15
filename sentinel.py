@@ -1,3 +1,21 @@
+# ============================================================================
+# sentinel.py
+# Sentinel Module
+# ============================================================================
+#
+# PURPOSE:
+# This module is part of the sentinelforge package in SentinelForge.
+# [Specific purpose based on module name: sentinel]
+#
+# KEY RESPONSIBILITIES:
+# - [Automatically generated - review and enhance based on actual functionality]
+#
+# INTEGRATION:
+# - Used by: [To be documented]
+# - Depends on: [To be documented]
+#
+# ============================================================================
+
 #!/usr/bin/env python3
 import argparse
 import subprocess

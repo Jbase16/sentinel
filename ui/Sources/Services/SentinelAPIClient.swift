@@ -1,3 +1,21 @@
+// ============================================================================
+// ui/Sources/Services/SentinelAPIClient.swift
+// Sentinelapiclient Component
+// ============================================================================
+//
+// PURPOSE:
+// This Swift component is part of the SentinelForge macOS UI.
+// [Specific purpose based on component name: SentinelAPIClient]
+//
+// KEY RESPONSIBILITIES:
+// - [Automatically generated - review and enhance based on actual functionality]
+//
+// INTEGRATION:
+// - Used by: [To be documented]
+// - Depends on: [To be documented]
+//
+// ============================================================================
+
 import Foundation
 
 /// Tiny HTTP client for talking to the local Sentinel Python bridge.
@@ -121,26 +139,62 @@ public struct SentinelAPIClient: Sendable {
         return decoded.results
     }
 
-    // MARK: - God-Tier Endpoints
+    // MARK: - Ghost Protocol
 
-    @available(*, deprecated, message: "Use startGhostRecording(flowName:) instead. The backend exposes /ghost/record/{flow_name}.")
-    public func startGhost(port: Int = 8080) async throws -> Bool {
-        // Backward compatibility: map port to a flow name
-        return try await startGhostRecording(flowName: "flow-\(port)")
+    private struct GhostStartResponse: Decodable {
+        let status: String
+        let port: Int?
     }
 
+    private struct GhostStopResponse: Decodable {
+        let status: String
+    }
+
+    /// Start the passive interception proxy (Ghost Protocol).
+    /// - Returns: The listening port, if provided by the backend.
+    public func startGhost(port: Int = 8080) async throws -> Int? {
+        guard let base = URL(string: "/ghost/start", relativeTo: baseURL),
+            var components = URLComponents(url: base, resolvingAgainstBaseURL: true)
+        else { throw APIError.badStatus }
+
+        components.queryItems = [URLQueryItem(name: "port", value: "\(port)")]
+        guard let url = components.url else { throw APIError.badStatus }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.badStatus
+        }
+
+        let decoded = try? JSONDecoder().decode(GhostStartResponse.self, from: data)
+        return decoded?.port
+    }
+
+    /// Stop the passive interception proxy (Ghost Protocol).
+    public func stopGhost() async throws -> Bool {
+        guard let url = URL(string: "/ghost/stop", relativeTo: baseURL) else { throw APIError.badStatus }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.badStatus
+        }
+
+        // Treat any 200 as a successful stop; parse best-effort for status.
+        if let decoded = try? JSONDecoder().decode(GhostStopResponse.self, from: data) {
+            return decoded.status == "stopped" || decoded.status == "not_running"
+        }
+        return true
+    }
+
+    /// Record a user flow for Logic Fuzzing (FlowMapper), not the interception proxy.
     public func startGhostRecording(flowName: String) async throws -> Bool {
         guard let url = URL(string: "/ghost/record/\(flowName)", relativeTo: baseURL) else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         let (_, response) = try await session.data(for: request)
         return (response as? HTTPURLResponse)?.statusCode == 200
-    }
-
-    @available(*, deprecated, message: "No corresponding backend endpoint. This is a no-op.")
-    public func stopGhost() async throws -> Bool {
-        // The backend does not implement /ghost/stop. This is a no-op for compatibility.
-        return true
     }
 
     public func startMission(target: String) async throws -> String {
