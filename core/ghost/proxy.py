@@ -24,6 +24,10 @@ class GhostAddon:
     def __init__(self, session: ScanSession):
         self.session = session
         self.strategy = StrategyEngine(session)
+        
+        # Lazy load Lazarus
+        from core.ghost.lazarus import LazarusEngine
+        self.lazarus = LazarusEngine.instance()
 
     def request(self, flow: http.HTTPFlow):
         """
@@ -87,6 +91,12 @@ class GhostAddon:
                     "target": flow.request.host,
                     "metadata": {"server_header": server}
                 })
+            
+            # Lazarus Engine: De-obfuscation
+            if self.lazarus.should_process(flow):
+                self.session.log(f"[Lazarus] De-obfuscating JS: {flow.request.pretty_url}")
+                self.lazarus.process(flow)
+                
         except Exception as e:
             logger.error(f"[Ghost] Response processing error: {e}")
 

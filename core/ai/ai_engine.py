@@ -113,6 +113,26 @@ class AIEngine:
                 logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
                 self.client = None
 
+    def deobfuscate_code(self, code_snippet: str) -> str:
+        """
+        Specialized pipeline for JS de-obfuscation.
+        """
+        if not self.client:
+            return ""
+            
+        system_prompt = (
+            "You are a Reverse Engineering Expert. "
+            "Your task is to de-obfuscate JavaScript code. "
+            "1. Rename single-letter variables (a, b, c) to meaningful names based on context. "
+            "2. Add comments explaining complex logic. "
+            "3. Format the code with proper indentation. "
+            "Return ONLY the clean code. No markdown blocks, no preamble."
+        )
+        
+        user_prompt = f"Code:\n{code_snippet}"
+        
+        return self.client.generate_text(user_prompt, system_prompt) or ""
+
     # ---------------------------------------------------------
     # Status helpers for UI/IPC
     # ---------------------------------------------------------

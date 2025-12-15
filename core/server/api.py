@@ -45,7 +45,8 @@ logger = logging.getLogger(__name__)
 class ScanRequest(BaseModel):
     target: str = Field(..., min_length=1, max_length=2048)
     modules: Optional[List[str]] = None
-    force: bool = False # Added for UX robustness
+    force: bool = False
+    mode: str = "standard"  # Strategos mode: standard, bug_bounty, stealth
     
     @validator("target")
     def validate_target(cls, v: str) -> str:
@@ -542,6 +543,7 @@ async def start_scan(
         _scan_state = {
             "target": req.target,
             "modules": req.modules,
+            "mode": req.mode,  # Strategos mode
             "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -566,7 +568,7 @@ async def start_scan(
             orch = ScanOrchestrator(session=session, log_fn=_log_sink_sync)
             start_time = time.time()
             try:
-                await orch.run(req.target, modules=req.modules, cancel_flag=_cancel_requested)
+                await orch.run(req.target, modules=req.modules, cancel_flag=_cancel_requested, mode=req.mode)
                 _scan_state["status"] = "completed"
                 _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
                 # Store session summary in scan state

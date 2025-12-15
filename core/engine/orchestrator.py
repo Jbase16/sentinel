@@ -117,11 +117,11 @@ class Orchestrator:
         except Exception as e:
              logger.warning(f"    [Orchestrator] Generic Ghost startup failed: {e}")
         
-        def adptor(msg):
+        def adapter(msg):
              logger.info(f"      [Scanner] {msg}")
              session.log(msg) 
 
-        worker = ScanOrchestrator(session=session, log_fn=adptor)
+        worker = ScanOrchestrator(session=session, log_fn=adapter)
         brain = Strategos()
         
         # Decide Mode (Default to Standard, but could be Bug Bounty)
@@ -131,24 +131,33 @@ class Orchestrator:
              installed_tools = list(worker._detect_installed().keys())
              logger.info(f"    [Strategos] Detected {len(installed_tools)} available tools.")
              
-             # The Thinking Loop
-             async for tool in brain.orchestrate(target, installed_tools, mode=mode):
-                 logger.info(f"    [Orchestrator] Assigning {tool} to Worker...")
+             # === DISPATCH CALLBACK ===
+             # This is called by Strategos for each tool to run.
+             # Returns findings list (Strategos handles ingestion via events).
+             async def dispatch_tool(tool: str) -> List[Dict]:
+                 """
+                 Runs the tool via worker and returns findings.
+                 """
+                 logger.info(f"    [Orchestrator] Dispatching {tool} to Worker...")
                  
-                 # 1. Queue the task
-                 worker.queue_task(tool)
-                 tools_to_run.append(tool)
+                 # Run the single tool
+                 context = await worker.run(target, modules=[tool])
+                 
+                 # Return findings for event queue
+                 if context and context.findings:
+                     return context.findings
+                 return []
              
-             if not tools_to_run:
-                 logger.warning("    [Strategos] No tools selected by the Laws.")
-                 return
-
-             # Run the worker with the queued tasks
-             # We pass empty list to run() because we queued them manually
-             context = await worker.run(target, modules=[]) 
+             # === RUN THE MISSION ===
+             result = await brain.run_mission(
+                 target=target,
+                 available_tools=installed_tools,
+                 mode=mode,
+                 dispatch_tool=dispatch_tool
+             )
              
-             logger.info(f"    [Orchestrator] Scan complete. Findings: {len(context.findings)}")
-             self.first_pass_context = context
+             logger.info(f"    [Orchestrator] Mission Complete: {result.reason}")
+             self.first_pass_context = brain.context
         except Exception as e:
              logger.error(f"    [Orchestrator] Scan failed: {e}")  
 

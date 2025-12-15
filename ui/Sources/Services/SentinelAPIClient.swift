@@ -35,14 +35,14 @@ public struct SentinelAPIClient: Sendable {
     }
 
     // Kick off a scan for a given target.
-    public func startScan(target: String, modules: [String] = []) async throws {
+    public func startScan(target: String, modules: [String] = [], mode: String = "standard") async throws {
         guard let url = URL(string: "/scan", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
         // Force by default to clean up zombie states
-        var body: [String: Any] = ["target": target, "force": true]
+        var body: [String: Any] = ["target": target, "force": true, "mode": mode]
         
         if !modules.isEmpty {
             body["modules"] = modules

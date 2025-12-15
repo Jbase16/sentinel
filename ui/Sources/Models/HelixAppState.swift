@@ -6,6 +6,23 @@ struct LogItem: Identifiable, Equatable {
     let text: String
 }
 
+// Scan Mode (Strategos)
+enum ScanMode: String, CaseIterable, Identifiable {
+    case standard = "standard"
+    case bugBounty = "bug_bounty"
+    case stealth = "stealth"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .standard: return "Standard"
+        case .bugBounty: return "Bug Bounty"
+        case .stealth: return "Stealth"
+        }
+    }
+}
+
 // Holds shared UI + LLM state.
 // ObservableObject means any @Published changes will re-render SwiftUI views.
 @MainActor
@@ -86,7 +103,8 @@ class HelixAppState: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] event in
                 // Prefer 'message' (EventStore LOG_EMITTED), fallback to 'line' (legacy), else type
-                let text = event.payload["message"]?.stringValue
+                let text =
+                    event.payload["message"]?.stringValue
                     ?? event.payload["line"]?.stringValue
                     ?? event.type
                 self?.apiLogItems.append(LogItem(id: event.sequence, text: text))
@@ -202,12 +220,12 @@ class HelixAppState: ObservableObject {
     }
 
     // MARK: - Report Generation
-    
+
     func generateReport(section: String) {
         guard !reportIsGenerating else { return }
         reportIsGenerating = true
-        reportContent[section] = "" // Clear previous content
-        
+        reportContent[section] = ""  // Clear previous content
+
         Task {
             defer {
                 Task { @MainActor in
@@ -222,7 +240,8 @@ class HelixAppState: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
-                    self.reportContent[section, default: ""] += "\n[Error: \(error.localizedDescription)]"
+                    self.reportContent[section, default: ""] +=
+                        "\n[Error: \(error.localizedDescription)]"
                 }
             }
         }
@@ -236,8 +255,10 @@ class HelixAppState: ObservableObject {
     }
 
     /// Start a scan via the core /scan endpoint (supports logs + cancellation)
-    func startScan(target: String, modules: [String] = []) {
-        print("[AppState] Starting Scan for target: \(target) with modules: \(modules)")
+    func startScan(target: String, modules: [String] = [], mode: ScanMode = .standard) {
+        print(
+            "[AppState] Starting Scan for target: \(target) with modules: \(modules) mode: \(mode.rawValue)"
+        )
         BackendManager.shared.isActiveOperation = true  // Scans can be long-running
         Task {
             defer {
@@ -246,7 +267,7 @@ class HelixAppState: ObservableObject {
                 }
             }
             do {
-                try await apiClient.startScan(target: target, modules: modules)
+                try await apiClient.startScan(target: target, modules: modules, mode: mode.rawValue)
                 await MainActor.run {
                     self.isScanRunning = true
                 }
@@ -350,6 +371,9 @@ class HelixAppState: ObservableObject {
                 let line = json["line"] as? String
             {
                 self.apiLogs.append(line)
+                // Sync to apiLogItems for the View
+                let nextID = (self.apiLogItems.last?.id ?? 0) + 1
+                self.apiLogItems.append(LogItem(id: nextID, text: line))
             }
         case "findings_update", "evidence_update":
             // For now, just trigger a full refresh of results to keep it simple and consistent
@@ -404,4 +428,3 @@ enum SidebarTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 }
-

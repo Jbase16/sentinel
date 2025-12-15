@@ -6,10 +6,11 @@ struct ScanControlView: View {
     @StateObject var backend = BackendManager.shared
     @State private var scanTarget: String = "http://testphp.vulnweb.com"
     @FocusState private var isFocused: Bool
-    
+
     // Scan Config
     @State private var selectedTools: Set<String> = []
     @State private var showToolConfig = false
+    @State private var selectedMode: ScanMode = .standard
 
     private var isScanning: Bool {
         appState.engineStatus?.scanRunning == true || appState.isScanRunning
@@ -38,7 +39,17 @@ struct ScanControlView: View {
                         startScan()
                     }
                     .disabled(!backend.isRunning || isScanning)
-                
+
+                // Mode Picker
+                Picker("", selection: $selectedMode) {
+                    ForEach(ScanMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 200)
+                .disabled(isScanning)
+
                 // Tool Configuration
                 Button(action: { showToolConfig.toggle() }) {
                     Image(systemName: "gearshape")
@@ -86,16 +97,11 @@ struct ScanControlView: View {
             }
         }
     }
-    
+
     private func startScan() {
         if !scanTarget.isEmpty && backend.isRunning {
-            // If selection is empty, it means "All" (default behavior) logic, 
-            // OR it means "None selected".
-            // Let's assume empty selection = Run All (default).
-            // But if user explicitly deselected all... that's tricky.
-            // For now, let's treat empty as "Default/All".
-            // If they want specific, they select specific.
-            appState.startScan(target: scanTarget, modules: Array(selectedTools))
+            appState.startScan(
+                target: scanTarget, modules: Array(selectedTools), mode: selectedMode)
         }
     }
 }
@@ -105,13 +111,13 @@ struct ScanControlView: View {
 struct ToolSelectionView: View {
     let installed: [String]
     @Binding var selection: Set<String>
-    
+
     var body: some View {
         VStack(alignment: .leading) {
             Text("Select Tools")
                 .font(.headline)
                 .padding(.bottom, 4)
-            
+
             HStack {
                 Button("All") {
                     selection = Set(installed)
@@ -122,9 +128,9 @@ struct ToolSelectionView: View {
             }
             .buttonStyle(.link)
             .font(.caption)
-            
-            Divider() 
-            
+
+            Divider()
+
             List {
                 ForEach(installed, id: \.self) { tool in
                     HStack {
@@ -143,7 +149,7 @@ struct ToolSelectionView: View {
                 }
             }
             .frame(minWidth: 250, minHeight: 300)
-            
+
             Text("\(selection.count) selected")
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -261,10 +267,11 @@ struct LogConsoleView: View {
                 }
                 .buttonStyle(.plain)
                 .font(.caption)
-                
+
                 Button("Export") {
                     // Extract text from log items
-                    logContentForExport = appState.apiLogItems.map { $0.text }.joined(separator: "\n")
+                    logContentForExport = appState.apiLogItems.map { $0.text }.joined(
+                        separator: "\n")
                     showingExporter = true
                 }
                 .buttonStyle(.plain)
@@ -326,4 +333,3 @@ struct PlainTextDocument: FileDocument {
         return FileWrapper(regularFileWithContents: content.data(using: .utf8)!)
     }
 }
-
