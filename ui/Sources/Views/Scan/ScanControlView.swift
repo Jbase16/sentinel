@@ -16,6 +16,7 @@
 //
 // ============================================================================
 
+import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -369,7 +370,9 @@ struct LogConsoleView: View {
                 }
                 .onChange(of: appState.apiLogItems.count) { _, _ in
                     if let last = appState.apiLogItems.last {
-                        withAnimation {
+                        // Keep the newest scan activity visible. Avoid per-line animations to
+                        // prevent stutter under high-volume logs.
+                        DispatchQueue.main.async {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     }

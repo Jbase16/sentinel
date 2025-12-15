@@ -611,26 +611,26 @@ async def start_scan(
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
         
-	        async def _runner():
-	            from core.base.session import ScanSession
-	            from core.cortex.events import get_event_bus
-	            from core.engine.scanner_engine import ScannerEngine
-	            from core.scheduler.modes import ScanMode as StrategosMode
-	            from core.scheduler.strategos import Strategos
-	            from core.toolkit.tools import get_installed_tools
-            
+        async def _runner():
+            from core.base.session import ScanSession
+            from core.cortex.events import get_event_bus
+            from core.engine.scanner_engine import ScannerEngine
+            from core.scheduler.modes import ScanMode as StrategosMode
+            from core.scheduler.strategos import Strategos
+            from core.toolkit.tools import get_installed_tools
+
             event_bus = get_event_bus()
-            
+
             # Create a session for this scan to isolate data
             session = ScanSession(req.target)
             _scan_state["session_id"] = session.id
 
             # Stream scan logs through the session (so `/logs` works) and mirror to UI/event streams.
             session.set_external_log_sink(_log_sink_sync)
-            
+
             # Register the session with the session manager
             await register_session(session.id, session)
-            
+
             # Emit SCAN_STARTED event
             installed_tools = list(get_installed_tools().keys())
             requested_tools = list(dict.fromkeys(req.modules or []))
@@ -648,7 +648,7 @@ async def start_scan(
                 session.log(f"[Strategos] ⚠️ Requested tools not installed: {', '.join(missing_tools)}")
 
             event_bus.emit_scan_started(req.target, allowed_tools, session.id)
-            
+
             start_time = time.time()
             try:
                 try:
@@ -656,58 +656,58 @@ async def start_scan(
                 except ValueError:
                     mode = StrategosMode.STANDARD
 
-	                brain = Strategos(log_fn=session.log)
+                brain = Strategos(log_fn=session.log)
 
-	                async def dispatch_tool(tool: str) -> List[Dict]:
-	                    # Best-effort early stop; cancellation will also interrupt via task cancellation.
-	                    if _cancel_requested.is_set():
-	                        return []
+                async def dispatch_tool(tool: str) -> List[Dict]:
+                    # Best-effort early stop; cancellation will also interrupt via task cancellation.
+                    if _cancel_requested.is_set():
+                        return []
 
-	                    session.log(f"[Strategos] Dispatching tool: {tool}")
-	                    try:
-	                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[])
-	                    except Exception:
-	                        pass
+                    session.log(f"[Strategos] Dispatching tool: {tool}")
+                    try:
+                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[])
+                    except Exception:
+                        pass
 
-	                    # Execute the concrete tool run directly. Strategos decides *what* to run;
-	                    # ScannerEngine handles *how* to run it and stream output.
-	                    engine = ScannerEngine(session=session)
-	                    try:
-	                        async for log_line in engine.scan(
-	                            req.target, selected_tools=[tool], cancel_flag=_cancel_requested
-	                        ):
-	                            session.log(log_line)
+                    # Execute the concrete tool run directly. Strategos decides *what* to run;
+                    # ScannerEngine handles *how* to run it and stream output.
+                    engine = ScannerEngine(session=session)
+                    try:
+                        async for log_line in engine.scan(
+                            req.target, selected_tools=[tool], cancel_flag=_cancel_requested
+                        ):
+                            session.log(log_line)
 
-	                        findings = engine.get_last_results() or []
-	                        try:
-	                            event_bus.emit_tool_completed(
-	                                tool=tool, exit_code=0, findings_count=len(findings)
-	                            )
-	                        except Exception:
-	                            pass
-	                        return findings
-	                    except asyncio.CancelledError:
-	                        _cancel_requested.set()
-	                        try:
-	                            await engine.shutdown(reason="cancelled")
-	                        except Exception:
-	                            pass
-	                        try:
-	                            event_bus.emit_tool_completed(tool=tool, exit_code=130, findings_count=0)
-	                        except Exception:
-	                            pass
-	                        raise
-	                    except Exception as exc:
-	                        session.log(f"[Strategos] Tool failed ({tool}): {exc}")
-	                        try:
-	                            await engine.shutdown(reason="error")
-	                        except Exception:
-	                            pass
-	                        try:
-	                            event_bus.emit_tool_completed(tool=tool, exit_code=1, findings_count=0)
-	                        except Exception:
-	                            pass
-	                        return []
+                        findings = engine.get_last_results() or []
+                        try:
+                            event_bus.emit_tool_completed(
+                                tool=tool, exit_code=0, findings_count=len(findings)
+                            )
+                        except Exception:
+                            pass
+                        return findings
+                    except asyncio.CancelledError:
+                        _cancel_requested.set()
+                        try:
+                            await engine.shutdown(reason="cancelled")
+                        except Exception:
+                            pass
+                        try:
+                            event_bus.emit_tool_completed(tool=tool, exit_code=130, findings_count=0)
+                        except Exception:
+                            pass
+                        raise
+                    except Exception as exc:
+                        session.log(f"[Strategos] Tool failed ({tool}): {exc}")
+                        try:
+                            await engine.shutdown(reason="error")
+                        except Exception:
+                            pass
+                        try:
+                            event_bus.emit_tool_completed(tool=tool, exit_code=1, findings_count=0)
+                        except Exception:
+                            pass
+                        return []
 
                 mission = await brain.run_mission(
                     target=req.target,
@@ -721,31 +721,31 @@ async def start_scan(
                 _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
                 # Store session summary in scan state
                 _scan_state["summary"] = session.to_dict()
-                
+
                 # Emit SCAN_COMPLETED event
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration)
-                
+
             except asyncio.CancelledError:
                 _scan_state["status"] = "cancelled"
                 _scan_state["summary"] = session.to_dict()
-                
+
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration)
-                
+
             except Exception as e:
                 _scan_state["status"] = "error"
                 _scan_state["error"] = str(e)
                 _scan_state["summary"] = session.to_dict()
                 logger.error(f"Scan error: {e}", exc_info=True)
-                
+
                 # Emit error via event store
                 event_bus._store.append(
                     GraphEventType.SCAN_ERROR,
                     {"error": str(e), "target": req.target},
                     source="orchestrator"
                 )
-                
+
             finally:
                 # Unregister session when scan is complete
                 await unregister_session(session.id)
@@ -1016,3 +1016,4 @@ def serve(port: Optional[int] = None, host: Optional[str] = None):
 
 if __name__ == "__main__":
     serve()
+

@@ -17,6 +17,7 @@
 // ============================================================================
 
 import Combine
+import Foundation
 import SwiftUI
 
 struct LogItem: Identifiable, Equatable {
@@ -59,6 +60,10 @@ class HelixAppState: ObservableObject {
     let ptyClient: PTYClient
 
     private var cancellables = Set<AnyCancellable>()
+    private var didSetupEventStreamSubscriptions = false
+    private var seenEventIDs: Set<String> = []
+    private var eventSequenceEpoch: Int = 1
+    private var lastEventSequence: Int = 0
 
     @Published var apiLogs: [String] = []  // Buffered logs from Python core
     @Published var apiResults: SentinelResults?  // Latest scan snapshot
@@ -115,21 +120,90 @@ class HelixAppState: ObservableObject {
         self.startEventStream()
         self.refreshStatus()
 
+        if !didSetupEventStreamSubscriptions {
+            didSetupEventStreamSubscriptions = true
+
+            // Subscribe BEFORE connecting so we don't drop early replay events.
+            eventClient.eventPublisher
+                .receive(on: RunLoop.main)
+                .sink { [weak self] event in
+                    guard let self else { return }
+
+                    // Deduplicate by immutable event UUID (survives backend restarts/replays).
+                    if self.seenEventIDs.contains(event.id) {
+                        return
+                    }
+                    self.seenEventIDs.insert(event.id)
+                    if self.seenEventIDs.count > 50_000 {
+                        self.seenEventIDs.removeAll(keepingCapacity: true)
+                    }
+
+                    // Maintain a stable, strictly increasing local ID even if the backend
+                    // restarts and its sequence counter resets.
+                    if event.sequence < self.lastEventSequence {
+                        self.eventSequenceEpoch += 1
+                    }
+                    self.lastEventSequence = event.sequence
+                    let stableID = (self.eventSequenceEpoch * 1_000_000) + event.sequence
+
+                    // Update scan-running state from the authoritative scan lifecycle events.
+                    switch event.eventType {
+                    case .scanStarted:
+                        self.isScanRunning = true
+                    case .scanCompleted, .scanError:
+                        self.isScanRunning = false
+                    default:
+                        break
+                    }
+
+                    // Render selected events into the Live Logs console.
+                    let rendered = self.renderLiveLogLine(event: event)
+                    guard let rendered else { return }
+
+                    self.apiLogItems.append(LogItem(id: stableID, text: rendered))
+                }
+                .store(in: &cancellables)
+        }
+
         // Connect unified event stream (provides sequence IDs)
         eventClient.connect()
+    }
 
-        // Subscribe to log events and map to stable-identity items
-        eventClient.logEventPublisher
-            .receive(on: RunLoop.main)
-            .sink { [weak self] event in
-                // Prefer 'message' (EventStore LOG_EMITTED), fallback to 'line' (legacy), else type
-                let text =
-                    event.payload["message"]?.stringValue
-                    ?? event.payload["line"]?.stringValue
-                    ?? event.type
-                self?.apiLogItems.append(LogItem(id: event.sequence, text: text))
-            }
-            .store(in: &cancellables)
+    private func renderLiveLogLine(event: GraphEvent) -> String? {
+        switch event.eventType {
+        case .logEmitted:
+            return event.payload["message"]?.stringValue
+                ?? event.payload["line"]?.stringValue
+                ?? event.type
+
+        case .scanStarted:
+            let target = event.payload["target"]?.stringValue ?? "unknown"
+            let toolCount = (event.payload["modules"]?.value as? [Any])?.count ?? 0
+            return "[Scan] started: \(target) (\(toolCount) tools)"
+
+        case .scanCompleted:
+            let status = event.payload["status"]?.stringValue ?? "unknown"
+            let findings = event.payload["findings_count"]?.intValue ?? 0
+            let duration = event.payload["duration_seconds"]?.doubleValue ?? 0.0
+            return String(format: "[Scan] %@(findings=%d, duration=%.1fs)", status, findings, duration)
+
+        case .scanError:
+            let error = event.payload["error"]?.stringValue ?? "unknown error"
+            return "[Scan] error: \(error)"
+
+        case .toolInvoked:
+            let tool = event.payload["tool"]?.stringValue ?? "unknown"
+            return "[Tool] start: \(tool)"
+
+        case .toolCompleted:
+            let tool = event.payload["tool"]?.stringValue ?? "unknown"
+            let exitCode = event.payload["exit_code"]?.intValue ?? 0
+            let findings = event.payload["findings_count"]?.intValue ?? 0
+            return "[Tool] done: \(tool) (exit=\(exitCode), findings=\(findings))"
+
+        default:
+            return nil
+        }
     }
 
     private func setupLLMBindings() {

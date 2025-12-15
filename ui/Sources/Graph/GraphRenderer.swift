@@ -24,6 +24,7 @@
 //  Manages the Metal Pipeline, Buffers, and Physics Simulation.
 //
 
+import Foundation
 import Metal
 import MetalKit
 import simd
@@ -41,14 +42,14 @@ class GraphRenderer: NSObject {
 
     struct Event {
         let eventType: EventType
-        let payload: [String: JSONValue]
+        let payload: [String: AnyCodable]
 
-        init(eventType: EventType, payload: [String: JSONValue]) {
+        init(eventType: EventType, payload: [String: AnyCodable]) {
             self.eventType = eventType
             self.payload = payload
         }
 
-        init(typeString: String, payload: [String: JSONValue]) {
+        init(typeString: String, payload: [String: AnyCodable]) {
             self.eventType = EventType(rawValue: typeString) ?? .unknown
             self.payload = payload
         }
@@ -57,7 +58,9 @@ class GraphRenderer: NSObject {
     var device: MTLDevice
     var commandQueue: MTLCommandQueue?  // Changed from ! to ? for safety
     var pipelineState: MTLRenderPipelineState?  // Changed from ! to ?
+    var linePipelineState: MTLRenderPipelineState?  // Edge rendering
     var vertexBuffer: MTLBuffer?
+    var edgeVertexBuffer: MTLBuffer?
     var uniformsBuffer: MTLBuffer?
 
     // Scene State
@@ -91,6 +94,7 @@ class GraphRenderer: NSObject {
         }
         let vertexFunction = library.makeFunction(name: "vertex_main")
         let fragmentFunction = library.makeFunction(name: "fragment_main")
+        let lineFragmentFunction = library.makeFunction(name: "fragment_line")
         print(
             "GraphRenderer: Functions loaded: v=\(vertexFunction != nil) f=\(fragmentFunction != nil)"
         )
@@ -128,7 +132,28 @@ class GraphRenderer: NSObject {
             pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
             print("GraphRenderer: Pipeline State created successfully")
         } catch {
-            print("Failed to create pipeline: \(error)")
+            print("Failed to create point pipeline: \(error)")
+        }
+
+        // Separate pipeline for edge lines (no point_coord in fragment shader).
+        if let lineFragmentFunction {
+            let lineDescriptor = MTLRenderPipelineDescriptor()
+            lineDescriptor.vertexFunction = vertexFunction
+            lineDescriptor.fragmentFunction = lineFragmentFunction
+            lineDescriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            lineDescriptor.colorAttachments[0].isBlendingEnabled = true
+            lineDescriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            lineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            lineDescriptor.vertexDescriptor = vertexDescriptor
+
+            do {
+                linePipelineState = try device.makeRenderPipelineState(descriptor: lineDescriptor)
+                print("GraphRenderer: Line Pipeline State created successfully")
+            } catch {
+                print("Failed to create line pipeline: \(error)")
+            }
+        } else {
+            print("GraphRenderer: fragment_line not found; edges disabled")
         }
     }
     // MARK: - Live Event Integration
@@ -136,6 +161,11 @@ class GraphRenderer: NSObject {
     /// Node tracking for event-driven updates
     private var nodePositions: [String: Int] = [:]  // node_id -> index
     private var nodeCount: Int = 0
+
+    /// Edge tracking for event-driven updates
+    private var edgeKeys: Set<String> = []
+    private var pendingEdges: [(sourceId: String, targetId: String, edgeType: String)] = []
+    private var edgeVertices: [Node] = []
 
     /// Initialize with a single placeholder node (will be replaced by live data)
     private func generateDummyData() {
@@ -154,8 +184,7 @@ class GraphRenderer: NSObject {
         case .nodeAdded:
             addNodeFromEvent(event)
         case .edgeAdded:
-            // For now, edges are visual links - could animate
-            break
+            addEdgeFromEvent(event)
         case .findingDiscovered:
             addFindingNode(event)
         case .scanStarted:
@@ -180,12 +209,12 @@ class GraphRenderer: NSObject {
         // Skip if already added
         if nodePositions[nodeId] != nil { return }
 
-        // Position based on type (ring layout)
+        // Position based on type (spiral layout in world coordinates)
         let angle = Float(nodeCount) * 0.618 * 2 * .pi  // Golden angle
-        let radius: Float = 0.3 + Float(nodeCount) * 0.05
+        let radius: Float = 20.0 + Float(nodeCount) * 3.0
         let x = cos(angle) * radius
         let y = sin(angle) * radius
-        let z = Float.random(in: -0.1...0.1)
+        let z = stableFloat(seed: nodeId, min: -10, max: 10)
 
         // Color based on node type
         let color = colorForNodeType(nodeType)
@@ -203,6 +232,43 @@ class GraphRenderer: NSObject {
         lock.unlock()
 
         uploadToGPU()
+        resolvePendingEdges()
+    }
+
+    /// Add an edge from an EDGE_ADDED event (if endpoints exist; otherwise, queue it)
+    private func addEdgeFromEvent(_ event: Event) {
+        guard let sourceId = event.payload["source_id"]?.stringValue,
+            let targetId = event.payload["target_id"]?.stringValue
+        else {
+            return
+        }
+        let edgeType = event.payload["edge_type"]?.stringValue ?? "LINK"
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Deduplicate
+        let key = "\(sourceId)->\(targetId):\(edgeType)"
+        if edgeKeys.contains(key) { return }
+
+        guard let sourceIndex = nodePositions[sourceId],
+            let targetIndex = nodePositions[targetId]
+        else {
+            pendingEdges.append((sourceId: sourceId, targetId: targetId, edgeType: edgeType))
+            return
+        }
+
+        edgeKeys.insert(key)
+
+        let sourcePos = nodes[sourceIndex].position
+        let targetPos = nodes[targetIndex].position
+        let color = colorForEdgeType(edgeType)
+
+        // For line primitives, pos.w is unused; keep it non-zero.
+        edgeVertices.append(Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color))
+        edgeVertices.append(Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color))
+
+        uploadEdgesToGPU()
     }
 
     /// Add a finding as a prominent node
@@ -217,7 +283,7 @@ class GraphRenderer: NSObject {
 
         // Findings appear in outer ring
         let angle = Float(nodeCount) * 0.618 * 2 * .pi
-        let radius: Float = 0.8
+        let radius: Float = 90.0
         let x = cos(angle) * radius
         let y = sin(angle) * radius
 
@@ -251,6 +317,10 @@ class GraphRenderer: NSObject {
         nodePositions[target] = 0
         nodes = [targetNode]
         nodeCount = 1
+        edgeKeys.removeAll()
+        pendingEdges.removeAll()
+        edgeVertices.removeAll()
+        edgeVertexBuffer = nil
         lock.unlock()
 
         uploadToGPU()
@@ -262,6 +332,11 @@ class GraphRenderer: NSObject {
         nodes.removeAll()
         nodePositions.removeAll()
         nodeCount = 0
+        edgeKeys.removeAll()
+        pendingEdges.removeAll()
+        edgeVertices.removeAll()
+        vertexBuffer = nil
+        edgeVertexBuffer = nil
         lock.unlock()
     }
 
@@ -273,6 +348,49 @@ class GraphRenderer: NSObject {
         guard !nodes.isEmpty else { return }
         let dataSize = nodes.count * MemoryLayout<Node>.stride
         vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
+    }
+
+    /// Upload current edges to GPU
+    private func uploadEdgesToGPU() {
+        guard !edgeVertices.isEmpty else { return }
+        let dataSize = edgeVertices.count * MemoryLayout<Node>.stride
+        edgeVertexBuffer = device.makeBuffer(bytes: edgeVertices, length: dataSize, options: [])
+    }
+
+    /// Try to resolve queued edges now that a new node has been added.
+    private func resolvePendingEdges() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !pendingEdges.isEmpty else { return }
+
+        var remaining: [(sourceId: String, targetId: String, edgeType: String)] = []
+        for edge in pendingEdges {
+            let key = "\(edge.sourceId)->\(edge.targetId):\(edge.edgeType)"
+            if edgeKeys.contains(key) { continue }
+
+            guard let sourceIndex = nodePositions[edge.sourceId],
+                let targetIndex = nodePositions[edge.targetId]
+            else {
+                remaining.append(edge)
+                continue
+            }
+
+            edgeKeys.insert(key)
+
+            let sourcePos = nodes[sourceIndex].position
+            let targetPos = nodes[targetIndex].position
+            let color = colorForEdgeType(edge.edgeType)
+            edgeVertices.append(
+                Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color)
+            )
+            edgeVertices.append(
+                Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color)
+            )
+        }
+
+        pendingEdges = remaining
+        uploadEdgesToGPU()
     }
 
     // MARK: - Visual Mapping
@@ -318,6 +436,30 @@ class GraphRenderer: NSObject {
         default:
             return SIMD4<Float>(0.5, 0.5, 0.5, 0.7)  // Gray
         }
+    }
+
+    private func colorForEdgeType(_ edgeType: String) -> SIMD4<Float> {
+        switch edgeType {
+        case "EXPOSES", "VULNERABLE_TO":
+            return SIMD4<Float>(1.0, 0.3, 0.3, 0.15)
+        case "HAS_PORT":
+            return SIMD4<Float>(0.5, 1.0, 0.5, 0.15)
+        case "USES_TECH", "RUNS":
+            return SIMD4<Float>(0.8, 0.5, 1.0, 0.15)
+        default:
+            return SIMD4<Float>(0.7, 0.7, 0.8, 0.10)
+        }
+    }
+
+    private func stableFloat(seed: String, min: Float, max: Float) -> Float {
+        guard min < max else { return min }
+        var hash: UInt64 = 1469598103934665603  // FNV-1a offset basis
+        for byte in seed.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        let unit = Float(hash % 10_000) / 10_000.0
+        return min + (max - min) * unit
     }
 
     func resize(size: CGSize) {
@@ -398,8 +540,6 @@ class GraphRenderer: NSObject {
             return
         }
 
-        encoder.setRenderPipelineState(pipelineState)
-
         // Update Time
         time += 0.015
 
@@ -432,7 +572,21 @@ class GraphRenderer: NSObject {
         encoder.setVertexBytes(&model, length: 64, index: 2)
         encoder.setVertexBytes(&timeVal, length: 4, index: 3)
 
-        // Safe Drawing
+        // Edges (optional)
+        if let linePSO = linePipelineState,
+            let eBuffer = edgeVertexBuffer,
+            !edgeVertices.isEmpty
+        {
+            encoder.setRenderPipelineState(linePSO)
+            encoder.setVertexBuffer(eBuffer, offset: 0, index: 0)
+            encoder.drawPrimitives(
+                type: MTLPrimitiveType.line,
+                vertexStart: 0,
+                vertexCount: edgeVertices.count
+            )
+        }
+
+        // Nodes
         guard !nodes.isEmpty, let vBuffer = vertexBuffer else {
             if frameCount % 60 == 0 {
                 print("GraphRenderer: Nodes empty. Skipping draw primitives.")
@@ -443,9 +597,9 @@ class GraphRenderer: NSObject {
             return
         }
 
+        encoder.setRenderPipelineState(pipelineState)
         encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
-        encoder.drawPrimitives(
-            type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
+        encoder.drawPrimitives(type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)

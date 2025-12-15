@@ -77,3 +77,10 @@ fragment float4 fragment_main(
     
     return float4(finalColor, alpha);
 }
+
+// --- Line Fragment Shader (for edges) ---
+fragment float4 fragment_line(
+    VertexOut in [[stage_in]]
+) {
+    return float4(in.color.rgb, in.color.a);
+}

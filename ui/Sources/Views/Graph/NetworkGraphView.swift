@@ -46,6 +46,15 @@ struct NetworkGraphView: View {
                             .cornerRadius(4)
                     }
 
+                    if appState.eventClient.isConnected {
+                        Text("EVENT STREAM :: CONNECTED")
+                            .font(.custom("Courier New", size: 14))
+                            .foregroundColor(.green)
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(4)
+                    }
+
                     if appState.isGhostActive {
                         Text("GHOST PROTOCOL :: ACTIVE")
                             .font(.custom("Courier New", size: 14))

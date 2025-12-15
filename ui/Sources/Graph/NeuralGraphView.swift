@@ -24,16 +24,18 @@
 //  Wraps the Metal Renderer for SwiftUI.
 //
 
+import Combine
 import MetalKit
 import SwiftUI
 
 struct NeuralGraphView: NSViewRepresentable {
-    var nodes: [CortexStream.NodeModel]
+    let eventClient: EventStreamClient
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+        Coordinator(eventClient: eventClient)
     }
 
+    @MainActor
     func makeNSView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.delegate = context.coordinator
@@ -60,28 +62,41 @@ struct NeuralGraphView: NSViewRepresentable {
             }
         }
 
-        // Initial data
-        context.coordinator.update(nodes: nodes)
+        context.coordinator.bindEventStream(view: mtkView)
 
         return mtkView
     }
 
+    @MainActor
     func updateNSView(_ nsView: MTKView, context: Context) {
-        // Feed live data to the renderer
-        context.coordinator.update(nodes: nodes)
+        context.coordinator.bindEventStream(view: nsView)
     }
 
     class Coordinator: NSObject, MTKViewDelegate {
-        var parent: NeuralGraphView
         var renderer: GraphRenderer?
+        private let eventClient: EventStreamClient
+        private var graphCancellable: AnyCancellable?
+        private weak var mtkView: MTKView?
 
-        init(_ parent: NeuralGraphView) {
-            self.parent = parent
+        init(eventClient: EventStreamClient) {
+            self.eventClient = eventClient
             super.init()
         }
 
-        func update(nodes: [CortexStream.NodeModel]) {
-            renderer?.updateNodes(nodes)
+        @MainActor
+        func bindEventStream(view: MTKView) {
+            self.mtkView = view
+            guard graphCancellable == nil else { return }
+
+            graphCancellable = eventClient.eventPublisher
+                .receive(on: RunLoop.main)
+                .sink { [weak self] event in
+                    guard let self, let renderer = self.renderer else { return }
+                    renderer.handleGraphEvent(
+                        GraphRenderer.Event(typeString: event.type, payload: event.payload)
+                    )
+                    self.mtkView?.setNeedsDisplay(self.mtkView?.bounds ?? .zero)
+                }
         }
 
         func updateInput(drag: CGSize, zoom: CGFloat) {
@@ -110,7 +125,7 @@ struct InteractiveGraphContainer: View {
     @State private var lastDrag = CGSize.zero
 
     var body: some View {
-        NeuralGraphView(nodes: appState.cortexStream.nodes)
+        NeuralGraphView(eventClient: appState.eventClient)
             .gesture(
                 DragGesture()
                     .onChanged { value in
