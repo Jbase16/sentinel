@@ -119,10 +119,10 @@ struct ToolSelectionView: View {
                 .padding(.bottom, 4)
 
             HStack {
-                Button("All") {
+                Button("Select All") {
                     selection = Set(installed)
                 }
-                Button("None") {
+                Button("Clear") {
                     selection.removeAll()
                 }
             }
@@ -150,7 +150,7 @@ struct ToolSelectionView: View {
             }
             .frame(minWidth: 250, minHeight: 300)
 
-            Text("\(selection.count) selected")
+            Text(selection.isEmpty ? "Auto: all installed tools" : "\(selection.count) selected")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

@@ -102,44 +102,85 @@ class ScanSession:
         self.wraith = WraithAutomator(self)
 
     def start_ghost(self, port: int = 8080):
-        """Activates the Ghost Protocol traffic interceptor."""
+        """
+        Activate the Ghost Protocol network proxy for this session.
+        
+        Ghost intercepts HTTP/HTTPS traffic between target and browser,
+        allowing us to inspect/modify requests and discover API endpoints.
+        
+        Args:
+            port: Port to run the proxy on (default 8080, like Burp Suite)
+        """
         from core.ghost.proxy import GhostInterceptor
+        # Create and configure the proxy for this session
         self.ghost = GhostInterceptor(self, port)
-        # We need to run the async start method. 
-        # Since we are likely in an async context, we can await it or create a task.
+        
+        # Start the proxy in the background (async operation)
+        # asyncio.create_task runs it concurrently without blocking
         import asyncio
         asyncio.create_task(self.ghost.start())
 
     def stop_ghost(self):
+        """
+        Deactivate the Ghost Protocol proxy.
+        
+        Shuts down the proxy server and cleans up resources.
+        Safe to call even if Ghost isn't running.
+        """
         if self.ghost:
-            self.ghost.stop()
-            self.ghost = None
+            self.ghost.stop()  # Shut down the proxy
+            self.ghost = None  # Clear the reference
 
     def log(self, message: str):
+        """
+        Add a log message to this session's log stream.
+        
+        Unlike global logging, these logs are tied to this specific scan.
+        They're shown in the UI for this session and saved with the scan results.
+        
+        Thread-safe: multiple tools can log simultaneously without corruption.
+        
+        Args:
+            message: What to log (e.g., "nmap scan started", "Found SQL injection")
+        """
+        # Format timestamp as HH:MM:SS for readability
         timestamp = time.strftime("%H:%M:%S", time.localtime())
         entry = f"[{timestamp}] {message}"
         
-        # Thread-safe logging
+        # Use a lock to prevent race conditions when multiple threads log at once
         with self._logs_lock:
             self.logs.append(entry)
             
-        # Also send to external log sink for UI streaming if available
+        # If UI is subscribed, send the log there too (real-time streaming)
         if self._external_log_sink:
             self._external_log_sink(entry)
-        
-        # We could also emit a signal here for real-time UI updates specific to this session
     
     def set_external_log_sink(self, log_fn):
-        """Set the external log sink function."""
+        """
+        Connect a function to receive log messages as they're added.
+        
+        Used by the scan orchestrator to stream logs to UI via WebSocket/SSE.
+        
+        Args:
+            log_fn: Function to call with each log entry (e.g., lambda msg: send_to_ui(msg))
+        """
         self._external_log_sink = log_fn
 
     def to_dict(self) -> Dict:
+        """
+        Serialize this session to a dictionary (for API responses).
+        
+        Returns a JSON-friendly summary of the session state.
+        
+        Returns:
+            Dictionary with session metadata and statistics
+        """
         return {
-            "id": self.id,
-            "target": self.target,
-            "status": self.status,
-            "findings_count": len(self.findings.get_all()),
-            "issues_count": len(self.issues.get_all()),
-            "start_time": self.start_time,
-            "ghost_active": self.ghost is not None
+            "id": self.id,  # Unique session identifier
+            "target": self.target,  # What we're scanning
+            "status": self.status,  # Current state (Created/Running/Complete)
+            "findings_count": len(self.findings.get_all()),  # How many vulnerabilities found
+            "issues_count": len(self.issues.get_all()),  # How many confirmed exploits
+            "start_time": self.start_time,  # When scan began (Unix timestamp)
+            "ghost_active": self.ghost is not None  # Is proxy running?
         }

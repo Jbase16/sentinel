@@ -1,4 +1,32 @@
-# core/reporting.py — report bundle generation utilities
+# ============================================================================
+# core/ai/reporting.py
+# AI-Powered Security Report Generation
+# ============================================================================
+#
+# PURPOSE:
+# Transforms raw security findings into professional penetration testing reports.
+# Uses AI to write narrative explanations instead of just listing vulnerabilities.
+#
+# WHY AI-DRIVEN REPORTS:
+# - Explains the "so what?" of findings (business impact)
+# - Connects findings into attack chains (shows exploitation path)
+# - Tailors language for different audiences (executives vs. technical teams)
+# - Generates remediation roadmaps (prioritized fix recommendations)
+#
+# REPORT SECTIONS:
+# 1. Executive Summary: High-level overview for leadership
+# 2. Attack Narrative: Story of how findings could be chained
+# 3. Technical Findings: Detailed vulnerability descriptions
+# 4. Risk Assessment: Severity scoring and impact analysis
+# 5. Remediation Roadmap: Prioritized fix recommendations
+#
+# HOW IT WORKS:
+# - Gathers all findings, issues, and kill chain data
+# - Feeds context to AI with specific prompts for each section
+# - AI generates professional Markdown content
+# - Falls back to template-based content if AI unavailable
+#
+# ============================================================================
 
 from __future__ import annotations
 

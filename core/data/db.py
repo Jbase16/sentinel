@@ -1,5 +1,37 @@
-# core/db.py
-# Async SQLite persistence layer (Single Connection + WAL)
+# ============================================================================
+# core/data/db.py
+# Database Layer - Persistent Storage for Scan Sessions and Findings
+# ============================================================================
+#
+# PURPOSE:
+# Provides the database layer for storing all scan data persistently.
+# Uses SQLite (file-based database) with async operations for performance.
+#
+# WHAT GETS STORED:
+# - Sessions: Each scan's metadata (target, start time, status, logs)
+# - Findings: Security discoveries (open ports, vulns, exposed services)
+# - Issues: Confirmed exploitable vulnerabilities
+# - Evidence: References to stored tool outputs
+# - Kill Chain: Attack progression tracking
+#
+# WHY SQLITE:
+# - No separate database server needed (just a file)
+# - ACID transactions (data safety)
+# - Good enough for local security tool (not meant for thousands of concurrent users)
+# - Easy backup (just copy the .db file)
+#
+# KEY CONCEPTS:
+# - Async/Await: Non-blocking database operations (app doesn't freeze during queries)
+# - WAL Mode (Write-Ahead Logging): Allows concurrent reads while writing
+# - Singleton Pattern: One database connection shared across the app
+# - Foreign Keys: Enforce data relationships (findings belong to sessions)
+#
+# PERFORMANCE:
+# - Single persistent connection (avoids reconnection overhead)
+# - WAL mode enables concurrent readers
+# - Async prevents blocking the event loop
+#
+# ============================================================================
 
 import aiosqlite
 import json

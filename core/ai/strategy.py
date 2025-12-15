@@ -1,8 +1,34 @@
-"""
-core/ai/strategy.py
-The Neural Strategy Engine.
-Uses Gemma 9B to analyze Ghost Traffic and dream up specific attack vectors.
-"""
+# ============================================================================
+# core/ai/strategy.py
+# Neural Strategy Engine - AI-Powered Attack Vector Discovery
+# ============================================================================
+#
+# PURPOSE:
+# Analyzes intercepted network traffic (from Ghost proxy) and uses AI to hypothesize
+# specific attack vectors. Goes beyond pattern matching to "think like a hacker."
+#
+# WHAT IT DOES:
+# - Examines HTTP requests captured by the proxy
+# - Identifies parameters that might be vulnerable (IDs, flags, paths)
+# - Uses AI to generate attack hypotheses (IDOR, SQLi, mass assignment, etc.)
+# - Suggests specific payloads to test each hypothesis
+#
+# WHY AI FOR STRATEGY:
+# - Recognizes subtle patterns humans might miss
+# - Understands context (e.g., "user_id=5" in profile API → potential IDOR)
+# - Generates creative test cases beyond wordlists
+# - Learns from fine-tuned security knowledge
+#
+# KEY CONCEPTS:
+# - IDOR (Insecure Direct Object Reference): Access other users' data by changing IDs
+# - BOLA (Broken Object Level Authorization): Similar to IDOR but broader
+# - Mass Assignment: Modify hidden object properties via API
+# - Logic Vulnerabilities: Business logic flaws vs. technical bugs
+#
+# WORKFLOW:
+# Ghost captures traffic → Strategy analyzes → Wraith executes test payloads
+#
+# ============================================================================
 
 import json
 import logging

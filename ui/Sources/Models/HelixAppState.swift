@@ -297,7 +297,7 @@ class HelixAppState: ObservableObject {
         Task {
             if let lines = try? await apiClient.fetchLogs(), !lines.isEmpty {
                 await MainActor.run {
-                    self.apiLogs.append(contentsOf: lines)
+                    self.mergePolledLogs(lines)
                 }
             }
         }
@@ -338,6 +338,10 @@ class HelixAppState: ObservableObject {
     func cancelScan() {
         Task {
             try? await apiClient.cancelScan()
+            await MainActor.run {
+                self.isScanRunning = false
+            }
+            self.refreshStatus()
         }
     }
 
@@ -372,9 +376,11 @@ class HelixAppState: ObservableObject {
                 let line = json["line"] as? String
             {
                 self.apiLogs.append(line)
-                // Sync to apiLogItems for the View
-                let nextID = (self.apiLogItems.last?.id ?? 0) + 1
-                self.apiLogItems.append(LogItem(id: nextID, text: line))
+                // Prefer `/events/stream` for the live console; use legacy SSE only as a fallback.
+                if !self.eventClient.isConnected {
+                    let nextID = (self.apiLogItems.last?.id ?? 0) + 1
+                    self.apiLogItems.append(LogItem(id: nextID, text: line))
+                }
             }
         case "findings_update", "evidence_update":
             // For now, just trigger a full refresh of results to keep it simple and consistent
@@ -390,6 +396,32 @@ class HelixAppState: ObservableObject {
             }
         default:
             break
+        }
+    }
+
+    @MainActor
+    private func mergePolledLogs(_ lines: [String]) {
+        guard !lines.isEmpty else { return }
+
+        // `/logs` returns a tail window; merge by finding the last seen line.
+        let lastText = apiLogs.last
+        let startIndex: Int
+        if let lastText, let idx = lines.lastIndex(of: lastText) {
+            startIndex = idx + 1
+        } else {
+            startIndex = 0
+        }
+
+        let newLines = startIndex < lines.count ? Array(lines[startIndex...]) : []
+        guard !newLines.isEmpty else { return }
+
+        apiLogs.append(contentsOf: newLines)
+
+        if !eventClient.isConnected {
+            for line in newLines {
+                let nextID = (apiLogItems.last?.id ?? 0) + 1
+                apiLogItems.append(LogItem(id: nextID, text: line))
+            }
         }
     }
 

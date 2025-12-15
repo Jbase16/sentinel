@@ -1,5 +1,33 @@
-# core/ai_engine.py
-# Central analysis engine for AraUltra with Ollama Support
+# ============================================================================
+# core/ai/ai_engine.py
+# AI Brain - Analyzes Security Tool Output Using Large Language Models
+# ============================================================================
+#
+# PURPOSE:
+# Takes raw output from security tools (like nmap, httpx) and uses AI to:
+# 1. Understand what was discovered (semantic analysis)
+# 2. Extract structured findings (ports, vulnerabilities, services)
+# 3. Suggest next steps (which tools to run next)
+# 4. Map findings to kill chain phases (reconnaissance → exploitation → etc.)
+#
+# HOW IT WORKS:
+# - Runs a local AI model (Gemma 9B) via Ollama (no cloud/privacy leaks)
+# - Forces JSON output for structured responses (no free-form text)
+# - Falls back to rule-based heuristics if AI is unavailable
+#
+# WHY LOCAL AI:
+# - Security data stays on your machine (compliance/privacy)
+# - No API costs or rate limits
+# - Can fine-tune model for security-specific knowledge
+# - Works offline (no internet dependency)
+#
+# KEY CONCEPTS:
+# - LLM (Large Language Model): AI trained on text to understand and generate language
+# - Ollama: Local server that runs LLMs on your GPU/CPU
+# - Prompt Engineering: Crafting instructions to get good AI responses
+# - JSON Schema Enforcement: Force AI to return structured data, not essays
+#
+# ============================================================================
 
 from __future__ import annotations
 
@@ -17,10 +45,24 @@ logger = logging.getLogger(__name__)
 
 class OllamaClient:
     """
-    Simple client to interact with the local Ollama API.
+    HTTP client for communicating with local Ollama server.
+    
+    Ollama is a local server that runs large language models (LLMs) on your machine.
+    This class provides a Python interface to send prompts and receive AI responses.
+    
+    Think of it like a translator: You send questions in Python → Ollama answers via HTTP
     """
     def __init__(self, base_url: str, model: str):
+        """
+        Initialize connection to Ollama.
+        
+        Args:
+            base_url: Where Ollama is running (e.g., "http://localhost:11434")
+            model: Which AI model to use (e.g., "sentinel-9b-god-tier")
+        """
+        # Remove trailing slash for consistent URL building
         self.base_url = base_url.rstrip('/')
+        # Store which model to load (Ollama can host multiple models)
         self.model = model
 
     def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:

@@ -1,3 +1,39 @@
+# ============================================================================
+# core/data/evidence_store.py  
+# Evidence Store - File-Based Artifact Preservation
+# ============================================================================
+#
+# PURPOSE:
+# Saves raw tool outputs and artifacts as files for audit trail and later review.
+# Think of this as the "crime scene photos" of a penetration test.
+#
+# WHAT GETS SAVED:
+# - Raw tool outputs (nmap XML, httpx JSON)
+# - Screenshots of vulnerabilities
+# - Network packet captures
+# - SSL/TLS certificates
+# - Source code snippets
+# - HTTP request/response pairs
+#
+# WHY FILE-BASED STORAGE:
+# - Database bloat prevention (tool outputs can be huge)
+# - Easy external access (can open files in other tools)
+# - Archival compliance (some regulations require raw evidence)
+# - Re-analysis capability (can reprocess with updated parsers)
+#
+# FILE ORGANIZATION:
+# ~/AraUltra_Evidence/
+#   ├── nmap/target_com_timestamp.txt
+#   ├── httpx/target_com_timestamp.json
+#   └── screenshots/target_com_timestamp.png
+#
+# KEY CONCEPTS:
+# - **Evidence Chain**: Maintaining provable audit trail
+# - **Sanitization**: Cleaning filenames for filesystem safety
+# - **Timestamping**: Ensuring unique filenames per run
+#
+# ============================================================================
+
 import asyncio
 import logging
 from core.utils.observer import Observable, Signal

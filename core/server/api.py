@@ -218,6 +218,13 @@ def _log_sink_sync(msg: str) -> None:
         loop.call_soon_threadsafe(lambda: _log_queue.put_nowait(msg) if not _log_queue.full() else None)
     except Exception:
         pass
+
+    # Also emit into the event-sourced stream so the UI console can rely on `/events/stream`.
+    try:
+        from core.cortex.events import get_event_bus
+        get_event_bus().emit_log(msg, source="core")
+    except Exception:
+        pass
     
     try:
         # Bridge to TaskRouter for SSE AND buffer for late-connecting clients
@@ -329,7 +336,8 @@ async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
         if session and hasattr(session, "logs"):
             # Return session logs (most recent first, respecting limit)
             lines = session.logs[-limit:] if len(session.logs) > limit else session.logs
-            return {"lines": lines, "session_id": session_id}
+            if lines:
+                return {"lines": lines, "session_id": session_id}
     
     # Fallback to global queue for legacy behavior
     while not _log_queue.empty() and len(lines) < limit:
@@ -602,7 +610,9 @@ async def start_scan(
             # Emit SCAN_STARTED event
             event_bus.emit_scan_started(req.target, req.modules or [], session.id)
             
-            orch = ScanOrchestrator(session=session, log_fn=_log_sink_sync)
+            # Stream all scan logs through the session (so `/logs` works) and mirror to UI/event streams.
+            session.set_external_log_sink(_log_sink_sync)
+            orch = ScanOrchestrator(session=session, log_fn=session.log)
             start_time = time.time()
             try:
                 await orch.run(req.target, modules=req.modules, cancel_flag=_cancel_requested, mode=req.mode)
@@ -905,4 +915,3 @@ def serve(port: Optional[int] = None, host: Optional[str] = None):
 
 if __name__ == "__main__":
     serve()
-

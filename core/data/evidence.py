@@ -1,4 +1,38 @@
-# core/evidence.py — Evidence storage & artifact recorder
+# ============================================================================
+# core/data/evidence.py
+# Evidence Storage - Raw Artifact Preservation
+# ============================================================================
+#
+# PURPOSE:
+# Saves raw outputs from security tools as files for later review/auditing.
+# Think of this like a lab notebook - preserving the original data.
+#
+# WHAT GETS SAVED:
+# - Text: Raw tool outputs (nmap scans, httpx results, etc.)
+# - JSON: Structured data exports
+# - Binary: Screenshots, network captures, SSL certificates
+#
+# WHY SAVE EVIDENCE:
+# - Reproducibility: Can review findings months later
+# - Audit Trail: Proves what was discovered and when
+# - Legal/Compliance: Evidence for penetration test reports
+# - AI Re-analysis: Can reprocess with improved AI models
+#
+# FILE ORGANIZATION:
+# ~/AraUltra_Evidence/
+#   ├── nmap/
+#   │   └── example_com_20240101-120000.txt
+#   ├── httpx/
+#   │   └── example_com_20240101-120100.json
+#   └── screenshots/
+#       └── example_com_20240101-120200.png
+#
+# KEY CONCEPTS:
+# - Sanitization: Clean target names for safe filenames (remove slashes, etc.)
+# - Timestamping: Each artifact gets a unique timestamp
+# - Directory Organization: One folder per tool for easy browsing
+#
+# ============================================================================
 
 from __future__ import annotations
 

@@ -1,4 +1,37 @@
-# core/risk.py — simple asset risk scoring engine
+# ============================================================================
+# core/data/risk.py
+# Risk Scoring Engine - Automated Asset Risk Calculation
+# ============================================================================
+#
+# PURPOSE:
+# Automatically calculates a risk score for each target based on discovered issues.
+# Helps prioritize which assets need immediate attention.
+#
+# HOW SCORING WORKS:
+# - Each confirmed issue has a severity (CRITICAL, HIGH, MEDIUM, LOW, INFO)
+# - Severities have numeric weights (CRITICAL=10, HIGH=6, MEDIUM=3, LOW=1, INFO=0.5)
+# - An asset's score = sum of all issue weights for that asset
+# - Higher score = more/worse vulnerabilities = higher priority
+#
+# EXAMPLE:
+# example.com has:
+#   - 1 CRITICAL issue (10 points)
+#   - 2 HIGH issues (6 × 2 = 12 points)
+#   - 3 MEDIUM issues (3 × 3 = 9 points)
+#   Total score: 31 points (needs urgent attention!)
+#
+# WHY AUTOMATIC SCORING:
+# - Objective prioritization (not just gut feel)
+# - Helps focus on highest-impact targets first
+# - Provides quantitative risk metrics for reports
+# - Updates automatically as new issues are discovered
+#
+# KEY CONCEPTS:
+# - Observable Pattern: Emits signal when scores change (UI can update automatically)
+# - Reactive Updates: Recalculates whenever new issues are added
+# - Asset Aggregation: Groups issues by target to compute per-asset scores
+#
+# ============================================================================
 
 from __future__ import annotations
 

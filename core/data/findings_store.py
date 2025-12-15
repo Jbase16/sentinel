@@ -1,3 +1,37 @@
+# ============================================================================
+# core/data/findings_store.py
+# Findings Store - In-Memory + Persistent Vulnerability Storage
+# ============================================================================
+#
+# PURPOSE:
+# Manages all discovered vulnerabilities with both in-memory caching and
+# database persistence. Acts as the central repository for scan findings.
+#
+# WHAT ARE FINDINGS:
+# Findings are potential security issues discovered by tools:
+# - Open ports (nmap finds port 22 open)
+# - Exposed services (httpx finds admin panel at /admin)
+# - Misconfigurations (TLS 1.0 enabled, weak ciphers)
+# - Information disclosure (server version leaked)
+# - Vulnerabilities (known CVEs in detected software)
+#
+# FINDINGS VS. ISSUES:
+# - **Finding**: Something potentially risky (needs investigation)
+# - **Issue**: Confirmed exploit (has been validated/tested)
+#
+# ARCHITECTURE:
+# - In-memory list for fast access during scan
+# - Async writes to SQLite for persistence
+# - Observable pattern (emits signals when findings change)
+# - Session scoping (findings belong to specific scans)
+#
+# KEY CONCEPTS:
+# - **Observable Pattern**: Emits signals when data changes
+# - **Dual Storage**: Memory (fast) + Database (permanent)
+# - **Session Scoping**: Each scan's findings kept separate
+#
+# ============================================================================
+
 # core/findings_store.py — central findings store with UI signals
 
 from __future__ import annotations

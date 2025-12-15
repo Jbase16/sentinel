@@ -210,9 +210,12 @@ public struct SentinelAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 202 else {
-            throw APIError.badStatus
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus }
+        // Backend returns 409 when no scan is active; treat as a successful "already stopped".
+        if http.statusCode == 202 || http.statusCode == 409 {
+            return
         }
+        throw APIError.badStatus
     }
 
     // Stream context-aware chat from Python backend

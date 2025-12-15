@@ -1,3 +1,33 @@
+# ============================================================================
+# core/data/issues_store.py
+# Issues Store - Confirmed Exploitable Vulnerability Storage
+# ============================================================================
+#
+# PURPOSE:
+# Stores confirmed security issues that have been validated/exploited.
+# These are the "real" vulnerabilities, not just potential findings.
+#
+# FINDINGS → ISSUES PROMOTION:
+# 1. Tool discovers something (becomes a Finding)
+# 2. AI or human analyzes it
+# 3. If exploitable, promoted to Issue
+# 4. Issue includes proof-of-concept and impact assessment
+#
+# WHAT MAKES AN ISSUE:
+# - **Reproducible**: Can be triggered reliably
+# - **Validated**: Confirmed through testing
+# - **Impact assessed**: Severity and business risk determined
+# - **Proof-of-concept**: Working exploit demonstrated
+#
+# ISSUE ATTRIBUTES:
+# - Severity: CRITICAL, HIGH, MEDIUM, LOW
+# - Type: SQLi, XSS, IDOR, RCE, etc.
+# - Proof: Steps to reproduce / exploit code
+# - Impact: What attacker could achieve
+# - Remediation: How to fix it
+#
+# ============================================================================
+
 from core.utils.observer import Observable, Signal
 from core.data.db import Database
 import asyncio
