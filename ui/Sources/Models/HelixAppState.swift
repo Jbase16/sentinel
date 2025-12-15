@@ -21,7 +21,7 @@ import Foundation
 import SwiftUI
 
 struct LogItem: Identifiable, Equatable {
-    let id: Int
+    let id: UUID
     let text: String
 }
 
@@ -144,7 +144,9 @@ class HelixAppState: ObservableObject {
                         self.eventSequenceEpoch += 1
                     }
                     self.lastEventSequence = event.sequence
-                    let stableID = (self.eventSequenceEpoch * 1_000_000) + event.sequence
+                    self.lastEventSequence = event.sequence
+                    // let stableID = (self.eventSequenceEpoch * 1_000_000) + event.sequence
+                    // We use UUID for view identity now, so stableID logic is obsolete for View ID.
 
                     // Update scan-running state from the authoritative scan lifecycle events.
                     switch event.eventType {
@@ -160,7 +162,7 @@ class HelixAppState: ObservableObject {
                     let rendered = self.renderLiveLogLine(event: event)
                     guard let rendered else { return }
 
-                    self.apiLogItems.append(LogItem(id: stableID, text: rendered))
+                    self.apiLogItems.append(LogItem(id: UUID(), text: rendered))
                 }
                 .store(in: &cancellables)
         }
@@ -185,7 +187,8 @@ class HelixAppState: ObservableObject {
             let status = event.payload["status"]?.stringValue ?? "unknown"
             let findings = event.payload["findings_count"]?.intValue ?? 0
             let duration = event.payload["duration_seconds"]?.doubleValue ?? 0.0
-            return String(format: "[Scan] %@(findings=%d, duration=%.1fs)", status, findings, duration)
+            return String(
+                format: "[Scan] %@(findings=%d, duration=%.1fs)", status, findings, duration)
 
         case .scanError:
             let error = event.payload["error"]?.stringValue ?? "unknown error"
@@ -470,11 +473,10 @@ class HelixAppState: ObservableObject {
                 let line = json["line"] as? String
             {
                 self.apiLogs.append(line)
-                // Prefer `/events/stream` for the live console; use legacy SSE only as a fallback.
-                if !self.eventClient.isConnected {
-                    let nextID = (self.apiLogItems.last?.id ?? 0) + 1
-                    self.apiLogItems.append(LogItem(id: nextID, text: line))
-                }
+                // Prefer `/events/stream` matches usually, but allow legacy logs redundantly
+                // to prevent silence if the graph stream stalls.
+                // let nextID = (self.apiLogItems.last?.id ?? 0) + 1
+                self.apiLogItems.append(LogItem(id: UUID(), text: line))
             }
         case "findings_update", "evidence_update":
             // For now, just trigger a full refresh of results to keep it simple and consistent
@@ -492,7 +494,6 @@ class HelixAppState: ObservableObject {
             break
         }
     }
-
 
     @MainActor
     private func mergePolledLogs(_ lines: [String]) {
@@ -514,8 +515,8 @@ class HelixAppState: ObservableObject {
 
         if !eventClient.isConnected {
             for line in newLines {
-                let nextID = (apiLogItems.last?.id ?? 0) + 1
-                apiLogItems.append(LogItem(id: nextID, text: line))
+                // let nextID = (apiLogItems.last?.id ?? 0) + 1
+                apiLogItems.append(LogItem(id: UUID(), text: line))
             }
         }
     }

@@ -265,29 +265,25 @@ class EventStreamClient: ObservableObject {
             throw URLError(.badServerResponse)
         }
 
-        isConnected = true
+        // REMOVED: isConnected = true (now handled in handleEvent after first event)
         reconnectAttempt = 0
         print("[EventStreamClient] Connected, replaying from sequence \(lastSequence)")
 
         // Parse SSE stream
-        var dataBuffer = ""
-
         for try await line in bytes.lines {
             if Task.isCancelled { break }
 
-            if line.isEmpty {
-                // Empty line = end of event
-                if let data = dataBuffer.data(using: .utf8),
-                    let event = try? JSONDecoder().decode(GraphEvent.self, from: data)
-                {
+            if line.hasPrefix("data:") {
+                let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+
+                guard let data = json.data(using: .utf8) else { continue }
+
+                do {
+                    let event = try JSONDecoder().decode(GraphEvent.self, from: data)
                     await handleEvent(event)
+                } catch {
+                    print("[EventStreamClient] Failed to decode event: \(json)")
                 }
-                dataBuffer = ""
-            } else if line.hasPrefix("data:") {
-                let dataLine = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
-                dataBuffer += dataLine
-            } else if line.hasPrefix(":") {
-                // Comment/keepalive, ignore
             }
         }
     }
@@ -295,6 +291,11 @@ class EventStreamClient: ObservableObject {
     // MARK: - Event Handling
 
     private func handleEvent(_ event: GraphEvent) async {
+        // Mark as connected on first event receipt
+        if !isConnected {
+            isConnected = true
+        }
+
         // Update tracking
         lastSequence = max(lastSequence, event.sequence)
         eventCount += 1
@@ -375,4 +376,3 @@ extension EventStreamClient {
         }
     }
 }
-

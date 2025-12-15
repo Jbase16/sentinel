@@ -363,7 +363,6 @@ struct LogConsoleView: View {
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(.green)
                                 .textSelection(.enabled)
-                                .id(item.id)
                         }
                     }
                     .padding(8)
