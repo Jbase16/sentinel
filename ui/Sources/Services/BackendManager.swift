@@ -135,7 +135,7 @@ class BackendManager: ObservableObject {
 
         guard
             let repoPath = possiblePaths.first(where: { path in
-                fileManager.fileExists(atPath: path.appendingPathComponent("core/api.py").path)
+                fileManager.fileExists(atPath: path.appendingPathComponent("core/server/api.py").path)
             })
         else {
             await MainActor.run { self.status = "Error: Repository not found" }
@@ -161,7 +161,7 @@ class BackendManager: ObservableObject {
         let p = Process()
         p.executableURL = python
         p.currentDirectoryURL = repoPath
-        p.arguments = ["-m", "uvicorn", "core.api:app", "--host", "127.0.0.1", "--port", "8765"]
+        p.arguments = ["-m", "uvicorn", "core.server.api:app", "--host", "127.0.0.1", "--port", "8765"]
 
         // Inherit PYTHONPATH so imports work
         var env = ProcessInfo.processInfo.environment
