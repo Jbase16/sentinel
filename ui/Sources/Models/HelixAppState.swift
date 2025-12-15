@@ -414,11 +414,11 @@ class HelixAppState: ObservableObject {
     func toggleGhost() {
         Task {
             if isGhostActive {
-                if try await apiClient.stopGhost() {
-                    await MainActor.run { self.isGhostActive = false }
-                }
+                // Backend has no stop endpoint; just toggle UI state off
+                await MainActor.run { self.isGhostActive = false }
             } else {
-                if try await apiClient.startGhost() {
+                // Start recording a flow with a default name
+                if try await apiClient.startGhostRecording(flowName: "default") {
                     await MainActor.run { self.isGhostActive = true }
                 }
             }

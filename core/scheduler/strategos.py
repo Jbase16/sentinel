@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import List, Dict, Any, Callable, Awaitable, Optional, Set
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from core.scheduler.laws import Constitution
 from core.scheduler.registry import ToolRegistry, PHASE_1_PASSIVE, PHASE_2_LIGHT, PHASE_3_SURFACE, PHASE_4_DEEP, PHASE_5_HEAVY
@@ -23,6 +24,8 @@ from core.scheduler.events import ToolStartedEvent, ToolCompletedEvent, MissionT
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_EVENT_QUEUE_MAXSIZE = 1024
+
 @dataclass
 class ScanContext:
     target: str
@@ -32,7 +35,10 @@ class ScanContext:
     max_concurrent: int = 3  # Real throttling limit
     findings: List[Dict] = field(default_factory=list)
     findings_this_intent: int = 0
+    surface_delta_this_intent: int = 0
     running_tools: Set[str] = field(default_factory=set)
+    completed_tools_per_intent: Dict[str, Set[str]] = field(default_factory=dict)
+    surface_seen: Set[str] = field(default_factory=set)
 
 class Strategos:
     """
@@ -40,13 +46,15 @@ class Strategos:
     A truly concurrent, event-driven planner.
     """
     
-    def __init__(self):
+    def __init__(self, event_queue_maxsize: int = DEFAULT_EVENT_QUEUE_MAXSIZE):
         self.constitution = Constitution()
         self.registry = ToolRegistry()
         self.context: Optional[ScanContext] = None
-        self.event_queue: asyncio.Queue = asyncio.Queue()
+        self.event_queue: asyncio.Queue = asyncio.Queue(maxsize=event_queue_maxsize)
         self._terminated = False
-        self._dispatch_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        self._dispatch_callback: Optional[Callable[[str], Awaitable[List[Dict]]]] = None
+        self._tool_tasks: Dict[str, asyncio.Task] = {}
+        self._tool_semaphore: Optional[asyncio.Semaphore] = None
         
     async def run_mission(
         self, 
@@ -59,10 +67,18 @@ class Strategos:
         The Agent Loop.
         Dispatches tools concurrently, listens for events, and re-plans.
         """
+        while not self.event_queue.empty():
+            try:
+                self.event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+
         self.context = ScanContext(target=target)
         self.context.knowledge["mode"] = mode
         self._terminated = False
         self._dispatch_callback = dispatch_tool
+        self._tool_tasks = {}
+        self._tool_semaphore = asyncio.Semaphore(self.context.max_concurrent)
         
         current_intent = INTENT_PASSIVE_RECON
         
@@ -76,6 +92,7 @@ class Strategos:
             while not self._terminated:
                 self.context.phase_index = self._get_phase_for_intent(current_intent)
                 self.context.findings_this_intent = 0
+                self.context.surface_delta_this_intent = 0
                 
                 logger.info(f"[Strategos] Decision: Executing {current_intent}")
                 
@@ -86,7 +103,7 @@ class Strategos:
                     logger.info(f"[Strategos] No tools available for {current_intent}. Skipping.")
                 else:
                     # Dispatch all tools for this intent (ASYNC)
-                    await self._dispatch_tools_async(tools_to_run)
+                    await self._dispatch_tools_async(tools_to_run, intent=current_intent)
                     
                     # Wait for all tools in this intent to complete
                     await self._wait_for_intent_completion()
@@ -100,6 +117,12 @@ class Strategos:
                     current_intent = next_intent
         finally:
             self._terminated = True
+            tasks = list(self._tool_tasks.values())
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._tool_tasks.clear()
             listener_task.cancel()
             try:
                 await listener_task
@@ -110,39 +133,119 @@ class Strategos:
         logger.info(f"[Strategos] {reason}")
         return MissionTerminatedEvent(reason=reason)
     
-    async def _dispatch_tools_async(self, tools: List[str]):
+    async def _dispatch_tools_async(self, tools: List[str], intent: str):
         """
         Fire-and-forget dispatch with concurrency throttling.
         """
         for tool in tools:
+            if tool in self.context.running_tools:
+                logger.debug(f"[Strategos] Skipping {tool}: already running.")
+                continue
+            if tool in self.context.completed_tools_per_intent.get(intent, set()):
+                logger.debug(f"[Strategos] Skipping {tool}: already completed for {intent}.")
+                continue
+
             # THROTTLE: Wait for a slot
-            while self.context.active_tools >= self.context.max_concurrent:
-                logger.debug(f"[Strategos] Throttling: {self.context.active_tools}/{self.context.max_concurrent} slots used.")
-                await asyncio.sleep(0.1)
+            await self._tool_semaphore.acquire()
             
             # Dispatch (fire-and-forget)
             self.context.active_tools += 1
             self.context.running_tools.add(tool)
             logger.info(f"[Strategos] Dispatching: {tool} ({self.context.active_tools}/{self.context.max_concurrent})")
             
-            asyncio.create_task(self._run_tool_worker(tool))
+            task = asyncio.create_task(self._run_tool_worker(tool, intent=intent))
+            self._tool_tasks[tool] = task
     
-    async def _run_tool_worker(self, tool: str):
+    def _surface_key(self, finding: Dict[str, Any]) -> Optional[str]:
+        if not isinstance(finding, dict):
+            return None
+        metadata = finding.get("metadata") or {}
+        raw = metadata.get("original_target") or finding.get("target") or finding.get("asset")
+        if not raw or not isinstance(raw, str):
+            return None
+        raw = raw.strip()
+        if not raw:
+            return None
+
+        if "://" not in raw:
+            host = raw.lower().rstrip(".")
+            if host.startswith("www."):
+                host = host[4:]
+            return host
+
+        try:
+            parsed = urlparse(raw)
+        except Exception:
+            return raw
+
+        host = (parsed.hostname or "").lower().rstrip(".")
+        if not host:
+            return raw
+        if host.startswith("www."):
+            host = host[4:]
+
+        scheme = (parsed.scheme or "https").lower()
+        port = parsed.port
+        netloc = host if port is None else f"{host}:{port}"
+
+        path = parsed.path or ""
+        if path and path != "/":
+            path = path.rstrip("/")
+        else:
+            path = ""
+
+        return f"{scheme}://{netloc}{path}"
+
+    def _enqueue_event(self, event: Any) -> bool:
+        try:
+            self.event_queue.put_nowait(event)
+            return True
+        except asyncio.QueueFull:
+            logger.warning(
+                f"[Strategos] Event queue full ({self.event_queue.qsize()}/{self.event_queue.maxsize}); "
+                f"dropping {type(event).__name__}."
+            )
+            return False
+
+    async def _run_tool_worker(self, tool: str, intent: str):
         """
         Runs a tool and pushes ToolCompletedEvent to queue.
         """
         findings = []
         success = True
+        start = asyncio.get_running_loop().time()
         try:
             findings = await self._dispatch_callback(tool)
             if findings is None:
                 findings = []
+        except asyncio.CancelledError:
+            success = False
+            raise
         except Exception as e:
             logger.error(f"[Strategos] Tool {tool} failed: {e}")
             success = False
         finally:
-            event = ToolCompletedEvent(tool=tool, findings=findings, success=success)
-            await self.event_queue.put(event)
+            duration = max(0.0, asyncio.get_running_loop().time() - start)
+            try:
+                if findings:
+                    self.ingest_findings(findings)
+            finally:
+                self.context.completed_tools_per_intent.setdefault(intent, set()).add(tool)
+                self.context.running_tools.discard(tool)
+                self._tool_tasks.pop(tool, None)
+                self.context.active_tools = max(0, self.context.active_tools - 1)
+                if self._tool_semaphore is not None:
+                    self._tool_semaphore.release()
+
+            event = ToolCompletedEvent(
+                tool=tool,
+                findings=findings,
+                success=success,
+                duration_seconds=duration,
+            )
+            if not self._enqueue_event(event):
+                status = "✓" if event.success else "✗"
+                logger.info(f"[Strategos] {status} {event.tool} complete. Findings: {len(event.findings)}")
     
     async def _event_listener(self):
         """
@@ -163,12 +266,6 @@ class Strategos:
         """
         Process a completed tool event.
         """
-        self.context.active_tools -= 1
-        self.context.running_tools.discard(event.tool)
-        
-        if event.findings:
-            self.ingest_findings(event.findings)
-        
         status = "✓" if event.success else "✗"
         logger.info(f"[Strategos] {status} {event.tool} complete. Findings: {len(event.findings)}")
     
@@ -189,6 +286,11 @@ class Strategos:
         for finding in findings:
             self.context.findings.append(finding)
             self.context.findings_this_intent += 1
+
+            surface_key = self._surface_key(finding)
+            if surface_key and surface_key not in self.context.surface_seen:
+                self.context.surface_seen.add(surface_key)
+                self.context.surface_delta_this_intent += 1
             
             tags = finding.get("tags", [])
             finding_type = finding.get("type", "")
@@ -207,6 +309,7 @@ class Strategos:
         """
         candidates = ToolRegistry.get_tools_for_intent(intent, mode=mode)
         candidates = [t for t in candidates if t in available_tools]
+        candidates = [t for t in candidates if t not in self.context.completed_tools_per_intent.get(intent, set())]
         
         scored = []
         for t in candidates:
@@ -248,7 +351,7 @@ class Strategos:
             return INTENT_SURFACE_ENUMERATION
             
         if current_intent == INTENT_SURFACE_ENUMERATION:
-            if mode == ScanMode.BUG_BOUNTY and self.context.findings_this_intent == 0:
+            if mode == ScanMode.BUG_BOUNTY and self.context.surface_delta_this_intent == 0:
                 logger.info("[Strategos] Walk Away: No new surface discovered. Aborting deep scan.")
                 return None
             return INTENT_VULN_SCANNING

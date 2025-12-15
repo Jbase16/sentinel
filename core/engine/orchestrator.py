@@ -121,14 +121,14 @@ class Orchestrator:
              logger.info(f"      [Scanner] {msg}")
              session.log(msg) 
 
-        worker = ScanOrchestrator(session=session, log_fn=adapter)
+        detector = ScanOrchestrator(session=session, log_fn=adapter)
         brain = Strategos()
         
         # Decide Mode (Default to Standard, but could be Bug Bounty)
         mode = ScanMode.STANDARD
         
         try:
-             installed_tools = list(worker._detect_installed().keys())
+             installed_tools = list(detector._detect_installed().keys())
              logger.info(f"    [Strategos] Detected {len(installed_tools)} available tools.")
              
              # === DISPATCH CALLBACK ===
@@ -140,8 +140,10 @@ class Orchestrator:
                  """
                  logger.info(f"    [Orchestrator] Dispatching {tool} to Worker...")
                  
+                 tool_worker = ScanOrchestrator(session=session, log_fn=adapter)
+                 
                  # Run the single tool
-                 context = await worker.run(target, modules=[tool])
+                 context = await tool_worker.run(target, modules=[tool], mode=mode.value)
                  
                  # Return findings for event queue
                  if context and context.findings:
