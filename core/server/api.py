@@ -574,14 +574,14 @@ async def start_scan(
                 
                 # Emit SCAN_COMPLETED event
                 duration = time.time() - start_time
-                event_bus.emit_scan_completed("completed", len(session.findings), duration)
+                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration)
                 
             except asyncio.CancelledError:
                 _scan_state["status"] = "cancelled"
                 _scan_state["summary"] = session.to_dict()
                 
                 duration = time.time() - start_time
-                event_bus.emit_scan_completed("cancelled", len(session.findings), duration)
+                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration)
                 
             except Exception as e:
                 _scan_state["status"] = "error"
@@ -866,3 +866,4 @@ def serve(port: Optional[int] = None, host: Optional[str] = None):
 
 if __name__ == "__main__":
     serve()
+

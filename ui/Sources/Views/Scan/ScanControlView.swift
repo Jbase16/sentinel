@@ -280,6 +280,7 @@ struct LogConsoleView: View {
                         ForEach(appState.apiLogItems) { item in
                             Text(item.text)
                                 .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.green)
                                 .textSelection(.enabled)
                                 .id(item.id)
                         }

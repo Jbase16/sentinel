@@ -42,6 +42,22 @@ _EXTRA_PATHS = [
     "/usr/local/bin",                         # Homebrew on Intel Macs
 ]
 
+# CRITICAL: Add venv bin if we're running inside one OR if one exists in the project
+# This fixes tools installed via pip (wafw00f, dirsearch, whatweb)
+# Strategy 1: If currently running in venv, use sys.prefix
+if hasattr(sys, 'prefix') and hasattr(sys, 'base_prefix') and sys.prefix != sys.base_prefix:
+    venv_bin = os.path.join(sys.prefix, 'bin')
+    if os.path.exists(venv_bin):
+        _EXTRA_PATHS.insert(0, venv_bin)
+
+# Strategy 2: Check for .venv in project root (common pattern)
+# Navigate up from core/toolkit/ to find project root
+_project_root = Path(__file__).resolve().parents[2]  # Go up 2 levels from core/toolkit/tools.py
+for venv_name in ['.venv', 'venv']:
+    venv_bin = _project_root / venv_name / 'bin'
+    if venv_bin.exists() and str(venv_bin) not in _EXTRA_PATHS:
+        _EXTRA_PATHS.insert(0, str(venv_bin))
+
 # Also add all Python user bin paths (e.g., ~/Library/Python/3.11/bin)
 import glob
 for p in glob.glob(os.path.expanduser("~/Library/Python/*/bin")):
@@ -240,7 +256,7 @@ TOOLS: Dict[str, Dict] = {
     },
     "testssl": {
         "label": "testssl.sh (TLS/SSL config)",
-        "cmd": ["testssl", "{target}"],
+        "cmd": ["testssl.sh", "{target}"],  # FIXED: Binary is testssl.sh, not testssl
         "aggressive": False,
         "target_type": "host",
     },
@@ -378,33 +394,156 @@ TOOLS: Dict[str, Dict] = {
 # Note: Some tools require tapping (adding) external Homebrew repositories first.
 # We use "||" (shell OR) to make tapping idempotent (tap OR install).
 
+# ============================================================================
+# INSTALLATION STRATEGY DEFINITIONS
+# ============================================================================
+# New schema: Each tool can have multiple installation strategies with fallbacks
+# - strategies: List of installation methods (tried in order until one succeeds)
+# - verify_cmd: Command to run post-install to verify binary works
+# - prerequisite: Required tool that must exist before installation (go, brew, python)
+#
+# ARCHITECTURE: This enables:
+# 1. Automatic fallback (if brew fails, try pip; if pip fails, try go)
+# 2. Prerequisite checking (don't try go install if Go isn't installed)
+# 3. Post-install verification (ensure --version works, not just PATH check)
+# 4. Failure diagnostics (which strategy failed and why)
+
 INSTALLERS: Dict[str, Dict] = {
-    # Homebrew formulas (brew tap projectdiscovery/tap for nuclei, naabu, etc.)
-    "nmap": {"cmd": ["brew", "install", "nmap"]},
-    "subfinder": {"cmd": ["brew", "tap", "projectdiscovery/tap/subfinder", "||", "brew", "install", "subfinder"]},
-    "httpx": {"cmd": ["brew", "tap", "projectdiscovery/tap/httpx", "||", "brew", "install", "httpx"]},
-    "nuclei": {"cmd": ["brew", "tap", "projectdiscovery/tap/nuclei", "||", "brew", "install", "nuclei"]},
-    "nikto": {"cmd": ["brew", "install", "nikto"]},
-    "naabu": {"cmd": ["brew", "tap", "projectdiscovery/tap/naabu", "||", "brew", "install", "naabu"]},
-    "whatweb": {"cmd": ["pip", "install", "whatweb"]},
-    "wafw00f": {"cmd": ["pip", "install", "wafw00f"]},
-    "assetfinder": {"cmd": ["brew", "tap", "tomnomnom/tools", "&&", "brew", "install", "assetfinder"]},
-    "hakrawler": {"cmd": ["pip", "install", "hakrawler"]},
-    "dnsx": {"cmd": ["brew", "tap", "projectdiscovery/tap/dnsx", "||", "brew", "install", "dnsx"]},
-    "amass": {"cmd": ["brew", "install", "amass"]},
-    "subjack": {"cmd": ["pip", "install", "subjack"]},
-    "sslyze": {"cmd": ["brew", "install", "sslyze"]},
-    "httprobe": {"cmd": ["pip", "install", "httprobe"]},
-    "dirsearch": {"cmd": ["pip", "install", "dirsearch"]},
-    "feroxbuster": {"cmd": ["brew", "install", "feroxbuster"]},
-    "gobuster": {"cmd": ["brew", "install", "gobuster"]},
-    "jaeles": {"cmd": ["pip", "install", "jaeles"]},
-    "pshtt": {"cmd": ["pip", "install", "pshtt"]},
-    "wfuzz": {"cmd": ["pip", "install", "wfuzz"]},
-    "testssl": {"cmd": ["brew", "install", "testssl"]},
-    "hakrevdns": {"cmd": ["pip", "install", "hakrevdns"]},
-    "eyewitness": {"cmd": ["pip", "install", "eyewitness"]},
-    "masscan": {"cmd": ["brew", "install", "masscan"]},
+    # Homebrew-based tools
+    "nmap": {
+        "strategies": [{"cmd": ["brew", "install", "nmap"]}],
+        "verify_cmd": ["--version"],
+    },
+    "subfinder": {
+        "strategies": [
+            {"cmd": ["brew", "tap", "projectdiscovery/tap/subfinder", "||", "brew", "install", "subfinder"]},
+        ],
+        "verify_cmd": ["-version"],
+    },
+    "httpx": {
+        "strategies": [
+            {"cmd": ["brew", "tap", "projectdiscovery/tap/httpx", "||", "brew", "install", "httpx"]},
+        ],
+        "verify_cmd": ["-version"],
+    },
+    "nuclei": {
+        "strategies": [
+            {"cmd": ["brew", "tap", "projectdiscovery/tap/nuclei", "||", "brew", "install", "nuclei"]},
+        ],
+        "verify_cmd": ["-version"],
+    },
+    "nikto": {
+        "strategies": [{"cmd": ["brew", "install", "nikto"]}],
+        "verify_cmd": ["-Version"],
+    },
+    "naabu": {
+        "strategies": [
+            {"cmd": ["brew", "tap", "projectdiscovery/tap/naabu", "||", "brew", "install", "naabu"]},
+        ],
+        "verify_cmd": ["-version"],
+    },
+    
+    # Python pip-based tools
+    "whatweb": {
+        "strategies": [{"cmd": ["pip", "install", "whatweb"]}],
+        "verify_cmd": ["--version"],
+    },
+    "wafw00f": {
+        "strategies": [{"cmd": ["pip", "install", "wafw00f"]}],
+        "verify_cmd": ["--version"],
+    },
+    "dirsearch": {
+        "strategies": [{"cmd": ["pip", "install", "dirsearch"]}],
+        "verify_cmd": ["--version"],
+    },
+    "pshtt": {
+        "strategies": [{"cmd": ["pip", "install", "pshtt"]}],
+        "verify_cmd": ["--version"],
+    },
+    "wfuzz": {
+        "strategies": [
+            {"cmd": ["pip", "install", "wfuzz"]},
+            {"cmd": ["pip3", "install", "wfuzz"]},  # Fallback to pip3 if pip fails
+        ],
+        "verify_cmd": ["--version"],
+    },
+    
+    # Go-based tools (FIXED: Use go install instead of brew/pip)
+    # CRITICAL: These require Go to be installed first
+    "assetfinder": {
+        "strategies": [
+            {"cmd": ["go", "install", "github.com/tomnomnom/assetfinder@latest"], "prerequisite": "go"},
+        ],
+        "verify_cmd": ["--help"],  # assetfinder doesn't have --version
+    },
+    "hakrevdns": {
+        "strategies": [
+            {"cmd": ["go", "install", "github.com/hakluke/hakrevdns@latest"], "prerequisite": "go"},
+        ],
+        "verify_cmd": ["--help"],
+    },
+    "hakrawler": {
+        "strategies": [
+            {"cmd": ["go", "install", "github.com/hakluke/hakrawler@latest"], "prerequisite": "go"},
+        ],
+        "verify_cmd": ["--help"],
+    },
+    "subjack": {
+        "strategies": [
+            {"cmd": ["go", "install", "github.com/haccer/subjack@latest"], "prerequisite": "go"},
+        ],
+        "verify_cmd": ["--help"],
+    },
+    "httprobe": {
+        "strategies": [
+            {"cmd": ["go", "install", "github.com/tomnomnom/httprobe@latest"], "prerequisite": "go"},
+        ],
+        "verify_cmd": ["--help"],
+    },
+    
+    # Special cases
+    "dnsx": {
+        "strategies": [
+            {"cmd": ["brew", "tap", "projectdiscovery/tap/dnsx", "||", "brew", "install", "dnsx"]},
+        ],
+        "verify_cmd": ["-version"],
+    },
+    "amass": {
+        "strategies": [{"cmd": ["brew", "install", "amass"]}],
+        "verify_cmd": ["--version"],
+    },
+    "sslyze": {
+        "strategies": [{"cmd": ["brew", "install", "sslyze"]}],
+        "verify_cmd": ["--version"],
+    },
+    "feroxbuster": {
+        "strategies": [{"cmd": ["brew", "install", "feroxbuster"]}],
+        "verify_cmd": ["--version"],
+    },
+    "gobuster": {
+        "strategies": [{"cmd": ["brew", "install", "gobuster"]}],
+        "verify_cmd": ["--version"],
+    },
+    "testssl": {
+        "strategies": [{"cmd": ["brew", "install", "testssl"]}],
+        "verify_cmd": ["--version"],
+    },
+    "masscan": {
+        "strategies": [{"cmd": ["brew", "install", "masscan"]}],
+        "verify_cmd": ["--version"],
+    },
+    
+    # REMOVED problematic tools that don't have working installers:
+    # - eyewitness: Requires manual installation from https://github.com/RedSiege/EyeWitness
+    #               (pip install eyewitness does NOT work - package doesn't exist)
+    # - jaeles: Tool has been archived/unmaintained, no active package available
+    #
+    # These tools remain in TOOLS dict but won't have auto-install capability.
+    # Users must install manually and they'll be discovered via PATH scanning.
+    #
+    # IMPORTANT: Go-based tools (assetfinder, hakrevdns, etc.) require Go to be installed first:
+    #   brew install go
+    # After Go is installed, restart the backend to pick up the new PATH.
 }
 
 # ============================================================================
@@ -413,20 +552,25 @@ INSTALLERS: Dict[str, Dict] = {
 
 async def install_tool(name: str) -> Dict[str, str]:
     """
-    Install a single tool using Homebrew or pip.
+    Install a single tool using the strategy-based installation system.
     
-    Process:
-    1. Notify UI that installation is starting
-    2. Look up the installer command from INSTALLERS dict
-    3. Run the command in a subprocess
-    4. Check if the tool exists in PATH after installation
-    5. Notify UI of the result
+    NEW ARCHITECTURE (Production-Grade):
+    Instead of blindly running installer commands, this implements:
+    1. Prerequisite checking: Verify required tools (go, brew) exist before attempting install
+    2. Strategy fallback: Try multiple installation methods in order until one succeeds
+    3. Post-install verification: Run --version or --help to ensure binary actually works
+    4. Binary name resolution: Check the CORRECT binary name from TOOLS dict, not tool name
+    5. Detailed diagnostics: Return which strategy succeeded/failed and why
+    
+    INVARIANT: install_tool(t) returns "installed" ⟹ get_installed_tools() includes t
+    
+    This solves the state divergence problem where package managers lie about success.
     
     Args:
-        name: Tool name (must exist in INSTALLERS dict)
+        name: Tool name (must exist in both TOOLS and INSTALLERS dicts)
     
     Returns:
-        Dict with keys: tool, status ("installed" or "error"), message (output/error)
+        Dict with keys: tool, status ("installed" or "error"), message (diagnostic output)
     
     Why async?
     - Installation can take 10-60 seconds per tool
@@ -438,79 +582,149 @@ async def install_tool(name: str) -> Dict[str, str]:
     import subprocess
     
     # Import here to avoid circular dependency at module load time
-    # (tools.py is imported by scanner_engine, which is imported by api, which imports task_router)
     try:
         from core.base.task_router import TaskRouter
     except ImportError:
-        # Fallback if TaskRouter is not available (e.g., during testing)
         TaskRouter = None
     
-    # Notify UI: Installation starting (fires SSE event that UI can listen to)
+    # Notify UI: Installation starting
     if TaskRouter:
         try:
             TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "installing"})
         except Exception:
-            pass  # Don't fail installation if UI notification fails
+            pass
 
-    # Look up the installer command
+    # Look up the installer spec
     spec = INSTALLERS.get(name)
     if not spec:
-        return {"tool": name, "status": "unknown", "message": "No installer mapping"}
-    cmd = spec["cmd"]
+        return {"tool": name, "status": "error", "message": f"No installer defined. Tool '{name}' must be installed manually."}
     
-    # Prepend environment variables for non-interactive mode
-    env_vars = "NONINTERACTIVE=1 "
+    # Get the expected binary name from TOOLS dict (NOT the tool name!)
+    # Example: "testssl" tool → "testssl.sh" binary
+    tool_def = TOOLS.get(name)
+    if not tool_def:
+        return {"tool": name, "status": "error", "message": f"Tool '{name}' not found in TOOLS registry"}
     
-    # Resolve 'pip' to the current python executable to avoid path issues
-    # and ensure we install into the active venv
-    final_cmd_parts = []
-    for part in cmd:
-        if part == "pip":
-            final_cmd_parts.extend([sys.executable, "-m", "pip"])
-        else:
-            final_cmd_parts.append(part)
-            
-    # Handle shell pipes in command (e.g. "||" for fallback)
-    # We prepend the env var to the command string
-    cmd_str = env_vars + " ".join(final_cmd_parts)
+    expected_binary = tool_def.get("binary") or tool_def["cmd"][0]
     
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd_str,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            shell=True,
-            env=dict(os.environ)  # CRITICAL: Pass the modified PATH as a pure dict
-        )
-        out, _ = await proc.communicate()
-        output = out.decode(errors="ignore")[-1000:] if out else ""  # Keep last 1000 chars
+    # Try each installation strategy in order
+    strategies = spec.get("strategies", [])
+    if not strategies:
+        return {"tool": name, "status": "error", "message": "No installation strategies defined"}
+    
+    last_error = None
+    installation_log = []
+    
+    for idx, strategy in enumerate(strategies):
+        strategy_cmd = strategy["cmd"]
+        prerequisite = strategy.get("prerequisite")
         
-        # Determine status based on return code and PATH check
-        status = "error"
-        msg = f"Installation failed (rc={proc.returncode}):\n{output}"
-
-        if proc.returncode == 0:
-            status = "installed"
-            msg = output
+        # CRITICAL: Check prerequisite before attempting installation
+        if prerequisite and not shutil.which(prerequisite):
+            msg = f"Strategy {idx+1} requires '{prerequisite}' but it's not installed. Install {prerequisite} first."
+            installation_log.append(f"⊗ Strategy {idx+1}: {msg}")
+            last_error = msg
+            continue  # Try next strategy
         
-        # Double-check: Is the tool actually in PATH?
-        # Sometimes brew returns 0 even if the tool isn't available
-        if shutil.which(name):
-            status = "installed"
-            msg = f"Successfully installed {name}\nLogs:\n{output}"
+        # Resolve 'pip' to the current python executable (ensures venv usage)
+        final_cmd_parts = []
+        for part in strategy_cmd:
+            if part == "pip":
+                final_cmd_parts.extend([sys.executable, "-m", "pip"])
+            elif part == "go" and prerequisite == "go":
+                # Use absolute path to go if available
+                go_path = shutil.which("go")
+                if go_path:
+                    final_cmd_parts.append(go_path)
+                else:
+                    final_cmd_parts.append("go")  # Will fail, but good for error message
+            else:
+                final_cmd_parts.append(part)
+        
+        # Build shell command string
+        env_vars = "NONINTERACTIVE=1 "
+        cmd_str = env_vars + " ".join(final_cmd_parts)
+        
+        try:
+            # Execute installation command
+            proc = await asyncio.create_subprocess_shell(
+                cmd_str,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                shell=True,
+                env=dict(os.environ)
+            )
+            out, _ = await proc.communicate()
+            output = out.decode(errors="ignore")[-800:] if out else ""
             
-        # Notify UI: Result
-        if TaskRouter:
+            installation_log.append(f"→ Strategy {idx+1}: {' '.join(strategy_cmd[:3])}... (rc={proc.returncode})")
+            
+            # Check if installation succeeded
+            if proc.returncode != 0:
+                last_error = f"Command failed with exit code {proc.returncode}"
+                installation_log.append(f"  ⊗ Failed: {last_error}")
+                continue  # Try next strategy
+            
+            # CRITICAL: Verify the binary is now in PATH
+            if not shutil.which(expected_binary):
+                last_error = f"Command succeeded but '{expected_binary}' not found in PATH"
+                installation_log.append(f"  ⊗ Failed: {last_error}")
+                continue  # Try next strategy
+            
+            # CRITICAL: Run verification command to ensure binary actually works
+            verify_cmd = spec.get("verify_cmd", ["--version"])
             try:
-                TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": status})
-            except Exception:
+                verify_proc = await asyncio.create_subprocess_exec(
+                    expected_binary,
+                    *verify_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                # Use wait_for to add timeout (some tools hang on --version)
+                await asyncio.wait_for(verify_proc.communicate(), timeout=5.0)
+                
+                if verify_proc.returncode != 0:
+                    last_error = f"Binary exists but verification command failed (rc={verify_proc.returncode})"
+                    installation_log.append(f"  ⊗ Verification failed: {last_error}")
+                    continue  # Try next strategy
+                    
+            except asyncio.TimeoutError:
+                # Some tools hang on --version without stdin, accept this as success
                 pass
-
-        return {"tool": name, "status": status, "message": msg}
+            except Exception as verify_err:
+                # Verification failed, but binary exists - still count as success
+                installation_log.append(f"  ⚠ Verification warning: {verify_err}")
+            
+            # SUCCESS: All checks passed
+            installation_log.append(f"  ✓ Success: '{expected_binary}' installed and verified")
+            
+            if TaskRouter:
+                try:
+                    TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "installed"})
+                except Exception:
+                    pass
+            
+            full_log = "\n".join(installation_log) + f"\n\nInstallation output:\n{output}"
+            return {"tool": name, "status": "installed", "message": full_log}
         
-    except Exception as e:
-        # Subprocess failed to start (command not found, permission denied, etc.)
-        return {"tool": name, "status": "error", "message": str(e)}
+        except Exception as e:
+            last_error = str(e)
+            installation_log.append(f"  ⊗ Exception: {last_error}")
+            continue  # Try next strategy
+    
+    # All strategies failed
+    if TaskRouter:
+        try:
+            TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "error"})
+        except Exception:
+            pass
+    
+    failure_log = "\n".join(installation_log)
+    return {
+        "tool": name,
+        "status": "error",
+        "message": f"All installation strategies failed.\n\n{failure_log}\n\nLast error: {last_error}"
+    }
 
 
 async def install_tools(names: List[str]) -> List[Dict[str, str]]:

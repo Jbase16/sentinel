@@ -103,36 +103,54 @@ class Orchestrator:
     async def _run_recon(self, target: str):
         from core.engine.scan_orchestrator import ScanOrchestrator
         from core.base.session import ScanSession
+        from core.scheduler.strategos import Strategos
+        from core.scheduler.modes import ScanMode
         
-        logger.info(f"    [Orchestrator] Launching ScanOrchestrator for {target}...")
+        logger.info(f"    [Orchestrator] Launching Strategos for {target}...")
         
-        # Create a new isolated session for this scan
         session = ScanSession(target)
-        self.active_missions[session.id] = session # Track it
+        self.active_missions[session.id] = session 
         
-        # ACTIVATE GHOST PROTOCOL (The Eyes)
-        # We use a fixed port for the demo, but in prod we'd find a free port
         try:
              session.start_ghost(port=8080)
              logger.info("    [Orchestrator] Ghost Protocol ACTIVE on :8080")
         except Exception as e:
              logger.warning(f"    [Orchestrator] Generic Ghost startup failed: {e}")
         
-        # Use a simple logger adapter
         def adptor(msg):
              logger.info(f"      [Scanner] {msg}")
-             session.log(msg) # Persist to session log
+             session.log(msg) 
 
-        # Inject session into orchestrator
-        orch = ScanOrchestrator(session=session, log_fn=adptor)
+        worker = ScanOrchestrator(session=session, log_fn=adptor)
+        brain = Strategos()
         
-        # Run the scan (triggers tools, updates findings_store/knowledge_graph)
+        # Decide Mode (Default to Standard, but could be Bug Bounty)
+        mode = ScanMode.STANDARD
+        
         try:
-             context = await orch.run(target)
+             installed_tools = list(worker._detect_installed().keys())
+             logger.info(f"    [Strategos] Detected {len(installed_tools)} available tools.")
+             
+             # The Thinking Loop
+             async for tool in brain.orchestrate(target, installed_tools, mode=mode):
+                 logger.info(f"    [Orchestrator] Assigning {tool} to Worker...")
+                 
+                 # 1. Queue the task
+                 worker.queue_task(tool)
+                 tools_to_run.append(tool)
+             
+             if not tools_to_run:
+                 logger.warning("    [Strategos] No tools selected by the Laws.")
+                 return
+
+             # Run the worker with the queued tasks
+             # We pass empty list to run() because we queued them manually
+             context = await worker.run(target, modules=[]) 
+             
              logger.info(f"    [Orchestrator] Scan complete. Findings: {len(context.findings)}")
              self.first_pass_context = context
         except Exception as e:
-             logger.error(f"    [Orchestrator] Scan failed: {e}") 
+             logger.error(f"    [Orchestrator] Scan failed: {e}")  
 
     async def _engage_targets(self, main_target: str, opportunities: List[Dict], mission_id: str = None):
         """

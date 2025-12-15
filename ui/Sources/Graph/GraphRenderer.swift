@@ -61,7 +61,7 @@ class GraphRenderer: NSObject {
         self.commandQueue = device.makeCommandQueue()
         print("GraphRenderer: commandQueue created: \(self.commandQueue != nil)")
         buildPipeline()
-        generateDummyData()
+        // generateDummyData() // Removed to prevent ghost dots
         print("GraphRenderer: init() complete")
     }
 
