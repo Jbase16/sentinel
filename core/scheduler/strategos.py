@@ -75,7 +75,11 @@ class Strategos:
     A truly concurrent, event-driven planner.
     """
     
-    def __init__(self, event_queue_maxsize: int = DEFAULT_EVENT_QUEUE_MAXSIZE):
+    def __init__(
+        self,
+        event_queue_maxsize: int = DEFAULT_EVENT_QUEUE_MAXSIZE,
+        log_fn: Optional[Callable[[str], None]] = None,
+    ):
         self.constitution = Constitution()
         self.registry = ToolRegistry()
         self.context: Optional[ScanContext] = None
@@ -84,6 +88,20 @@ class Strategos:
         self._dispatch_callback: Optional[Callable[[str], Awaitable[List[Dict]]]] = None
         self._tool_tasks: Dict[str, asyncio.Task] = {}
         self._tool_semaphore: Optional[asyncio.Semaphore] = None
+        self._log_fn = log_fn
+
+    def _emit_log(self, message: str, level: str = "info") -> None:
+        try:
+            log_method = getattr(logger, level, logger.info)
+            log_method(message)
+        except Exception:
+            pass
+
+        if self._log_fn:
+            try:
+                self._log_fn(message)
+            except Exception:
+                pass
         
     async def run_mission(
         self, 
@@ -119,7 +137,7 @@ class Strategos:
         
         current_intent = INTENT_PASSIVE_RECON
         
-        logger.info(f"[Strategos] Mission Start: {target} (Mode: {mode.value})")
+        self._emit_log(f"[Strategos] Mission Start: {target} (Mode: {mode.value})")
         
         # Start event listener in background
         listener_task = asyncio.create_task(self._event_listener())
@@ -131,13 +149,13 @@ class Strategos:
                 self.context.findings_this_intent = 0
                 self.context.surface_delta_this_intent = 0
                 
-                logger.info(f"[Strategos] Decision: Executing {current_intent}")
+                self._emit_log(f"[Strategos] Decision: Executing {current_intent}")
                 
                 # Get tools for this intent
                 tools_to_run = self._select_tools(current_intent, available_tools, mode)
                 
                 if not tools_to_run:
-                    logger.info(f"[Strategos] No tools available for {current_intent}. Skipping.")
+                    self._emit_log(f"[Strategos] No tools available for {current_intent}. Skipping.")
                 else:
                     # Dispatch all tools for this intent (ASYNC)
                     await self._dispatch_tools_async(tools_to_run, intent=current_intent)
@@ -167,7 +185,7 @@ class Strategos:
                 pass
         
         reason = "Mission Complete. All intents exhausted or Walk Away triggered."
-        logger.info(f"[Strategos] {reason}")
+        self._emit_log(f"[Strategos] {reason}")
         return MissionTerminatedEvent(reason=reason)
     
     async def _dispatch_tools_async(self, tools: List[str], intent: str):
@@ -188,7 +206,9 @@ class Strategos:
             # Dispatch (fire-and-forget)
             self.context.active_tools += 1
             self.context.running_tools.add(tool)
-            logger.info(f"[Strategos] Dispatching: {tool} ({self.context.active_tools}/{self.context.max_concurrent})")
+            self._emit_log(
+                f"[Strategos] Dispatching: {tool} ({self.context.active_tools}/{self.context.max_concurrent})"
+            )
             
             task = asyncio.create_task(self._run_tool_worker(tool, intent=intent))
             self._tool_tasks[tool] = task
@@ -238,9 +258,10 @@ class Strategos:
             self.event_queue.put_nowait(event)
             return True
         except asyncio.QueueFull:
-            logger.warning(
+            self._emit_log(
                 f"[Strategos] Event queue full ({self.event_queue.qsize()}/{self.event_queue.maxsize}); "
-                f"dropping {type(event).__name__}."
+                f"dropping {type(event).__name__}.",
+                level="warning",
             )
             return False
 
@@ -259,7 +280,7 @@ class Strategos:
             success = False
             raise
         except Exception as e:
-            logger.error(f"[Strategos] Tool {tool} failed: {e}")
+            self._emit_log(f"[Strategos] Tool {tool} failed: {e}", level="error")
             success = False
         finally:
             duration = max(0.0, asyncio.get_running_loop().time() - start)
@@ -282,7 +303,7 @@ class Strategos:
             )
             if not self._enqueue_event(event):
                 status = "✓" if event.success else "✗"
-                logger.info(f"[Strategos] {status} {event.tool} complete. Findings: {len(event.findings)}")
+                self._emit_log(f"[Strategos] {status} {event.tool} complete. Findings: {len(event.findings)}")
     
     async def _event_listener(self):
         """
@@ -304,7 +325,7 @@ class Strategos:
         Process a completed tool event.
         """
         status = "✓" if event.success else "✗"
-        logger.info(f"[Strategos] {status} {event.tool} complete. Findings: {len(event.findings)}")
+        self._emit_log(f"[Strategos] {status} {event.tool} complete. Findings: {len(event.findings)}")
     
     async def _wait_for_intent_completion(self):
         """
@@ -338,7 +359,7 @@ class Strategos:
             existing_tags.update(tags)
             self.context.knowledge["tags"] = existing_tags
             
-        logger.info(f"[Strategos] Ingested {len(findings)} findings. Total: {len(self.context.findings)}")
+        self._emit_log(f"[Strategos] Ingested {len(findings)} findings. Total: {len(self.context.findings)}")
 
     def _select_tools(self, intent: str, available_tools: List[str], mode: ScanMode) -> List[str]:
         """
@@ -358,7 +379,7 @@ class Strategos:
             
             decision = self.constitution.check(self.context, tool_def)
             if not decision.allowed:
-                logger.info(f"[Strategos] Blocked {t}: {decision.reason} ({decision.blocking_law})")
+                self._emit_log(f"[Strategos] Blocked {t}: {decision.reason} ({decision.blocking_law})")
                 continue
                 
             score = self._calculate_score(tool_def, mode)
@@ -389,13 +410,13 @@ class Strategos:
             
         if current_intent == INTENT_SURFACE_ENUMERATION:
             if mode == ScanMode.BUG_BOUNTY and self.context.surface_delta_this_intent == 0:
-                logger.info("[Strategos] Walk Away: No new surface discovered. Aborting deep scan.")
+                self._emit_log("[Strategos] Walk Away: No new surface discovered. Aborting deep scan.")
                 return None
             return INTENT_VULN_SCANNING
             
         if current_intent == INTENT_VULN_SCANNING:
             if mode == ScanMode.BUG_BOUNTY:
-                logger.info("[Strategos] Bug Bounty Mode: Skipping Heavy Artillery.")
+                self._emit_log("[Strategos] Bug Bounty Mode: Skipping Heavy Artillery.")
                 return None
             return INTENT_HEAVY_ARTILLERY
             

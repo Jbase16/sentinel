@@ -656,7 +656,7 @@ async def start_scan(
                 except ValueError:
                     mode = StrategosMode.STANDARD
 
-	                brain = Strategos()
+	                brain = Strategos(log_fn=session.log)
 
 	                async def dispatch_tool(tool: str) -> List[Dict]:
 	                    # Best-effort early stop; cancellation will also interrupt via task cancellation.
