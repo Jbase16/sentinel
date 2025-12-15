@@ -61,11 +61,11 @@ class LazarusEngine:
         self.cache: dict[str, str] = {}  # hash -> clean_code
         self._processing: set[str] = set()  # Currently processing hashes
         
-        # Load config values
+        # Load config values from GhostConfig
         config = get_config()
-        self.min_js_size = getattr(config, 'ghost_min_js_size', MIN_JS_SIZE)
-        self.max_js_size = getattr(config, 'ghost_max_js_size', MAX_JS_SIZE)
-        self.max_context_chars = getattr(config, 'ghost_max_context', MAX_CONTEXT_CHARS)
+        self.min_js_size = config.ghost.min_js_size
+        self.max_js_size = config.ghost.max_js_size
+        self.max_context_chars = config.ghost.max_context_chars
     
     def should_process(self, flow: http.HTTPFlow) -> bool:
         """

@@ -276,8 +276,9 @@ class HelixAppState: ObservableObject {
 
     /// Start a scan via the core /scan endpoint (supports logs + cancellation)
     func startScan(target: String, modules: [String] = [], mode: ScanMode = .standard) {
+        let toolsDescription = modules.isEmpty ? "AUTO (all installed)" : "\(modules)"
         print(
-            "[AppState] Starting Scan for target: \(target) with modules: \(modules) mode: \(mode.rawValue)"
+            "[AppState] Starting Scan for target: \(target) tools: \(toolsDescription) mode: \(mode.rawValue)"
         )
         BackendManager.shared.isActiveOperation = true  // Scans can be long-running
         Task {
@@ -417,6 +418,7 @@ class HelixAppState: ObservableObject {
             break
         }
     }
+
 
     @MainActor
     private func mergePolledLogs(_ lines: [String]) {

@@ -65,7 +65,10 @@ class ModeRegistry:
         # Restrict Noisy Tools
         "nuclei": ToolOverlay(cost_modifier=1), # Nuanced: Nuclei is loud
         "gobuster": ToolOverlay(disabled=True), # Brute force is boring
-        "feroxbuster": ToolOverlay(disabled=True)
+        "feroxbuster": ToolOverlay(disabled=True),
+        "wfuzz": ToolOverlay(disabled=True),
+        "jaeles": ToolOverlay(cost_modifier=1),
+        "eyewitness": ToolOverlay(cost_modifier=1),
     }
     
     STEALTH_OVERLAY: Dict[str, ToolOverlay] = {
@@ -73,6 +76,9 @@ class ModeRegistry:
         "masscan": ToolOverlay(disabled=True),
         "nuclei": ToolOverlay(disabled=True),
         "dirsearch": ToolOverlay(disabled=True),
+        "wfuzz": ToolOverlay(disabled=True),
+        "jaeles": ToolOverlay(disabled=True),
+        "eyewitness": ToolOverlay(disabled=True),
         # Only passive allowed essentially or very light active
     }
 

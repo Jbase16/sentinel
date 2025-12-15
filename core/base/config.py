@@ -232,6 +232,26 @@ class LogConfig:
 
 
 # ============================================================================
+# Ghost Module Configuration (Lazarus, Proxy)
+# ============================================================================
+# Controls the JS de-obfuscation and proxy intercept behavior.
+
+@dataclass(frozen=True)
+class GhostConfig:
+    # Minimum JS file size to consider for de-obfuscation (bytes)
+    min_js_size: int = 500
+    
+    # Maximum JS file size to process (bytes) - larger files skipped for performance
+    max_js_size: int = 100_000
+    
+    # Maximum characters to send to LLM for de-obfuscation context
+    max_context_chars: int = 2000
+    
+    # Known library hashes to skip (jQuery, React, etc.)
+    skip_library_hashes: tuple = ()
+
+
+# ============================================================================
 # Master Configuration Container
 # ============================================================================
 # Combines all configuration sections into one cohesive structure.
@@ -252,6 +272,9 @@ class SentinelConfig:
     
     # Logging behavior settings (verbosity, file rotation, etc.)
     log: LogConfig = field(default_factory=LogConfig)
+    
+    # Ghost module settings (Lazarus JS de-obfuscation, proxy)
+    ghost: GhostConfig = field(default_factory=GhostConfig)
     
     # Debug mode: enables extra logging and development features
     # False = production mode (clean output, fast)

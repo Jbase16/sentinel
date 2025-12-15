@@ -38,6 +38,15 @@ struct NetworkGraphView: View {
                         .cornerRadius(4)
 
                     if appState.cortexStream.isConnected {
+                        Text("CORTEX STREAM :: CONNECTED")
+                            .font(.custom("Courier New", size: 14))
+                            .foregroundColor(.green)
+                            .padding(8)
+                            .background(.ultraThinMaterial)
+                            .cornerRadius(4)
+                    }
+
+                    if appState.isGhostActive {
                         Text("GHOST PROTOCOL :: ACTIVE")
                             .font(.custom("Courier New", size: 14))
                             .foregroundColor(.orange)

@@ -99,7 +99,14 @@ class ToolRegistry:
             "intrusiveness": 1,
              "gates": ["protocol:http", "protocol:https"]
         },
-         "sslyze": {
+        "sslyze": {
+            "intent": INTENT_ACTIVE_LIVE_CHECK,
+            "phase": PHASE_2_LIGHT,
+            "cost": 2,
+            "intrusiveness": 1,
+            "gates": ["protocol:https"]
+        },
+        "pshtt": {
             "intent": INTENT_ACTIVE_LIVE_CHECK,
             "phase": PHASE_2_LIGHT,
             "cost": 2,
@@ -142,6 +149,13 @@ class ToolRegistry:
             "intrusiveness": 3, 
             "gates": ["protocol:http", "protocol:https"]
         },
+         "eyewitness": {
+            "intent": INTENT_SURFACE_ENUMERATION,
+            "phase": PHASE_3_SURFACE,
+            "cost": 3,
+            "intrusiveness": 2,
+            "gates": ["protocol:http", "protocol:https"]
+        },
          "gobuster": {
              "intent": INTENT_SURFACE_ENUMERATION,
              "phase": PHASE_3_SURFACE,
@@ -170,6 +184,20 @@ class ToolRegistry:
             "phase": PHASE_4_DEEP,
             "cost": 2,
             "intrusiveness": 3, 
+            "gates": ["protocol:http", "protocol:https"]
+        },
+        "jaeles": {
+            "intent": INTENT_VULN_SCANNING,
+            "phase": PHASE_4_DEEP,
+            "cost": 2,
+            "intrusiveness": 3,
+            "gates": ["protocol:http", "protocol:https"]
+        },
+        "wfuzz": {
+            "intent": INTENT_VULN_SCANNING,
+            "phase": PHASE_4_DEEP,
+            "cost": 3,
+            "intrusiveness": 4,
             "gates": ["protocol:http", "protocol:https"]
         },
         "subjack": {

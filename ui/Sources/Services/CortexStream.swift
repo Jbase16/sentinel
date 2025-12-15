@@ -29,6 +29,7 @@ import Foundation
 class CortexStream: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
+    private var positionCache: [String: SIMD3<Float>] = [:]
 
     @Published var nodes: [NodeModel] = []
     @Published var isConnected: Bool = false
@@ -103,13 +104,28 @@ class CortexStream: ObservableObject {
         do {
             let update = try JSONDecoder().decode(GraphData.self, from: data)
 
+            // Prune stale cached positions to avoid unbounded growth.
+            let ids = Set(update.nodes.map { $0.id })
+            positionCache = positionCache.filter { ids.contains($0.key) }
+
             // Map to 3D Space
             let mappedNodes = update.nodes.map { node -> NodeModel in
                 var n = node
-                // If backend sends 2D or no coords, project to 3D sphere/cloud
-                if n.x == nil { n.x = Float.random(in: -50...50) }
-                if n.y == nil { n.y = Float.random(in: -50...50) }
-                if n.z == nil { n.z = Float.random(in: -50...50) }
+
+                // If backend omits coords, keep a stable pseudo-layout per node id
+                // so the graph doesn't jitter each snapshot.
+                let base = positionCache[n.id] ?? SIMD3<Float>(
+                    Float.random(in: -50...50),
+                    Float.random(in: -50...50),
+                    Float.random(in: -50...50)
+                )
+                let x = n.x ?? base.x
+                let y = n.y ?? base.y
+                let z = n.z ?? base.z
+                positionCache[n.id] = SIMD3<Float>(x, y, z)
+                n.x = x
+                n.y = y
+                n.z = z
 
                 // Color based on type
                 // Color based on type (Neural/Ghost Support)

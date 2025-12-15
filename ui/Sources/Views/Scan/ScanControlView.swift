@@ -19,6 +19,20 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum ToolSelectionMode: String, CaseIterable, Identifiable {
+    case scheduler = "scheduler"
+    case custom = "custom"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .scheduler: return "Strategos"
+        case .custom: return "Custom"
+        }
+    }
+}
+
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
@@ -29,9 +43,14 @@ struct ScanControlView: View {
     @State private var selectedTools: Set<String> = []
     @State private var showToolConfig = false
     @State private var selectedMode: ScanMode = .standard
+    @State private var toolSelectionMode: ToolSelectionMode = .scheduler
 
     private var isScanning: Bool {
         appState.engineStatus?.scanRunning == true || appState.isScanRunning
+    }
+
+    private var installedTools: [String] {
+        appState.engineStatus?.tools?.installed ?? []
     }
 
     var body: some View {
@@ -68,19 +87,40 @@ struct ScanControlView: View {
                 .frame(width: 200)
                 .disabled(isScanning)
 
-                // Tool Configuration
-                Button(action: { showToolConfig.toggle() }) {
-                    Image(systemName: "gearshape")
-                        .foregroundColor(selectedTools.isEmpty ? .secondary : .blue)
+                Picker("", selection: $toolSelectionMode) {
+                    ForEach(ToolSelectionMode.allCases) { selectionMode in
+                        Text(selectionMode.displayName).tag(selectionMode)
+                    }
                 }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showToolConfig) {
-                    ToolSelectionView(
-                        installed: appState.engineStatus?.tools?.installed ?? [],
-                        selection: $selectedTools
-                    )
-                }
+                .pickerStyle(.segmented)
+                .frame(width: 180)
                 .disabled(isScanning)
+                .onChange(of: toolSelectionMode) { _, newMode in
+                    guard newMode == .custom else { return }
+                    guard selectedTools.isEmpty, !installedTools.isEmpty else { return }
+                    selectedTools = Set(installedTools)
+                }
+                .onChange(of: installedTools) { _, newInstalled in
+                    guard toolSelectionMode == .custom else { return }
+                    guard selectedTools.isEmpty, !newInstalled.isEmpty else { return }
+                    selectedTools = Set(newInstalled)
+                }
+
+                if toolSelectionMode == .custom {
+                    // Tool Configuration
+                    Button(action: { showToolConfig.toggle() }) {
+                        Image(systemName: "gearshape")
+                            .foregroundColor(selectedTools.isEmpty ? .secondary : .blue)
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showToolConfig) {
+                        ToolSelectionView(
+                            installed: installedTools,
+                            selection: $selectedTools
+                        )
+                    }
+                    .disabled(isScanning)
+                }
 
                 if isScanning {
                     Button(action: { appState.cancelScan() }) {
@@ -95,7 +135,11 @@ struct ScanControlView: View {
                     Button(action: startScan) {
                         Label("Start Scan", systemImage: "play.fill")
                     }
-                    .disabled(scanTarget.isEmpty || !backend.isRunning)
+                    .disabled(
+                        scanTarget.isEmpty
+                            || !backend.isRunning
+                            || (toolSelectionMode == .custom && selectedTools.isEmpty)
+                    )
                 }
             }
             .padding()
@@ -118,8 +162,19 @@ struct ScanControlView: View {
 
     private func startScan() {
         if !scanTarget.isEmpty && backend.isRunning {
+            if toolSelectionMode == .custom && selectedTools.isEmpty {
+                showToolConfig = true
+                return
+            }
+            let modules: [String]
+            switch toolSelectionMode {
+            case .scheduler:
+                modules = []
+            case .custom:
+                modules = Array(selectedTools)
+            }
             appState.startScan(
-                target: scanTarget, modules: Array(selectedTools), mode: selectedMode)
+                target: scanTarget, modules: modules, mode: selectedMode)
         }
     }
 }
@@ -168,7 +223,7 @@ struct ToolSelectionView: View {
             }
             .frame(minWidth: 250, minHeight: 300)
 
-            Text(selection.isEmpty ? "Auto: all installed tools" : "\(selection.count) selected")
+            Text(selection.isEmpty ? "0 selected" : "\(selection.count) selected")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }

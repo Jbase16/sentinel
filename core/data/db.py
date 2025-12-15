@@ -38,6 +38,7 @@ import json
 import logging
 import os
 import asyncio
+import sqlite3
 from typing import List, Dict, Optional, Any
 
 from core.base.config import get_config
@@ -73,11 +74,15 @@ class Database:
                 
             try:
                 # Create persistent connection
-                self._db_connection = await aiosqlite.connect(self.db_path)
+                # Set a connect-level timeout so SQLite waits briefly on writer contention
+                # instead of immediately raising "database is locked".
+                self._db_connection = await aiosqlite.connect(self.db_path, timeout=5.0)
                 
                 # Enable WAL mode for concurrency
                 await self._db_connection.execute("PRAGMA journal_mode=WAL;")
                 await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
+                await self._db_connection.execute("PRAGMA busy_timeout=5000;")
+                await self._db_connection.execute("PRAGMA foreign_keys=ON;")
                 
                 # Create tables
                 await self._db_connection.execute("""
@@ -137,32 +142,94 @@ class Database:
                 logger.error(f"Database init failed: {e}")
                 raise
 
+    @staticmethod
+    def _is_locked_error(exc: Exception) -> bool:
+        if not isinstance(exc, sqlite3.OperationalError):
+            return False
+        msg = str(exc).lower()
+        return (
+            "database is locked" in msg
+            or "database is busy" in msg
+            or "database table is locked" in msg
+        )
+
     async def execute(self, query: str, params: tuple = ()):
         """Execute a query using the shared connection safely."""
         if not self._initialized:
             await self.init()
         
-        async with self._db_lock:
-            try:
-                cursor = await self._db_connection.execute(query, params)
-                await self._db_connection.commit()
-                return cursor
-            except Exception as e:
-                logger.error(f"DB Execute Error: {e} | Query: {query}")
-                raise
+        try:
+            max_attempts = max(1, int(os.environ.get("SENTINEL_DB_LOCK_RETRIES", "5")))
+        except ValueError:
+            max_attempts = 5
+        try:
+            base_delay = max(0.0, float(os.environ.get("SENTINEL_DB_LOCK_DELAY_SECONDS", "0.05")))
+        except ValueError:
+            base_delay = 0.05
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_attempts):
+            delay = 0.0
+            async with self._db_lock:
+                try:
+                    cursor = await self._db_connection.execute(query, params)
+                    await self._db_connection.commit()
+                    return cursor
+                except Exception as exc:
+                    last_exc = exc
+                    if self._is_locked_error(exc) and attempt < max_attempts - 1:
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            f"DB locked; retrying in {delay:.2f}s "
+                            f"(attempt {attempt + 1}/{max_attempts})"
+                        )
+                    else:
+                        logger.error(f"DB Execute Error: {exc} | Query: {query}")
+                        raise
+
+            if delay > 0.0:
+                await asyncio.sleep(delay)
+
+        # Should be unreachable due to raise in loop; keep as a safety net.
+        if last_exc:
+            raise last_exc
+        raise RuntimeError("DB execute failed without exception")
 
     async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
         """Execute and fetch all results."""
         if not self._initialized:
             await self.init()
             
-        async with self._db_lock:
-            try:
-                async with self._db_connection.execute(query, params) as cursor:
-                    return await cursor.fetchall()
-            except Exception as e:
-                logger.error(f"DB Fetch Error: {e}")
-                return []
+        try:
+            max_attempts = max(1, int(os.environ.get("SENTINEL_DB_LOCK_RETRIES", "5")))
+        except ValueError:
+            max_attempts = 5
+        try:
+            base_delay = max(0.0, float(os.environ.get("SENTINEL_DB_LOCK_DELAY_SECONDS", "0.05")))
+        except ValueError:
+            base_delay = 0.05
+
+        for attempt in range(max_attempts):
+            delay = 0.0
+            async with self._db_lock:
+                try:
+                    async with self._db_connection.execute(query, params) as cursor:
+                        return await cursor.fetchall()
+                except Exception as exc:
+                    if self._is_locked_error(exc) and attempt < max_attempts - 1:
+                        delay = base_delay * (2**attempt)
+                        logger.warning(
+                            f"DB locked on fetch; retrying in {delay:.2f}s "
+                            f"(attempt {attempt + 1}/{max_attempts})"
+                        )
+                    else:
+                        logger.error(f"DB Fetch Error: {exc}")
+                        return []
+
+            if delay > 0.0:
+                await asyncio.sleep(delay)
+
+        return []
 
     async def save_session(self, session_data: Dict[str, Any]):
         await self.execute("""

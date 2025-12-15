@@ -46,7 +46,7 @@ except ImportError:
 
 # Configurable concurrency limit based on system resources
 MIN_CONCURRENT_TOOLS = 1
-MAX_CONCURRENT_TOOLS_BASE = 10  # Base value for small systems
+MAX_CONCURRENT_TOOLS_BASE = 20  # Base value for small systems
 
 def calculate_concurrent_limit() -> int:
     """Calculate optimal concurrency based on available system resources."""
@@ -331,6 +331,94 @@ class ScannerEngine:
             enriched_count, edge_count = self._refresh_enrichment()
             
             yield f"[scanner] Processed {len(normalized)} findings, {enriched_count} issues, {edge_count} killchain edges"
+
+    async def shutdown(self, reason: str = "shutdown") -> None:
+        """
+        Best-effort cleanup for cancellation/error paths.
+
+        Terminates any running subprocesses and cancels any in-flight tool tasks
+        spawned by this engine instance. Safe to call multiple times.
+        """
+        # Stop launching new tasks.
+        try:
+            self._pending_tasks.clear()
+        except Exception:
+            pass
+
+        # Cancel running tasks first (they may be awaiting process IO).
+        tasks = []
+        try:
+            tasks = list(self._running_tasks.values())
+            for task in tasks:
+                task.cancel()
+        except Exception:
+            tasks = []
+
+        # Terminate processes.
+        procs = []
+        try:
+            procs = list(self._procs.items())
+        except Exception:
+            procs = []
+
+        for name, proc in procs:
+            if proc is None:
+                continue
+            if proc.returncode is not None:
+                continue
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                logger.debug(f"[scanner] terminate failed for {name} ({reason}): {exc}")
+
+        # Give processes a brief moment to exit, then force-kill stubborn ones.
+        try:
+            await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            # Continue with best-effort cleanup even if cancelled.
+            pass
+
+        for name, proc in procs:
+            if proc is None:
+                continue
+            if proc.returncode is not None:
+                continue
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                logger.debug(f"[scanner] kill failed for {name} ({reason}): {exc}")
+
+        # Await task completion without propagating cancellation outward.
+        if tasks:
+            try:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            except Exception:
+                pass
+
+        # Best-effort waits for processes to fully exit (avoid zombies).
+        for name, proc in procs:
+            if proc is None:
+                continue
+            try:
+                if proc.returncode is None:
+                    await asyncio.wait_for(proc.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+            except Exception:
+                pass
+
+        try:
+            self._running_tasks.clear()
+        except Exception:
+            pass
+        try:
+            self._procs.clear()
+        except Exception:
+            pass
 
 
     def queue_task(self, tool: str, args: List[str] = None):

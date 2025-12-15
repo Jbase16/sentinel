@@ -104,6 +104,14 @@ class Strategos:
 
         self.context = ScanContext(target=target)
         self.context.knowledge["mode"] = mode
+        # Seed baseline tags so protocol-gated tools can run deterministically.
+        # If the target is a URL, we still assume both HTTP and HTTPS are plausible
+        # until evidence proves otherwise.
+        existing_tags = self.context.knowledge.get("tags")
+        if not isinstance(existing_tags, set):
+            existing_tags = set()
+        existing_tags.update({"protocol:http", "protocol:https"})
+        self.context.knowledge["tags"] = existing_tags
         self._terminated = False
         self._dispatch_callback = dispatch_tool
         self._tool_tasks = {}

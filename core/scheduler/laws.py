@@ -65,15 +65,39 @@ class Law3_EvidenceGates(Law):
             return Decision(True, "No prerequisites required")
             
         # Context.knowledge is a Dict
-        knowledge = getattr(context, "knowledge", {})
-        findings = knowledge.get("findings", [])
+        knowledge = getattr(context, "knowledge", {}) or {}
         mode = knowledge.get("mode", None)
         
-        # Build tag set active on target
-        tags = set()
-        for f in findings:
-            tags.update(f.get("tags", []))
-            tags.add(f.get("type", "")) # e.g. 'type:subdomain'
+        # Build the active tag set from context + knowledge.
+        tags: set[str] = set()
+
+        known_tags = knowledge.get("tags")
+        if isinstance(known_tags, set):
+            tags.update(t for t in known_tags if isinstance(t, str) and t)
+        elif isinstance(known_tags, list):
+            tags.update(t for t in known_tags if isinstance(t, str) and t)
+
+        # Fold in tags/types from findings if present.
+        # Supports both legacy `knowledge['findings']` and `context.findings`.
+        findings_sources: List[Any] = []
+        knowledge_findings = knowledge.get("findings")
+        if isinstance(knowledge_findings, list):
+            findings_sources.append(knowledge_findings)
+        context_findings = getattr(context, "findings", None)
+        if isinstance(context_findings, list):
+            findings_sources.append(context_findings)
+
+        for findings in findings_sources:
+            for f in findings:
+                if not isinstance(f, dict):
+                    continue
+                finding_type = f.get("type")
+                if isinstance(finding_type, str) and finding_type:
+                    tags.add(finding_type)
+                    tags.add(f"type:{finding_type}")
+                for tag in f.get("tags", []) or []:
+                    if isinstance(tag, str) and tag:
+                        tags.add(tag)
             
         # Check gate satisfaction
         for gate in gates:
@@ -119,4 +143,3 @@ class Constitution:
             if not decision.allowed:
                 return decision
         return Decision(True, "All laws passed")
-
