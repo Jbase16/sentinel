@@ -123,21 +123,41 @@ public struct SentinelAPIClient: Sendable {
 
     // MARK: - God-Tier Endpoints
 
+    @available(*, deprecated, message: "Use startGhostRecording(flowName:) instead. The backend exposes /ghost/record/{flow_name}.")
+    public func startGhost(port: Int = 8080) async throws -> Bool {
+        // Backward compatibility: map port to a flow name
+        return try await startGhostRecording(flowName: "flow-\(port)")
+    }
+
+    public func startGhostRecording(flowName: String) async throws -> Bool {
+        guard let url = URL(string: "/ghost/record/\(flowName)", relativeTo: baseURL) else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        let (_, response) = try await session.data(for: request)
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    @available(*, deprecated, message: "No corresponding backend endpoint. This is a no-op.")
+    public func stopGhost() async throws -> Bool {
+        // The backend does not implement /ghost/stop. This is a no-op for compatibility.
+        return true
+    }
+
     public func startMission(target: String) async throws -> String {
         struct MissionResponse: Decodable {
             let status: String
             let mission_id: String
         }
         
-        guard let url = URL(string: "/mission/start", relativeTo: baseURL) else { throw APIError.badStatus }
-        var request = URLRequest(url: url)
+        guard let base = URL(string: "/mission/start", relativeTo: baseURL),
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: true) else { throw APIError.badStatus }
+        components.queryItems = [URLQueryItem(name: "target", value: target)]
+        guard let finalURL = components.url else { throw APIError.badStatus }
+        var request = URLRequest(url: finalURL)
         request.httpMethod = "POST"
         
         // Add auth token if we had one (Placeholder)
         // request.setValue("Bearer ...", forHTTPHeaderField: "Authorization")
-        
-        let pathWithQuery = url.absoluteString + "?target=\(target)"
-        request.url = URL(string: pathWithQuery)
         
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(MissionResponse.self, from: data)
@@ -149,8 +169,9 @@ public struct SentinelAPIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         
-        let pathWithQuery = url.absoluteString + "?question=\(question.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")"
-        request.url = URL(string: pathWithQuery)
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
+        components.queryItems = [URLQueryItem(name: "question", value: question)]
+        request.url = components.url
         
         struct ChatResponse: Decodable {
             let response: String

@@ -372,6 +372,43 @@ async def ghost_record(flow_name: str, _: bool = Depends(verify_token)):
     fid = FlowMapper.instance().start_recording(flow_name)
     return {"status": "recording", "flow_id": fid}
 
+# --- Ghost Protocol Control ---
+
+@app.post("/ghost/start")
+async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
+    """Start the passive interception proxy (Lazarus Engine enabled)."""
+    from core.ghost.proxy import GhostInterceptor
+    from core.base.session import ScanSession
+    
+    # We need a session for the proxy to log to. Use a global 'ghost' session.
+    # Check if we have one?
+    global _scan_state
+    session_id = _scan_state.get("session_id")
+    session = await get_session(session_id) if session_id else None
+    
+    if not session:
+        # Create a dedicated Ghost session if no scan is active
+        session = ScanSession("ghost-mode")
+        await register_session(session.id, session)
+        _scan_state["session_id"] = session.id # Track it
+        
+    # Ideally store the interceptor instance somewhere global or in session
+    if not hasattr(app.state, "ghost"):
+        app.state.ghost = GhostInterceptor(session, port=port)
+        await app.state.ghost.start()
+        return {"status": "started", "port": port}
+    else:
+        return {"status": "already_running", "port": app.state.ghost.port}
+
+@app.post("/ghost/stop")
+async def ghost_stop(_: bool = Depends(verify_token)):
+    """Stop the passive interception proxy."""
+    if hasattr(app.state, "ghost") and app.state.ghost:
+        app.state.ghost.stop()
+        del app.state.ghost
+        return {"status": "stopped"}
+    return {"status": "not_running"}
+
 @app.post("/forge/compile")
 async def forge_compile(
     target: str,

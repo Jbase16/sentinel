@@ -336,7 +336,8 @@ class AIEngine:
             return {"findings": [], "next_steps": []}
 
         try:
-            data = json.loads(response_json)
+            clean_json = self._clean_json_response(response_json)
+            data = json.loads(clean_json)
             findings = data.get("findings", [])
             next_steps = data.get("next_steps", [])
             
@@ -357,8 +358,16 @@ class AIEngine:
                 "next_steps": next_steps
             }
         except json.JSONDecodeError:
-            logger.error("Failed to parse LLM JSON response")
+            logger.error(f"Failed to parse LLM JSON response: {response_json[:200]}...")
             return {"findings": [], "next_steps": []}
+
+    def _clean_json_response(self, text: str) -> str:
+        text = text.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if len(lines) >= 3:
+                return "\n".join(lines[1:-1])
+        return text
 
     def generate_report_narrative(self, findings: List[Dict], issues: List[Dict]) -> str:
         """

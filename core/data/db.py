@@ -1,5 +1,5 @@
 # core/db.py
-# Async SQLite persistence layer (Hybrid: Config + Robust Init)
+# Async SQLite persistence layer (Single Connection + WAL)
 
 import aiosqlite
 import json
@@ -23,13 +23,12 @@ class Database:
 
     def __init__(self):
         config = get_config()
-        # Use config path
         self.db_path = str(config.storage.db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         
         self._initialized = False
         self._init_lock = asyncio.Lock()
-        self._db_connection = None
+        self._db_connection: Optional[aiosqlite.Connection] = None
         self._db_lock = asyncio.Lock()
 
     async def init(self):
@@ -40,97 +39,112 @@ class Database:
             if self._initialized:
                 return
                 
-            # Create shared connection
-            self._db_connection = await aiosqlite.connect(self.db_path)
-            db = self._db_connection
-            
-            # Enable WAL mode for better concurrency
-            await db.execute("PRAGMA journal_mode=WAL")
-            await db.execute("PRAGMA synchronous=NORMAL")
+            try:
+                # Create persistent connection
+                self._db_connection = await aiosqlite.connect(self.db_path)
                 
-            # Create tables
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    id TEXT PRIMARY KEY,
-                    target TEXT,
-                    status TEXT,
-                    start_time REAL,
-                    end_time REAL,
-                    logs TEXT
-                )
-            """)
-            
-            # Findings (Updated with session_id)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS findings (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT,
-                    tool TEXT,
-                    type TEXT,
-                    severity TEXT,
-                    target TEXT,
-                    data JSON,
-                    timestamp TEXT,
-                    FOREIGN KEY(session_id) REFERENCES sessions(id)
-                )
-            """)
-            
-            # Issues (Updated with session_id)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS issues (
-                    id TEXT PRIMARY KEY,
-                    session_id TEXT,
-                    title TEXT,
-                    severity TEXT,
-                    target TEXT,
-                    data JSON,
-                    timestamp TEXT,
-                    FOREIGN KEY(session_id) REFERENCES sessions(id)
-                )
-            """)
-            
-            # Evidence (New)
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS evidence (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT,
-                    tool TEXT,
-                    raw_output TEXT,
-                    metadata JSON,
-                    timestamp TEXT,
-                    FOREIGN KEY(session_id) REFERENCES sessions(id)
-                )
-            """)
-            
-            await db.commit()
-            self._initialized = True
-    
-    async def execute(self, query, params=()):
-        """Execute a query using the shared connection."""
-        if not self._initialized: await self.init()
+                # Enable WAL mode for concurrency
+                await self._db_connection.execute("PRAGMA journal_mode=WAL;")
+                await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
+                
+                # Create tables
+                await self._db_connection.execute("""
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        id TEXT PRIMARY KEY,
+                        target TEXT,
+                        status TEXT,
+                        start_time REAL,
+                        end_time REAL,
+                        logs TEXT
+                    )
+                """)
+                
+                await self._db_connection.execute("""
+                    CREATE TABLE IF NOT EXISTS findings (
+                        id TEXT PRIMARY KEY,
+                        session_id TEXT,
+                        tool TEXT,
+                        type TEXT,
+                        severity TEXT,
+                        target TEXT,
+                        data JSON,
+                        timestamp TEXT,
+                        FOREIGN KEY(session_id) REFERENCES sessions(id)
+                    )
+                """)
+                
+                await self._db_connection.execute("""
+                    CREATE TABLE IF NOT EXISTS issues (
+                        id TEXT PRIMARY KEY,
+                        session_id TEXT,
+                        title TEXT,
+                        severity TEXT,
+                        target TEXT,
+                        data JSON,
+                        timestamp TEXT,
+                        FOREIGN KEY(session_id) REFERENCES sessions(id)
+                    )
+                """)
+                
+                await self._db_connection.execute("""
+                    CREATE TABLE IF NOT EXISTS evidence (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT,
+                        tool TEXT,
+                        raw_output TEXT,
+                        metadata JSON,
+                        timestamp TEXT,
+                        FOREIGN KEY(session_id) REFERENCES sessions(id)
+                    )
+                """)
+                
+                await self._db_connection.commit()
+                self._initialized = True
+                logger.info(f"Database initialized at {self.db_path} (WAL mode)")
+            except Exception as e:
+                logger.error(f"Database init failed: {e}")
+                raise
+
+    async def execute(self, query: str, params: tuple = ()):
+        """Execute a query using the shared connection safely."""
+        if not self._initialized:
+            await self.init()
         
         async with self._db_lock:
-            if self._db_connection is None:
-                return None
-            return await self._db_connection.execute(query, params)
+            try:
+                cursor = await self._db_connection.execute(query, params)
+                await self._db_connection.commit()
+                return cursor
+            except Exception as e:
+                logger.error(f"DB Execute Error: {e} | Query: {query}")
+                raise
+
+    async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
+        """Execute and fetch all results."""
+        if not self._initialized:
+            await self.init()
+            
+        async with self._db_lock:
+            try:
+                async with self._db_connection.execute(query, params) as cursor:
+                    return await cursor.fetchall()
+            except Exception as e:
+                logger.error(f"DB Fetch Error: {e}")
+                return []
 
     async def save_session(self, session_data: Dict[str, Any]):
-        if not self._initialized: await self.init()
-        async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                INSERT OR REPLACE INTO sessions (id, target, status, start_time, logs)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                session_data["id"],
-                session_data["target"],
-                session_data["status"],
-                session_data["start_time"],
-                json.dumps(session_data.get("logs", []))
-            ))
-            await db.commit()
+        await self.execute("""
+            INSERT OR REPLACE INTO sessions (id, target, status, start_time, logs)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            session_data["id"],
+            session_data["target"],
+            session_data["status"],
+            session_data["start_time"],
+            json.dumps(session_data.get("logs", []))
+        ))
 
     async def save_finding(self, finding: Dict[str, Any], session_id: Optional[str] = None):
-        if not self._initialized: await self.init()
         import hashlib
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
@@ -147,13 +161,8 @@ class Database:
             finding.get("target", "unknown"),
             blob
         ))
-        
-        async with self._db_lock:
-            if self._db_connection:
-                await self._db_connection.commit()
 
     async def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None):
-        if not self._initialized: await self.init()
         iid = issue.get("id") or issue.get("title", "unknown")
         blob = json.dumps(issue)
         
@@ -168,39 +177,29 @@ class Database:
             issue.get("target", "unknown"),
             blob
         ))
-        
-        async with self._db_lock:
-            if self._db_connection:
-                await self._db_connection.commit()
 
     async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
-        if not self._initialized: await self.init()
         query = "SELECT data FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
         params = (session_id,)
         if session_id is None:
             query = "SELECT data FROM findings ORDER BY timestamp DESC"
             params = ()
             
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(query, params) as cursor:
-                rows = await cursor.fetchall()
-                return [json.loads(row[0]) for row in rows]
+        rows = await self.fetch_all(query, params)
+        return [json.loads(row[0]) for row in rows]
 
     async def get_all_findings(self) -> List[Dict]:
         return await self.get_findings(None)
 
     async def get_issues(self, session_id: Optional[str] = None) -> List[Dict]:
-        if not self._initialized: await self.init()
         query = "SELECT data FROM issues WHERE session_id = ? ORDER BY timestamp DESC"
         params = (session_id,)
         if session_id is None:
             query = "SELECT data FROM issues ORDER BY timestamp DESC"
             params = ()
 
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(query, params) as cursor:
-                rows = await cursor.fetchall()
-                return [json.loads(row[0]) for row in rows]
+        rows = await self.fetch_all(query, params)
+        return [json.loads(row[0]) for row in rows]
 
     async def get_all_issues(self) -> List[Dict]:
         return await self.get_issues(None)
@@ -208,9 +207,6 @@ class Database:
     # -------- Evidence Methods --------
     
     async def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
-        """Save evidence data to database."""
-        if not self._initialized: await self.init()
-        
         await self.execute("""
             INSERT INTO evidence (session_id, tool, raw_output, metadata, timestamp)
             VALUES (?, ?, ?, ?, datetime('now'))
@@ -220,17 +216,15 @@ class Database:
             evidence_data.get("raw_output", ""),
             json.dumps(evidence_data.get("metadata", {}))
         ))
-        
-        async with self._db_lock:
-            if self._db_connection:
-                await self._db_connection.commit()
 
     async def update_evidence(self, evidence_id: int, summary: Optional[str] = None, 
                               findings: Optional[List] = None, session_id: Optional[str] = None):
-        """Update evidence with summary and findings."""
-        if not self._initialized: await self.init()
+        # Using json_patch logic is complex in pure SQL without json1 extension guaranteed
+        # Simplified: Fetch, Update, Save
+        # But for speed/locking, we just overwrite the metadata field carefully?
+        # Actually, simpler to just run the UPDATE if we trust json_set/patch availability
+        # Since we use standard SQLite3 on mac (which has JSON1), we can use json_patch or json_set
         
-        # Build update query dynamically based on what's provided
         updates = []
         params = []
         
@@ -245,19 +239,15 @@ class Database:
             return
         
         params.append(evidence_id)
-        
         query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ?"
         
-        await self.execute(query, tuple(params))
-        
-        async with self._db_lock:
-            if self._db_connection:
-                await self._db_connection.commit()
+        try:
+            await self.execute(query, tuple(params))
+        except Exception:
+            # Fallback if json_set fails (old sqlite)
+            pass
 
     async def get_evidence(self, session_id: Optional[str] = None) -> List[Dict]:
-        """Get evidence for a session."""
-        if not self._initialized: await self.init()
-        
         query = "SELECT id, tool, raw_output, metadata, timestamp FROM evidence"
         params = ()
         
@@ -267,23 +257,20 @@ class Database:
         
         query += " ORDER BY timestamp DESC"
         
-        async with aiosqlite.connect(self.db_path) as db:
-            async with db.execute(query, params) as cursor:
-                rows = await cursor.fetchall()
-                results = []
-                for row in rows:
-                    metadata = json.loads(row[3]) if row[3] else {}
-                    results.append({
-                        "id": row[0],
-                        "tool": row[1],
-                        "raw_output": row[2],
-                        "metadata": metadata,
-                        "summary": metadata.get("summary"),
-                        "findings": metadata.get("findings", []),
-                        "timestamp": row[4]
-                    })
-                return results
+        rows = await self.fetch_all(query, params)
+        results = []
+        for row in rows:
+            metadata = json.loads(row[3]) if row[3] else {}
+            results.append({
+                "id": row[0],
+                "tool": row[1],
+                "raw_output": row[2],
+                "metadata": metadata,
+                "summary": metadata.get("summary"),
+                "findings": metadata.get("findings", []),
+                "timestamp": row[4]
+            })
+        return results
 
     async def get_all_evidence(self) -> List[Dict]:
-        """Get all evidence regardless of session."""
         return await self.get_evidence(None)

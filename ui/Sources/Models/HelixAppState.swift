@@ -50,6 +50,7 @@ class HelixAppState: ObservableObject {
     @Published var preferredModel: String = ModelRouter.defaultPreferredModel
     @Published var autoRoutingEnabled: Bool = true
     @Published var pendingActions: [PendingAction] = []
+    @Published var isGhostActive: Bool = false
 
     // Report State (Persisted)
     @Published var reportContent: [String: String] = [:]
@@ -406,6 +407,20 @@ class HelixAppState: ObservableObject {
             try? await apiClient.denyAction(id: action.id)
             await MainActor.run {
                 self.pendingActions.removeAll { $0.id == action.id }
+            }
+        }
+    }
+
+    func toggleGhost() {
+        Task {
+            if isGhostActive {
+                if try await apiClient.stopGhost() {
+                    await MainActor.run { self.isGhostActive = false }
+                }
+            } else {
+                if try await apiClient.startGhost() {
+                    await MainActor.run { self.isGhostActive = true }
+                }
             }
         }
     }

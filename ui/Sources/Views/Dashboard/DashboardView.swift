@@ -27,6 +27,17 @@ struct DashboardView: View {
                         statusText: appState.aiStatus?.model ?? "Offline",
                         icon: "cpu"
                     )
+                    
+                    // Ghost Protocol
+                    Button(action: { appState.toggleGhost() }) {
+                        SystemStatusCard(
+                            title: "Ghost Protocol",
+                            isConnected: appState.isGhostActive,
+                            statusText: appState.isGhostActive ? "Active (8080)" : "Inactive",
+                            icon: "eye"
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
 
