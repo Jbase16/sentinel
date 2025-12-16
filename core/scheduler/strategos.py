@@ -51,6 +51,13 @@ from core.scheduler.intents import (
 )
 from core.scheduler.events import ToolStartedEvent, ToolCompletedEvent, MissionTerminatedEvent
 from core.cortex.events import EventBus
+from core.scheduler.decisions import (
+    DecisionContext,
+    DecisionLedger,
+    DecisionType,
+    DecisionPoint,
+    create_decision_context
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +80,11 @@ class ScanContext:
 class Strategos:
     """
     The Strategist.
-    A truly concurrent, event-driven planner.
+    A truly concurrent, event-driven planner with first-class decision tracking.
+    
+    Every strategic decision is captured as an immutable DecisionPoint and
+    automatically emitted as events to the EventBus. This ensures complete
+    observability and audit trail without manual emit_event() calls.
     """
     
     def __init__(
@@ -81,6 +92,7 @@ class Strategos:
         event_queue_maxsize: int = DEFAULT_EVENT_QUEUE_MAXSIZE,
         log_fn: Optional[Callable[[str], None]] = None,
         event_bus: Optional[EventBus] = None,
+        decision_ledger: Optional[DecisionLedger] = None,
     ):
         self.constitution = Constitution()
         self.registry = ToolRegistry()
@@ -92,6 +104,14 @@ class Strategos:
         self._tool_semaphore: Optional[asyncio.Semaphore] = None
         self._log_fn = log_fn
         self._event_bus = event_bus
+        
+        # Decision Emission Layer: All strategic choices flow through this context
+        # This creates a complete audit trail separate from the event stream
+        self._decision_ledger = decision_ledger or DecisionLedger()
+        self._decision_ctx: Optional[DecisionContext] = None
+        
+        # Track current decision for hierarchical decision trees
+        self._current_intent_decision: Optional[DecisionPoint] = None
 
     def _emit_log(self, message: str, level: str = "info") -> None:
         try:
@@ -114,29 +134,50 @@ class Strategos:
         dispatch_tool: Callable[[str], Awaitable[List[Dict]]]
     ) -> MissionTerminatedEvent:
         """
-        The Agent Loop.
-        Dispatches tools concurrently, listens for events, and re-plans.
+        The Agent Loop with First-Class Decision Tracking.
+        
+        Every strategic decision (intent transition, tool selection, phase change)
+        is captured as an immutable DecisionPoint and automatically emitted.
+        
+        Decision Flow Architecture:
+        1. DecisionContext wraps entire mission lifecycle
+        2. Each intent transition creates a parent decision
+        3. Tool selections are child decisions linked to intent
+        4. Phase transitions emit specialized phase_changed events
+        5. Early termination (Walk Away) is an explicit decision
+        
+        This ensures complete decision audit trail without manual emit calls.
         """
+        # Clear event queue from previous runs
         while not self.event_queue.empty():
             try:
                 self.event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
 
+        # Initialize scan context
         self.context = ScanContext(target=target)
         self.context.knowledge["mode"] = mode
-        # Seed baseline tags so protocol-gated tools can run deterministically.
-        # If the target is a URL, we still assume both HTTP and HTTPS are plausible
-        # until evidence proves otherwise.
+        
+        # Seed baseline protocol tags for deterministic tool gating
+        # Assumption: HTTP/HTTPS targets until proven otherwise
         existing_tags = self.context.knowledge.get("tags")
         if not isinstance(existing_tags, set):
             existing_tags = set()
         existing_tags.update({"protocol:http", "protocol:https"})
         self.context.knowledge["tags"] = existing_tags
+        
         self._terminated = False
         self._dispatch_callback = dispatch_tool
         self._tool_tasks = {}
         self._tool_semaphore = asyncio.Semaphore(self.context.max_concurrent)
+        
+        # Initialize Decision Emission Layer
+        # All decisions made during this mission flow through this context
+        self._decision_ctx = create_decision_context(
+            event_bus=self._event_bus,
+            ledger=self._decision_ledger
+        )
         
         current_intent = INTENT_PASSIVE_RECON
         
@@ -146,54 +187,97 @@ class Strategos:
         listener_task = asyncio.create_task(self._event_listener())
         
         try:
-            # === THE AGENT LOOP ===
+            # === THE AGENT LOOP (Decision-Driven) ===
             while not self._terminated:
+                # DECISION POINT: Phase Transition
+                # Check if we need to transition to a new phase based on intent
                 new_phase = self._get_phase_for_intent(current_intent)
                 if new_phase != self.context.phase_index:
-                    if self._event_bus:
-                        # Map int phase to string name manually for now or just emit raw
-                        self._event_bus.emit_scan_phase_changed(
-                            phase=f"PHASE_{new_phase}",
-                            previous_phase=f"PHASE_{self.context.phase_index}"
-                        )
-                self.context.phase_index = new_phase
+                    # Emit phase transition as specialized decision
+                    phase_decision = self._decision_ctx.choose(
+                        decision_type=DecisionType.PHASE_TRANSITION,
+                        chosen=f"PHASE_{new_phase}",
+                        reason=f"Intent {current_intent} requires phase {new_phase}",
+                        alternatives=[f"PHASE_{self.context.phase_index}"],  # What we're leaving
+                        context={
+                            "phase": f"PHASE_{new_phase}",
+                            "previous_phase": f"PHASE_{self.context.phase_index}",
+                            "intent": current_intent,
+                            "mode": mode.value
+                        }
+                    )
+                    self.context.phase_index = new_phase
+                
+                # Reset intent-scoped metrics
                 self.context.findings_this_intent = 0
                 self.context.surface_delta_this_intent = 0
                 
+                # DECISION POINT: Intent Execution
+                # Declare intent to execute this strategic phase
                 self._emit_log(f"[Strategos] Decision: Executing {current_intent}")
-                if self._event_bus:
-                    self._event_bus.emit_decision_made(
-                        intent=current_intent,
-                        reason="Standard progression",
-                        context={"mode": mode.value}
-                    )
+                self._current_intent_decision = self._decision_ctx.choose(
+                    decision_type=DecisionType.INTENT_TRANSITION,
+                    chosen=current_intent,
+                    reason="Standard sequential progression through scan intents",
+                    alternatives=self._get_available_intents(current_intent, mode),
+                    context={
+                        "mode": mode.value,
+                        "target": target,
+                        "current_phase": new_phase
+                    },
+                    evidence={
+                        "findings_count": len(self.context.findings),
+                        "surface_size": len(self.context.surface_seen),
+                        "completed_tools": sum(
+                            len(tools) 
+                            for tools in self.context.completed_tools_per_intent.values()
+                        )
+                    }
+                )
                 
-                # Get tools for this intent
+                # DECISION POINT: Tool Selection
+                # Select which tools to run for this intent (may be empty)
                 tools_to_run = self._select_tools(current_intent, available_tools, mode)
                 
                 if not tools_to_run:
+                    # DECISION: Skip intent due to no available tools
                     self._emit_log(f"[Strategos] No tools available for {current_intent}. Skipping.")
-                    if self._event_bus:
-                        self._event_bus.emit_decision_made(
-                            intent=current_intent,
-                            reason="No tools available",
-                            context={"mode": mode.value, "skipped": True}
+                    
+                    # Nested decision under current intent
+                    with self._decision_ctx.nested(self._current_intent_decision):
+                        self._decision_ctx.choose(
+                            decision_type=DecisionType.TOOL_SELECTION,
+                            chosen="SKIP",
+                            reason="No tools available or all tools blocked",
+                            alternatives=available_tools,  # What we could have chosen
+                            context={
+                                "mode": mode.value,
+                                "intent": current_intent,
+                                "skipped": True
+                            },
+                            evidence={
+                                "available_tools": available_tools,
+                                "candidate_tools_count": 0
+                            }
                         )
                 else:
-                    # Dispatch all tools for this intent (ASYNC)
+                    # Dispatch all selected tools concurrently
                     await self._dispatch_tools_async(tools_to_run, intent=current_intent)
                     
                     # Wait for all tools in this intent to complete
                     await self._wait_for_intent_completion()
                 
-                # THINK: What next?
+                # DECISION POINT: Next Intent Selection
+                # Strategic decision: what to do next based on current state
                 next_intent = self._decide_next_step(current_intent)
                 
                 if next_intent is None:
+                    # Mission termination is a decision too
                     self._terminated = True
                 else:
                     current_intent = next_intent
         finally:
+            # Cleanup: Cancel all running tasks
             self._terminated = True
             tasks = list(self._tool_tasks.values())
             for task in tasks:
@@ -387,29 +471,107 @@ class Strategos:
     def _select_tools(self, intent: str, available_tools: List[str], mode: ScanMode) -> List[str]:
         """
         Select and prioritize tools for an intent.
+        
+        This is a critical decision point - tool selection determines scan coverage.
+        Every tool that is blocked, disabled, or rejected gets its own decision record.
+        
+        Decision Flow:
+        1. Get candidate tools for this intent
+        2. Filter by availability and completion status
+        3. For each candidate:
+           a. Check if disabled by mode overlay
+           b. Check against Constitution (safety rules)
+           c. Calculate priority score
+        4. Emit individual decisions for rejections
+        5. Return sorted list of approved tools
         """
         candidates = ToolRegistry.get_tools_for_intent(intent, mode=mode)
         candidates = [t for t in candidates if t in available_tools]
         candidates = [t for t in candidates if t not in self.context.completed_tools_per_intent.get(intent, set())]
         
         scored = []
+        rejected_count = 0
+        
         for t in candidates:
             tool_def = ToolRegistry.get(t, mode=mode)
             tool_def["name"] = t
             
+            # DECISION POINT: Tool disabled by mode overlay
             if tool_def.get("disabled"):
+                rejected_count += 1
+                if self._decision_ctx and self._current_intent_decision:
+                    with self._decision_ctx.nested(self._current_intent_decision):
+                        self._decision_ctx.choose(
+                            decision_type=DecisionType.TOOL_REJECTION,
+                            chosen="DISABLED",
+                            reason=f"Tool {t} disabled by {mode.value} mode overlay",
+                            context={
+                                "tool": t,
+                                "intent": intent,
+                                "mode": mode.value
+                            }
+                        )
                 continue
             
-            decision = self.constitution.check(self.context, tool_def)
-            if not decision.allowed:
-                self._emit_log(f"[Strategos] Blocked {t}: {decision.reason} ({decision.blocking_law})")
-                continue
+            # DECISION POINT: Constitutional check (safety rules)
+            constitution_decision = self.constitution.check(self.context, tool_def)
+            if not constitution_decision.allowed:
+                rejected_count += 1
+                self._emit_log(
+                    f"[Strategos] Blocked {t}: {constitution_decision.reason} "
+                    f"({constitution_decision.blocking_law})"
+                )
                 
+                # Emit rejection decision with full constitutional reasoning
+                if self._decision_ctx and self._current_intent_decision:
+                    with self._decision_ctx.nested(self._current_intent_decision):
+                        self._decision_ctx.choose(
+                            decision_type=DecisionType.TOOL_REJECTION,
+                            chosen="BLOCKED_BY_CONSTITUTION",
+                            reason=constitution_decision.reason,
+                            context={
+                                "tool": t,
+                                "intent": intent,
+                                "blocking_law": constitution_decision.blocking_law,
+                                "mode": mode.value
+                            },
+                            evidence={
+                                "allowed": constitution_decision.allowed,
+                                "warnings": constitution_decision.warnings
+                            }
+                        )
+                continue
+            
+            # DECISION POINT: Scoring (implicit selection)
             score = self._calculate_score(tool_def, mode)
             scored.append((t, score))
         
+        # Sort by score (highest priority first)
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [t for t, _ in scored]
+        selected_tools = [t for t, _ in scored]
+        
+        # DECISION POINT: Final tool selection for this intent
+        # Emit a single decision recording all selected tools
+        if self._decision_ctx and self._current_intent_decision:
+            with self._decision_ctx.nested(self._current_intent_decision):
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.TOOL_SELECTION,
+                    chosen=selected_tools,
+                    reason=f"Selected {len(selected_tools)} tools for {intent} (rejected {rejected_count})",
+                    alternatives=candidates,  # All candidates considered
+                    context={
+                        "intent": intent,
+                        "mode": mode.value,
+                        "selected_count": len(selected_tools),
+                        "rejected_count": rejected_count
+                    },
+                    evidence={
+                        "tool_scores": {t: score for t, score in scored},
+                        "available_count": len(available_tools)
+                    }
+                )
+        
+        return selected_tools
 
     def _calculate_score(self, tool_def: Dict, mode: ScanMode) -> int:
         overlay_map = ModeRegistry.get_overlay(mode)
@@ -423,44 +585,184 @@ class Strategos:
         return (priority * 10) - (cost * 2) - intrusiveness
 
     def _decide_next_step(self, current_intent: str) -> Optional[str]:
+        """
+        Strategic decision: what intent to execute next.
+        
+        This implements the core scan progression logic:
+        - Standard: Passive → Active → Surface → Vuln → Heavy
+        - Bug Bounty: Passive → Active → Surface → Vuln (skip Heavy)
+        - Walk Away: Terminate early if no new surface discovered
+        
+        Every transition (or termination) is an explicit decision with justification.
+        
+        Decision Types:
+        - Intent transition: Moving to next phase
+        - Early termination: Walk Away logic
+        - Mode adaptation: Skipping phases based on mode constraints
+        """
+        # Handle edge cases for unit tests and initial state
+        if self.context is None or current_intent is None:
+            return INTENT_PASSIVE_RECON
+        
         mode = self.context.knowledge.get("mode", ScanMode.STANDARD)
         
+        # DECISION POINT: Post-Passive Recon
         if current_intent == INTENT_PASSIVE_RECON:
-            return INTENT_ACTIVE_LIVE_CHECK
-            
+            next_intent = INTENT_ACTIVE_LIVE_CHECK
+            if self._decision_ctx:
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.INTENT_TRANSITION,
+                    chosen=next_intent,
+                    reason="Passive recon complete, proceeding to active live checks",
+                    alternatives=[None],  # Could terminate, but standard progression continues
+                    context={"from": current_intent, "to": next_intent, "mode": mode.value},
+                    evidence={"findings_count": len(self.context.findings)}
+                )
+            return next_intent
+        
+        # DECISION POINT: Post-Active Live Check
         if current_intent == INTENT_ACTIVE_LIVE_CHECK:
-            return INTENT_SURFACE_ENUMERATION
-            
+            next_intent = INTENT_SURFACE_ENUMERATION
+            if self._decision_ctx:
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.INTENT_TRANSITION,
+                    chosen=next_intent,
+                    reason="Live checks complete, proceeding to surface enumeration",
+                    alternatives=[None],
+                    context={"from": current_intent, "to": next_intent, "mode": mode.value},
+                    evidence={"findings_count": len(self.context.findings)}
+                )
+            return next_intent
+        
+        # DECISION POINT: Post-Surface Enumeration (Walk Away Logic)
         if current_intent == INTENT_SURFACE_ENUMERATION:
+            # Bug Bounty Walk Away: Terminate if no new surface discovered
             if mode == ScanMode.BUG_BOUNTY and self.context.surface_delta_this_intent == 0:
                 self._emit_log("[Strategos] Walk Away: No new surface discovered. Aborting deep scan.")
-                if self._event_bus:
-                    self._event_bus.emit_decision_made(
-                        intent="WALK_AWAY",
-                        reason="No new surface discovered (Bug Bounty Mode)",
-                        context={"surface_delta": 0}
+                
+                if self._decision_ctx:
+                    self._decision_ctx.choose(
+                        decision_type=DecisionType.EARLY_TERMINATION,
+                        chosen="WALK_AWAY",
+                        reason="No new attack surface discovered in surface enumeration phase",
+                        alternatives=[INTENT_VULN_SCANNING],  # What we could do instead
+                        context={
+                            "from": current_intent,
+                            "mode": mode.value,
+                            "trigger": "bug_bounty_zero_surface_delta"
+                        },
+                        evidence={
+                            "surface_delta_this_intent": self.context.surface_delta_this_intent,
+                            "total_surface_size": len(self.context.surface_seen),
+                            "findings_this_intent": self.context.findings_this_intent
+                        }
                     )
-                return None
-            return INTENT_VULN_SCANNING
+                
+                return None  # Terminate mission
             
+            # Standard progression: proceed to vuln scanning
+            next_intent = INTENT_VULN_SCANNING
+            if self._decision_ctx:
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.INTENT_TRANSITION,
+                    chosen=next_intent,
+                    reason="Surface enumeration complete, proceeding to vulnerability scanning",
+                    alternatives=[None],  # Could Walk Away
+                    context={"from": current_intent, "to": next_intent, "mode": mode.value},
+                    evidence={
+                        "surface_delta": self.context.surface_delta_this_intent,
+                        "total_surface": len(self.context.surface_seen)
+                    }
+                )
+            return next_intent
+        
+        # DECISION POINT: Post-Vuln Scanning (Mode-Based Heavy Artillery)
         if current_intent == INTENT_VULN_SCANNING:
+            # Bug Bounty Mode: Skip heavy artillery (too aggressive)
             if mode == ScanMode.BUG_BOUNTY:
                 self._emit_log("[Strategos] Bug Bounty Mode: Skipping Heavy Artillery.")
-                if self._event_bus:
-                    self._event_bus.emit_decision_made(
-                        intent="SKIP_HEAVY",
-                        reason="Bug Bounty Mode restriction",
-                        context={}
+                
+                if self._decision_ctx:
+                    self._decision_ctx.choose(
+                        decision_type=DecisionType.MODE_ADAPTATION,
+                        chosen="SKIP_HEAVY_ARTILLERY",
+                        reason="Bug Bounty mode prohibits heavy/aggressive scanning tools",
+                        alternatives=[INTENT_HEAVY_ARTILLERY],  # What we're skipping
+                        context={
+                            "from": current_intent,
+                            "mode": mode.value,
+                            "skipped_intent": INTENT_HEAVY_ARTILLERY
+                        }
                     )
-                return None
-            return INTENT_HEAVY_ARTILLERY
+                
+                return None  # Terminate mission gracefully
             
+            # Standard mode: proceed to heavy artillery
+            next_intent = INTENT_HEAVY_ARTILLERY
+            if self._decision_ctx:
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.INTENT_TRANSITION,
+                    chosen=next_intent,
+                    reason="Vulnerability scanning complete, proceeding to heavy artillery",
+                    alternatives=[None],  # Could stop here
+                    context={"from": current_intent, "to": next_intent, "mode": mode.value},
+                    evidence={"findings_count": len(self.context.findings)}
+                )
+            return next_intent
+        
+        # DECISION POINT: Post-Heavy Artillery (End of Standard Scan)
+        # No more intents, mission complete
+        if self._decision_ctx:
+            self._decision_ctx.choose(
+                decision_type=DecisionType.EARLY_TERMINATION,
+                chosen="MISSION_COMPLETE",
+                reason="All intents exhausted, scan complete",
+                context={"last_intent": current_intent, "mode": mode.value},
+                evidence={
+                    "total_findings": len(self.context.findings),
+                    "total_surface": len(self.context.surface_seen),
+                    "total_tools_run": sum(
+                        len(tools) for tools in self.context.completed_tools_per_intent.values()
+                    )
+                }
+            )
+        
         return None
     
     def _get_phase_for_intent(self, intent: str) -> int:
+        """Map intent to numeric phase for compatibility with existing phase tracking."""
         if intent == INTENT_PASSIVE_RECON: return PHASE_1_PASSIVE
         if intent == INTENT_ACTIVE_LIVE_CHECK: return PHASE_2_LIGHT
         if intent == INTENT_SURFACE_ENUMERATION: return PHASE_3_SURFACE
         if intent == INTENT_VULN_SCANNING: return PHASE_4_DEEP
         if intent == INTENT_HEAVY_ARTILLERY: return PHASE_5_HEAVY
         return 0
+    
+    def _get_available_intents(self, current_intent: str, mode: ScanMode) -> List[str]:
+        """
+        Get the list of possible next intents for decision recording.
+        
+        This documents what alternatives existed at each decision point.
+        Helps with decision replay and "what-if" analysis.
+        """
+        # Standard progression sequence
+        if current_intent == INTENT_PASSIVE_RECON:
+            return [INTENT_ACTIVE_LIVE_CHECK, None]  # Could terminate early
+        
+        if current_intent == INTENT_ACTIVE_LIVE_CHECK:
+            return [INTENT_SURFACE_ENUMERATION, None]
+        
+        if current_intent == INTENT_SURFACE_ENUMERATION:
+            if mode == ScanMode.BUG_BOUNTY:
+                # Bug bounty has Walk Away option
+                return [INTENT_VULN_SCANNING, None]
+            return [INTENT_VULN_SCANNING, None]
+        
+        if current_intent == INTENT_VULN_SCANNING:
+            if mode == ScanMode.BUG_BOUNTY:
+                # No heavy artillery in bug bounty
+                return [None]
+            return [INTENT_HEAVY_ARTILLERY, None]
+        
+        # Heavy artillery is always terminal
+        return [None]
