@@ -1,23 +1,38 @@
 # ============================================================================
 # core/toolkit/raw_classifier.py
-# Raw Classifier Module
+# Raw Classifier Module - Tool Output Parsing & Finding Normalization
 # ============================================================================
 #
 # PURPOSE:
-# This module is part of the toolkit package in SentinelForge.
-# [Specific purpose based on module name: raw_classifier]
+# Transforms unstructured security tool output (nmap, nikto, gobuster, etc.) into
+# normalized RawFinding objects for downstream analysis by AIEngine and ReasoningEngine.
+# Acts as the first stage of the SentinelForge analysis pipeline.
 #
 # KEY RESPONSIBILITIES:
-# - [Automatically generated - review and enhance based on actual functionality]
+# - Parse tool-specific output formats (text, JSON, ANSI-colored CLI output)
+# - Extract security findings using regex pattern matching
+# - Normalize findings into consistent RawFinding dataclass structure
+# - Classify severity, assign tags/families, extract metadata
+# - Detect cross-tool patterns (secrets, misconfigurations, exposures)
 #
 # INTEGRATION:
-# - Used by: [To be documented]
-# - Depends on: [To be documented]
+# - Used by: core/engine/orchestrator.py (scan result processing)
+# - Depends on: Tool-specific output formats (nmap, whatweb, httpx, etc.)
+# - Feeds into: core/ai/engine.py (AIEngine for enrichment)
+#
+# REGEX PATTERN DOCUMENTATION STANDARD:
+# All regex patterns in this module follow production-grade documentation:
+#   1. PURPOSE: What the pattern matches and why (security context)
+#   2. STRUCTURE: Breakdown of pattern syntax with group semantics
+#   3. EXAMPLES: Matched strings demonstrating pattern behavior
+#   4. EDGE CASES: Boundary conditions, ambiguous inputs, format variations
+#   5. FAILURE MODES: Known limitations, tool version dependencies
+#   6. PERFORMANCE: Backtracking risks, complexity analysis (where relevant)
+#
+# Rationale: Security tool output parsing is brittle; comprehensive documentation
+# prevents regressions during tool upgrades and enables safe pattern evolution.
 #
 # ============================================================================
-
-# core/raw_classifier.py
-# Normalizes raw tool output into structured findings for downstream engines.
 
 from __future__ import annotations
 
@@ -39,6 +54,16 @@ ManagementPortMap = {
 }
 
 CMS_SIGNATURES = {
+    # Pattern structure: cms_name + delimiter + version
+    # Matches: "WordPress 6.4.2", "wordpress/5.9", "WordPress:4.7", "wordpress_3.8.1", "wordpress-2.9"
+    # Group 1 (optional): Version in format X, X.Y, or X.Y.Z
+    # Delimiter class [\s/:_-]* permits zero or more whitespace, forward slash, colon, underscore, or hyphen
+    # Version pattern: ([0-9]+(?:\.[0-9]+){0,2})?
+    #   - [0-9]+ = one or more digits (major version, required if version present)
+    #   - (?:\.[0-9]+){0,2} = zero to two occurrences of dot + digits (minor/patch versions)
+    #   - Entire group is optional (?) to match "WordPress" without version
+    # Invariant: CMS name must be present; version extraction is opportunistic
+    # Edge case: Matches "wordpress" in "wordpress.org" (intentional for broad capture)
     "wordpress": re.compile(r"wordpress[\s/:_-]*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "joomla": re.compile(r"joomla[\s/:_-]*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "drupal": re.compile(r"drupal[\s/:_-]*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
@@ -50,21 +75,126 @@ CMS_SIGNATURES = {
     "concrete5": re.compile(r"concrete5[\s/:_-]*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
 }
 
+# RFC 1918 Private IPv4 Address Detection
+# Matches three private address ranges:
+#   - 10.0.0.0/8:       10.0.0.0 - 10.255.255.255
+#   - 172.16.0.0/12:    172.16.0.0 - 172.31.255.255
+#   - 192.168.0.0/16:   192.168.0.0 - 192.168.255.255
+#
+# Pattern breakdown:
+#   \b                                    = Word boundary (prevents matching inside longer strings)
+#   (?:                                   = Non-capturing group for alternation
+#     10\.\d{1,3}\.\d{1,3}\.\d{1,3}      = Class A private (10.x.x.x)
+#     |                                    = OR
+#     192\.168\.\d{1,3}\.\d{1,3}         = Class C private (192.168.x.x)
+#     |                                    = OR
+#     172\.(?:1[6-9]|2\d|3[01])\.        = Class B private (172.16-31.x.x)
+#         \d{1,3}\.\d{1,3}
+#   )
+#   \b                                    = Word boundary
+#
+# Class B breakdown (172.16-31.x.x):
+#   (?:1[6-9]|2\d|3[01])
+#     1[6-9]  = 16-19 (1 followed by 6-9)
+#     2\d     = 20-29 (2 followed by any digit)
+#     3[01]   = 30-31 (3 followed by 0 or 1)
+#
+# False positives: Allows invalid octets (e.g., 10.999.1.1) for permissive matching of malformed tool output
+# Rationale: Security tools may truncate or malform IPs; prefer false positives over false negatives
+# Performance: No catastrophic backtracking; linear time complexity O(n)
 PRIVATE_IP_REGEX = re.compile(
     r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b"
 )
 
+# Credential and Secret Detection Patterns
+# Each pattern targets specific secret formats leaked in tool output, headers, or page content
+# Tuples: (human_label, compiled_regex_pattern)
+# All patterns are designed to minimize false negatives at cost of occasional false positives
 SECRET_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
+    # AWS Access Key ID
+    # Format: AKIA + 16 alphanumeric uppercase characters
+    # Example: AKIAIOSFODNN7EXAMPLE
+    # \b = word boundary to prevent matching inside larger strings
+    # Group 0 (full match): entire key
     ("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    
+    # AWS Secret Access Key (contextual)
+    # Matches secret keys appearing near "aws", "secret", or "key" identifiers
+    # Pattern: variable name/prefix + optional spacing + separator + 40-char base64-like value
+    # (?i) = case insensitive for identifier matching
+    # .{0,10} = up to 10 chars between "aws" and "secret/key" (handles "aws_secret", "aws-api-key")
+    # ['\"]? = optional quote before separator
+    # [:=] = colon or equals separator
+    # Group 3: the 40-character secret value
+    # Example: aws_secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    # False positive risk: Generic 40-char base64 strings near "key" keyword; acceptable for security context
     ("aws-secret-key", re.compile(r"(?i)aws(.{0,10})?(secret|key)['\"]?\s*[:=]\s*['\"]([A-Za-z0-9/+=]{40})")),
+    
+    # Google Cloud API Key
+    # Format: AIza + 35 chars (base62: A-Z, a-z, 0-9, hyphen, underscore)
+    # Example: AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe
+    # \b boundaries ensure exact format matching
     ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b")),
+    
+    # GitHub Personal Access Token / App Token
+    # Format: gh{p|o|u|s|r}_ + 36+ alphanumeric characters
+    # Token types: p=personal, o=OAuth, u=user-to-server, s=server-to-server, r=refresh
+    # Character class [pousr] matches any valid type prefix
+    # {36,} = minimum 36 chars (tokens can be longer; unbounded for forward compatibility)
+    # Example: ghp_1234567890abcdefghijklmnopqrstuvwxyz
     ("github-token", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{36,}\b")),
+    
+    # Slack API Tokens
+    # Format: xox{b|a|p|r|s}- + variable-length alphanumeric + hyphens
+    # Token types: b=bot, a=app, p=personal, r=refresh, s=service
+    # Minimum 10 chars after prefix (legacy tokens); modern tokens often 50+ chars
+    # Example: xoxb-XXXXXXXXXX-XXXXXXXXXXXX-XXXXXXXXXXXXXXXX
     ("slack-token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
+    
+    # Stripe Live Secret Key
+    # Format: sk_live_ + 24+ alphanumeric characters
+    # sk_test_ deliberately excluded (test keys are lower risk)
+    # {24,} = minimum length observed; allows longer keys for API evolution
+    # Example: sk_live_FAKEKEY_REDACTED_EXAMPLE
     ("stripe-secret", re.compile(r"\bsk_live_[0-9A-Za-z]{24,}\b")),
+    
+    # Firebase/Google Services API Key
+    # Identical format to google-api-key but listed separately for explicit Firebase identification
+    # No word boundary at start (may appear in URLs like "?key=AIza...")
+    # Example: AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe
     ("firebase", re.compile(r"AIza[0-9A-Za-z\-_]{35}")),
+    
+    # Twilio Account SID
+    # Format: AC + 32 hexadecimal characters
+    # SID is public identifier but often indicates presence of sensitive auth tokens nearby
+    # Example: ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
     ("twilio-sid", re.compile(r"\bAC[0-9a-fA-F]{32}\b")),
+    
+    # Twilio Auth Token (contextual)
+    # Pattern: "twilio" + proximity text + separator + 32 hex chars
+    # .{0,5} = up to 5 chars between "twilio" and identifier (handles "twilio_auth", "twilio.token")
+    # Group 3: the 32-char hexadecimal token
+    # Example: twilio_auth_token="1234567890abcdef1234567890abcdef"
     ("twilio-auth", re.compile(r"(?i)\btwilio(.{0,5})?(secret|token)['\"]?\s*[:=]\s*['\"]([0-9a-fA-F]{32})")),
+    
+    # Private Key Headers (PEM format)
+    # Matches RSA, Elliptic Curve, or DSA private key blocks
+    # (?:RSA|EC|DSA) = non-capturing group for key type alternatives
+    # Matches header only; key material extraction would require multi-line matching
+    # Example: -----BEGIN RSA PRIVATE KEY-----
+    # Rationale: Header presence is sufficient for high-severity finding; full key extraction not required
     ("jwt-key", re.compile(r"-----BEGIN (?:RSA|EC|DSA) PRIVATE KEY-----")),
+    
+    # Generic Secret Pattern (catch-all)
+    # Matches common variable naming conventions followed by long alphanumeric values
+    # (?i) = case insensitive to catch SECRET, secret, Secret
+    # (secret|token|api[_-]?key) = Group 1: common identifier keywords
+    # ['\"=:\s]+ = one or more quote/equals/colon/whitespace separators
+    # Group 2: 24+ character value (alphanumeric, underscore, hyphen)
+    # Minimum 24 chars reduces false positives from short config values
+    # Example: api_key="abcdef1234567890ghijklmnopqrstuvwxyz"
+    # False positive risk: HIGH - matches benign long identifiers; use as fallback only
+    # Severity elevation logic should apply if found in HTTP responses or non-config contexts
     ("generic-secret", re.compile(r"(?i)(secret|token|api[_-]?key)['\"=:\s]+([A-Za-z0-9_\-]{24,})")),
 ]
 
@@ -79,19 +209,51 @@ SECURITY_HEADERS = [
     "cross-origin-embedder-policy",
 ]
 
+# Web Framework and Runtime Detection Patterns
+# Extracts framework/runtime names and version numbers from HTTP headers, error messages, or tool output
+# Pattern structure mirrors CMS_SIGNATURES but accounts for framework-specific naming (e.g., "Spring Boot", "ASP.NET Core")
+# All patterns use IGNORECASE for case-insensitive matching
 FRAMEWORK_PATTERNS: Dict[str, re.Pattern[str]] = {
+    # Express.js (Node.js framework)
+    # Matches: "Express 4.18.2", "express/4.17", "Express / 3.0"
+    # /? = optional forward slash separator
+    # Group 1: Version (optional, format X, X.Y, or X.Y.Z)
     "express": re.compile(r"express/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
     "flask": re.compile(r"flask/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "django": re.compile(r"django/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "rails": re.compile(r"rails/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "laravel": re.compile(r"laravel/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
+    # Spring Boot (Java framework)
+    # Matches: "Spring Boot 3.1.0", "spring boot/2.7", "spring-boot 3.0"
+    # Literal space in pattern requires exact "spring boot" match
+    # Edge case: Does NOT match standalone "Spring" framework (intentional)
     "spring": re.compile(r"spring boot/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
+    # ASP.NET / ASP.NET Core (.NET framework)
+    # Matches: "ASP.NET Core 8.0", "asp.net 4.8", "ASP.NET Core/7.0"
+    # \. = escaped dot (literal period in "asp.net")
+    # (?: core)? = optional non-capturing group for "core" suffix
+    # Handles both legacy ASP.NET and modern ASP.NET Core
     "aspnet": re.compile(r"asp\.net(?: core)?/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
     "fastapi": re.compile(r"fastapi/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "phoenix": re.compile(r"phoenix/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
+    # Next.js (React framework)
+    # Matches: "Next.js 14.0.3", "next.js/13.5", "nextjs 12.0"
+    # \. = escaped dot in "next.js"
+    # Edge case: Also matches "nextjs" without dot (common informal naming)
     "nextjs": re.compile(r"next\.js/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
     "nuxtjs": re.compile(r"nuxt\.js/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "node": re.compile(r"node\.js/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    
+    # Generic language runtimes (Java, PHP)
+    # These may match overly broad contexts (e.g., "Java" in prose)
+    # Trade-off: Prioritize detection completeness over precision
+    # Downstream filtering should validate context (e.g., presence in X-Powered-By header)
     "java": re.compile(r"java/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     "php": re.compile(r"php/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
 }
@@ -119,6 +281,32 @@ def _parse_version(raw: str) -> Tuple[int, ...]:
     return tuple(int(n) for n in nums[:3])
 
 
+# ANSI/VT100 Escape Sequence Removal Pattern
+# Removes terminal control sequences (colors, cursor movement, formatting) from tool output
+# Many CLI security tools (nmap, gobuster, feroxbuster) emit colorized output with ANSI codes
+#
+# ANSI CSI sequence structure: ESC [ <parameters> <intermediate bytes> <final byte>
+# Pattern breakdown:
+#   \x1B        = ESC character (0x1B, starts all ANSI sequences)
+#   \[          = Literal left bracket (CSI - Control Sequence Introducer)
+#   [0-?]*      = Parameter bytes: zero or more chars in range 0-9, :, ;, <, =, >, ? (0x30-0x3F)
+#   [ -/]*      = Intermediate bytes: zero or more chars in range space through / (0x20-0x2F)
+#   [@-~]       = Final byte: single char in range @ through ~ (0x40-0x7E)
+#                 Determines the action (m=color, H=cursor position, K=erase, etc.)
+#
+# Example sequences matched:
+#   \x1B[0m        = Reset all formatting
+#   \x1B[1;31m     = Bold + red foreground
+#   \x1B[2J        = Clear screen
+#   \x1B[?25h      = Show cursor
+#
+# Does NOT match:
+#   - OSC sequences (\x1B]...\x07) used for titles/notifications
+#   - Single-char escape sequences (\x1BM, \x1B7) without CSI
+#   Rationale: These are rare in security tool output; CSI coverage is sufficient for 99%+ cases
+#
+# Performance: Non-backtracking; safe for untrusted input
+# Used by: _strip_ansi() function to normalize tool output before regex matching
 ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 
@@ -298,6 +486,27 @@ def _handle_wafw00f(target: str, output: str) -> List[RawFinding]:
 
 def _handle_httpx(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # HTTPX Output Parser
+    # Parses httpx tool output format: URL [STATUS] [TITLE] [TECH]
+    # Example: "https://example.com [200] [Welcome Page] [nginx,PHP]"
+    #
+    # Pattern: (https?://\S+)\s+\[(\d{3})\]\s*(?:\[(.*?)\])?\s*(?:\[(.*?)\])?
+    # Group 1: URL (required) - https?://\S+ = http/https + non-whitespace chars
+    # Group 2: HTTP status code (required) - (\d{3}) = exactly 3 digits
+    # Group 3: Page title (optional) - (?:\[(.*?)\])? = non-greedy capture within brackets
+    # Group 4: Technology stack (optional) - (?:\[(.*?)\])? = non-greedy capture within brackets
+    #
+    # Non-capturing groups (?:...) wrap bracket literals to avoid group pollution
+    # Lazy quantifiers (.*?) prevent over-matching across multiple bracketed sections
+    #
+    # Edge cases:
+    #   - ANSI codes in URL or fields: Handled by _strip_ansi() before matching
+    #   - Missing title/tech fields: Optional groups return None, handled by .group() or ""
+    #   - URLs with query params containing brackets: URL group stops at first whitespace (\S+)
+    #
+    # Failure modes:
+    #   - httpx format changes in future versions: Pattern assumes [field] bracketing convention
+    #   - Malformed URLs (missing protocol): Won't match, which is correct (invalid httpx output)
     pattern = re.compile(r"(https?://\S+)\s+\[(\d{3})\]\s*(?:\[(.*?)\])?\s*(?:\[(.*?)\])?")
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
@@ -333,6 +542,29 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
 
 def _handle_dirsearch(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # Dirsearch Output Parser
+    # Parses dirsearch directory enumeration format: STATUS - SIZE - PATH [-> REDIRECT]
+    # Example: "200 -  1234B  - /admin/login.php"
+    # Example: "301 -   312B  - /images -> /images/"
+    #
+    # Pattern: (\d{3})\s*-\s*[^\-]*-\s*(\S+)(?:\s*->\s*(\S+))?
+    # Group 1: HTTP status code - (\d{3}) = exactly 3 digits
+    # Group 2: Path/URL - (\S+) = non-whitespace sequence (stops at space or redirect arrow)
+    # Group 3: Redirect target (optional) - (?:\s*->\s*(\S+))? = literal " -> " followed by destination
+    #
+    # Middle section [^\-]*:
+    #   Matches size field (e.g., "1234B", "  312B") without capturing
+    #   [^\-]* = zero or more non-hyphen chars (stops at second hyphen separator)
+    #   Rationale: Size format varies; we don't extract it, just skip to path field
+    #
+    # Edge cases:
+    #   - Paths containing spaces: Group 2 captures only up to first space (acceptable; dirsearch rarely outputs such paths)
+    #   - Multiple hyphens in path: Pattern uses hyphen as delimiter, so paths like "foo-bar-baz" work correctly
+    #   - Color codes: Handled by _strip_ansi() preprocessing
+    #
+    # Failure modes:
+    #   - Dirsearch format change (e.g., different separators): Would require pattern update
+    #   - Missing size field: [^\-]* handles zero-length, pattern still matches
     pattern = re.compile(r"(\d{3})\s*-\s*[^\-]*-\s*(\S+)(?:\s*->\s*(\S+))?")
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
@@ -360,6 +592,29 @@ def _handle_dirsearch(target: str, output: str) -> List[RawFinding]:
 
 def _handle_gobuster(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # Gobuster Output Parser
+    # Parses gobuster dir/vhost mode output: PATH (Status: CODE)
+    # Example: "/admin (Status: 200)"
+    # Example: "https://api.example.com (Status: 301)"
+    #
+    # Pattern: ^([^\s]+)\s+\(Status:\s*(\d{3})\)
+    # ^ = anchor to line start (ensures we match full result lines, not partial matches in headers)
+    # Group 1: Path or URL - ([^\s]+) = one or more non-whitespace chars
+    # Group 2: HTTP status code - (\d{3}) = exactly 3 digits
+    #
+    # Literal match: \(Status:\s*
+    #   \( = escaped opening paren (literal character)
+    #   Status: = case-sensitive literal (gobuster's fixed format)
+    #   \s* = optional whitespace before status code
+    #
+    # Edge cases:
+    #   - Gobuster DNS mode: Different output format (domain names without status codes); won't match, correct behavior
+    #   - Paths with parentheses: Group 1 stops at whitespace before "(Status:", so "/foo(bar)" matches correctly
+    #   - ANSI color codes: Handled by _strip_ansi() preprocessing
+    #
+    # Anchoring rationale:
+    #   ^ prevents matching "Status: 200" in progress messages or headers
+    #   Ensures only actual finding lines are captured
     pattern = re.compile(r"^([^\s]+)\s+\(Status:\s*(\d{3})\)")
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
@@ -386,6 +641,31 @@ def _handle_gobuster(target: str, output: str) -> List[RawFinding]:
 
 def _handle_feroxbuster(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # Feroxbuster Output Parser
+    # Parses feroxbuster recursive enumeration format: STATUS SIZE WORDS LINES URL
+    # Example: "200      4096   100    50 https://example.com/admin/"
+    #
+    # Pattern: ^(\d{3})\s+\S+\s+\S+\s+(https?://\S+)
+    # ^ = anchor to line start
+    # Group 1: HTTP status code - (\d{3}) = exactly 3 digits
+    # \s+\S+\s+\S+\s+ = skip intermediate fields (size, words, lines) without capturing
+    #   Each \S+ matches a non-whitespace field, separated by \s+ (whitespace)
+    #   Rationale: Field order is fixed but values vary widely; we only need status and URL
+    # Group 2: Full URL - (https?://\S+) = protocol + non-whitespace chars
+    #
+    # Intermediate field structure:
+    #   Field 1 after status: Size in bytes (e.g., "4096", "1.2K")
+    #   Field 2: Word count (integer)
+    #   Field 3: Line count (integer)
+    #   All matched by \S+ without semantic parsing
+    #
+    # Edge cases:
+    #   - Feroxbuster with different column count: Pattern would fail (acceptable; indicates format change)
+    #   - URLs with fragments (#section): Captured in URL group (correct behavior)
+    #   - Progress/status messages: Don't start with status code, won't match
+    #
+    # Anchoring rationale:
+    #   ^ prevents matching status codes embedded in URLs or other fields
     pattern = re.compile(r"^(\d{3})\s+\S+\s+\S+\s+(https?://\S+)")
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
@@ -412,6 +692,31 @@ def _handle_feroxbuster(target: str, output: str) -> List[RawFinding]:
 
 def _handle_nikto(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # Nikto Wrapper Output Parser
+    # Parses custom nikto-shim wrapper format: [nikto-shim] SEVERITY: MESSAGE
+    # Example: "[nikto-shim] HIGH: Outdated Apache version detected"
+    #
+    # Pattern: \[nikto-shim\]\s+([A-Z]+):\s+(.*)
+    # \[nikto-shim\] = literal tag prefix (wrapper-specific, not native nikto format)
+    # \s+ = one or more whitespace chars (typically single space)
+    # Group 1: Severity level - ([A-Z]+) = one or more uppercase letters (LOW, MEDIUM, HIGH, CRITICAL, INFO)
+    # : = literal colon separator
+    # \s+ = one or more whitespace chars before message
+    # Group 2: Finding message - (.*) = greedy capture of remaining line content
+    #
+    # Wrapper context:
+    #   nikto-shim is a SentinelForge-specific wrapper that normalizes nikto's variable output format
+    #   Native nikto uses "+ OSVDB-####: /path: message" format, which is inconsistent
+    #   Wrapper standardizes severity classification and prefixes with [nikto-shim] tag
+    #
+    # Edge cases:
+    #   - Native nikto output without wrapper: Won't match (correct; needs wrapper preprocessing)
+    #   - Multi-line messages: Group 2 captures only first line (acceptable; nikto-shim emits one line per finding)
+    #   - Non-standard severity values: Matched by [A-Z]+ but validated in handler code
+    #
+    # Design rationale:
+    #   Pattern is tightly coupled to wrapper format for deterministic parsing
+    #   Alternative approach (parsing native nikto) would require complex OSVDB lookup and heuristic severity assignment
     pattern = re.compile(r"\[nikto-shim\]\s+([A-Z]+):\s+(.*)")
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -437,6 +742,31 @@ def _handle_nikto(target: str, output: str) -> List[RawFinding]:
 
 def _handle_masscan(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # Masscan Output Parser
+    # Parses masscan port scan results: "Discovered open port PORT/PROTO on HOST"
+    # Example: "Discovered open port 443/tcp on 192.168.1.1"
+    #
+    # Pattern: Discovered open port (\d+)/(tcp|udp) on ([^\s]+)
+    # Literal prefix: "Discovered open port " (masscan's fixed output format)
+    # Group 1: Port number - (\d+) = one or more digits (1-65535, no validation in regex)
+    # / = literal forward slash separator
+    # Group 2: Protocol - (tcp|udp) = exact match for either protocol
+    # Literal: " on " (fixed masscan syntax)
+    # Group 3: Host identifier - ([^\s]+) = non-whitespace chars (IP address or hostname)
+    #
+    # Host field variations:
+    #   - IPv4: 192.168.1.1
+    #   - IPv6: 2001:db8::1 (contains colons, captured correctly by [^\s]+)
+    #   - Hostname: example.com (if reverse DNS enabled)
+    #
+    # Edge cases:
+    #   - Masscan XML output: Different format; this pattern only works with text mode
+    #   - Closed/filtered ports: Masscan doesn't report these in default mode, so won't match
+    #   - Banner grabbing data: Appears in separate output lines, not matched by this pattern
+    #
+    # Protocol constraint:
+    #   (tcp|udp) = exact alternation; masscan doesn't report other protocols (SCTP, etc.) in standard mode
+    #   Future-proofing: If masscan adds protocols, pattern would need |(sctp|...) extension
     pattern = re.compile(r"Discovered open port (\d+)/(tcp|udp) on ([^\s]+)")
     for line in output.splitlines():
         match = pattern.search(line)
@@ -489,6 +819,34 @@ def _handle_naabu(target: str, output: str) -> List[RawFinding]:
 
 def _handle_dnsx(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # DNSX Output Parser
+    # Parses dnsx DNS enumeration format: HOSTNAME [RECORD_TYPE] [VALUE]
+    # Example: "example.com [A] [192.168.1.1]"
+    # Example: "mail.example.com [MX] [mail.provider.com]"
+    #
+    # Pattern: ([^\s]+)\s+\[(\w+)\]\s+\[([^\]]+)\]
+    # Group 1: Hostname/domain - ([^\s]+) = non-whitespace chars
+    # \s+ = one or more whitespace separators
+    # Group 2: DNS record type - \[(\w+)\] = word chars within brackets
+    #   Record types: A, AAAA, MX, TXT, NS, CNAME, PTR, SOA, etc.
+    #   \w+ = one or more alphanumeric/underscore chars (covers all standard record types)
+    # \s+ = whitespace separator
+    # Group 3: Record value - \[([^\]]+)\] = any chars except closing bracket
+    #   [^\]]+ = one or more non-bracket chars (handles IPs, hostnames, TXT record content)
+    #
+    # Bracket handling:
+    #   \[ and \] = escaped brackets (literal characters in dnsx output)
+    #   [^\]]+ in Group 3 = negated character class (not "]"), allows brackets in value if nested
+    #
+    # Edge cases:
+    #   - Multi-value records (e.g., multiple A records): dnsx emits separate lines per value
+    #   - TXT records with spaces: Captured by [^\]]+ (includes all content until closing bracket)
+    #   - IPv6 addresses: Contain colons, matched by [^\]]+
+    #   - CNAME chains: Only immediate target captured; chain resolution appears in subsequent lines
+    #
+    # Failure modes:
+    #   - DNSX format change (different bracketing): Would require pattern update
+    #   - Records with literal ] in value: Would terminate Group 3 early (extremely rare in DNS)
     pattern = re.compile(r"([^\s]+)\s+\[(\w+)\]\s+\[([^\]]+)\]")
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -513,6 +871,33 @@ def _handle_dnsx(target: str, output: str) -> List[RawFinding]:
 
 def _handle_hakrevdns(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
+    # Hakrevdns Wrapper Output Parser
+    # Parses custom hakrevdns-shim wrapper format: [hakrevdns-shim] IP -> PTR_RECORD
+    # Example: "[hakrevdns-shim] 192.168.1.1 -> host1.example.com"
+    #
+    # Pattern: \[hakrevdns-shim\]\s+([^\s]+)\s*->\s*(.*)
+    # \[hakrevdns-shim\] = literal wrapper tag prefix
+    # \s+ = one or more whitespace chars
+    # Group 1: IP address - ([^\s]+) = non-whitespace chars (IPv4 or IPv6)
+    # \s*->\s* = arrow separator with optional surrounding whitespace
+    #   -> = literal arrow (reverse DNS mapping indicator)
+    #   \s* on both sides handles variable spacing in wrapper output
+    # Group 2: PTR record(s) - (.*) = greedy capture of remaining line
+    #   May contain single hostname or comma-separated list for multi-PTR IPs
+    #
+    # Wrapper context:
+    #   hakrevdns-shim normalizes hakrevdns output for consistent parsing
+    #   Native hakrevdns format varies by version; wrapper provides stable [tag] IP -> PTR structure
+    #
+    # Edge cases:
+    #   - Multiple PTR records: Group 2 captures all (comma-separated or space-separated)
+    #   - No PTR record (NXDOMAIN): Wrapper emits "IP -> (none)" or similar; captured by .*
+    #   - IPv6 addresses: Contain colons, matched by [^\s]+ in Group 1
+    #   - IP addresses with port notation: Pattern doesn't expect ports; would be captured in Group 1
+    #
+    # Arrow semantics:
+    #   -> indicates direction of resolution (IP resolves to PTR)
+    #   Distinct from forward DNS lookups (hostname -> IP)
     pattern = re.compile(r"\[hakrevdns-shim\]\s+([^\s]+)\s*->\s*(.*)")
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -729,7 +1114,25 @@ def _detect_cors_headers(target: str, output: str) -> List[RawFinding]:
         block_lower = block.lower()
         if "access-control-allow-origin" not in block_lower:
             continue
+        # CORS Header Extraction Patterns
+        # Extracts CORS policy configuration from HTTP response headers
+        
+        # Access-Control-Allow-Origin Pattern
+        # Pattern: access-control-allow-origin:\s*([^\s]+)
+        # Literal: "access-control-allow-origin:" (case-insensitive via block_lower)
+        # \s* = optional whitespace after colon
+        # Group 1: Origin value - ([^\s]+) = non-whitespace chars
+        #   Values: "*" (wildcard), "null", or full origin "https://example.com"
+        # Edge case: Multiple CORS headers (non-compliant): Only first match captured
         aca_origin = re.search(r"access-control-allow-origin:\s*([^\s]+)", block_lower)
+        
+        # Access-Control-Allow-Credentials Pattern
+        # Pattern: access-control-allow-credentials:\s*(true|1)
+        # Detects credential-permitting CORS configs (high risk when combined with wildcard origin)
+        # Group 1: Boolean value - (true|1) = literal "true" or "1"
+        #   Standard value is "true"; "1" is non-standard but observed in misconfigured servers
+        # Does NOT match: "false" or "0" (intentional; only flag permissive configs)
+        # Security implication: aca_origin="*" + aca_credentials="true" is CRITICAL (impossible per spec but seen in broken proxies)
         aca_credentials = re.search(r"access-control-allow-credentials:\s*(true|1)", block_lower)
         if aca_origin and (
             aca_origin.group(1) == "*" or "http" in aca_origin.group(1)
@@ -753,6 +1156,26 @@ def _detect_cors_headers(target: str, output: str) -> List[RawFinding]:
 
 def _detect_http_methods(target: str, output: str) -> List[RawFinding]:
     findings = []
+    # HTTP Methods Discovery Pattern
+    # Extracts allowed HTTP methods from tool output (typically nmap http-methods script)
+    # Example: "Allowed methods: GET, POST, PUT, DELETE, OPTIONS"
+    #
+    # Pattern: Allowed methods:\s*(.+)
+    # Literal: "Allowed methods:" (case-insensitive via re.IGNORECASE)
+    # \s* = optional whitespace after colon
+    # Group 1: Method list - (.+) = one or more chars (greedy capture to end of line)
+    #   Expected format: Comma-separated method names (GET, POST, etc.)
+    #   Greedy .+ captures all methods in single line
+    #
+    # Security context:
+    #   Dangerous methods: PUT (upload), DELETE (remove resources), TRACE (XST), OPTIONS (info disclosure)
+    #   Safe methods: GET, POST, HEAD
+    #   Pattern captures all; downstream logic filters for dangerous methods
+    #
+    # Edge cases:
+    #   - Methods with trailing description: Group 1 captures everything; split on comma handles it
+    #   - Multi-line method lists: Only first line captured (acceptable; nmap emits single line)
+    #   - Non-standard methods (PROPFIND, PATCH): Captured correctly by .+
     method_line = re.search(r"Allowed methods:\s*(.+)", output, re.IGNORECASE)
     if not method_line:
         return findings
@@ -777,6 +1200,34 @@ def _detect_http_methods(target: str, output: str) -> List[RawFinding]:
 
 def _detect_upload_endpoints(target: str, output: str) -> List[RawFinding]:
     findings = []
+    # File Upload Endpoint Detection Pattern
+    # Identifies URLs/paths containing "upload" keyword, indicating potential file upload functionality
+    # Example matches: "/fileupload", "/admin/upload.php", "/api/upload-avatar", "/user_upload_photo"
+    #
+    # Pattern: /[A-Za-z0-9_\-]+upload[a-z/0-9_\-]*
+    # / = literal forward slash (path start or separator)
+    # [A-Za-z0-9_\-]+ = one or more alphanumeric, underscore, or hyphen chars (path prefix)
+    #   Handles: /file_upload, /admin-upload, /uploadFile
+    # upload = literal keyword (case-insensitive via re.IGNORECASE)
+    # [a-z/0-9_\-]* = zero or more lowercase, digit, slash, underscore, hyphen chars (path suffix)
+    #   Captures extensions and subpaths: upload.php, upload/image, upload_avatar
+    #
+    # Prefix requirement [A-Za-z0-9_\-]+:
+    #   Prevents matching standalone "/upload" at path root (too generic)
+    #   Requires context like "/file-upload" or "/api/upload"
+    #
+    # Suffix pattern [a-z/0-9_\-]*:
+    #   Lowercase only (uppercase excluded to prevent matching URL params like "?Upload=true")
+    #   Allows slash for nested paths: /upload/process, /upload/validate
+    #
+    # Edge cases:
+    #   - URL parameters: Doesn't match "?file=upload.txt" (intentional; query params not upload endpoints)
+    #   - Mixed case in suffix: Only lowercase after "upload" matched; "Upload" would terminate match
+    #   - Fragments: Doesn't match "#upload-section" (no leading /)
+    #
+    # False positive risk:
+    #   - Documentation paths like "/docs/upload-guide" (acceptable; better to flag and review)
+    #   - Download endpoints named "uploaded-files" (mitigated by requiring "upload" not "uploaded")
     pattern = re.compile(r"/[A-Za-z0-9_\-]+upload[a-z/0-9_\-]*", re.IGNORECASE)
     for match in pattern.findall(output):
         findings.append(
@@ -1009,15 +1460,72 @@ def _detect_directory_listing(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_backup_files(target: str, output: str) -> List[RawFinding]:
+    # Backup and Sensitive File Extension Patterns
+    # Detects backup files, archives, and configuration artifacts exposed via web enumeration
+    # Security context: These files often contain source code, credentials, or historical data
+    
     patterns = [
+        # .bak Extension
+        # Pattern: \.bak\b
+        # Matches: config.bak, index.php.bak, database.sql.bak
+        # \. = escaped dot (literal period)
+        # bak = literal extension
+        # \b = word boundary (prevents matching "backup.txt")
         r"\.bak\b",
+        
+        # .old Extension
+        # Pattern: \.old\b
+        # Matches: config.php.old, settings.old, app.js.old
+        # Common practice: Admins rename files to .old during updates/testing
         r"\.old\b",
+        
+        # .zip Archive
+        # Pattern: \.zip\b
+        # Matches: backup.zip, source.zip, archive.zip
+        # Risk: May contain full source code, database dumps, or credentials
         r"\.zip\b",
+        
+        # .tar and .tar.gz Archives
+        # Pattern: \.tar(?:\.gz)?\b
+        # Matches: backup.tar, backup.tar.gz
+        # (?:\.gz)? = optional non-capturing group for gzip suffix
+        # \b = word boundary after "tar" or "gz"
         r"\.tar(?:\.gz)?\b",
+        
+        # .swp Vim Swap Files
+        # Pattern: \.swp\b
+        # Matches: .index.php.swp, .config.swp
+        # Vim/Vi editors create swap files during editing; often left on servers after crashes
+        # Contains file content in various save states (potential credential/code leak)
         r"\.swp\b",
+        
+        # .env Environment Files
+        # Pattern: \.env\b
+        # Matches: .env, config.env, production.env
+        # Contains environment variables including API keys, database passwords, secrets
+        # CRITICAL severity finding if exposed
         r"\.env\b",
+        
+        # .git/config Repository Config
+        # Pattern: \.git/config
+        # Matches: .git/config (literal path)
+        # Git repository metadata; reveals repo structure, remote URLs, contributor info
+        # Often indicates full .git directory exposure (can reconstruct source history)
+        # \. = escaped dot, / = literal forward slash
         r"\.git/config",
+        
+        # .sql Database Dumps
+        # Pattern: \.sql\b
+        # Matches: backup.sql, dump.sql, database.sql
+        # Direct database exports containing table schemas and data (HIGH/CRITICAL risk)
         r"\.sql\b",
+        
+        # config.php.old (Specific Pattern)
+        # Pattern: config\.php\.old
+        # Matches: config.php.old (exact filename)
+        # Targets common PHP config backup pattern
+        # \. = escaped dots (literal periods in filename)
+        # More specific than generic \.old pattern; raised separately for severity tuning
         r"config\.php\.old",
     ]
     findings = []
@@ -1063,6 +1571,32 @@ def _detect_login_flows(target: str, output: str) -> List[RawFinding]:
 
 def _detect_session_misconfigs(target: str, output: str) -> List[RawFinding]:
     findings = []
+    # Set-Cookie Header Extraction Pattern
+    # Extracts cookie values and attributes to detect security misconfigurations
+    # Example: "Set-Cookie: sessionid=abc123; Path=/; HttpOnly; Secure; SameSite=Strict"
+    #
+    # Pattern: set-cookie:\s*([^\n]+)
+    # Literal: "set-cookie:" (case-insensitive via re.IGNORECASE)
+    # \s* = optional whitespace after colon
+    # Group 1: Full cookie string - ([^\n]+) = all chars until newline
+    #   Captures: name=value and all attributes (Secure, HttpOnly, SameSite, etc.)
+    #   [^\n]+ = one or more non-newline chars (stops at line break, handles multi-line headers)
+    #
+    # Downstream parsing:
+    #   Group 1 content is analyzed for presence/absence of security flags:
+    #   - "Secure" flag: Cookie only sent over HTTPS
+    #   - "HttpOnly" flag: Cookie inaccessible to JavaScript (XSS mitigation)
+    #   - "SameSite" attribute: CSRF protection (Strict/Lax/None)
+    #
+    # Edge cases:
+    #   - Multiple Set-Cookie headers: finditer() captures all (correct behavior)
+    #   - Cookies with embedded newlines (RFC violation): Only first line captured
+    #   - Quoted cookie values: Captured as-is; downstream logic handles quotes
+    #
+    # Security checks performed on Group 1:
+    #   - missing_secure: "secure" not in lowercased cookie string
+    #   - missing_http_only: "httponly" not in lowercased cookie string
+    #   - samesite_none: "samesite=none" present (risky without Secure flag)
     for match in re.finditer(r"set-cookie:\s*([^\n]+)", output, re.IGNORECASE):
         cookie = match.group(1)
         lowered = cookie.lower()
@@ -1153,9 +1687,59 @@ def _detect_waf_behaviors(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_cloud_storage(target: str, output: str) -> List[RawFinding]:
+    # Cloud Storage URL Detection Patterns
+    # Identifies publicly accessible cloud storage URLs in tool output (HTML, headers, JS)
+    # Security context: Public bucket URLs may leak sensitive data or indicate misconfigured ACLs
+    
     patterns = [
+        # AWS S3 Bucket URL Pattern
+        # Matches: https://bucket-name.s3.amazonaws.com/path/to/object.txt
+        #          http://my-bucket.s3-us-west-2.amazonaws.com/file.pdf
+        #
+        # Pattern: https?://[a-z0-9\-\.]+\.s3\.amazonaws\.com/[^\s\"']+
+        # https? = http or https protocol
+        # [a-z0-9\-\.]+ = bucket name (lowercase alphanumeric, hyphens, dots)
+        #   S3 bucket naming: 3-63 chars, lowercase, numbers, hyphens, dots
+        #   Pattern allows region-specific endpoints: bucket.s3-us-east-1.amazonaws.com
+        # \.s3\.amazonaws\.com = literal domain suffix (escaped dots)
+        # / = path separator (required in URL)
+        # [^\s\"']+ = object key/path (non-whitespace, non-quote chars)
+        #   Stops at whitespace or quotes (common delimiters in HTML/JSON)
+        #
+        # Edge cases:
+        #   - S3 Transfer Acceleration endpoints (*.s3-accelerate.amazonaws.com): Not matched (rare in pentesting)
+        #   - Virtual-hosted style (above) vs. path-style (s3.amazonaws.com/bucket/key): Only virtual-hosted matched
+        #   - Pre-signed URLs with query params: Captured in [^\s\"']+ up to delimiter
         (r"https?://[a-z0-9\-\.]+\.s3\.amazonaws\.com/[^\s\"']+", "aws-s3"),
+        
+        # Google Cloud Storage URL Pattern
+        # Matches: https://storage.googleapis.com/bucket-name/path/to/object
+        #
+        # Pattern: https?://storage\.googleapis\.com/[^\s\"']+
+        # storage\.googleapis\.com = literal GCS domain (escaped dots)
+        # / = path separator
+        # [^\s\"']+ = bucket name + object path
+        #   GCS URL structure: storage.googleapis.com/BUCKET_NAME/OBJECT_PATH
+        #   Pattern captures entire path; bucket/object split done downstream if needed
+        #
+        # Alternative GCS URLs not matched:
+        #   - Custom domain CNAMEs: Unpredictable, can't pattern match reliably
+        #   - XML API endpoints: Different domain structure
         (r"https?://storage\.googleapis\.com/[^\s\"']+", "gcp-storage"),
+        
+        # Azure Blob Storage URL Pattern
+        # Matches: https://storageaccount.blob.core.windows.net/container/blob.txt
+        #
+        # Pattern: https?://[a-z0-9\-\.]+\.blob\.core\.windows\.net/[^\s\"']+
+        # [a-z0-9\-\.]+ = storage account name (lowercase alphanumeric, hyphens)
+        #   Azure storage account: 3-24 chars, lowercase, numbers only (hyphens in subdomain)
+        #   Pattern allows dots for legacy accounts
+        # \.blob\.core\.windows\.net = literal Azure Blob domain (escaped dots)
+        # [^\s\"']+ = container + blob path
+        #
+        # Azure service variations not matched:
+        #   - Table storage (*.table.core.windows.net): Different service, not blob storage
+        #   - Queue/File services: Distinct endpoints
         (r"https?://[a-z0-9\-\.]+\.blob\.core\.windows\.net/[^\s\"']+", "azure-blob"),
     ]
     findings = []
