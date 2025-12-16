@@ -54,6 +54,7 @@ from core.base.action_dispatcher import ActionDispatcher
 from core.ai.reporting import ReportComposer
 from core.engine.pty_manager import PTYManager
 from core.data.db import Database
+from core.errors import SentinelError, ErrorCode, handle_error
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,16 @@ app = FastAPI(
 )
 
 security = HTTPBearer(auto_error=False)
+
+# Exception handler for SentinelError
+@app.exception_handler(SentinelError)
+async def sentinel_error_handler(request: Request, exc: SentinelError):
+    """Convert SentinelError to HTTPException for FastAPI."""
+    logger.error(f"[API] {exc.code.value}: {exc.message}", extra=exc.details)
+    return JSONResponse(
+        status_code=exc.http_status,
+        content=exc.to_dict()
+    )
 
 # --- Rate Limiting ---
 
@@ -204,7 +215,11 @@ async def _begin_scan(req: ScanRequest) -> str:
                     pass
                 _active_scan_task = None
             else:
-                raise HTTPException(status_code=409, detail="Scan already running")
+                raise SentinelError(
+                    ErrorCode.SCAN_ALREADY_RUNNING,
+                    "Cannot start scan while another is active",
+                    details={"active_target": _scan_state.get("target")}
+                )
 
         # Ensure any previous session is no longer addressable via /results.
         previous_session_id = _scan_state.get("session_id")
@@ -363,18 +378,34 @@ async def verify_token(
     if not config.security.require_auth:
         return True
     if credentials is None:
-        raise HTTPException(status_code=401, detail="Missing auth")
+        raise SentinelError(
+            ErrorCode.AUTH_TOKEN_MISSING,
+            "Authentication token required",
+            details={"endpoint": str(request.url.path)}
+        )
     if credentials.credentials != config.security.api_token:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise SentinelError(
+            ErrorCode.AUTH_TOKEN_INVALID,
+            "Invalid authentication token",
+            details={"endpoint": str(request.url.path)}
+        )
     return True
 
 async def check_rate_limit(request: Request) -> None:
     if not _rate_limiter.is_allowed(get_client_ip(request)):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        raise SentinelError(
+            ErrorCode.AUTH_RATE_LIMIT_EXCEEDED,
+            "Rate limit exceeded",
+            details={"endpoint": str(request.url.path), "client_ip": get_client_ip(request)}
+        )
 
 async def check_ai_rate_limit(request: Request) -> None:
     if not _ai_rate_limiter.is_allowed(get_client_ip(request)):
-        raise HTTPException(status_code=429, detail="AI rate limit exceeded")
+        raise SentinelError(
+            ErrorCode.AI_RATE_LIMIT_EXCEEDED,
+            "AI rate limit exceeded",
+            details={"endpoint": str(request.url.path), "client_ip": get_client_ip(request)}
+        )
 
 @app.on_event("startup")
 async def startup_event():
@@ -800,7 +831,11 @@ async def cancel_scan(_: bool = Depends(verify_token)):
         _cancel_requested.set()
         _active_scan_task.cancel()
         return JSONResponse({"status": "cancelling"}, status_code=202)
-    raise HTTPException(status_code=409, detail="No active scan")
+    raise SentinelError(
+        ErrorCode.SCAN_SESSION_NOT_FOUND,
+        "No active scan to cancel",
+        details={}
+    )
 
 @app.post("/chat")
 async def chat(
@@ -1004,7 +1039,11 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
         success = dispatcher.deny_action(action_id)
     
     if not success:
-        raise HTTPException(status_code=404, detail="Action not found")
+        raise SentinelError(
+            ErrorCode.SYSTEM_INTERNAL_ERROR,
+            f"Action not found: {action_id}",
+            details={"action_id": action_id, "verb": verb}
+        )
     return {"status": "ok", "action_id": action_id, "result": verb}
 
 # Terminal WebSocket endpoint with config check
