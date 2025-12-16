@@ -6,5 +6,6 @@
   "[swift]": {
     "editor.defaultFormatter": "sswg.swift-lang"
   },
-  "zencoder.shellTool.commandConfirmationPolicy": "alwaysAsk"
+  "zencoder.shellTool.commandConfirmationPolicy": "alwaysAsk",
+  "cursorpyright.analysis.typeCheckingMode": "basic"
 }

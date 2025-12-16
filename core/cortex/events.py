@@ -80,6 +80,9 @@ class GraphEventType(str, Enum):
     
     # Observability Events
     LOG_EMITTED = "log_emitted"         # Log line added
+    
+    # Strategy Events
+    DECISION_MADE = "decision_made"     # Strategos logic decision
 
 
 # ============================================================================
@@ -531,10 +534,26 @@ class EventBus:
         """Emit a log event for the live console."""
         return self._store.append(
             GraphEventType.LOG_EMITTED,
-            {"message": message, "level": level},
             source=source
         )
 
+    # -------------------------------------------------------------------------
+    # Strategy / Reasoning
+    # -------------------------------------------------------------------------
+
+    def emit_decision_made(
+        self,
+        intent: str,
+        reason: str,
+        context: Dict[str, Any],
+        source: str = "strategos"
+    ) -> GraphEvent:
+        """Emit event when the scheduler makes a strategic decision."""
+        return self._store.append(
+            GraphEventType.DECISION_MADE,
+            {"intent": intent, "reason": reason, "context": context},
+            source=source
+        )
 
 # ============================================================================
 # Module-Level Singleton Access

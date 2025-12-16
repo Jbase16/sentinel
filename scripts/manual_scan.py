@@ -60,10 +60,18 @@ async def main():
         print("--- Scan Complete ---")
         print("Findings:", len(results.get("findings", [])))
         print(results)
+        print(results)
     except Exception as e:
         print(f"--- CRITICAL ERROR: {e} ---")
         import traceback
         traceback.print_exc()
+    finally:
+        # CRITICAL: Drain the write queue
+        print("--- Draining Persistence Queue ---")
+        await BlackBox.instance().shutdown()
+        print("--- Closing Database Connection ---")
+        await Database.instance().close()
+        print("--- Shutdown Complete ---")
 
 if __name__ == "__main__":
     try:

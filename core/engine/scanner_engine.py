@@ -182,8 +182,23 @@ class ScannerEngine:
         """
         Async generator that yields log-style strings while the supported tools run.
         """
+        # CRITICAL: Use Vanguard to preflight check tools availability & compatibility
+        from core.engine.vanguard import Vanguard
+        
+        # 1. Get raw installed
         installed = self._detect_installed()
-        self._installed_meta = installed
+        # 2. Filter via Vanguard
+        # We need a list of names to check.
+        # Vanguard check takes a list and returns a valid list.
+        # But here we have a dict.
+        candidates = list(installed.keys())
+        valid_names = Vanguard.preflight_check(candidates)
+        
+        # Re-build installed map with only valid tools
+        self._installed_meta = {k: v for k, v in installed.items() if k in valid_names}
+        
+        # Allow logic to proceed using filtered meta
+        installed = self._installed_meta
         
         # Reset state for this run
         self._last_results = []

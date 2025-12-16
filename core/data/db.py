@@ -63,6 +63,10 @@ class Database:
         self._init_lock = asyncio.Lock()
         self._db_connection: Optional[aiosqlite.Connection] = None
         self._db_lock = asyncio.Lock()
+        
+        # Persistence Actor
+        from core.data.blackbox import BlackBox
+        self.blackbox = BlackBox.instance()
 
     async def init(self):
         if self._initialized:
@@ -73,166 +77,138 @@ class Database:
                 return
                 
             try:
-                # Create persistent connection
-                # Set a connect-level timeout so SQLite waits briefly on writer contention
-                # instead of immediately raising "database is locked".
                 self._db_connection = await aiosqlite.connect(self.db_path, timeout=5.0)
-                
-                # Enable WAL mode for concurrency
                 await self._db_connection.execute("PRAGMA journal_mode=WAL;")
                 await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
                 await self._db_connection.execute("PRAGMA busy_timeout=5000;")
                 await self._db_connection.execute("PRAGMA foreign_keys=ON;")
                 
-                # Create tables
-                await self._db_connection.execute("""
-                    CREATE TABLE IF NOT EXISTS sessions (
-                        id TEXT PRIMARY KEY,
-                        target TEXT,
-                        status TEXT,
-                        start_time REAL,
-                        end_time REAL,
-                        logs TEXT
-                    )
-                """)
-                
-                await self._db_connection.execute("""
-                    CREATE TABLE IF NOT EXISTS findings (
-                        id TEXT PRIMARY KEY,
-                        session_id TEXT,
-                        tool TEXT,
-                        type TEXT,
-                        severity TEXT,
-                        target TEXT,
-                        data JSON,
-                        timestamp TEXT,
-                        FOREIGN KEY(session_id) REFERENCES sessions(id)
-                    )
-                """)
-                
-                await self._db_connection.execute("""
-                    CREATE TABLE IF NOT EXISTS issues (
-                        id TEXT PRIMARY KEY,
-                        session_id TEXT,
-                        title TEXT,
-                        severity TEXT,
-                        target TEXT,
-                        data JSON,
-                        timestamp TEXT,
-                        FOREIGN KEY(session_id) REFERENCES sessions(id)
-                    )
-                """)
-                
-                await self._db_connection.execute("""
-                    CREATE TABLE IF NOT EXISTS evidence (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        session_id TEXT,
-                        tool TEXT,
-                        raw_output TEXT,
-                        metadata JSON,
-                        timestamp TEXT,
-                        FOREIGN KEY(session_id) REFERENCES sessions(id)
-                    )
-                """)
+                await self._create_tables()
                 
                 await self._db_connection.commit()
                 self._initialized = True
+                
+                # Start the BlackBox worker now that we are ready
+                self.blackbox.start()
+                
                 logger.info(f"Database initialized at {self.db_path} (WAL mode)")
             except Exception as e:
                 logger.error(f"Database init failed: {e}")
                 raise
 
-    @staticmethod
-    def _is_locked_error(exc: Exception) -> bool:
-        if not isinstance(exc, sqlite3.OperationalError):
-            return False
-        msg = str(exc).lower()
-        return (
-            "database is locked" in msg
-            or "database is busy" in msg
-            or "database table is locked" in msg
-        )
+    async def close(self):
+        """Close the database connection safely."""
+        if self._db_connection:
+            try:
+                await self._db_connection.close()
+                self._initialized = False
+                logger.info("[Database] Connection closed.")
+            except Exception as e:
+                logger.error(f"[Database] Error closing connection: {e}")
+
+    async def _create_tables(self):
+        await self._db_connection.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id TEXT PRIMARY KEY,
+                target TEXT,
+                status TEXT,
+                start_time REAL,
+                end_time REAL,
+                logs TEXT
+            )
+        """)
+        await self._db_connection.execute("""
+            CREATE TABLE IF NOT EXISTS findings (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                tool TEXT,
+                type TEXT,
+                severity TEXT,
+                target TEXT,
+                data JSON,
+                timestamp TEXT,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            )
+        """)
+        await self._db_connection.execute("""
+            CREATE TABLE IF NOT EXISTS issues (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                title TEXT,
+                severity TEXT,
+                target TEXT,
+                data JSON,
+                timestamp TEXT,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            )
+        """)
+        await self._db_connection.execute("""
+            CREATE TABLE IF NOT EXISTS evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT,
+                tool TEXT,
+                raw_output TEXT,
+                metadata JSON,
+                timestamp TEXT,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            )
+        """)
+
+    async def _execute_internal(self, query: str, params: tuple = ()):
+        """Internal low-level execute used by BlackBox worker."""
+        if not self._initialized:
+             await self.init()
+        
+        # Simple retry loop for robustness against external lockers
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                async with self._db_lock:
+                    await self._db_connection.execute(query, params)
+                    await self._db_connection.commit()
+                return
+            except Exception as e:
+                is_locked = "database is locked" in str(e).lower()
+                if is_locked and attempt < max_retries - 1:
+                    await asyncio.sleep(0.1 * (attempt + 1))
+                    continue
+                # If filtered or final attempt, raise
+                raise e
 
     async def execute(self, query: str, params: tuple = ()):
-        """Execute a query using the shared connection safely."""
+        """
+        Public execute. Prefer specific save_* methods which route to BlackBox.
+        If used for writes, this bypasses the BlackBox, which is unsafe.
+        Assuming this is mostly used for reads or ad-hoc queries?
+        Actually, let's funnel it too if it's a write? 
+        Regexing query is brittle. 
+        For now, we leave this for READ operations or direct usage, 
+        and update save_* to use the queue.
+        """
+        # ... logic as before or simplified ...
+        # Simplified:
         if not self._initialized:
             await self.init()
-        
-        try:
-            max_attempts = max(1, int(os.environ.get("SENTINEL_DB_LOCK_RETRIES", "5")))
-        except ValueError:
-            max_attempts = 5
-        try:
-            base_delay = max(0.0, float(os.environ.get("SENTINEL_DB_LOCK_DELAY_SECONDS", "0.05")))
-        except ValueError:
-            base_delay = 0.05
-
-        last_exc: Optional[Exception] = None
-        for attempt in range(max_attempts):
-            delay = 0.0
-            async with self._db_lock:
-                try:
-                    cursor = await self._db_connection.execute(query, params)
-                    await self._db_connection.commit()
-                    return cursor
-                except Exception as exc:
-                    last_exc = exc
-                    if self._is_locked_error(exc) and attempt < max_attempts - 1:
-                        delay = base_delay * (2**attempt)
-                        logger.warning(
-                            f"DB locked; retrying in {delay:.2f}s "
-                            f"(attempt {attempt + 1}/{max_attempts})"
-                        )
-                    else:
-                        logger.error(f"DB Execute Error: {exc} | Query: {query}")
-                        raise
-
-            if delay > 0.0:
-                await asyncio.sleep(delay)
-
-        # Should be unreachable due to raise in loop; keep as a safety net.
-        if last_exc:
-            raise last_exc
-        raise RuntimeError("DB execute failed without exception")
+        async with self._db_lock:
+            cursor = await self._db_connection.execute(query, params)
+            await self._db_connection.commit()
+            return cursor
 
     async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
-        """Execute and fetch all results."""
         if not self._initialized:
             await self.init()
-            
-        try:
-            max_attempts = max(1, int(os.environ.get("SENTINEL_DB_LOCK_RETRIES", "5")))
-        except ValueError:
-            max_attempts = 5
-        try:
-            base_delay = max(0.0, float(os.environ.get("SENTINEL_DB_LOCK_DELAY_SECONDS", "0.05")))
-        except ValueError:
-            base_delay = 0.05
+        async with self._db_lock:
+            async with self._db_connection.execute(query, params) as cursor:
+                return await cursor.fetchall()
 
-        for attempt in range(max_attempts):
-            delay = 0.0
-            async with self._db_lock:
-                try:
-                    async with self._db_connection.execute(query, params) as cursor:
-                        return await cursor.fetchall()
-                except Exception as exc:
-                    if self._is_locked_error(exc) and attempt < max_attempts - 1:
-                        delay = base_delay * (2**attempt)
-                        logger.warning(
-                            f"DB locked on fetch; retrying in {delay:.2f}s "
-                            f"(attempt {attempt + 1}/{max_attempts})"
-                        )
-                    else:
-                        logger.error(f"DB Fetch Error: {exc}")
-                        return []
-
-            if delay > 0.0:
-                await asyncio.sleep(delay)
-
-        return []
+    # -------- Session Methods --------
 
     async def save_session(self, session_data: Dict[str, Any]):
-        await self.execute("""
+        """Fire-and-forget save."""
+        self.blackbox.fire_and_forget(self._save_session_impl, session_data)
+
+    async def _save_session_impl(self, session_data: Dict[str, Any]):
+        await self._execute_internal("""
             INSERT OR REPLACE INTO sessions (id, target, status, start_time, logs)
             VALUES (?, ?, ?, ?, ?)
         """, (
@@ -243,12 +219,17 @@ class Database:
             json.dumps(session_data.get("logs", []))
         ))
 
+    # -------- Findings Methods --------
+
     async def save_finding(self, finding: Dict[str, Any], session_id: Optional[str] = None):
+        self.blackbox.fire_and_forget(self._save_finding_impl, finding, session_id)
+
+    async def _save_finding_impl(self, finding: Dict[str, Any], session_id: Optional[str] = None):
         import hashlib
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
         
-        await self.execute("""
+        await self._execute_internal("""
             INSERT OR REPLACE INTO findings (id, session_id, tool, type, severity, target, data, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, (
@@ -261,11 +242,16 @@ class Database:
             blob
         ))
 
+    # -------- Issues Methods --------
+
     async def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None):
+        self.blackbox.fire_and_forget(self._save_issue_impl, issue, session_id)
+
+    async def _save_issue_impl(self, issue: Dict[str, Any], session_id: Optional[str] = None):
         iid = issue.get("id") or issue.get("title", "unknown")
         blob = json.dumps(issue)
         
-        await self.execute("""
+        await self._execute_internal("""
             INSERT OR REPLACE INTO issues (id, session_id, title, severity, target, data, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         """, (
@@ -277,36 +263,13 @@ class Database:
             blob
         ))
 
-    async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
-        query = "SELECT data FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
-        params = (session_id,)
-        if session_id is None:
-            query = "SELECT data FROM findings ORDER BY timestamp DESC"
-            params = ()
-            
-        rows = await self.fetch_all(query, params)
-        return [json.loads(row[0]) for row in rows]
-
-    async def get_all_findings(self) -> List[Dict]:
-        return await self.get_findings(None)
-
-    async def get_issues(self, session_id: Optional[str] = None) -> List[Dict]:
-        query = "SELECT data FROM issues WHERE session_id = ? ORDER BY timestamp DESC"
-        params = (session_id,)
-        if session_id is None:
-            query = "SELECT data FROM issues ORDER BY timestamp DESC"
-            params = ()
-
-        rows = await self.fetch_all(query, params)
-        return [json.loads(row[0]) for row in rows]
-
-    async def get_all_issues(self) -> List[Dict]:
-        return await self.get_issues(None)
-
     # -------- Evidence Methods --------
-    
+
     async def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
-        await self.execute("""
+        self.blackbox.fire_and_forget(self._save_evidence_impl, evidence_data, session_id)
+
+    async def _save_evidence_impl(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
+        await self._execute_internal("""
             INSERT INTO evidence (session_id, tool, raw_output, metadata, timestamp)
             VALUES (?, ?, ?, ?, datetime('now'))
         """, (
@@ -318,15 +281,14 @@ class Database:
 
     async def update_evidence(self, evidence_id: int, summary: Optional[str] = None, 
                               findings: Optional[List] = None, session_id: Optional[str] = None):
-        # Using json_patch logic is complex in pure SQL without json1 extension guaranteed
-        # Simplified: Fetch, Update, Save
-        # But for speed/locking, we just overwrite the metadata field carefully?
-        # Actually, simpler to just run the UPDATE if we trust json_set/patch availability
-        # Since we use standard SQLite3 on mac (which has JSON1), we can use json_patch or json_set
-        
+         self.blackbox.fire_and_forget(self._update_evidence_impl, evidence_id, summary, findings, session_id)
+
+    async def _update_evidence_impl(self, evidence_id: int, summary: Optional[str] = None, 
+                                    findings: Optional[List] = None, session_id: Optional[str] = None):
         updates = []
         params = []
         
+        # Note: json_set is preferred but simple update works too
         if summary is not None:
             updates.append("metadata = json_set(metadata, '$.summary', ?)")
             params.append(summary)
@@ -341,21 +303,43 @@ class Database:
         query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ?"
         
         try:
-            await self.execute(query, tuple(params))
+            await self._execute_internal(query, tuple(params))
         except Exception:
-            # Fallback if json_set fails (old sqlite)
             pass
+
+    # -------- Read Methods (Safe to run directly) --------
+
+    async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
+        query = "SELECT data FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
+        params = (session_id,)
+        if session_id is None:
+            query = "SELECT data FROM findings ORDER BY timestamp DESC"
+            params = ()
+        rows = await self.fetch_all(query, params)
+        return [json.loads(row[0]) for row in rows]
+
+    async def get_all_findings(self) -> List[Dict]:
+        return await self.get_findings(None)
+
+    async def get_issues(self, session_id: Optional[str] = None) -> List[Dict]:
+        query = "SELECT data FROM issues WHERE session_id = ? ORDER BY timestamp DESC"
+        params = (session_id,)
+        if session_id is None:
+            query = "SELECT data FROM issues ORDER BY timestamp DESC"
+            params = ()
+        rows = await self.fetch_all(query, params)
+        return [json.loads(row[0]) for row in rows]
+
+    async def get_all_issues(self) -> List[Dict]:
+        return await self.get_issues(None)
 
     async def get_evidence(self, session_id: Optional[str] = None) -> List[Dict]:
         query = "SELECT id, tool, raw_output, metadata, timestamp FROM evidence"
         params = ()
-        
         if session_id is not None:
             query += " WHERE session_id = ?"
             params = (session_id,)
-        
         query += " ORDER BY timestamp DESC"
-        
         rows = await self.fetch_all(query, params)
         results = []
         for row in rows:

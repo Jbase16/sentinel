@@ -478,9 +478,29 @@ class HelixAppState: ObservableObject {
                 // let nextID = (self.apiLogItems.last?.id ?? 0) + 1
                 self.apiLogItems.append(LogItem(id: UUID(), text: line))
             }
-        case "findings_update", "evidence_update":
             // For now, just trigger a full refresh of results to keep it simple and consistent
             self.refreshResults()
+
+        case "decision_made":
+            if let data = event.data.data(using: .utf8),
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let intent = json["intent"] as? String,
+                let reason = json["reason"] as? String
+            {
+                let text = "🧠 [Decision] \(intent) → \(reason)"
+                self.apiLogs.append(text)
+                self.apiLogItems.append(LogItem(id: UUID(), text: text))
+            }
+
+        case "scan_phase_changed":
+            if let data = event.data.data(using: .utf8),
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let phase = json["phase"] as? String
+            {
+                let text = "🔄 [Phase] Transitioned to \(phase)"
+                self.apiLogs.append(text)
+                self.apiLogItems.append(LogItem(id: UUID(), text: text))
+            }
         case "action_needed":
             if let data = event.data.data(using: .utf8),
                 let action = try? JSONDecoder().decode(PendingAction.self, from: data)

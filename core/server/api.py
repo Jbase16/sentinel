@@ -257,7 +257,7 @@ async def _begin_scan(req: ScanRequest) -> str:
                 except ValueError:
                     mode = StrategosMode.STANDARD
 
-                brain = Strategos(log_fn=session.log)
+                brain = Strategos(log_fn=session.log, event_bus=event_bus)
 
                 async def dispatch_tool(tool: str) -> List[Dict]:
                     findings: List[Dict] = []
@@ -391,6 +391,16 @@ async def startup_event():
     # Async DB Init
     db = Database.instance()
     await db.init()  # Ensure DB is ready before requests
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("SentinelForge API Shutting Down...")
+    from core.data.blackbox import BlackBox
+    await BlackBox.instance().shutdown()
+    
+    # Ideally close DB connection too if we exposed a close method
+    db = Database.instance()
+    await db.close()
 
 def setup_cors():
     config = get_config()

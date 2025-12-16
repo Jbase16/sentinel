@@ -50,6 +50,7 @@ from core.scheduler.intents import (
     INTENT_HEAVY_ARTILLERY
 )
 from core.scheduler.events import ToolStartedEvent, ToolCompletedEvent, MissionTerminatedEvent
+from core.cortex.events import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ class Strategos:
         self,
         event_queue_maxsize: int = DEFAULT_EVENT_QUEUE_MAXSIZE,
         log_fn: Optional[Callable[[str], None]] = None,
+        event_bus: Optional[EventBus] = None,
     ):
         self.constitution = Constitution()
         self.registry = ToolRegistry()
@@ -89,6 +91,7 @@ class Strategos:
         self._tool_tasks: Dict[str, asyncio.Task] = {}
         self._tool_semaphore: Optional[asyncio.Semaphore] = None
         self._log_fn = log_fn
+        self._event_bus = event_bus
 
     def _emit_log(self, message: str, level: str = "info") -> None:
         try:
@@ -145,17 +148,37 @@ class Strategos:
         try:
             # === THE AGENT LOOP ===
             while not self._terminated:
-                self.context.phase_index = self._get_phase_for_intent(current_intent)
+                new_phase = self._get_phase_for_intent(current_intent)
+                if new_phase != self.context.phase_index:
+                    if self._event_bus:
+                        # Map int phase to string name manually for now or just emit raw
+                        self._event_bus.emit_scan_phase_changed(
+                            phase=f"PHASE_{new_phase}",
+                            previous_phase=f"PHASE_{self.context.phase_index}"
+                        )
+                self.context.phase_index = new_phase
                 self.context.findings_this_intent = 0
                 self.context.surface_delta_this_intent = 0
                 
                 self._emit_log(f"[Strategos] Decision: Executing {current_intent}")
+                if self._event_bus:
+                    self._event_bus.emit_decision_made(
+                        intent=current_intent,
+                        reason="Standard progression",
+                        context={"mode": mode.value}
+                    )
                 
                 # Get tools for this intent
                 tools_to_run = self._select_tools(current_intent, available_tools, mode)
                 
                 if not tools_to_run:
                     self._emit_log(f"[Strategos] No tools available for {current_intent}. Skipping.")
+                    if self._event_bus:
+                        self._event_bus.emit_decision_made(
+                            intent=current_intent,
+                            reason="No tools available",
+                            context={"mode": mode.value, "skipped": True}
+                        )
                 else:
                     # Dispatch all tools for this intent (ASYNC)
                     await self._dispatch_tools_async(tools_to_run, intent=current_intent)
@@ -411,12 +434,24 @@ class Strategos:
         if current_intent == INTENT_SURFACE_ENUMERATION:
             if mode == ScanMode.BUG_BOUNTY and self.context.surface_delta_this_intent == 0:
                 self._emit_log("[Strategos] Walk Away: No new surface discovered. Aborting deep scan.")
+                if self._event_bus:
+                    self._event_bus.emit_decision_made(
+                        intent="WALK_AWAY",
+                        reason="No new surface discovered (Bug Bounty Mode)",
+                        context={"surface_delta": 0}
+                    )
                 return None
             return INTENT_VULN_SCANNING
             
         if current_intent == INTENT_VULN_SCANNING:
             if mode == ScanMode.BUG_BOUNTY:
                 self._emit_log("[Strategos] Bug Bounty Mode: Skipping Heavy Artillery.")
+                if self._event_bus:
+                    self._event_bus.emit_decision_made(
+                        intent="SKIP_HEAVY",
+                        reason="Bug Bounty Mode restriction",
+                        context={}
+                    )
                 return None
             return INTENT_HEAVY_ARTILLERY
             
