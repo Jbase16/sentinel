@@ -58,6 +58,8 @@ from core.scheduler.decisions import (
     DecisionPoint,
     create_decision_context
 )
+from core.cortex.arbitration import ArbitrationEngine
+from core.cortex.policy import ScopePolicy, RiskPolicy, Verdict
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +113,13 @@ class Strategos:
         self._decision_ctx: Optional[DecisionContext] = None
         
         # Track current decision for hierarchical decision trees
+        # Track current decision for hierarchical decision trees
         self._current_intent_decision: Optional[DecisionPoint] = None
+
+        # Layer 4: Policy Arbitration
+        self.arbitrator = ArbitrationEngine()
+        self.arbitrator.register_policy(ScopePolicy())
+        self.arbitrator.register_policy(RiskPolicy())
 
     def _emit_log(self, message: str, level: str = "info") -> None:
         try:
@@ -508,6 +516,28 @@ class Strategos:
             if not constitution_decision.allowed:
                 rejected_count += 1
                 reason = f"{constitution_decision.blocking_law} ({constitution_decision.reason})"
+                reasons.setdefault(reason, []).append(t)
+                continue
+            
+            # DECISION POINT: Policy Arbitration (Flexible Rules)
+            # Create a transient decision to query the arbitrator
+            # We must verify if this tool is acceptable under current policies
+            sim_ctx = {
+                **tool_def, 
+                "target": self.context.target if self.context else "unknown", 
+                "mode": mode.value
+            }
+            simulated_decision = DecisionPoint.create(
+                DecisionType.TOOL_SELECTION,
+                chosen=t,
+                reason="Candidate Qualification",
+                context=sim_ctx
+            )
+            judgment = self.arbitrator.review(simulated_decision, sim_ctx)
+            
+            if judgment.verdict == Verdict.VETO:
+                rejected_count += 1
+                reason = f"Policy Veto: {judgment.policy_name}"
                 reasons.setdefault(reason, []).append(t)
                 continue
             

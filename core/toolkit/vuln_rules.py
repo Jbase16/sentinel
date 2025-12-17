@@ -92,10 +92,14 @@
 from __future__ import annotations
 
 import re
+import yaml
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Iterable, List, Tuple
 
 TextAccumulator = Callable[[List[dict]], List[dict]]
+
+RULES_FILE = Path(__file__).parents[1] / "cortex" / "rules.yaml"
 
 
 def _pluck_text(finding: dict) -> str:
@@ -1166,7 +1170,7 @@ def _match_backup_rule(findings: List[dict]) -> List[dict]:
 #
 # ----------------------------------------------------------------------
 
-RULES: List[VulnRule] = [
+_LEGACY_RULES: List[VulnRule] = [
     VulnRule(
         id="EXPOSED_ADMIN",
         title="Public Administrative Interface",
@@ -1498,6 +1502,64 @@ RULES: List[VulnRule] = [
         matcher=_match_tls_timing,
     ),
 ]
+
+
+def load_rules_from_yaml() -> List[VulnRule]:
+    """
+    Load external rules from rules.yaml and hydrate them with matcher functions.
+    """
+    if not RULES_FILE.exists():
+        return []
+
+    try:
+        with open(RULES_FILE, "r") as f:
+            data = yaml.safe_load(f)
+            
+        loaded = []
+        raw_rules = data.get("rules", [])
+        
+        # Registry of available matchers in this module
+        # Dynamic lookup from globals()
+        available_matchers = globals()
+        
+        for rule_def in raw_rules:
+            matcher_name = rule_def.get("matcher_func")
+            matcher = available_matchers.get(matcher_name)
+            
+            if not matcher:
+                # Fallback or error logging could go here
+                print(f"Warning: Matcher '{matcher_name}' not found for rule {rule_def.get('id')}")
+                continue
+                
+            loaded.append(VulnRule(
+                id=rule_def["id"],
+                title=rule_def["title"],
+                severity=rule_def["severity"],
+                description=rule_def["description"],
+                tags=rule_def.get("tags", []),
+                families=rule_def.get("families", []),
+                base_score=float(rule_def.get("base_score", 5.0)),
+                remediation=rule_def.get("remediation", ""),
+                matcher=matcher
+            ))
+            
+        return loaded
+    except Exception as e:
+        print(f"Error loading rules.yaml: {e}")
+        return []
+
+# Hybrid Rule Set: Merge Legacy with YAML (YAML wins)
+def _merge_rules() -> List[VulnRule]:
+    # Rule ID -> VulnRule
+    registry = {r.id: r for r in _LEGACY_RULES}
+    
+    # Overlay YAML rules
+    for r in load_rules_from_yaml():
+        registry[r.id] = r
+        
+    return list(registry.values())
+
+RULES = _merge_rules()
 
 
 def apply_rules(findings: List[dict]):

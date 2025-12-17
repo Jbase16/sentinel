@@ -576,7 +576,7 @@ def _handle_dirsearch(target: str, output: str) -> List[RawFinding]:
         redirect = match.group(3)
         findings.append(
             RawFinding(
-                type="Hidden Directory",
+                type="Directory Enumeration",
                 severity="MEDIUM" if status < 400 else "LOW",
                 tool="dirsearch",
                 target=target,
@@ -625,7 +625,7 @@ def _handle_gobuster(target: str, output: str) -> List[RawFinding]:
         status = int(match.group(2))
         findings.append(
             RawFinding(
-                type="Brute Forced Path",
+                type="Directory Enumeration",
                 severity="MEDIUM",
                 tool="gobuster",
                 target=target,
@@ -676,7 +676,7 @@ def _handle_feroxbuster(target: str, output: str) -> List[RawFinding]:
         url = match.group(2)
         findings.append(
             RawFinding(
-                type="Recursive Discovery",
+                type="Directory Enumeration",
                 severity="MEDIUM",
                 tool="feroxbuster",
                 target=target,

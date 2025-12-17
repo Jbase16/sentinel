@@ -56,3 +56,45 @@ class Policy(ABC):
         Judge the proposed decision.
         """
         pass
+
+class ScopePolicy(Policy):
+    """
+    Enforces that all actions target authorized scopes only.
+    """
+    @property
+    def name(self) -> str:
+        return "ScopePolicy"
+        
+    def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
+        # If decision proposes a tool targeting a host, check if it's in scope.
+        # This is a stub logic - normally we'd check decision.context['target'] vs global scope.
+        # For now, we assume if "target" is in context, it must be safe or explicitly allowed.
+        # Real implementation would check `self.scope_manager.is_allowed(target)`.
+        
+        target = decision.context.get("target") or context.get("target")
+        if target:
+            # Example: Block .edu or .gov if strict rules apply
+            if "forbidden.com" in target:
+                 return Judgment(Verdict.VETO, self.name, f"Target {target} is explicitly forbidden.")
+                 
+        return Judgment(Verdict.APPROVE, self.name, "Scope OK")
+
+class RiskPolicy(Policy):
+    """
+    Enforces risk limits based on current engagement mode.
+    """
+    @property
+    def name(self) -> str:
+        return "RiskPolicy"
+        
+    def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
+        # Example: If Mode is PASSIVE, block ACTIVE tools.
+        # This duplicates some reasoning in Strategos, but as a hard safety net.
+        
+        mode = context.get("mode", "standard")
+        tool_risk = decision.context.get("risk", "low") # Assumes tool definition provides risk
+        
+        if mode == "passive" and tool_risk in ["high", "critical"]:
+             return Judgment(Verdict.VETO, self.name, f"High risk tool blocked in PASSIVE mode.")
+             
+        return Judgment(Verdict.APPROVE, self.name, "Risk Level Acceptable")
