@@ -71,6 +71,7 @@ enum GraphEventType: String, CaseIterable {
 
     // Logging
     case logEmitted = "log_emitted"
+    case narrativeEmitted = "narrative_emitted"
 
     // Fallback
     case unknown = "unknown"
@@ -316,7 +317,7 @@ class EventStreamClient: ObservableObject {
             findingEventPublisher.send(event)
 
         case .scanStarted, .scanPhaseChanged, .scanCompleted, .scanError, .toolInvoked,
-            .toolCompleted:
+            .toolCompleted, .narrativeEmitted:
             scanEventPublisher.send(event)
 
         case .unknown:

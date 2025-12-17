@@ -204,6 +204,11 @@ class HelixAppState: ObservableObject {
             let findings = event.payload["findings_count"]?.intValue ?? 0
             return "[Tool] done: \(tool) (exit=\(exitCode), findings=\(findings))"
 
+        case .narrativeEmitted:
+            // Layer 3 Narrative: The Primary UX
+            let narrative = event.payload["narrative"]?.stringValue ?? "..."
+            return "🧠 \(narrative)"
+
         default:
             return nil
         }

@@ -53,12 +53,14 @@ import time
 import uuid
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Callable, TypeVar, Generic
+from typing import Any, Dict, List, Optional, Callable, TypeVar, Generic, TYPE_CHECKING
 from enum import Enum
 from collections import deque
 from contextlib import contextmanager
 
-from core.cortex.events import EventBus
+if TYPE_CHECKING:
+    from core.cortex.events import EventBus
+    from core.cortex.narrator import NarratorEngine
 
 
 # ============================================================================
@@ -358,7 +360,8 @@ class DecisionContext:
         self,
         event_bus: Optional[EventBus] = None,
         ledger: Optional[DecisionLedger] = None,
-        auto_emit: bool = True
+        auto_emit: bool = True,
+        narrator: Optional["NarratorEngine"] = None
     ):
         """
         Initialize decision context.
@@ -367,10 +370,12 @@ class DecisionContext:
             event_bus: EventBus for emitting events (None = no emission)
             ledger: DecisionLedger for audit trail (None = ephemeral decisions)
             auto_emit: Whether to auto-emit events on commit (default True)
+            narrator: Optional NarratorEngine for human-readable L3 events
         """
         self._event_bus = event_bus
         self._ledger = ledger or DecisionLedger()
         self._auto_emit = auto_emit
+        self._narrator = narrator
         self._parent_stack: List[str] = []  # For nested decision hierarchies
         self._pending: List[DecisionPoint] = []  # Batch commit support
     
@@ -450,8 +455,13 @@ class DecisionContext:
         committed = self._ledger.commit(decision)
         
         # Emit event if configured
-        if self._auto_emit and self._event_bus:
-            self._emit_decision_event(committed)
+        if self._auto_emit:
+            if self._event_bus:
+                self._emit_decision_event(committed)
+            
+            # Layer 3: Narrative Emission (Automatic)
+            if self._narrator:
+                self._narrator.narrate(committed)
         
         return committed
     

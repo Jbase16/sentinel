@@ -491,6 +491,7 @@ class Strategos:
         
         scored = []
         rejected_count = 0
+        reasons: Dict[str, List[str]] = {}
         
         for t in candidates:
             tool_def = ToolRegistry.get(t, mode=mode)
@@ -499,52 +500,36 @@ class Strategos:
             # DECISION POINT: Tool disabled by mode overlay
             if tool_def.get("disabled"):
                 rejected_count += 1
-                if self._decision_ctx and self._current_intent_decision:
-                    with self._decision_ctx.nested(self._current_intent_decision):
-                        self._decision_ctx.choose(
-                            decision_type=DecisionType.TOOL_REJECTION,
-                            chosen="DISABLED",
-                            reason=f"Tool {t} disabled by {mode.value} mode overlay",
-                            context={
-                                "tool": t,
-                                "intent": intent,
-                                "mode": mode.value
-                            }
-                        )
+                reasons.setdefault("Mode Overlay", []).append(t)
                 continue
             
             # DECISION POINT: Constitutional check (safety rules)
             constitution_decision = self.constitution.check(self.context, tool_def)
             if not constitution_decision.allowed:
                 rejected_count += 1
-                self._emit_log(
-                    f"[Strategos] Blocked {t}: {constitution_decision.reason} "
-                    f"({constitution_decision.blocking_law})"
-                )
-                
-                # Emit rejection decision with full constitutional reasoning
-                if self._decision_ctx and self._current_intent_decision:
-                    with self._decision_ctx.nested(self._current_intent_decision):
-                        self._decision_ctx.choose(
-                            decision_type=DecisionType.TOOL_REJECTION,
-                            chosen="BLOCKED_BY_CONSTITUTION",
-                            reason=constitution_decision.reason,
-                            context={
-                                "tool": t,
-                                "intent": intent,
-                                "blocking_law": constitution_decision.blocking_law,
-                                "mode": mode.value
-                            },
-                            evidence={
-                                "allowed": constitution_decision.allowed,
-                                "warnings": constitution_decision.warnings
-                            }
-                        )
+                reason = f"{constitution_decision.blocking_law} ({constitution_decision.reason})"
+                reasons.setdefault(reason, []).append(t)
                 continue
             
             # DECISION POINT: Scoring (implicit selection)
             score = self._calculate_score(tool_def, mode)
             scored.append((t, score))
+            
+        # Emit grouped rejection decisions
+        if self._decision_ctx and self._current_intent_decision and reasons:
+            with self._decision_ctx.nested(self._current_intent_decision):
+                for reason_desc, tools in reasons.items():
+                    self._decision_ctx.choose(
+                        decision_type=DecisionType.TOOL_REJECTION,
+                        chosen="BLOCKED",
+                        reason=reason_desc,
+                        context={
+                            "tools": tools,
+                            "count": len(tools),
+                            "intent": intent,
+                            "mode": mode.value
+                        }
+                    )
         
         # Sort by score (highest priority first)
         scored.sort(key=lambda x: x[1], reverse=True)
