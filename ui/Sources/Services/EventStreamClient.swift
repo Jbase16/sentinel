@@ -30,23 +30,23 @@ import Foundation
 // MARK: - Event Models
 
 /// Typed event received from the backend EventStore
-struct GraphEvent: Decodable, Identifiable {
-    let id: String
-    let type: String
-    let timestamp: Double
-    let wall_time: String
-    let sequence: Int
-    let payload: [String: AnyCodable]
-    let source: String
+public struct GraphEvent: Decodable, Identifiable {
+    public let id: String
+    public let type: String
+    public let timestamp: Double
+    public let wall_time: String
+    public let sequence: Int
+    public let payload: [String: AnyCodable]
+    public let source: String
 
     /// Event type as enum for pattern matching
-    var eventType: GraphEventType {
+    public var eventType: GraphEventType {
         GraphEventType(rawValue: type) ?? .unknown
     }
 }
 
 /// All known event types from the backend
-enum GraphEventType: String, CaseIterable {
+public enum GraphEventType: String, CaseIterable {
     // Graph Structure
     case nodeAdded = "node_added"
     case nodeUpdated = "node_updated"
@@ -78,10 +78,10 @@ enum GraphEventType: String, CaseIterable {
 }
 
 /// Type-erased Codable wrapper for heterogeneous payloads
-struct AnyCodable: Decodable {
-    let value: Any
+public struct AnyCodable: Decodable {
+    public let value: Any
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
         if let string = try? container.decode(String.self) {
@@ -105,19 +105,19 @@ struct AnyCodable: Decodable {
     }
 
     /// Get value as String
-    var stringValue: String? { value as? String }
+    public var stringValue: String? { value as? String }
 
     /// Get value as Int
-    var intValue: Int? { value as? Int }
+    public var intValue: Int? { value as? Int }
 
     /// Get value as Double
-    var doubleValue: Double? { value as? Double }
+    public var doubleValue: Double? { value as? Double }
 
     /// Get value as Bool
-    var boolValue: Bool? { value as? Bool }
+    public var boolValue: Bool? { value as? Bool }
 
     /// Get value as Dictionary
-    var dictValue: [String: Any]? { value as? [String: Any] }
+    public var dictValue: [String: Any]? { value as? [String: Any] }
 }
 
 // MARK: - EventStreamClient
@@ -142,7 +142,7 @@ struct AnyCodable: Decodable {
 /// }
 /// ```
 @MainActor
-class EventStreamClient: ObservableObject {
+public class EventStreamClient: ObservableObject {
 
     // MARK: - Published State
 

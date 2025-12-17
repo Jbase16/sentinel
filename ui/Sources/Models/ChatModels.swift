@@ -20,17 +20,17 @@ import Foundation
 
 // Minimal chat primitives borrowed from Helix so the UI can render streaming text.
 // Kept intentionally small to make serialization and previews easy.
-struct ChatMessage: Identifiable, Codable, Hashable {
-    enum Role: String, Codable, Hashable {
+public struct ChatMessage: Identifiable, Codable, Hashable {
+    public enum Role: String, Codable, Hashable {
         case user, assistant, system
     }
 
-    let id: UUID
-    let role: Role
-    var text: String
-    var timestamp: Date
+    public let id: UUID
+    public let role: Role
+    public var text: String
+    public var timestamp: Date
 
-    init(id: UUID = UUID(), role: Role, text: String, timestamp: Date = Date()) {
+    public init(id: UUID = UUID(), role: Role, text: String, timestamp: Date = Date()) {
         self.id = id
         self.role = role
         self.text = text
@@ -39,25 +39,25 @@ struct ChatMessage: Identifiable, Codable, Hashable {
 }
 
 // Represents a single conversation tab/thread.
-struct ChatThread: Identifiable, Codable, Hashable {
-    let id: UUID
-    var title: String
-    var messages: [ChatMessage]
-    var lastUpdated: Date
+public struct ChatThread: Identifiable, Codable, Hashable {
+    public let id: UUID
+    public var title: String
+    public var messages: [ChatMessage]
+    public var lastUpdated: Date
 
-    init(id: UUID = UUID(), title: String, messages: [ChatMessage] = []) {
+    public init(id: UUID = UUID(), title: String, messages: [ChatMessage] = []) {
         self.id = id
         self.title = title
         self.messages = messages
         self.lastUpdated = Date()
     }
 
-    mutating func append(_ message: ChatMessage) {
+    public mutating func append(_ message: ChatMessage) {
         messages.append(message)
         lastUpdated = Date()
     }
 
-    mutating func clear() {
+    public mutating func clear() {
         messages.removeAll()
         lastUpdated = Date()
     }
