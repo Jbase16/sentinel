@@ -34,6 +34,7 @@ from core.data.killchain_store import killchain_store
 from core.engine.runner import PhaseRunner
 from core.toolkit.tools import TOOLS, get_tool_command, get_installed_tools
 from core.base.task_router import TaskRouter
+from core.cortex.correlator import GraphCorrelator
 
 logger = logging.getLogger(__name__)
 
@@ -536,7 +537,6 @@ class ScannerEngine:
         else:
             enriched, killchain_edges = [], []
 
-        # Use session-scoped stores when available; fallback to global singletons
         if self.session:
             self.session.issues.replace_all(enriched)
             combined_edges = list(killchain_edges) + list(self._recon_edges)
@@ -545,6 +545,53 @@ class ScannerEngine:
             issues_store.replace_all(enriched)
             combined_edges = list(killchain_edges) + list(self._recon_edges)
             killchain_store.replace_all(combined_edges)
+        
+        # ---------------------------------------------------------------------
+        # Cartographer: Graph Intelligence (Layer 5)
+        # ---------------------------------------------------------------------
+        # 1. Gather all data points
+        source_findings = self.session.findings.get_all() if self.session else findings_store.get_all()
+        
+        # 2. Transform to Nodes for Correlator
+        # Correlator expects: {"id": "asset_name", "attributes": {...}}
+        nodes = []
+        for f in source_findings:
+            # Only fingerprint "Asset" type findings or those with clear metadata signals
+            # Ideally each Asset has one canonical node. This simplification treats every finding as a potential source of traits.
+            # A better approach (future): Aggregate findings per asset first.
+            asset = f.get("asset") or f.get("target") or "unknown"
+            if asset == "unknown":
+                continue
+                
+            attributes = {}
+            # Extract potential fingerprints from metadata
+            meta = f.get("metadata", {})
+            for key in ["simhash", "favicon_hash", "ssl_serial", "ga_id"]:
+                if val := meta.get(key):
+                    attributes[key] = val
+            
+            if attributes:
+                nodes.append({"id": asset, "attributes": attributes})
+                
+        # 3. Analyze
+        if nodes:
+            correlator = GraphCorrelator()
+            implied_edges = correlator.process(nodes)
+            
+            # 4. Integrate
+            if implied_edges:
+                # Merge with existing edges
+                # Note: This simplistic merge might duplicate if run repeatedly without deduplication logic
+                # But _refresh_enrichment replaces ALL edges usually.
+                # Here we are appending to the set we just built.
+                combined_edges.extend(implied_edges)
+                
+                # Re-save
+                if self.session:
+                    self.session.killchain.replace_all(combined_edges)
+                else:
+                    killchain_store.replace_all(combined_edges)
+
         return len(enriched), len(combined_edges)
 
     async def _run_tool_task(

@@ -536,14 +536,15 @@ class DecisionContext:
 
 def create_decision_context(
     event_bus: Optional[EventBus] = None,
-    ledger: Optional[DecisionLedger] = None
+    ledger: Optional[DecisionLedger] = None,
+    narrator: Optional["NarratorEngine"] = None
 ) -> DecisionContext:
     """
     Factory for creating DecisionContext with default configuration.
     
     This is the recommended way to create contexts in production code.
     """
-    return DecisionContext(event_bus=event_bus, ledger=ledger, auto_emit=True)
+    return DecisionContext(event_bus=event_bus, ledger=ledger, auto_emit=True, narrator=narrator)
 
 
 # ============================================================================

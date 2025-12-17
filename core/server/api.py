@@ -44,7 +44,7 @@ from core.base.config import get_config, setup_logging
 from core.ai.ai_engine import AIEngine
 from core.base.task_router import TaskRouter
 from core.cortex.reasoning import ReasoningEngine, reasoning_engine
-from core.cortex.events import EventStore, get_event_store, GraphEventType
+from core.cortex.events import GraphEventType
 from core.wraith.evasion import WraithEngine
 from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
@@ -199,8 +199,6 @@ async def _begin_scan(req: ScanRequest) -> str:
     from core.base.session import ScanSession
     from core.cortex.events import get_event_bus
     from core.engine.scanner_engine import ScannerEngine
-    from core.scheduler.modes import ScanMode as StrategosMode
-    from core.scheduler.strategos import Strategos
     from core.toolkit.tools import get_installed_tools
 
     async with _scan_lock:
@@ -267,12 +265,6 @@ async def _begin_scan(req: ScanRequest) -> str:
         async def _runner() -> None:
             start_time = time.time()
             try:
-                try:
-                    mode = StrategosMode(req.mode)
-                except ValueError:
-                    mode = StrategosMode.STANDARD
-
-                brain = Strategos(log_fn=session.log, event_bus=event_bus)
 
                 async def dispatch_tool(tool: str) -> List[Dict]:
                     findings: List[Dict] = []
@@ -322,11 +314,12 @@ async def _begin_scan(req: ScanRequest) -> str:
                                 exc_info=True,
                             )
 
-                mission = await brain.run_mission(
+                mission = await reasoning_engine.start_scan(
                     target=req.target,
                     available_tools=allowed_tools,
-                    mode=mode,
+                    mode=req.mode,
                     dispatch_tool=dispatch_tool,
+                    log_fn=session.log
                 )
                 session.log(f"[Strategos] {mission.reason}")
 

@@ -35,7 +35,7 @@ Implements a True Async Agent Loop with Event-Driven Concurrency.
 
 import asyncio
 import logging
-from typing import List, Dict, Any, Callable, Awaitable, Optional, Set
+from typing import List, Dict, Any, Callable, Awaitable, Optional, Set, TYPE_CHECKING
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -59,7 +59,11 @@ from core.scheduler.decisions import (
     create_decision_context
 )
 from core.cortex.arbitration import ArbitrationEngine
+from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.policy import ScopePolicy, RiskPolicy, Verdict
+
+if TYPE_CHECKING:
+    from core.cortex.narrator import NarratorEngine
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +99,7 @@ class Strategos:
         log_fn: Optional[Callable[[str], None]] = None,
         event_bus: Optional[EventBus] = None,
         decision_ledger: Optional[DecisionLedger] = None,
+        narrator: Optional["NarratorEngine"] = None,
     ):
         self.constitution = Constitution()
         self.registry = ToolRegistry()
@@ -106,6 +111,7 @@ class Strategos:
         self._tool_semaphore: Optional[asyncio.Semaphore] = None
         self._log_fn = log_fn
         self._event_bus = event_bus
+        self._narrator = narrator
         
         # Decision Emission Layer: All strategic choices flow through this context
         # This creates a complete audit trail separate from the event stream
@@ -128,7 +134,12 @@ class Strategos:
         except Exception:
             pass
 
-        if self._log_fn:
+        if hasattr(self, "_current_mission_log_fn") and self._current_mission_log_fn:
+            try:
+                self._current_mission_log_fn(message)
+            except Exception:
+                pass
+        elif self._log_fn:
             try:
                 self._log_fn(message)
             except Exception:
@@ -139,7 +150,8 @@ class Strategos:
         target: str, 
         available_tools: List[str], 
         mode: ScanMode,
-        dispatch_tool: Callable[[str], Awaitable[List[Dict]]]
+        dispatch_tool: Callable[[str], Awaitable[List[Dict]]],
+        log_fn: Optional[Callable[[str], None]] = None
     ) -> MissionTerminatedEvent:
         """
         The Agent Loop with First-Class Decision Tracking.
@@ -162,6 +174,9 @@ class Strategos:
                 self.event_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
+        
+        # Override log_fn for this mission if provided
+        self._current_mission_log_fn = log_fn
 
         # Initialize scan context
         self.context = ScanContext(target=target)
@@ -184,7 +199,8 @@ class Strategos:
         # All decisions made during this mission flow through this context
         self._decision_ctx = create_decision_context(
             event_bus=self._event_bus,
-            ledger=self._decision_ledger
+            ledger=self._decision_ledger,
+            narrator=self._narrator
         )
         
         current_intent = INTENT_PASSIVE_RECON

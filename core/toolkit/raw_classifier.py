@@ -41,6 +41,7 @@ import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Callable, Dict, Iterable, List, Tuple
+from core.toolkit.fingerprinters import ContentHasher, FaviconHasher
 
 ManagementPortMap = {
     22: "SSH",
@@ -486,7 +487,57 @@ def _handle_wafw00f(target: str, output: str) -> List[RawFinding]:
 
 def _handle_httpx(target: str, output: str) -> List[RawFinding]:
     findings: List[RawFinding] = []
-    # HTTPX Output Parser
+    
+    # Try parsing as JSON lines first (Cartographer Enrichment)
+    # httpx -json output contains rich data including hash, body, techs
+    for line in output.splitlines():
+        line = line.strip()
+        if not line: continue
+        
+        try:
+            if line.startswith("{"):
+                data = json.loads(line)
+                url = data.get("url")
+                status = data.get("status_code", 0)
+                techs = data.get("tech", [])
+                
+                # Fingerprinting (Cartographer)
+                metadata = {
+                    "url": url,
+                    "status": status,
+                    "title": data.get("title", ""),
+                    "tech": ",".join(techs) if isinstance(techs, list) else str(techs)
+                }
+                
+                # Favicon Hash (httpx native or manual)
+                if fhash := data.get("hash"):
+                    # httpx returns "mmh3:-12345" sometimes
+                    metadata["favicon_hash"] = str(fhash).replace("mmh3:", "")
+                
+                # SimHash of Body
+                if body := data.get("body"):
+                    metadata["simhash"] = ContentHasher.simhash(body)
+                
+                severity = "INFO"
+                if status >= 500: severity = "HIGH"
+                elif status >= 400: severity = "MEDIUM"
+                
+                findings.append(RawFinding(
+                    type="HTTP Endpoint",
+                    severity=severity,
+                    tool="httpx",
+                    target=target, # Maintain original target context
+                    message=f"{url} returned {status}",
+                    proof=line[:200],
+                    tags=["surface-http", f"status-{status}"],
+                    families=["exposure"],
+                    metadata=metadata
+                ))
+                continue # Handled as JSON
+        except json.JSONDecodeError:
+            pass # Fallback to regex text parsing
+
+    # HTTPX Output Parser (Legacy Text Mode)
     # Parses httpx tool output format: URL [STATUS] [TITLE] [TECH]
     # Example: "https://example.com [200] [Welcome Page] [nginx,PHP]"
     #
@@ -511,7 +562,12 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
         if not clean.startswith("http"):
+            # If it was JSON, we likely continued already. If garbage/empty, skip.
             continue
+        
+        # Double check it wasn't valid JSON that failed to parse (unlikely if startswith http)
+        if clean.startswith("{"): continue 
+        
         match = pattern.match(clean)
         if not match:
             continue
