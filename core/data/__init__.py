@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/__init__.py
-# Data Layer Package - Storage and Persistence
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/data/__init__.py."""
 #
 # PURPOSE:
 # Houses all data storage and persistence logic. Think of this as the "memory"
@@ -23,4 +20,3 @@
 # - **Evidence**: Raw artifacts (tool outputs, screenshots) saved as files
 # - **Findings vs. Issues**: Findings are discoveries, Issues are confirmed exploits
 #
-# ============================================================================

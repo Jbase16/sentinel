@@ -1,7 +1,3 @@
-# ============================================================================
-# core/ghost/lazarus.py
-# Lazarus Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the ghost package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/ghost/lazarus.py
@@ -52,6 +47,7 @@ class LazarusEngine:
     
     @staticmethod
     def instance() -> "LazarusEngine":
+        """Function instance."""
         if LazarusEngine._instance is None:
             LazarusEngine._instance = LazarusEngine()
         return LazarusEngine._instance

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/engine/headless_runner.py
-# Headless Runner Module
-# ============================================================================
+"""Module headless_runner: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/headless_runner.py."""
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/headless_runner.py
 # Controller for running AraUltra without a GUI.
@@ -35,6 +31,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class HeadlessRunner:
+    """Class HeadlessRunner."""
     def __init__(self):
         raise RuntimeError(
             "HeadlessRunner has been superseded by the canonical scan lifecycle. "
@@ -43,9 +40,11 @@ class HeadlessRunner:
         )
 
     def _log_callback(self, msg: str):
+        """Function _log_callback."""
         print(msg)
 
     async def run(self, target: str):
+        """AsyncFunction run."""
         print(f"[*] Starting Headless Scan against: {target}")
         print("[*] Press Ctrl+C to stop.")
         

@@ -1,7 +1,3 @@
-# ============================================================================
-# core/forge/compiler.py
-# Compiler Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the forge package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/forge/compiler.py
@@ -40,6 +35,7 @@ class ExploitCompiler:
     
     @staticmethod
     def instance():
+        """Function instance."""
         if ExploitCompiler._instance is None:
             ExploitCompiler._instance = ExploitCompiler()
         return ExploitCompiler._instance
@@ -89,6 +85,7 @@ class ExploitCompiler:
         return filepath
 
     def _extract_code(self, text: str) -> str:
+        """Function _extract_code."""
         if "```" in text:
             # Simple markdown extraction
             parts = text.split("```python")

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/fuzz/__init__.py
-# Fuzzing Package - Automated Input Mutation and Testing
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/fuzz/__init__.py."""
 #
 # PURPOSE:
 # Automatically generates and tests malicious/unexpected inputs to discover
@@ -31,4 +28,3 @@
 # - **Coverage**: Testing all possible code paths
 # - **Crash Detection**: Finding inputs that cause errors/crashes
 #
-# ============================================================================

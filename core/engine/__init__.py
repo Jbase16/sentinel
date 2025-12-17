@@ -1,7 +1,4 @@
-# ============================================================================
-# core/engine/__init__.py
-# Execution Engine Package - Tool Orchestration and Scanning
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/__init__.py."""
 #
 # PURPOSE:
 # Manages the execution of security tools and coordinates scanning workflows.
@@ -25,4 +22,3 @@
 # - **PTY (Pseudo-Terminal)**: Virtual terminal for interactive command-line tools
 # - **Async Execution**: Tools run concurrently without blocking
 #
-# ============================================================================

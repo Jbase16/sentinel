@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_ghost.py
-# Verify Ghost Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_ghost.py
@@ -29,6 +24,7 @@ sys.path.append(os.getcwd())
 from core.base.session import ScanSession
 
 async def test_ghost_protocol():
+    """AsyncFunction test_ghost_protocol."""
     print("[*] Initializing Ghost Protocol...")
     session = ScanSession("example.com")
     

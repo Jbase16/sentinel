@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/MainWindowView.swift
-// Mainwindowview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,14 +10,15 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
+/// Struct MainWindowView.
 struct MainWindowView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var selection: SidebarItem? = .chat  // Default to Chat for usability
 
+    /// Enum SidebarItem.
     enum SidebarItem: String, Identifiable, CaseIterable {
         case dashboard = "Dashboard"
         case scan = "Target Scan"
@@ -128,6 +125,7 @@ extension Color {
     static let cyberBlue = Color(red: 0.0, green: 0.4, blue: 1.0)
 }
 
+/// Struct BackendStatusBadge.
 struct BackendStatusBadge: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared

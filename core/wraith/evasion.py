@@ -1,7 +1,3 @@
-# ============================================================================
-# core/wraith/evasion.py
-# Evasion Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the wraith package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/wraith/evasion.py
@@ -40,6 +35,7 @@ class WraithEngine:
     
     @staticmethod
     def instance():
+        """Function instance."""
         if WraithEngine._instance is None:
             WraithEngine._instance = WraithEngine()
         return WraithEngine._instance

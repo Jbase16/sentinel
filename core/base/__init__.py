@@ -1,7 +1,4 @@
-# ============================================================================
-# core/base/__init__.py
-# Base/Foundation Module Package Marker
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/base/__init__.py."""
 #
 # PURPOSE:
 # Marks the "base" directory as a Python package containing foundational
@@ -17,4 +14,3 @@
 # These are the building blocks everything else is built on. If you're learning
 # the codebase, start here to understand how the system is structured.
 #
-# ============================================================================

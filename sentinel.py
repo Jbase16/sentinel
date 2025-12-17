@@ -1,7 +1,4 @@
-# ============================================================================
-# sentinel.py
-# Sentinel Module
-# ============================================================================
+"""Module sentinel: inline documentation for /Users/jason/Developer/sentinelforge/sentinel.py."""
 #
 # PURPOSE:
 # This module is part of the sentinelforge package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 #!/usr/bin/env python3
 import argparse
@@ -46,6 +42,7 @@ def run_brain(args):
     subprocess.run(cmd)
 
 def main():
+    """Function main."""
     parser = argparse.ArgumentParser(description="SentinelForge Command Deck")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 

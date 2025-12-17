@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/tool_base.py
-# Tool Base Module
-# ============================================================================
+"""Module tool_base: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/tool_base.py."""
 #
 # PURPOSE:
 # This module is part of the toolkit package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 from core.engine.executor import ExecutionEngine
 from .tool_callbacks import tool_callback_factory
@@ -29,6 +25,7 @@ class ToolBase:
         self.name = name
 
     def run(self, command: str, timeout: int = 120, metadata=None):
+        """Function run."""
         callback = tool_callback_factory(self.name)
         return ExecutionEngine.instance().submit(
             command=command,

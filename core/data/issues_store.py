@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/issues_store.py
-# Issues Store - Confirmed Exploitable Vulnerability Storage
-# ============================================================================
+"""Module issues_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/issues_store.py."""
 #
 # PURPOSE:
 # Stores confirmed security issues that have been validated/exploited.
@@ -26,7 +23,6 @@
 # - Impact: What attacker could achieve
 # - Remediation: How to fix it
 #
-# ============================================================================
 
 from core.utils.observer import Observable, Signal
 from core.data.db import Database
@@ -57,6 +53,7 @@ class IssuesStore(Observable):
 
     async def _init_load(self):
         # DB init is idempotent/shared
+        """AsyncFunction _init_load."""
         await self.db.init()
         if self.session_id:
             loaded = await self.db.get_issues(self.session_id)
@@ -66,6 +63,7 @@ class IssuesStore(Observable):
         self.issues_changed.emit()
 
     def add_issue(self, issue: dict):
+        """Function add_issue."""
         self._issues.append(issue)
         try:
             asyncio.get_running_loop()
@@ -78,10 +76,12 @@ class IssuesStore(Observable):
         self.issues_changed.emit()
 
     def get_all(self):
+        """Function get_all."""
         return list(self._issues)
 
 
     def clear(self):
+        """Function clear."""
         self._issues = []
         self.issues_changed.emit()
     

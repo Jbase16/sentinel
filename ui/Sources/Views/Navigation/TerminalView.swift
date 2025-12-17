@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Navigation/TerminalView.swift
-// Terminalview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,12 +10,13 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 import WebKit
 
+/// Struct TerminalView.
 struct TerminalView: NSViewRepresentable {
+    /// Function makeNSView.
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         // Allow local access
@@ -91,5 +88,6 @@ struct TerminalView: NSViewRepresentable {
         return webView
     }
 
+    /// Function updateNSView.
     func updateNSView(_ nsView: WKWebView, context: Context) {}
 }

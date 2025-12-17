@@ -1,7 +1,3 @@
-# ============================================================================
-# core/scheduler/modes.py
-# Modes Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the scheduler package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/scheduler/modes.py
@@ -27,6 +22,7 @@ from enum import Enum
 from dataclasses import dataclass, field
 
 class ScanMode(Enum):
+    """Class ScanMode."""
     STANDARD = "standard"
     BUG_BOUNTY = "bug_bounty"
     STEALTH = "stealth"
@@ -84,6 +80,7 @@ class ModeRegistry:
 
     @staticmethod
     def get_overlay(mode: ScanMode) -> Dict[str, ToolOverlay]:
+        """Function get_overlay."""
         if mode == ScanMode.BUG_BOUNTY:
             return ModeRegistry.BUG_BOUNTY_OVERLAY
         if mode == ScanMode.STEALTH:

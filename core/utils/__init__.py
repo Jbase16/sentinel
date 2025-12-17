@@ -1,7 +1,4 @@
-# ============================================================================
-# core/utils/__init__.py
-# Utilities Package - Common Helper Functions
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/utils/__init__.py."""
 #
 # PURPOSE:
 # Provides shared utility functions used across the entire codebase.
@@ -26,4 +23,3 @@
 # - **Async/Await**: Modern Python concurrency model
 # - **Decorators**: @function_wrapper syntax that modifies function behavior
 #
-# ============================================================================

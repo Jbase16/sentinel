@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Report/ReportComposerView.swift
-// Reportcomposerview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,10 +10,10 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
+/// Struct ReportComposerView.
 struct ReportComposerView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared

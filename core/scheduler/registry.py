@@ -1,7 +1,3 @@
-# ============================================================================
-# core/scheduler/registry.py
-# Registry Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the scheduler package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/scheduler/registry.py
@@ -252,6 +247,7 @@ class ToolRegistry:
     @classmethod
     def get_tools_for_phase(cls, phase: int, mode: Any = None) -> List[str]:
         # Legacy support mostly
+        """Function get_tools_for_phase."""
         candidates = [t for t, meta in cls.METADATA.items() if meta["phase"] == phase]
         if mode:
             return cls._filter_by_mode(candidates, mode)
@@ -270,6 +266,7 @@ class ToolRegistry:
 
     @classmethod
     def _filter_by_mode(cls, tools: List[str], mode: Any) -> List[str]:
+        """Function _filter_by_mode."""
         from core.scheduler.modes import ModeRegistry
         overlay_map = ModeRegistry.get_overlay(mode)
         

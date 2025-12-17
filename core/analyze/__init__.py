@@ -1,7 +1,4 @@
-# ============================================================================
-# core/analyze/__init__.py
-# Analysis Package - Vulnerability Analysis and Classification
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/analyze/__init__.py."""
 #
 # PURPOSE:
 # Provides advanced analysis capabilities for discovered vulnerabilities.
@@ -19,4 +16,3 @@
 # - **Severity Analysis**: Determining how serious a vulnerability is
 # - **Attack Chains**: Mapping how vulnerabilities enable attack progression
 #
-# ============================================================================

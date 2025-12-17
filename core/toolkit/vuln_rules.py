@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/vuln_rules.py
-# Vulnerability Correlation Engine - From Findings to Confirmed Issues
-# ============================================================================
+"""Module vuln_rules: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/vuln_rules.py."""
 #
 # PURPOSE:
 # This module is the "correlation engine" that transforms low-level findings
@@ -427,6 +424,7 @@ class VulnRule:
 
     @staticmethod
     def _summarize_evidence(evidence: List[dict]) -> str:
+        """Function _summarize_evidence."""
         if not evidence:
             return ""
         samples = []
@@ -532,7 +530,9 @@ LOGIN_KEYWORDS = ["login", "signin", "auth", "portal", "account", "mfa"]
 
 
 def _match_weak_ssl_on_login(findings: List[dict]) -> List[dict]:
+    """Function _match_weak_ssl_on_login."""
     def predicate(item: dict) -> bool:
+        """Function predicate."""
         text = _pluck_text(item)
         if not any(token in text for token in SSL_KEYWORDS):
             return False
@@ -664,6 +664,7 @@ PORT_REGEX = re.compile(r"(\d{2,5})/(tcp|udp)")
 
 
 def _match_management_ports(findings: List[dict]) -> List[dict]:
+    """Function _match_management_ports."""
     buckets: Dict[Tuple[str, int], List[dict]] = {}
     for item in findings:
         text_candidates = [item.get("proof"), item.get("message"), item.get("evidence")]
@@ -701,7 +702,9 @@ def _match_management_ports(findings: List[dict]) -> List[dict]:
 
 
 def _match_by_tag(required_tags: List[str]):
+    """Function _match_by_tag."""
     def matcher(findings: List[dict]) -> List[dict]:
+        """Function matcher."""
         results = []
         for item in findings:
             tags = set(item.get("tags", []))
@@ -719,6 +722,7 @@ def _match_by_tag(required_tags: List[str]):
 
 
 def _match_api_exposure(findings: List[dict]) -> List[dict]:
+    """Function _match_api_exposure."""
     matcher = _match_by_tag(["api", "exposure", "no-auth"])
     matches = matcher(findings)
     for match in matches:
@@ -731,6 +735,7 @@ def _match_api_exposure(findings: List[dict]) -> List[dict]:
 
 
 def _match_cors(findings: List[dict]) -> List[dict]:
+    """Function _match_cors."""
     matcher = _match_by_tag(["cors", "misconfiguration"])
     matches = matcher(findings)
     for match in matches:
@@ -742,6 +747,7 @@ def _match_cors(findings: List[dict]) -> List[dict]:
 
 
 def _match_dev_surfaces(findings: List[dict]) -> List[dict]:
+    """Function _match_dev_surfaces."""
     matcher = _match_by_tag(["dev-surface", "exposure"])
     matches = matcher(findings)
     for match in matches:
@@ -753,6 +759,7 @@ def _match_dev_surfaces(findings: List[dict]) -> List[dict]:
 
 
 def _match_user_enum(findings: List[dict]) -> List[dict]:
+    """Function _match_user_enum."""
     matcher = _match_by_tag(["auth", "user-enum"])
     matches = matcher(findings)
     for match in matches:
@@ -764,6 +771,7 @@ def _match_user_enum(findings: List[dict]) -> List[dict]:
 
 
 def _match_metadata(findings: List[dict]) -> List[dict]:
+    """Function _match_metadata."""
     matcher = _match_by_tag(["cloud", "ssrf"])
     matches = matcher(findings)
     for match in matches:
@@ -777,6 +785,7 @@ def _match_metadata(findings: List[dict]) -> List[dict]:
 
 
 def _match_dangerous_http(findings: List[dict]) -> List[dict]:
+    """Function _match_dangerous_http."""
     matcher = _match_by_tag(["surface-expansion"])
     matches = matcher(findings)
     for match in matches:
@@ -788,6 +797,7 @@ def _match_dangerous_http(findings: List[dict]) -> List[dict]:
 
 
 def _match_uploads(findings: List[dict]) -> List[dict]:
+    """Function _match_uploads."""
     matcher = _match_by_tag(["upload"])
     matches = matcher(findings)
     for match in matches:
@@ -799,6 +809,7 @@ def _match_uploads(findings: List[dict]) -> List[dict]:
 
 
 def _match_private_ip(findings: List[dict]) -> List[dict]:
+    """Function _match_private_ip."""
     matcher = _match_by_tag(["private-ip"])
     matches = matcher(findings)
     for match in matches:
@@ -810,6 +821,7 @@ def _match_private_ip(findings: List[dict]) -> List[dict]:
 
 
 def _match_verbose_errors(findings: List[dict]) -> List[dict]:
+    """Function _match_verbose_errors."""
     matcher = _match_by_tag(["error-leakage"])
     matches = matcher(findings)
     for match in matches:
@@ -821,6 +833,7 @@ def _match_verbose_errors(findings: List[dict]) -> List[dict]:
 
 
 def _match_graphql(findings: List[dict]) -> List[dict]:
+    """Function _match_graphql."""
     matcher = _match_by_tag(["graphql"])
     matches = matcher(findings)
     for match in matches:
@@ -832,6 +845,7 @@ def _match_graphql(findings: List[dict]) -> List[dict]:
 
 
 def _match_business_logic(findings: List[dict]) -> List[dict]:
+    """Function _match_business_logic."""
     matcher = _match_by_tag(["business-logic"])
     matches = matcher(findings)
     for match in matches:
@@ -845,6 +859,7 @@ def _match_business_logic(findings: List[dict]) -> List[dict]:
 
 
 def _match_session_header_chain(findings: List[dict]) -> List[dict]:
+    """Function _match_session_header_chain."""
     results = []
     targets = _gather_target_tag_map(findings)
     for target, tags in targets.items():
@@ -873,6 +888,7 @@ def _match_session_header_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_api_rate_limit_gap(findings: List[dict]) -> List[dict]:
+    """Function _match_api_rate_limit_gap."""
     results = []
     targets = _gather_target_tag_map(findings)
     for target, tags in targets.items():
@@ -898,6 +914,7 @@ def _match_api_rate_limit_gap(findings: List[dict]) -> List[dict]:
 
 
 def _match_cloud_storage_chain(findings: List[dict]) -> List[dict]:
+    """Function _match_cloud_storage_chain."""
     results = []
     targets = _gather_target_tag_map(findings)
     for target, tags in targets.items():
@@ -921,6 +938,7 @@ def _match_cloud_storage_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_waf_param_combo(findings: List[dict]) -> List[dict]:
+    """Function _match_waf_param_combo."""
     results = []
     targets = _gather_target_tag_map(findings)
     for target, tags in targets.items():
@@ -938,6 +956,7 @@ def _match_waf_param_combo(findings: List[dict]) -> List[dict]:
 
 
 def _match_timing_debug_combo(findings: List[dict]) -> List[dict]:
+    """Function _match_timing_debug_combo."""
     results = []
     targets = _gather_target_tag_map(findings)
     for target, tags in targets.items():
@@ -955,6 +974,7 @@ def _match_timing_debug_combo(findings: List[dict]) -> List[dict]:
 
 
 def _match_tls_timing(findings: List[dict]) -> List[dict]:
+    """Function _match_tls_timing."""
     results = []
     targets = _gather_target_tag_map(findings)
     for target, tags in targets.items():
@@ -972,6 +992,7 @@ def _match_tls_timing(findings: List[dict]) -> List[dict]:
 
 
 def _match_secret_exposure(findings: List[dict]) -> List[dict]:
+    """Function _match_secret_exposure."""
     matcher = _match_by_tag(["secret-leak"])
     matches = matcher(findings)
     for match in matches:
@@ -985,6 +1006,7 @@ def _match_secret_exposure(findings: List[dict]) -> List[dict]:
 
 
 def _match_session_weakness(findings: List[dict]) -> List[dict]:
+    """Function _match_session_weakness."""
     matcher = _match_by_tag(["session", "cookie"])
     matches = matcher(findings)
     for match in matches:
@@ -997,6 +1019,7 @@ def _match_session_weakness(findings: List[dict]) -> List[dict]:
 
 
 def _gather_target_tag_map(findings: List[dict]) -> Dict[str, set]:
+    """Function _gather_target_tag_map."""
     tag_map: Dict[str, set] = {}
     for item in findings:
         target = item.get("target", "unknown")
@@ -1006,6 +1029,7 @@ def _gather_target_tag_map(findings: List[dict]) -> Dict[str, set]:
 
 
 def _match_auth_chain(findings: List[dict]) -> List[dict]:
+    """Function _match_auth_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
     for target, tags in tag_map.items():
@@ -1029,6 +1053,7 @@ def _match_auth_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_directory_upload_chain(findings: List[dict]) -> List[dict]:
+    """Function _match_directory_upload_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
     for target, tags in tag_map.items():
@@ -1046,6 +1071,7 @@ def _match_directory_upload_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_ssrf_chain(findings: List[dict]) -> List[dict]:
+    """Function _match_ssrf_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
     for target, tags in tag_map.items():
@@ -1063,6 +1089,7 @@ def _match_ssrf_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_cloud_storage_rule(findings: List[dict]) -> List[dict]:
+    """Function _match_cloud_storage_rule."""
     matcher = _match_by_tag(["cloud-storage"])
     matches = matcher(findings)
     for match in matches:
@@ -1075,6 +1102,7 @@ def _match_cloud_storage_rule(findings: List[dict]) -> List[dict]:
 
 
 def _match_outdated_frameworks(findings: List[dict]) -> List[dict]:
+    """Function _match_outdated_frameworks."""
     hits = []
     for item in findings:
         meta = item.get("metadata") or {}
@@ -1099,6 +1127,7 @@ def _match_outdated_frameworks(findings: List[dict]) -> List[dict]:
 
 
 def _match_header_chain(findings: List[dict]) -> List[dict]:
+    """Function _match_header_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
     for target, tags in tag_map.items():
@@ -1129,6 +1158,7 @@ def _match_header_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_backup_rule(findings: List[dict]) -> List[dict]:
+    """Function _match_backup_rule."""
     matcher = _match_by_tag(["backup-leak"])
     matches = matcher(findings)
     for match in matches:
@@ -1551,6 +1581,7 @@ def load_rules_from_yaml() -> List[VulnRule]:
 # Hybrid Rule Set: Merge Legacy with YAML (YAML wins)
 def _merge_rules() -> List[VulnRule]:
     # Rule ID -> VulnRule
+    """Function _merge_rules."""
     registry = {r.id: r for r in _LEGACY_RULES}
     
     # Overlay YAML rules

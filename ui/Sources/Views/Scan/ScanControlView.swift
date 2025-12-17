@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Scan/ScanControlView.swift
-// Scancontrolview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,12 +10,12 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Enum ToolSelectionMode.
 enum ToolSelectionMode: String, CaseIterable, Identifiable {
     case scheduler = "scheduler"
     case custom = "custom"
@@ -34,6 +30,7 @@ enum ToolSelectionMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Struct ScanControlView.
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
@@ -182,6 +179,7 @@ struct ScanControlView: View {
 
 // MARK: - Subviews
 
+/// Struct ToolSelectionView.
 struct ToolSelectionView: View {
     let installed: [String]
     @Binding var selection: Set<String>
@@ -233,6 +231,7 @@ struct ToolSelectionView: View {
 }
 
 // MARK: - Scan Progress Header
+/// Struct ScanProgressHeader.
 struct ScanProgressHeader: View {
     let logCount: Int
     @State private var elapsedTime: Int = 0
@@ -282,6 +281,7 @@ struct ScanProgressHeader: View {
     }
 }
 
+/// Struct FindingsListView.
 struct FindingsListView: View {
     @EnvironmentObject var appState: HelixAppState
 
@@ -302,6 +302,7 @@ struct FindingsListView: View {
     }
 }
 
+/// Struct FindingRow.
 struct FindingRow: View {
     let finding: JSONDict
 
@@ -324,6 +325,7 @@ struct FindingRow: View {
     }
 }
 
+/// Struct LogConsoleView.
 struct LogConsoleView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var showingExporter = false
@@ -391,6 +393,7 @@ struct LogConsoleView: View {
 }
 
 // Minimal FileDocument implementation
+/// Struct PlainTextDocument.
 struct PlainTextDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.plainText] }
     var content: String
@@ -404,6 +407,7 @@ struct PlainTextDocument: FileDocument {
         content = ""
     }
 
+    /// Function fileWrapper.
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         return FileWrapper(regularFileWithContents: content.data(using: .utf8)!)
     }

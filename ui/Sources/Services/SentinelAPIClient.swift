@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/SentinelAPIClient.swift
-// Sentinelapiclient Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 
@@ -111,6 +106,7 @@ public struct SentinelAPIClient: Sendable {
 
     // Install selected tools
     public func installTools(_ tools: [String]) async throws -> [InstallResult] {
+        /// Struct InstallResponse.
         struct InstallResponse: Decodable { let results: [InstallResult] }
         guard let url = URL(string: "/tools/install", relativeTo: baseURL) else { throw APIError.badStatus }
         var req = URLRequest(url: url)
@@ -126,6 +122,7 @@ public struct SentinelAPIClient: Sendable {
 
     // Uninstall selected tools
     public func uninstallTools(_ tools: [String]) async throws -> [InstallResult] {
+        /// Struct InstallResponse.
         struct InstallResponse: Decodable { let results: [InstallResult] }
         guard let url = URL(string: "/tools/uninstall", relativeTo: baseURL) else { throw APIError.badStatus }
         var req = URLRequest(url: url)
@@ -198,6 +195,7 @@ public struct SentinelAPIClient: Sendable {
     }
 
     public func startMission(target: String) async throws -> String {
+        /// Struct MissionResponse.
         struct MissionResponse: Decodable {
             let status: String
             let mission_id: String
@@ -227,6 +225,7 @@ public struct SentinelAPIClient: Sendable {
         components.queryItems = [URLQueryItem(name: "question", value: question)]
         request.url = components.url
         
+        /// Struct ChatResponse.
         struct ChatResponse: Decodable {
             let response: String
         }
@@ -248,6 +247,7 @@ public struct SentinelAPIClient: Sendable {
         ]
         request.url = components.url
         
+        /// Struct ForgeResponse.
         struct ForgeResponse: Decodable {
             let status: String
             let script_path: String
@@ -428,6 +428,7 @@ public struct EngineStatus: Decodable {
     public let scanState: ScanState?
     public let cancelRequested: Bool?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case status, ai, tools
         case scanRunning = "scan_running"
@@ -443,6 +444,7 @@ public struct ToolStatus: Decodable {
     public let countInstalled: Int
     public let countTotal: Int
     
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case installed, missing
         case countInstalled = "count_installed"
@@ -459,6 +461,7 @@ public struct ScanState: Decodable {
     public let durationMs: Int?
     public let error: String?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
         case startedAt = "started_at"
@@ -474,6 +477,7 @@ public struct AIStatus: Decodable {
     public let fallbackEnabled: Bool
     public let availableModels: [String]?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case provider, model, connected
         case fallbackEnabled = "fallback_enabled"
@@ -491,6 +495,7 @@ public struct SentinelResults: Decodable {
     public let evidence: [EvidenceSummary]?
     public let logs: [String]?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case scan, summary, findings, issues, killchain, logs, evidence
         case phaseResults = "phase_results"
@@ -506,6 +511,7 @@ public struct ScanSummary: Decodable {
     public let durationMs: Int?
     public let error: String?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
         case startedAt = "started_at"
@@ -526,6 +532,7 @@ public struct ResultCounts: Decodable {
     public let logs: Int
     public let phaseResults: [String: Int]
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case findings, issues, logs
         case killchainEdges = "killchain_edges"
@@ -548,6 +555,7 @@ public struct Killchain: Decodable {
     public let degradedPaths: [[String]]?
     public let recommendedPhases: [String]?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case edges
         case attackPaths = "attack_paths"
@@ -565,6 +573,7 @@ public struct EvidenceSummary: Decodable {
     public let rawBytes: Int?
     public let findingCount: Int?
 
+    /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case id, tool, summary, metadata
         case rawPreview = "raw_preview"

@@ -1,7 +1,4 @@
-# ============================================================================
-# tests/verification/verify_backend.py
-# Verify Backend Module
-# ============================================================================
+"""Module verify_backend: inline documentation for /Users/jason/Developer/sentinelforge/tests/verification/verify_backend.py."""
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import requests
 import json
@@ -24,6 +20,7 @@ import time
 BASE_URL = "http://127.0.0.1:8765"
 
 def test_ping():
+    """Function test_ping."""
     print("[*] Testing /ping...")
     try:
         resp = requests.get(f"{BASE_URL}/ping", timeout=2)
@@ -35,6 +32,7 @@ def test_ping():
     return False
 
 def test_scan():
+    """Function test_scan."""
     print("[*] Testing /scan (mock target)...")
     try:
         # We use a dummy target to just check if the orchestrator starts
@@ -49,6 +47,7 @@ def test_scan():
     return False
 
 def test_chat():
+    """Function test_chat."""
     print("[*] Testing /chat (mock prompt)...")
     try:
         # We stream the response

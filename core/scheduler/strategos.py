@@ -1,7 +1,3 @@
-# ============================================================================
-# core/scheduler/strategos.py
-# Strategos - Strategic Scan Planning and Coordination
-# ============================================================================
 #
 # PURPOSE:
 # High-level strategic planning for security scans. Named after Greek "strategos"
@@ -25,7 +21,6 @@
 # - **Tactics**: Low-level execution (how to run each tool)
 # - **Adaptive Planning**: Adjust strategy based on discoveries
 #
-# ============================================================================
 
 """
 core/scheduler/strategos.py
@@ -71,6 +66,7 @@ DEFAULT_EVENT_QUEUE_MAXSIZE = 1024
 
 @dataclass
 class ScanContext:
+    """Class ScanContext."""
     target: str
     phase_index: int = 0
     knowledge: Dict[str, Any] = field(default_factory=dict)
@@ -128,6 +124,7 @@ class Strategos:
         self.arbitrator.register_policy(RiskPolicy())
 
     def _emit_log(self, message: str, level: str = "info") -> None:
+        """Function _emit_log."""
         try:
             log_method = getattr(logger, level, logger.info)
             log_method(message)
@@ -345,6 +342,7 @@ class Strategos:
             self._tool_tasks[tool] = task
     
     def _surface_key(self, finding: Dict[str, Any]) -> Optional[str]:
+        """Function _surface_key."""
         if not isinstance(finding, dict):
             return None
         metadata = finding.get("metadata") or {}
@@ -385,6 +383,7 @@ class Strategos:
         return f"{scheme}://{netloc}{path}"
 
     def _enqueue_event(self, event: Any) -> bool:
+        """Function _enqueue_event."""
         try:
             self.event_queue.put_nowait(event)
             return True
@@ -605,6 +604,7 @@ class Strategos:
         return selected_tools
 
     def _calculate_score(self, tool_def: Dict, mode: ScanMode) -> int:
+        """Function _calculate_score."""
         overlay_map = ModeRegistry.get_overlay(mode)
         tool_name = tool_def.get("name")
         overlay = overlay_map.get(tool_name)

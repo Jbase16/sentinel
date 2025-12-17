@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Components/StatusComponents.swift
-// Statuscomponents Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
@@ -76,6 +71,7 @@ struct IndeterminateProgressBar: View {
 struct StatusPill: View {
     let status: ConnectionStatus
     
+    /// Enum ConnectionStatus {.
     enum ConnectionStatus {
         case connecting
         case connected
@@ -136,6 +132,7 @@ struct StatusPill: View {
 }
 
 // MARK: - Activity Indicator with Label
+/// Struct ActivityIndicator.
 struct ActivityIndicator: View {
     let message: String
     let isActive: Bool
@@ -155,6 +152,7 @@ struct ActivityIndicator: View {
 }
 
 // MARK: - Typing Indicator (for chat)
+/// Struct TypingIndicator.
 struct TypingIndicator: View {
     @State private var phase = 0.0
     
@@ -187,6 +185,7 @@ struct TypingIndicator: View {
 }
 
 // MARK: - Scan Progress Card
+/// Struct ScanProgressCard.
 struct ScanProgressCard: View {
     let isRunning: Bool
     let status: String
@@ -226,6 +225,7 @@ struct ScanProgressCard: View {
 }
 
 // MARK: - AI Status Card
+/// Struct AIStatusCard.
 struct AIStatusCard: View {
     let isConnected: Bool
     let modelName: String
@@ -264,6 +264,7 @@ struct AIStatusCard: View {
 }
 
 // MARK: - Loading Overlay
+/// Struct LoadingOverlay.
 struct LoadingOverlay: View {
     let message: String
     let isShowing: Bool
@@ -291,6 +292,7 @@ struct LoadingOverlay: View {
 }
 
 // MARK: - Empty State with Loading
+/// Struct EmptyStateView.
 struct EmptyStateView: View {
     let icon: String
     let title: String

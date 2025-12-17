@@ -1,8 +1,4 @@
-# ============================================================================
-# tests/unit/test_narrator.py
-# Verification of Layer 3: Narrator Engine
-# ============================================================================
-
+"""Module test_narrator: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_narrator.py."""
 import pytest
 from typing import List, Dict, Any
 from core.cortex.events import EventBus, GraphEventType, GraphEvent
@@ -10,6 +6,7 @@ from core.cortex.narrator import NarratorEngine
 from core.scheduler.decisions import DecisionContext, DecisionType, DecisionLedger
 
 class MockSubscriber:
+    """Class MockSubscriber."""
     def __init__(self):
         self.events: List[GraphEvent] = []
         
@@ -18,6 +15,7 @@ class MockSubscriber:
 
 def test_narrator_integration():
     # 1. Setup Infrastructure
+    """Function test_narrator_integration."""
     bus = EventBus()
     subscriber = MockSubscriber()
     bus.subscribe(subscriber)
@@ -70,6 +68,7 @@ def test_narrator_integration():
 
 def test_narrator_determinism():
     # Verify string formatting without event bus
+    """Function test_narrator_determinism."""
     narrator = NarratorEngine()
     
     # Phase Transition

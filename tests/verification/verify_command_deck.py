@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_command_deck.py
-# Verify Command Deck Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_command_deck.py
@@ -36,6 +31,7 @@ from core.chat.chat_engine import GraphAwareChat
 from core.engine.orchestrator import Orchestrator
 
 def test_chat():
+    """Function test_chat."""
     print("[*] Testing GraphAwareChat...")
     chat = GraphAwareChat.instance()
     
@@ -52,6 +48,7 @@ def test_chat():
         print("    [FAIL] Chat Engine Error.")
 
 async def test_orchestrator():
+    """AsyncFunction test_orchestrator."""
     print("\n[*] Testing Orchestrator (One-Click)...")
     orch = Orchestrator.instance()
     

@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Core/HelixError.swift
-// Helixerror Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,10 +10,10 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 
+/// Enum HelixError.
 enum HelixError: Error, LocalizedError, Identifiable {
     case network(underlying: Error)
     case invalidResponse(statusCode: Int)

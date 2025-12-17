@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/CortexStream.swift
-// Cortexstream Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 //
 //  CortexStream.swift
@@ -26,6 +21,7 @@
 
 import Foundation
 
+/// Class CortexStream.
 class CortexStream: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     private var session: URLSession?
@@ -34,6 +30,7 @@ class CortexStream: ObservableObject {
     @Published var nodes: [NodeModel] = []
     @Published var isConnected: Bool = false
 
+    /// Struct NodeModel.
     struct NodeModel: Decodable, Identifiable {
         let id: String
         let type: String
@@ -43,11 +40,13 @@ class CortexStream: ObservableObject {
         var color: SIMD4<Float>?  // Computable
     }
 
+    /// Struct GraphData.
     struct GraphData: Decodable {
         let nodes: [NodeModel]
         // networkx format uses 'links', some formats use 'edges'
         // Use AnyCodable-like approach to handle both
 
+        /// Enum CodingKeys.
         enum CodingKeys: String, CodingKey {
             case nodes, links, edges, directed, multigraph, graph
         }
@@ -59,6 +58,7 @@ class CortexStream: ObservableObject {
         }
     }
 
+    /// Function connect.
     func connect(url: URL) {
         let config = URLSessionConfiguration.default
         let session = URLSession(

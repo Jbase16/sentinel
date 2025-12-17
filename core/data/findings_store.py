@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/findings_store.py
-# Findings Store - In-Memory + Persistent Vulnerability Storage
-# ============================================================================
+"""Module findings_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/findings_store.py."""
 #
 # PURPOSE:
 # Manages all discovered vulnerabilities with both in-memory caching and
@@ -30,7 +27,6 @@
 # - **Dual Storage**: Memory (fast) + Database (permanent)
 # - **Session Scoping**: Each scan's findings kept separate
 #
-# ============================================================================
 
 # core/findings_store.py — central findings store with UI signals
 
@@ -71,6 +67,7 @@ class FindingsStore(Observable):
     # ... Ensure loaded ...
 
     async def _init_load(self):
+        """AsyncFunction _init_load."""
         await self.db.init()
         # Load only for this session if ID provided
         if self.session_id:
@@ -89,6 +86,7 @@ class FindingsStore(Observable):
         self.findings_changed.emit()
 
     async def refresh(self):
+        """AsyncFunction refresh."""
         if not self.db._initialized:
             await self.db.init()
         if self.session_id:
@@ -99,6 +97,7 @@ class FindingsStore(Observable):
             self._findings = loaded
 
     def add_finding(self, finding: dict):
+        """Function add_finding."""
         with self._lock:
             self._findings.append(finding)
         

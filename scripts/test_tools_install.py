@@ -1,7 +1,3 @@
-# ============================================================================
-# scripts/test_tools_install.py
-# Test Tools Install Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the scripts package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 #!/usr/bin/env python3
 """Quick test for the tools install API endpoint"""
@@ -25,6 +20,7 @@ sys.path.insert(0, '.')
 
 async def test_install():
     # Import and call our new function directly
+    """AsyncFunction test_install."""
     from core.toolkit.tools import install_tools
     
     # Test installing a tool you don't have (e.g., wafw00f)

@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/EventStreamClient.swift
-// Eventstreamclient Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 //
 //  EventStreamClient.swift

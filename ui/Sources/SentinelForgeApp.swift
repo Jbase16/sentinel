@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/SentinelForgeApp.swift
-// Sentinelforgeapp Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,13 +10,14 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 // Sentinel entry point for the SwiftUI UI layer.
 // This stays tiny on purpose: create shared app state, inject into views.
 import SwiftUI
 
+/// Class AppDelegate.
 class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Function applicationDidFinishLaunching.
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Force the app to be a "regular" foreground app
         NSApp.setActivationPolicy(.regular)
@@ -34,17 +31,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    /// Function applicationWillTerminate.
     func applicationWillTerminate(_ notification: Notification) {
         // Ensure backend is stopped when app quits
         BackendManager.shared.stop()
     }
     
+    /// Function applicationShouldTerminateAfterLastWindowClosed.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
     }
 }
 
 @main
+/// Struct SentinelApp.
 struct SentinelApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     

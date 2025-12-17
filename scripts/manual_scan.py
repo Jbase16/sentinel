@@ -1,7 +1,4 @@
-# ============================================================================
-# scripts/manual_scan.py
-# Manual Scan Module
-# ============================================================================
+"""Module manual_scan: inline documentation for /Users/jason/Developer/sentinelforge/scripts/manual_scan.py."""
 #
 # PURPOSE:
 # This module is part of the scripts package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 
 import asyncio
@@ -33,6 +29,7 @@ from core.data.db import Database
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 async def main():
+    """AsyncFunction main."""
     target = "testphp.vulnweb.com"
     print(f"--- Starting Manual Scan on {target} ---")
     

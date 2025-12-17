@@ -1,7 +1,4 @@
-# ============================================================================
-# core/__init__.py
-# Package Marker for Python Core Backend
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/__init__.py."""
 #
 # PURPOSE:
 # This file tells Python that the "core" directory is a package (a collection
@@ -16,4 +13,3 @@
 # - Without this file, Python wouldn't recognize "core" as a module
 # - We could add shared initialization code here, but we keep it minimal
 #
-# ============================================================================

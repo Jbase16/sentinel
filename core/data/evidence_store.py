@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/evidence_store.py  
-# Evidence Store - File-Based Artifact Preservation
-# ============================================================================
+"""Module evidence_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/evidence_store.py."""
 #
 # PURPOSE:
 # Saves raw tool outputs and artifacts as files for audit trail and later review.
@@ -32,7 +29,6 @@
 # - **Sanitization**: Cleaning filenames for filesystem safety
 # - **Timestamping**: Ensuring unique filenames per run
 #
-# ============================================================================
 
 import asyncio
 import logging
@@ -89,6 +85,7 @@ class EvidenceStore(Observable):
         self.evidence_changed.emit()
 
     def add_evidence(self, tool: str, raw_output: str, metadata: dict):
+        """Function add_evidence."""
         self._counter += 1
         eid = self._counter
 
@@ -117,6 +114,7 @@ class EvidenceStore(Observable):
         return eid
 
     def update_evidence(self, evidence_id: int, summary=None, findings=None):
+        """Function update_evidence."""
         if evidence_id not in self._evidence:
             return
 
@@ -138,6 +136,7 @@ class EvidenceStore(Observable):
         self.evidence_changed.emit()
 
     def get_all(self):
+        """Function get_all."""
         return dict(self._evidence)
     
     def clear(self):

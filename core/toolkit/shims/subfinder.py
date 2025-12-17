@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/shims/subfinder.py
-# Subfinder Module
-# ============================================================================
+"""Module subfinder: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/subfinder.py."""
 #
 # PURPOSE:
 # This module is part of the shims package in SentinelForge.
@@ -14,14 +11,15 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 from ..tool_base import ToolBase
 
 class Subfinder(ToolBase):
+    """Class Subfinder."""
     def __init__(self):
         super().__init__("subfinder")
 
     def enumerate(self, domain: str):
+        """Function enumerate."""
         command = f"subfinder -silent -d {domain}"
         return self.run(command, metadata={"domain": domain, "type": "subdomain_enum"})

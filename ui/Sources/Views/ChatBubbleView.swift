@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/ChatBubbleView.swift
-// Chatbubbleview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,11 +10,11 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
 // Minimal bubble renderer; colors differentiate user vs assistant.
+/// Struct ChatBubbleView.
 struct ChatBubbleView: View {
     let message: ChatMessage
     var isStreaming: Bool = false

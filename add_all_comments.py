@@ -1,7 +1,3 @@
-# ============================================================================
-# add_all_comments.py
-# Add All Comments Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the sentinelforge package in SentinelForge.
@@ -14,28 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
-
-#!/usr/bin/env python3
-"""
-Comprehensive educational comment addition for SentinelForge.
-Adds headers to all files that don't have them yet.
-"""
-
-from pathlib import Path
-import sys
-
-BASE_DIR = Path("/Users/jason/Developer/sentinelforge")
-
-# Comprehensive header templates for all file types
-HEADERS = {
-    # === CORE MODULES (Already done, but adding for completeness) ===
-    
-    # === SCHEDULER MODULE ===
-    "core/scheduler/strategos.py": """# ============================================================================
-# core/scheduler/strategos.py
-# Strategos - Strategic Scan Planning and Coordination
-# ============================================================================
 #
 # PURPOSE:
 # High-level strategic planning for security scans. Named after Greek "strategos"
@@ -59,14 +33,6 @@ HEADERS = {
 # - **Tactics**: Low-level execution (how to run each tool)
 # - **Adaptive Planning**: Adjust strategy based on discoveries
 #
-# ============================================================================
-
-""",
-    
-    "core/scheduler/intents.py": """# ============================================================================
-# core/scheduler/intents.py
-# Intent Detection - Understanding Scan Objectives
-# ============================================================================
 #
 # PURPOSE:
 # Translates high-level user intent ("find SQLi vulns") into concrete scan tasks.
@@ -89,7 +55,6 @@ HEADERS = {
 # - **Task Decomposition**: Breaking goals into tool executions
 # - **Context Awareness**: Different intents for web vs. infrastructure
 #
-# ============================================================================
 
 """,
 }
@@ -187,6 +152,7 @@ def annotate_file(filepath: Path):
         return False
 
 def main():
+    """Function main."""
     annotated = 0
     skipped = 0
     

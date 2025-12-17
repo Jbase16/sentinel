@@ -1,7 +1,4 @@
-# ============================================================================
-# tests/integration/test_api_basic.py
-# Test Api Basic Module
-# ============================================================================
+"""Module test_api_basic: inline documentation for /Users/jason/Developer/sentinelforge/tests/integration/test_api_basic.py."""
 #
 # PURPOSE:
 # This module is part of the integration package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import sys
 import os
@@ -31,8 +27,10 @@ from core.server.api import serve
 
 class TestCoreAPI(unittest.TestCase):
     @classmethod
+    """Class TestCoreAPI."""
     def setUpClass(cls):
         # Start API in a separate thread
+        """Function setUpClass."""
         cls.port = 8766 # Use a test port
         cls.server_thread = threading.Thread(target=serve, args=(cls.port,), daemon=True)
         cls.server_thread.start()
@@ -40,11 +38,13 @@ class TestCoreAPI(unittest.TestCase):
         time.sleep(1)
 
     def test_01_ping(self):
+        """Function test_01_ping."""
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/ping") as resp:
             data = json.loads(resp.read().decode())
             self.assertEqual(data["status"], "ok")
 
     def test_02_status_structure(self):
+        """Function test_02_status_structure."""
         with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/status") as resp:
             data = json.loads(resp.read().decode())
             self.assertIn("ai", data)
@@ -55,6 +55,7 @@ class TestCoreAPI(unittest.TestCase):
             print(f"[Test] Missing Tools: {data['tools']['missing']}")
 
     def test_03_ai_status(self):
+         """Function test_03_ai_status."""
          with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/status") as resp:
             data = json.loads(resp.read().decode())
             ai = data.get("ai", {})

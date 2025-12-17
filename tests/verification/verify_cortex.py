@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_cortex.py
-# Verify Cortex Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_cortex.py
@@ -30,6 +25,7 @@ from core.cortex.memory import KnowledgeGraph, NodeType
 from core.cortex.reasoning import reasoning_engine
 
 def test_nmap_ingestion():
+    """Function test_nmap_ingestion."""
     print("[*] Testing Nmap Ingestion...")
     
     # Simulated Nmap Output
@@ -66,6 +62,7 @@ def test_nmap_ingestion():
         print("    [FAIL] Cortex failed to suggest Nikto for Port 80.")
 
 def main():
+    """Function main."""
     test_nmap_ingestion()
 
 if __name__ == "__main__":

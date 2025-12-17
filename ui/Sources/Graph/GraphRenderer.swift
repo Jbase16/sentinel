@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Graph/GraphRenderer.swift
-// Graphrenderer Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 //
 //  GraphRenderer.swift
@@ -29,8 +24,10 @@ import Metal
 import MetalKit
 import simd
 
+/// Class GraphRenderer.
 class GraphRenderer: NSObject {
     // Namespaced minimal graph event types used by the renderer to avoid global collisions
+    /// Enum EventType.
     enum EventType: String {
         case nodeAdded = "node_added"
         case edgeAdded = "edge_added"
@@ -40,6 +37,7 @@ class GraphRenderer: NSObject {
         case unknown
     }
 
+    /// Struct Event {.
     struct Event {
         let eventType: EventType
         let payload: [String: AnyCodable]
@@ -68,6 +66,7 @@ class GraphRenderer: NSObject {
     var viewportSize: CGSize = CGSize(width: 800, height: 600)
 
     // Data Model: Directly maps to Metal Layout (32 bytes aligned)
+    /// Struct Node {.
     struct Node {
         var position: SIMD4<Float>  // xyz = pos, w = size
         var color: SIMD4<Float>
@@ -462,6 +461,7 @@ class GraphRenderer: NSObject {
         return min + (max - min) * unit
     }
 
+    /// Function resize.
     func resize(size: CGSize) {
         self.viewportSize = size
     }
@@ -469,6 +469,7 @@ class GraphRenderer: NSObject {
     // Thread Safety
     private let lock = NSLock()
 
+    /// Function updateNodes.
     func updateNodes(_ newNodes: [CortexStream.NodeModel]) {
         lock.lock()
         defer { lock.unlock() }
@@ -500,6 +501,7 @@ class GraphRenderer: NSObject {
     var rotationY: Float = 0
     var zoom: Float = -200.0  // Move back to see the scene
 
+    /// Function updateCamera.
     func updateCamera(rotationX: Float, rotationY: Float, zoomDelta: Float) {
         lock.lock()
         defer { lock.unlock() }
@@ -512,6 +514,7 @@ class GraphRenderer: NSObject {
     var frameCount: Int = 0
     var lastLogTime: TimeInterval = 0
 
+    /// Function draw.
     func draw(in view: MTKView) {
         lock.lock()
         defer { lock.unlock() }
@@ -610,6 +613,7 @@ class GraphRenderer: NSObject {
 // --- Matrix Math Factory ---
 
 extension matrix_float4x4 {
+    /// Function translated.
     func translated(x: Float, y: Float, z: Float) -> matrix_float4x4 {
         var mat = self
         let col3 = self.columns.3
@@ -622,6 +626,7 @@ extension matrix_float4x4 {
         return mat
     }
 
+    /// Function rotated.
     func rotated(angle: Float, axis: SIMD3<Float>) -> matrix_float4x4 {
         // Simplified rotation around cardinality (production engines use quaternions)
         // This is a naive implementation sufficient for demo axis rotation.
@@ -650,6 +655,7 @@ extension matrix_float4x4 {
     }
 }
 
+/// Function matrix_perspective_right_hand.
 func matrix_perspective_right_hand(
     fovyRadians fovy: Float, aspectRatio: Float, nearZ: Float, farZ: Float
 ) -> matrix_float4x4 {

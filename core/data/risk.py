@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/risk.py
-# Risk Scoring Engine - Automated Asset Risk Calculation
-# ============================================================================
+"""Module risk: inline documentation for /Users/jason/Developer/sentinelforge/core/data/risk.py."""
 #
 # PURPOSE:
 # Automatically calculates a risk score for each target based on discovered issues.
@@ -31,7 +28,6 @@
 # - Reactive Updates: Recalculates whenever new issues are added
 # - Asset Aggregation: Groups issues by target to compute per-asset scores
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -52,6 +48,7 @@ SEVERITY_WEIGHTS = {
 
 
 class RiskEngine(Observable):
+    """Class RiskEngine."""
     scores_changed = Signal()
 
     def __init__(self):
@@ -61,6 +58,7 @@ class RiskEngine(Observable):
         self.recalculate()
 
     def recalculate(self):
+        """Function recalculate."""
         raw = issues_store.get_all()
         scores = defaultdict(float)
         for issue in raw:
@@ -72,6 +70,7 @@ class RiskEngine(Observable):
         self.scores_changed.emit()
 
     def get_scores(self) -> Dict[str, float]:
+        """Function get_scores."""
         return dict(self._scores)
 
 

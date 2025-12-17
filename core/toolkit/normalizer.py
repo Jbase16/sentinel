@@ -1,8 +1,4 @@
-# ============================================================================
-# core/toolkit/normalizer.py
-# TARGET NORMALIZATION - Convert user input to tool-specific formats
-# ============================================================================
-
+"""Module normalizer: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/normalizer.py."""
 import socket
 from urllib.parse import urlparse, urlunparse
 

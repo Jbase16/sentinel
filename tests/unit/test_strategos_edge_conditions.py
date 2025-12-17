@@ -1,7 +1,4 @@
-# ============================================================================
-# tests/unit/test_strategos_edge_conditions.py
-# Test Strategos Edge Conditions Module
-# ============================================================================
+"""Module test_strategos_edge_conditions: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_strategos_edge_conditions.py."""
 #
 # PURPOSE:
 # This module is part of the unit package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import asyncio
 
@@ -28,9 +24,11 @@ from core.scheduler.strategos import ScanContext, Strategos
 
 @pytest.mark.asyncio
 async def test_tool_cancellation_does_not_deadlock_intent_completion():
+    """AsyncFunction test_tool_cancellation_does_not_deadlock_intent_completion."""
     brain = Strategos(event_queue_maxsize=8)
 
     async def dispatch_tool(_: str):
+        """AsyncFunction dispatch_tool."""
         await asyncio.sleep(10)
         return []
 
@@ -59,9 +57,11 @@ async def test_tool_cancellation_does_not_deadlock_intent_completion():
 
 @pytest.mark.asyncio
 async def test_completed_tools_are_not_redispatched_for_same_intent():
+    """AsyncFunction test_completed_tools_are_not_redispatched_for_same_intent."""
     brain = Strategos(event_queue_maxsize=8)
 
     async def dispatch_tool(_: str):
+        """AsyncFunction dispatch_tool."""
         return []
 
     brain.context = ScanContext(target="example.com")
@@ -88,9 +88,11 @@ async def test_completed_tools_are_not_redispatched_for_same_intent():
 
 @pytest.mark.asyncio
 async def test_bounded_event_queue_does_not_block_tool_cleanup():
+    """AsyncFunction test_bounded_event_queue_does_not_block_tool_cleanup."""
     brain = Strategos(event_queue_maxsize=1)
 
     async def dispatch_tool(_: str):
+        """AsyncFunction dispatch_tool."""
         return []
 
     brain.context = ScanContext(target="example.com")
@@ -109,9 +111,11 @@ async def test_bounded_event_queue_does_not_block_tool_cleanup():
 
 @pytest.mark.asyncio
 async def test_bug_bounty_walk_away_uses_surface_delta():
+    """AsyncFunction test_bug_bounty_walk_away_uses_surface_delta."""
     brain = Strategos(event_queue_maxsize=8)
 
     async def dispatch_tool(tool: str):
+        """AsyncFunction dispatch_tool."""
         if tool == "subfinder":
             return [
                 {

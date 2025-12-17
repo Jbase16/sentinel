@@ -1,7 +1,3 @@
-# ============================================================================
-# core/engine/scan_orchestrator.py
-# Scan Orchestrator Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/engine/scan_orchestrator.py

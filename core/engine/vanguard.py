@@ -1,3 +1,4 @@
+"""Module vanguard: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/vanguard.py."""
 
 import asyncio
 import logging
@@ -76,6 +77,7 @@ class Vanguard:
     @staticmethod
     def _check_wordlists() -> bool:
         # Check common locations
+        """Function _check_wordlists."""
         try:
             from core.base.config import get_config
             config = get_config()

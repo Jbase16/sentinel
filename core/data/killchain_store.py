@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/killchain_store.py
-# Kill Chain Store - Attack Progression Tracking
-# ============================================================================
+"""Module killchain_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/killchain_store.py."""
 #
 # PURPOSE:
 # Maps discovered findings to phases of the Cyber Kill Chain to understand
@@ -28,7 +25,6 @@
 # - Root access gained → Installation
 # - Reverse shell established → Command & Control
 #
-# ============================================================================
 
 from core.utils.observer import Observable, Signal
 
@@ -48,10 +44,12 @@ class KillchainStore(Observable):
         self.session_id = session_id
 
     def replace_all(self, edges: list):
+        """Function replace_all."""
         self._edges = edges
         self.edges_changed.emit()
 
     def get_all(self):
+        """Function get_all."""
         return list(self._edges)
     
     def add_phase(self, phase: dict):

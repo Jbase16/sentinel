@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/LLMService.swift
-// Llmservice Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 import Combine
@@ -37,20 +32,24 @@ final class LLMService: ObservableObject {
     private var currentTask: Task<Void, Never>?
 
     // Stop any in-flight generation and reset flags.
+    /// Function cancel.
     func cancel() {
         currentTask?.cancel()
         currentTask = nil
         isGenerating = false
     }
 
+    /// Function updatePreferredModel.
     func updatePreferredModel(_ model: String) {
         preferredModel = model
     }
 
+    /// Function updateAutoRouting.
     func updateAutoRouting(_ enabled: Bool) {
         autoRoutingEnabled = enabled
     }
 
+    /// Function applyAvailability.
     func applyAvailability(connected: Bool, models: [String], defaultModel: String? = nil) {
         ollamaOnline = connected
         let cleaned = models.filter { !$0.isEmpty }
@@ -66,6 +65,7 @@ final class LLMService: ObservableObject {
 
     // Kick off a streaming generation call and deliver tokens to the caller.
     // onToken is invoked on the main actor so UI mutations are safe.
+    /// Function generate.
     func generate(prompt: String, onToken: @escaping (String) -> Void) {
         cancel()
 

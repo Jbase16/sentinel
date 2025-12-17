@@ -1,7 +1,4 @@
-# ============================================================================
-# core/base/config.py
-# Application Configuration Management
-# ============================================================================
+"""Module config: inline documentation for /Users/jason/Developer/sentinelforge/core/base/config.py."""
 #
 # PURPOSE:
 # This file defines all configuration settings for the entire application.
@@ -19,58 +16,8 @@
 # - Secrets should come from environment, not hardcoded in files
 # - Changing a setting in one place (here) affects the whole system
 #
-# ============================================================================
-
-from __future__ import annotations
-
-import os
-import secrets
-import logging
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional
-from functools import lru_cache
-
-logger = logging.getLogger(__name__)
-
-
-# ============================================================================
 # AI Engine Configuration
-# ============================================================================
-# Controls how the AI brain (Large Language Model) operates.
-# Sentinel uses local AI models running on your machine for security analysis.
-
-@dataclass(frozen=True)  # frozen=True makes this immutable (can't be changed after creation)
-class AIConfig:
-    # Which AI provider to use (we use "ollama" for local LLM hosting)
-    provider: str = "ollama"
-    
-    # Where the local AI server is running (localhost means "this computer")
-    # Port 11434 is Ollama's default port for serving AI models
-    ollama_url: str = "http://localhost:11434"
-    
-    # Which AI model to load (our fine-tuned security analysis model)
-    # "sentinel-9b-god-tier" is a custom 9-billion parameter model trained for security
-    model: str = "sentinel-9b-god-tier"
-    
-    # If AI fails, should we fall back to rule-based analysis? (safer but less smart)
-    fallback_enabled: bool = True
-    
-    # How long to wait for AI response before giving up (in seconds)
-    # 300 seconds = 5 minutes (analysis can be slow on complex outputs)
-    request_timeout: float = 300.0
-    
-    # How many AI requests can run at the same time (prevents overloading the GPU)
-    max_concurrent_requests: int = 2
-    
-    # Maximum text length the AI can process at once (in tokens, roughly words)
-    # 8000 tokens ≈ 6000 words of context
-    max_context_tokens: int = 8000
-
-
-# ============================================================================
 # Security & Access Control Configuration
-# ============================================================================
 # Controls who can access the API and what operations are allowed.
 # These defaults are permissive for local development - tighten for production.
 
@@ -79,6 +26,7 @@ class SecurityConfig:
     # Randomly generated secret token for API authentication
     # secrets.token_urlsafe creates a cryptographically random string (32 bytes = strong)
     # Each time the app starts, it gets a new token unless you set SENTINEL_API_TOKEN
+    """Class SecurityConfig."""
     api_token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     
     # Which websites can connect to our API (prevents random sites from accessing it)
@@ -123,6 +71,7 @@ class StorageConfig:
     # Base directory for all Sentinel data (~ means your home folder)
     # Example: /Users/yourname/.sentinelforge/ on Mac
     # Keeps all data organized in one hidden folder
+    """Class StorageConfig."""
     base_dir: Path = field(default_factory=lambda: Path.home() / ".sentinelforge")
     
     # Name of the SQLite database file (stores findings, sessions, evidence metadata)
@@ -142,16 +91,19 @@ class StorageConfig:
     # @property makes this look like a regular attribute but it's calculated dynamically
     @property
     def db_path(self) -> Path:
+        """Function db_path."""
         return self.base_dir / self.db_name  # / operator joins paths (OS-independent)
     
     # Property: Computed path to the evidence directory
     @property
     def evidence_path(self) -> Path:
+        """Function evidence_path."""
         return self.base_dir / self.evidence_dir
     
     # Property: Computed path to the reports directory
     @property
     def reports_path(self) -> Path:
+        """Function reports_path."""
         return self.base_dir / self.reports_dir
 
 
@@ -165,6 +117,7 @@ class ScanConfig:
     # How many security tools can run at the same time (parallelization)
     # 2 = balanced (doesn't overload system, still reasonably fast)
     # Higher = faster scans but more resource usage
+    """Class ScanConfig."""
     max_concurrent_tools: int = 2
     
     # How long to wait for a single tool to finish before killing it (in seconds)
@@ -204,6 +157,7 @@ class LogConfig:
     # INFO = important events (default, good balance)
     # WARNING = only potential problems
     # ERROR = only actual failures
+    """Class LogConfig."""
     level: str = "INFO"
     
     # Log message format template (Python's logging format string)
@@ -239,6 +193,7 @@ class LogConfig:
 @dataclass(frozen=True)
 class GhostConfig:
     # Minimum JS file size to consider for de-obfuscation (bytes)
+    """Class GhostConfig."""
     min_js_size: int = 500
     
     # Maximum JS file size to process (bytes) - larger files skipped for performance
@@ -259,6 +214,7 @@ class GhostConfig:
 @dataclass  # Not frozen because we need __post_init__ to create directories
 class SentinelConfig:
     # AI engine settings (which model, timeouts, etc.)
+    """Class SentinelConfig."""
     ai: AIConfig = field(default_factory=AIConfig)
     
     # Security/access control settings (authentication, rate limiting, etc.)
@@ -309,6 +265,7 @@ class SentinelConfig:
         # Build AI config from environment variables
         # os.getenv("VAR_NAME", "default") reads an environment variable, uses default if not set
         # This allows users to customize settings without editing code
+        """Function from_env."""
         ai = AIConfig(
             provider=os.getenv("SENTINEL_AI_PROVIDER", "ollama"),
             # AI Config - defaults to Sentinel Brain (local fine-tuned model on port 8009)

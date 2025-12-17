@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/shims/__init__.py
-#   Init   Module
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/__init__.py."""
 #
 # PURPOSE:
 # This module is part of the shims package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -34,7 +30,9 @@ REGISTRY: Dict[str, Callable[[str], None]] = {}
 
 
 def register(name: str) -> Callable[[Callable[[str], None]], Callable[[str], None]]:
+    """Function register."""
     def decorator(func: Callable[[str], None]) -> Callable[[str], None]:
+        """Function decorator."""
         REGISTRY[name] = func
         return func
 
@@ -42,6 +40,7 @@ def register(name: str) -> Callable[[Callable[[str], None]], Callable[[str], Non
 
 
 def run_cli() -> None:
+    """Function run_cli."""
     if len(sys.argv) < 3:
         print("[shim] Usage: python -m core.tool_shims <tool> <target>", file=sys.stderr)
         sys.exit(1)
@@ -55,12 +54,14 @@ def run_cli() -> None:
 
 
 def _clean_host(raw: str) -> str:
+    """Function _clean_host."""
     parsed = urlparse(raw if "://" in raw else f"//{raw}", scheme="https")
     host = parsed.hostname or raw
     return host.lower().strip("[]")
 
 
 def _ensure_url(raw: str) -> str:
+    """Function _ensure_url."""
     if not raw:
         return raw
     if "://" not in raw:
@@ -69,6 +70,7 @@ def _ensure_url(raw: str) -> str:
 
 
 def _safe_request(url: str, method: str = "GET", data: bytes | None = None, headers: Dict[str, str] | None = None, timeout: int = 15, allow_insecure: bool = True) -> Tuple[int | None, str, Dict[str, str]]:
+    """Function _safe_request."""
     req = urllib.request.Request(url, method=method)
     hdrs = headers or {}
     hdrs.setdefault("User-Agent", "AraUltra-Shim/1.0")
@@ -91,6 +93,7 @@ def _safe_request(url: str, method: str = "GET", data: bytes | None = None, head
 
 
 def _tls_probe(host: str, port: int = 443) -> Dict[str, str | float | int]:
+    """Function _tls_probe."""
     info: Dict[str, str | float | int] = {"host": host, "port": port}
     context = ssl.create_default_context()
     try:
@@ -113,11 +116,13 @@ def _tls_probe(host: str, port: int = 443) -> Dict[str, str | float | int]:
 
 
 def _print_json(data: Dict[str, object], prefix: str) -> None:
+    """Function _print_json."""
     print(f"[{prefix}] {json.dumps(data, default=str)}")
 
 
 @register("testssl")
 def shim_testssl(target: str) -> None:
+    """Function shim_testssl."""
     host = _clean_host(target)
     info = _tls_probe(host, 443)
     _print_json(info, "testssl-shim")
@@ -125,6 +130,7 @@ def shim_testssl(target: str) -> None:
 
 @register("sslyze")
 def shim_sslyze(target: str) -> None:
+    """Function shim_sslyze."""
     host = _clean_host(target)
     info = _tls_probe(host, 443)
     info["analysis"] = "sslyze shim"
@@ -133,6 +139,7 @@ def shim_sslyze(target: str) -> None:
 
 @register("assetfinder")
 def shim_assetfinder(target: str) -> None:
+    """Function shim_assetfinder."""
     domain = _clean_host(target)
     candidates = ["", "www", "api", "dev", "staging", "admin", "beta", "test", "portal", "internal"]
     results: List[Tuple[str, str]] = []
@@ -158,6 +165,7 @@ def shim_assetfinder(target: str) -> None:
 
 @register("hakrawler")
 def shim_hakrawler(target: str) -> None:
+    """Function shim_hakrawler."""
     url = _ensure_url(target)
     status, body, _ = _safe_request(url)
     if status is None:
@@ -176,6 +184,7 @@ def shim_hakrawler(target: str) -> None:
 
 @register("dnsx")
 def shim_dnsx(target: str) -> None:
+    """Function shim_dnsx."""
     host = _clean_host(target)
     try:
         infos = socket.getaddrinfo(host, None)
@@ -205,6 +214,7 @@ TAKEOVER_PATTERNS = [
 
 @register("subjack")
 def shim_subjack(target: str) -> None:
+    """Function shim_subjack."""
     host = _clean_host(target)
     hits = []
     for scheme in ("https", "http"):
@@ -224,6 +234,7 @@ def shim_subjack(target: str) -> None:
 
 @register("wfuzz")
 def shim_wfuzz(target: str) -> None:
+    """Function shim_wfuzz."""
     url = _ensure_url(target)
     payloads = [
         "../etc/passwd",
@@ -247,6 +258,7 @@ def shim_wfuzz(target: str) -> None:
 
 @register("pshtt")
 def shim_pshtt(target: str) -> None:
+    """Function shim_pshtt."""
     host = _clean_host(target)
     http_status, http_body, http_headers = _safe_request(f"http://{host}", method="HEAD", allow_insecure=True)
     https_status, https_body, https_headers = _safe_request(f"https://{host}", method="HEAD", allow_insecure=True)
@@ -262,6 +274,7 @@ def shim_pshtt(target: str) -> None:
 
 @register("eyewitness")
 def shim_eyewitness(target: str) -> None:
+    """Function shim_eyewitness."""
     url = _ensure_url(target)
     status, body, _ = _safe_request(url)
     if status is None:
@@ -276,6 +289,7 @@ def shim_eyewitness(target: str) -> None:
 
 @register("hakrevdns")
 def shim_hakrevdns(target: str) -> None:
+    """Function shim_hakrevdns."""
     host = _clean_host(target)
     try:
         infos = socket.getaddrinfo(host, None)
@@ -295,6 +309,7 @@ def shim_hakrevdns(target: str) -> None:
 
 @register("httprobe")
 def shim_httprobe(target: str) -> None:
+    """Function shim_httprobe."""
     host = _clean_host(target)
     for scheme in ("http", "https"):
         status, _, _ = _safe_request(f"{scheme}://{host}", allow_insecure=True)
@@ -306,6 +321,7 @@ def shim_httprobe(target: str) -> None:
 
 @register("nikto")
 def shim_nikto(target: str) -> None:
+    """Function shim_nikto."""
     url = _ensure_url(target)
     status, body, headers = _safe_request(url, allow_insecure=True)
     if status is None:

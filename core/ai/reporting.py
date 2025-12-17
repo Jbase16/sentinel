@@ -1,7 +1,4 @@
-# ============================================================================
-# core/ai/reporting.py
-# AI-Powered Security Report Generation
-# ============================================================================
+"""Module reporting: inline documentation for /Users/jason/Developer/sentinelforge/core/ai/reporting.py."""
 #
 # PURPOSE:
 # Transforms raw security findings into professional penetration testing reports.
@@ -26,7 +23,6 @@
 # - AI generates professional Markdown content
 # - Falls back to template-based content if AI unavailable
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -48,6 +44,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ReportBundle:
+    """Class ReportBundle."""
     folder: str
     markdown_path: str
     json_path: str
@@ -104,6 +101,7 @@ class ReportComposer:
         return self.ai.client.generate(user_prompt, system_prompt) or "AI Generation failed."
 
     def _gather_context(self) -> Dict:
+        """Function _gather_context."""
         return {
             "findings": findings_store.get_all(),
             "issues": issues_store.get_all(),
@@ -115,6 +113,7 @@ class ReportComposer:
     # --- Prompts ---
 
     def _prompt_exec_summary(self, ctx: Dict) -> str:
+        """Function _prompt_exec_summary."""
         issues = ctx.get("issues", [])
         return (
             f"Write an Executive Summary for a security assessment.\n"
@@ -125,6 +124,7 @@ class ReportComposer:
         )
 
     def _prompt_attack_narrative(self, ctx: Dict) -> str:
+        """Function _prompt_attack_narrative."""
         chains = ctx.get("reasoning", {}).get("attack_paths", [])
         if not chains:
             return "No complete attack chains were verified. Describe individual vectors found."
@@ -138,6 +138,7 @@ class ReportComposer:
         )
 
     def _prompt_technical(self, ctx: Dict) -> str:
+        """Function _prompt_technical."""
         findings = ctx.get("findings", [])
         return (
             f"Draft the Technical Findings section.\n"
@@ -147,6 +148,7 @@ class ReportComposer:
         )
 
     def _prompt_risk(self, ctx: Dict) -> str:
+        """Function _prompt_risk."""
         scores = ctx.get("risk", {})
         return (
             f"Provide a Risk Assessment based on these asset scores: {json.dumps(scores, indent=2)}\n"
@@ -154,6 +156,7 @@ class ReportComposer:
         )
 
     def _prompt_remediation(self, ctx: Dict) -> str:
+        """Function _prompt_remediation."""
         recs = ctx.get("reasoning", {}).get("recommended_phases", [])
         return (
             "Draft a Remediation Roadmap.\n"
@@ -165,11 +168,13 @@ class ReportComposer:
     # --- Fallbacks ---
 
     def _fallback_content(self, section: str, ctx: Dict) -> str:
+        """Function _fallback_content."""
         return f"## {section.replace('_', ' ').title()}\n\n*AI Unavailable. Raw data stats: {len(ctx.get('findings', []))} findings.*"
 
 
 # Legacy wrapper for backward compatibility
 def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
+    """Function create_report_bundle."""
     composer = ReportComposer()
     full_report = ""
     for section in composer.SECTIONS:

@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Models/ChatModels.swift
-// Chatmodels Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 

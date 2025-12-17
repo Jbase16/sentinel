@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_assemblage.py
-# Verify Assemblage Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_assemblage.py
@@ -24,6 +19,7 @@ import os
 import sys
 
 def check_file(path, description):
+    """Function check_file."""
     if os.path.exists(path):
         print(f"[PASS] {description} found at {os.path.basename(path)}")
         return True
@@ -32,6 +28,7 @@ def check_file(path, description):
         return False
 
 def main():
+    """Function main."""
     print("[*] Verifying Phase 7: Assemblage...")
     
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

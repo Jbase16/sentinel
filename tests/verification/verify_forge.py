@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_forge.py
-# Verify Forge Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_forge.py
@@ -36,6 +31,7 @@ from core.forge.sandbox import SandboxRunner
 from core.ai.ai_engine import AIEngine
 
 async def test_forge():
+    """AsyncFunction test_forge."""
     print("[*] Testing JIT Forge...")
     
     compiler = ExploitCompiler.instance()

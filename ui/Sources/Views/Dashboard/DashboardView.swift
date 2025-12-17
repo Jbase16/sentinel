@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Dashboard/DashboardView.swift
-// Dashboardview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,10 +10,10 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
+/// Struct DashboardView.
 struct DashboardView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
@@ -157,6 +153,7 @@ struct DashboardView: View {
         }
     }
 
+    /// Function calculateRisk.
     func calculateRisk() -> String {
         // Placeholder for real risk score from Python
         let issues = appState.apiResults?.issues ?? []
@@ -167,6 +164,7 @@ struct DashboardView: View {
         return "\(score)"
     }
 
+    /// Function riskColor.
     func riskColor() -> Color {
         let score = Int(calculateRisk()) ?? 0
         if score > 50 { return .red }
@@ -175,6 +173,7 @@ struct DashboardView: View {
     }
 }
 
+/// Struct StatCard.
 struct StatCard: View {
     let title: String
     let value: String
@@ -227,6 +226,7 @@ struct StatCard: View {
 }
 
 // MARK: - System Status Card
+/// Struct SystemStatusCard.
 struct SystemStatusCard: View {
     let title: String
     let isConnected: Bool
@@ -269,6 +269,7 @@ struct SystemStatusCard: View {
     }
 }
 
+/// Struct IssueRow.
 struct IssueRow: View {
     let issue: JSONDict
 
@@ -301,6 +302,7 @@ struct IssueRow: View {
         .textSelection(.enabled)
     }
 
+    /// Function severityColor.
     func severityColor(_ sev: String) -> Color {
         switch sev {
         case "CRITICAL": return .purple

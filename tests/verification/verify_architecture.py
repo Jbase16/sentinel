@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_architecture.py
-# Verify Architecture Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_architecture.py
@@ -38,6 +33,7 @@ from core.data.db import Database
 from core.toolkit.tools import TOOLS
 
 async def test_session_isolation():
+    """AsyncFunction test_session_isolation."""
     print("[*] Testing Session Isolation...")
     
     # Session A
@@ -77,6 +73,7 @@ async def test_session_isolation():
     print("    [OK] Session B has zero findings (Isolation Verified).")
 
 async def test_scanner_integration():
+    """AsyncFunction test_scanner_integration."""
     print("[*] Testing Scanner Engine Integration...")
     session = ScanSession("scanme.nmap.org")
     engine = ScannerEngine(session=session)

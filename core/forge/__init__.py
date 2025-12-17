@@ -1,7 +1,4 @@
-# ============================================================================
-# core/forge/__init__.py
-# Exploit Forge Package - Just-In-Time Exploit Generation
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/forge/__init__.py."""
 #
 # PURPOSE:
 # Generates and tests proof-of-concept exploits for discovered vulnerabilities.
@@ -33,7 +30,6 @@
 # - **Sandbox**: Isolated environment (Docker container, VM, etc.)
 # - **Proof-of-Concept**: Demonstrates vulnerability without causing harm
 #
-# ============================================================================
 
 from .compiler import ExploitCompiler
 from .sandbox import SandboxRunner

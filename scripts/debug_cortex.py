@@ -1,7 +1,4 @@
-# ============================================================================
-# scripts/debug_cortex.py
-# Debug Cortex Module
-# ============================================================================
+"""Module debug_cortex: inline documentation for /Users/jason/Developer/sentinelforge/scripts/debug_cortex.py."""
 #
 # PURPOSE:
 # This module is part of the scripts package in SentinelForge.
@@ -14,13 +11,13 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import asyncio
 import websockets
 import json
 
 async def monitor_cortex():
+    """AsyncFunction monitor_cortex."""
     uri = "ws://127.0.0.1:8765/ws/graph"
     print(f"Connecting to {uri}...")
     try:

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/recon/behavioral.py
-# Behavioral Module
-# ============================================================================
+"""Module behavioral: inline documentation for /Users/jason/Developer/sentinelforge/core/recon/behavioral.py."""
 #
 # PURPOSE:
 # This module is part of the recon package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/recon.py — Reconnaissance and behavioral probes
 
@@ -60,6 +56,7 @@ class PassiveReconEngine:
     }
 
     async def run_all(self, target: str):
+        """AsyncFunction run_all."""
         results = []
 
         for tool, meta in self.TOOLS.items():
@@ -86,6 +83,7 @@ class PassiveReconEngine:
         return results
 
     async def parse_httpx(self, target: str, output: str):
+        """AsyncFunction parse_httpx."""
         findings = []
         for line in output.splitlines():
             if not line.strip():
@@ -114,6 +112,7 @@ class PassiveReconEngine:
     # ... rest unchanged ...
 
     async def parse_dnsx(self, target: str, output: str):
+        """AsyncFunction parse_dnsx."""
         findings = []
         for line in output.splitlines():
             if not line.strip():
@@ -138,6 +137,7 @@ class PassiveReconEngine:
         return findings
 
     async def parse_sslscan(self, target: str, output: str):
+        """AsyncFunction parse_sslscan."""
         findings = []
 
         if "SSLv2" in output or "SSLv3" in output:
@@ -173,6 +173,7 @@ ReconEngine = PassiveReconEngine  # backward compatibility
 
 @dataclass
 class RequestVariant:
+    """Class RequestVariant."""
     name: str
     description: str
     method: str = "GET"
@@ -257,6 +258,7 @@ class BehavioralRecon:
             self._ssl_context.verify_mode = ssl.CERT_NONE
 
     async def run(self, target: str) -> List[dict]:
+        """AsyncFunction run."""
         url = self._normalize_target(target)
         variant_results = await self._execute_variants(url)
         findings = self._analyze_differentials(variant_results, url)
@@ -265,6 +267,7 @@ class BehavioralRecon:
         return findings
 
     async def _execute_variants(self, url: str) -> List[Dict[str, object]]:
+        """AsyncFunction _execute_variants."""
         loop = asyncio.get_running_loop()
         tasks = []
         for variant in self.VARIANTS:
@@ -280,6 +283,7 @@ class BehavioralRecon:
         return results
 
     def _perform_request(self, url: str, variant: RequestVariant) -> Dict[str, object]:
+        """Function _perform_request."""
         start = time.perf_counter()
         mutated_url = self._apply_variant_url(url, variant)
         req = urllib.request.Request(mutated_url, method=variant.method)
@@ -332,6 +336,7 @@ class BehavioralRecon:
             }
 
     def _analyze_differentials(self, results: List[Dict[str, object]], target: str) -> List[dict]:
+        """Function _analyze_differentials."""
         findings: List[dict] = []
         baseline = next((r for r in results if r["variant"] == "baseline" and r.get("status") is not None), None)
         if not baseline:
@@ -434,6 +439,7 @@ class BehavioralRecon:
 
     @staticmethod
     def _normalize_target(target: str) -> str:
+        """Function _normalize_target."""
         parsed = urlparse(target)
         if not parsed.scheme:
             return f"https://{target}"
@@ -441,6 +447,7 @@ class BehavioralRecon:
 
     @staticmethod
     def _make_finding(target: str, ftype: str, severity: str, message: str, proof: str, tags: List[str], variant: Optional[str] = None, families: Optional[List[str]] = None, metadata: Optional[Dict[str, object]] = None):
+        """Function _make_finding."""
         metadata = metadata.copy() if metadata else {}
         if variant:
             metadata.setdefault("variant", variant)
@@ -458,6 +465,7 @@ class BehavioralRecon:
         }
 
     def _apply_variant_url(self, url: str, variant: RequestVariant) -> str:
+        """Function _apply_variant_url."""
         if variant.url_transform:
             return variant.url_transform(url)
         if not variant.query_suffix:
@@ -470,6 +478,7 @@ class BehavioralRecon:
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
     def _record_evidence(self, variant: str, url: str, status: Optional[int], headers: Dict[str, str], body: bytes) -> Optional[str]:
+        """Function _record_evidence."""
         host = urlparse(url).netloc or "behavioral"
         preview = body[:2000].decode("utf-8", errors="ignore")
         lines = [
@@ -492,6 +501,7 @@ class BehavioralRecon:
             return None
 
     async def _run_tls_probe(self, url: str) -> List[dict]:
+        """AsyncFunction _run_tls_probe."""
         parsed = urlparse(url)
         if parsed.scheme != "https" or not parsed.hostname:
             return []
@@ -580,6 +590,7 @@ class BehavioralRecon:
         return findings
 
     async def _run_timing_phase(self, url: str) -> List[dict]:
+        """AsyncFunction _run_timing_phase."""
         samples = await self._collect_timing_samples(url)
         if len(samples) < 5:
             return []
@@ -608,6 +619,7 @@ class BehavioralRecon:
         return findings
 
     async def _collect_timing_samples(self, url: str, count: int = 8) -> List[float]:
+        """AsyncFunction _collect_timing_samples."""
         loop = asyncio.get_running_loop()
         tasks = [loop.run_in_executor(None, self._time_single_request, url) for _ in range(count)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -620,6 +632,7 @@ class BehavioralRecon:
         return samples
 
     def _time_single_request(self, url: str) -> Optional[float]:
+        """Function _time_single_request."""
         req = urllib.request.Request(url, method="GET")
         start = time.perf_counter()
         try:

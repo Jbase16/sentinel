@@ -66,6 +66,7 @@ class TestPhaseTransitionEmission:
         
         # Mock tool dispatcher (no actual tools)
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             return []
         
         # Run a minimal mission (will hit phase transitions)
@@ -104,6 +105,7 @@ class TestIntentTransitionEmission:
         """Every intent execution should create an INTENT_TRANSITION decision."""
         
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             return []
         
         await strategos_with_events.run_mission(
@@ -142,6 +144,7 @@ class TestToolSelectionEmission:
         """Tool selection should emit TOOL_SELECTION decisions."""
         
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             await asyncio.sleep(0.01)  # Simulate work
             return []
         
@@ -176,6 +179,7 @@ class TestToolSelectionEmission:
         """Blocked/disabled tools should emit TOOL_REJECTION decisions."""
         
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             return []
         
         # Bug bounty mode disables certain tools
@@ -206,6 +210,7 @@ class TestEarlyTerminationEmission:
         
         async def mock_dispatch(tool: str) -> List[Dict]:
             # Return no findings to trigger Walk Away
+            """AsyncFunction mock_dispatch."""
             return []
         
         await strategos_with_events.run_mission(
@@ -236,6 +241,7 @@ class TestDecisionEventCorrelation:
         """Every decision should result in at least one event."""
         
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             return []
         
         await strategos_with_events.run_mission(
@@ -265,6 +271,7 @@ class TestDecisionHierarchy:
         """Tool selection decisions should be children of intent decisions."""
         
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             return []
         
         await strategos_with_events.run_mission(
@@ -307,6 +314,7 @@ class TestDecisionCompleteness:
         """
         
         async def mock_dispatch(tool: str) -> List[Dict]:
+            """AsyncFunction mock_dispatch."""
             return []
         
         # Clear event store to get a clean baseline
@@ -346,6 +354,7 @@ async def test_dump_decision_trace_for_inspection(strategos_with_events, decisio
     """
     
     async def mock_dispatch(tool: str) -> List[Dict]:
+        """AsyncFunction mock_dispatch."""
         return []
     
     await strategos_with_events.run_mission(

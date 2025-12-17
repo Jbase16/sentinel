@@ -1,7 +1,3 @@
-# ============================================================================
-# core/ghost/logic.py
-# Logic Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the ghost package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/ghost/logic.py

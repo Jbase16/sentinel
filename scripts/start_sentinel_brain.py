@@ -1,7 +1,3 @@
-# ============================================================================
-# scripts/start_sentinel_brain.py
-# Start Sentinel Brain Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the scripts package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 #!/usr/bin/env python3
 """
@@ -47,6 +42,7 @@ model = None
 tokenizer = None
 
 def ensure_model_loaded():
+    """Function ensure_model_loaded."""
     global model, tokenizer
     if model is None:
         import mlx.core as mx
@@ -56,11 +52,14 @@ def ensure_model_loaded():
         print("✅ Model Loaded. Surgical Adapter Active.")
 
 class SentinelHandler(BaseHTTPRequestHandler):
+    """Class SentinelHandler."""
     def log_message(self, format, *args):
         # Suppress default logging, use our logger instead
+        """Function log_message."""
         pass
     
     def do_GET(self):
+        """Function do_GET."""
         if self.path == "/api/tags":
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -77,6 +76,7 @@ class SentinelHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        """Function do_POST."""
         if self.path == "/api/generate":
             ensure_model_loaded()
             from mlx_lm import generate
@@ -117,6 +117,7 @@ class SentinelHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
 def run(server_class=HTTPServer, handler_class=SentinelHandler, port=PORT):
+    """Function run."""
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     logger.info(f"🚀 Sentinel Brain active at http://localhost:{port}")

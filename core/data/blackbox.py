@@ -1,3 +1,4 @@
+"""Module blackbox: inline documentation for /Users/jason/Developer/sentinelforge/core/data/blackbox.py."""
 
 import asyncio
 import logging
@@ -23,6 +24,7 @@ class BlackBox:
     
     @staticmethod
     def instance():
+        """Function instance."""
         if BlackBox._instance is None:
             BlackBox._instance = BlackBox()
         return BlackBox._instance

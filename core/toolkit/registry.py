@@ -1,16 +1,9 @@
-# ============================================================================
-# core/toolkit/registry.py
-# TOOL DEFINITIONS - The heart of the tool registry
-# ============================================================================
-
+"""Module registry: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/registry.py."""
 from typing import Dict, List
 from pathlib import Path
 
 from core.toolkit.normalizer import normalize_target
 
-# ============================================================================
-# FILE PATHS - Wordlist locations for brute-force tools
-# ============================================================================
 BASE_DIR = Path(__file__).resolve().parents[1]  # Navigate up to core/
 WORDLIST_DIR = BASE_DIR / "assets" / "wordlists"
 DEFAULT_WORDLIST = WORDLIST_DIR / "common.txt"
@@ -29,9 +22,6 @@ def get_wordlist_path(name: str = "common.txt") -> str:
 COMMON_WORDLIST = get_wordlist_path("common.txt")
 
 
-# ============================================================================
-# TOOL DEFINITIONS
-# ============================================================================
 # Each tool is defined as a dictionary with:
 # - label: Human-readable description (shown in UI)
 # - cmd: Command-line arguments as a list (with {target} placeholder)

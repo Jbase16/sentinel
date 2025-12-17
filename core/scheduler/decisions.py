@@ -1,7 +1,4 @@
-# ============================================================================
-# core/scheduler/decisions.py
-# Decision Emission Layer - First-Class Decision Objects with Auto-Event Emission
-# ============================================================================
+"""Module decisions: inline documentation for /Users/jason/Developer/sentinelforge/core/scheduler/decisions.py."""
 #
 # PURPOSE:
 # Transform implicit control-flow decisions into explicit, observable, replayable events.
@@ -45,7 +42,6 @@
 #     )
 #     # Event automatically emitted when decision is committed
 # ```
-# ============================================================================
 
 from __future__ import annotations
 

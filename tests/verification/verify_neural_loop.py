@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_neural_loop.py
-# Verify Neural Loop Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_neural_loop.py
@@ -46,6 +41,7 @@ MOCK_AI_RESPONSE = json.dumps({
 })
 
 async def test_neural_pipeline():
+    """AsyncFunction test_neural_pipeline."""
     print("[*] Init Neural Pipeline Test")
     session = ScanSession("target-api.com")
     

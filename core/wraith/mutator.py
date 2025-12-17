@@ -1,7 +1,3 @@
-# ============================================================================
-# core/wraith/mutator.py
-# Mutator Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the wraith package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/wraith/mutator.py
@@ -96,11 +91,13 @@ class PayloadMutator:
 
     @staticmethod
     def _hex_encode(payload: str) -> str:
+        """Function _hex_encode."""
         return "".join(f"%{ord(c):02x}" for c in payload)
 
     @staticmethod
     def _unicode_bypass(payload: str) -> str:
         # Replace common characters with lookalikes (basic set)
+        """Function _unicode_bypass."""
         replacements = {'<': '＜', '>': '＞', "'": '＇', '"': '＂'}
         return "".join(replacements.get(c, c) for c in payload)
 

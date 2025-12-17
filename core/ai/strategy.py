@@ -1,7 +1,4 @@
-# ============================================================================
-# core/ai/strategy.py
-# Neural Strategy Engine - AI-Powered Attack Vector Discovery
-# ============================================================================
+"""Module strategy: inline documentation for /Users/jason/Developer/sentinelforge/core/ai/strategy.py."""
 #
 # PURPOSE:
 # Analyzes intercepted network traffic (from Ghost proxy) and uses AI to hypothesize
@@ -28,7 +25,6 @@
 # WORKFLOW:
 # Ghost captures traffic → Strategy analyzes → Wraith executes test payloads
 #
-# ============================================================================
 
 import json
 import logging
@@ -43,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AttackVector:
+    """Class AttackVector."""
     vuln_class: str  # e.g., "IDOR", "SQLi", "XSS"
     parameter: str   # e.g., "user_id"
     hypothesis: str  # e.g., "The id looks sequential, user 5 might access user 4."

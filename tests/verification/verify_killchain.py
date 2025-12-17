@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_killchain.py
-# Verify Killchain Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_killchain.py
@@ -44,6 +39,7 @@ MOCK_AI_RESPONSE = json.dumps({
 })
 
 async def test_full_killchain():
+    """AsyncFunction test_full_killchain."""
     print("[*] Init Full Killchain Test")
     session = ScanSession("target-bank.com")
     

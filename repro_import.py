@@ -1,3 +1,4 @@
+"""Module repro_import: inline documentation for /Users/jason/Developer/sentinelforge/repro_import.py."""
 import sys
 import os
 sys.path.append(os.getcwd())

@@ -1,8 +1,10 @@
+"""Module test_fingerprinters: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_fingerprinters.py."""
 import pytest
 from core.toolkit.fingerprinters import ContentHasher, FaviconHasher
 
 def test_simhash_similarity():
     # Identical text should match
+    """Function test_simhash_similarity."""
     h1 = ContentHasher.simhash("This is a test page for SentinelForge")
     h2 = ContentHasher.simhash("This is a test page for SentinelForge")
     assert h1 == h2
@@ -19,6 +21,7 @@ def test_favicon_hash():
     # Shodan format check
     # MMH3 of (base64 of bytes)
     # Empty bytes
+    """Function test_favicon_hash."""
     assert FaviconHasher.calculate(b"") == "0" 
     
     # Specific known value (if we had one).

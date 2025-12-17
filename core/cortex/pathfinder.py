@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/pathfinder.py
-# Cartographer Engine: Graph Algorithms & Strategy
-# ============================================================================
+"""Module pathfinder: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/pathfinder.py."""
 #
 # PURPOSE:
 # The tactical brain of the graph. Uses network theory to find:
@@ -12,7 +9,6 @@
 # DEPENDENCIES:
 # - networkx: For graph algorithms.
 #
-# ============================================================================
 
 import networkx as nx
 from typing import List, Dict, Any, Optional, Set, Tuple

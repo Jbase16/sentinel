@@ -1,7 +1,3 @@
-# ============================================================================
-# core/ghost/proxy.py
-# Proxy Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the ghost package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/ghost/proxy.py

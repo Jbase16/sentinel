@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/db.py
-# Database Layer - Persistent Storage for Scan Sessions and Findings
-# ============================================================================
+"""Module db: inline documentation for /Users/jason/Developer/sentinelforge/core/data/db.py."""
 #
 # PURPOSE:
 # Provides the database layer for storing all scan data persistently.
@@ -31,7 +28,6 @@
 # - WAL mode enables concurrent readers
 # - Async prevents blocking the event loop
 #
-# ============================================================================
 
 import aiosqlite
 import json
@@ -46,10 +42,12 @@ from core.base.config import get_config
 logger = logging.getLogger(__name__)
 
 class Database:
+    """Class Database."""
     _instance = None
 
     @staticmethod
     def instance():
+        """Function instance."""
         if Database._instance is None:
             Database._instance = Database()
         return Database._instance
@@ -69,6 +67,7 @@ class Database:
         self.blackbox = BlackBox.instance()
 
     async def init(self):
+        """AsyncFunction init."""
         if self._initialized:
             return
             
@@ -107,6 +106,7 @@ class Database:
                 logger.error(f"[Database] Error closing connection: {e}")
 
     async def _create_tables(self):
+        """AsyncFunction _create_tables."""
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -195,6 +195,7 @@ class Database:
             return cursor
 
     async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
+        """AsyncFunction fetch_all."""
         if not self._initialized:
             await self.init()
         async with self._db_lock:
@@ -208,6 +209,7 @@ class Database:
         self.blackbox.fire_and_forget(self._save_session_impl, session_data)
 
     async def _save_session_impl(self, session_data: Dict[str, Any]):
+        """AsyncFunction _save_session_impl."""
         await self._execute_internal("""
             INSERT OR REPLACE INTO sessions (id, target, status, start_time, logs)
             VALUES (?, ?, ?, ?, ?)
@@ -222,9 +224,11 @@ class Database:
     # -------- Findings Methods --------
 
     async def save_finding(self, finding: Dict[str, Any], session_id: Optional[str] = None):
+        """AsyncFunction save_finding."""
         self.blackbox.fire_and_forget(self._save_finding_impl, finding, session_id)
 
     async def _save_finding_impl(self, finding: Dict[str, Any], session_id: Optional[str] = None):
+        """AsyncFunction _save_finding_impl."""
         import hashlib
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
@@ -245,9 +249,11 @@ class Database:
     # -------- Issues Methods --------
 
     async def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None):
+        """AsyncFunction save_issue."""
         self.blackbox.fire_and_forget(self._save_issue_impl, issue, session_id)
 
     async def _save_issue_impl(self, issue: Dict[str, Any], session_id: Optional[str] = None):
+        """AsyncFunction _save_issue_impl."""
         iid = issue.get("id") or issue.get("title", "unknown")
         blob = json.dumps(issue)
         
@@ -266,9 +272,11 @@ class Database:
     # -------- Evidence Methods --------
 
     async def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
+        """AsyncFunction save_evidence."""
         self.blackbox.fire_and_forget(self._save_evidence_impl, evidence_data, session_id)
 
     async def _save_evidence_impl(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
+        """AsyncFunction _save_evidence_impl."""
         await self._execute_internal("""
             INSERT INTO evidence (session_id, tool, raw_output, metadata, timestamp)
             VALUES (?, ?, ?, ?, datetime('now'))
@@ -281,10 +289,12 @@ class Database:
 
     async def update_evidence(self, evidence_id: int, summary: Optional[str] = None, 
                               findings: Optional[List] = None, session_id: Optional[str] = None):
+         """AsyncFunction update_evidence."""
          self.blackbox.fire_and_forget(self._update_evidence_impl, evidence_id, summary, findings, session_id)
 
     async def _update_evidence_impl(self, evidence_id: int, summary: Optional[str] = None, 
                                     findings: Optional[List] = None, session_id: Optional[str] = None):
+        """AsyncFunction _update_evidence_impl."""
         updates = []
         params = []
         
@@ -310,6 +320,7 @@ class Database:
     # -------- Read Methods (Safe to run directly) --------
 
     async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
+        """AsyncFunction get_findings."""
         query = "SELECT data FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
         params = (session_id,)
         if session_id is None:
@@ -319,9 +330,11 @@ class Database:
         return [json.loads(row[0]) for row in rows]
 
     async def get_all_findings(self) -> List[Dict]:
+        """AsyncFunction get_all_findings."""
         return await self.get_findings(None)
 
     async def get_issues(self, session_id: Optional[str] = None) -> List[Dict]:
+        """AsyncFunction get_issues."""
         query = "SELECT data FROM issues WHERE session_id = ? ORDER BY timestamp DESC"
         params = (session_id,)
         if session_id is None:
@@ -331,9 +344,11 @@ class Database:
         return [json.loads(row[0]) for row in rows]
 
     async def get_all_issues(self) -> List[Dict]:
+        """AsyncFunction get_all_issues."""
         return await self.get_issues(None)
 
     async def get_evidence(self, session_id: Optional[str] = None) -> List[Dict]:
+        """AsyncFunction get_evidence."""
         query = "SELECT id, tool, raw_output, metadata, timestamp FROM evidence"
         params = ()
         if session_id is not None:
@@ -356,4 +371,5 @@ class Database:
         return results
 
     async def get_all_evidence(self) -> List[Dict]:
+        """AsyncFunction get_all_evidence."""
         return await self.get_evidence(None)

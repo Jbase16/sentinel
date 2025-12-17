@@ -1,7 +1,3 @@
-# ============================================================================
-# core/ghost/flow.py
-# Flow Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the ghost package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/ghost/flow.py
@@ -27,6 +22,7 @@ import uuid
 import time
 
 class FlowStep:
+    """Class FlowStep."""
     def __init__(self, method: str, url: str, params: Dict, headers: Dict):
         self.id = str(uuid.uuid4())
         self.method = method
@@ -47,10 +43,12 @@ class UserFlow:
         self.auth_tokens: Dict[str, str] = {} # Extracted tokens
 
     def add_step(self, step: FlowStep):
+        """Function add_step."""
         self.steps.append(step)
 
     def extract_tokens(self, headers: Dict):
         # Heuristic: Find Bearer/Cookie
+        """Function extract_tokens."""
         for k, v in headers.items():
             if k.lower() in ["authorization", "cookie", "x-csrf-token"]:
                 self.auth_tokens[k] = v
@@ -63,6 +61,7 @@ class FlowMapper:
     
     @staticmethod
     def instance():
+        """Function instance."""
         if FlowMapper._instance is None:
             FlowMapper._instance = FlowMapper()
         return FlowMapper._instance
@@ -71,11 +70,13 @@ class FlowMapper:
         self.active_flows: Dict[str, UserFlow] = {}
 
     def start_recording(self, flow_name: str) -> str:
+        """Function start_recording."""
         fid = str(uuid.uuid4())
         self.active_flows[fid] = UserFlow(flow_name)
         return fid
 
     def record_request(self, flow_id: str, method, url, params, headers):
+        """Function record_request."""
         if flow_id in self.active_flows:
             step = FlowStep(method, url, params, headers)
             self.active_flows[flow_id].add_step(step)

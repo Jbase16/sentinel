@@ -1,9 +1,11 @@
+"""Module test_correlator: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_correlator.py."""
 
 import pytest
 from core.cortex.correlator import GraphCorrelator
 
 def test_correlator_favicon_match():
     # Setup 3 nodes: A and B share favicon, C does not
+    """Function test_correlator_favicon_match."""
     nodes = [
         {"id": "A", "attributes": {"favicon_hash": "123456"}},
         {"id": "B", "attributes": {"favicon_hash": "123456"}},
@@ -24,6 +26,7 @@ def test_correlator_favicon_match():
 
 def test_correlator_multiple_matches():
     # A and B share favicon, B and C share SimHash
+    """Function test_correlator_multiple_matches."""
     nodes = [
         {"id": "A", "attributes": {"favicon_hash": "123456", "simhash": "abc"}},
         {"id": "B", "attributes": {"favicon_hash": "123456", "simhash": "xyz"}},

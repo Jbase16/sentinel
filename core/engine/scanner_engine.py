@@ -1,7 +1,4 @@
-# ============================================================================
-# core/engine/scanner_engine.py
-# Scanner Engine Module
-# ============================================================================
+"""Module scanner_engine: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/scanner_engine.py."""
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/scanner_engine.py — macOS-compatible active scanner engine
 from __future__ import annotations
@@ -457,9 +453,11 @@ class ScannerEngine:
     # Helpers
     # ----------------------------------------------------------------------
     def _detect_installed(self) -> Dict[str, Dict[str, object]]:
+        """Function _detect_installed."""
         return get_installed_tools()
 
     def _normalize_findings(self, items: List[dict] | None) -> List[dict]:
+        """Function _normalize_findings."""
         normalized: List[dict] = []
         if not items:
             return normalized
@@ -493,6 +491,7 @@ class ScannerEngine:
         return list(self._last_results)
 
     def _build_recon_edges(self, findings: List[dict]) -> List[dict]:
+        """Function _build_recon_edges."""
         edges: List[dict] = []
         for item in findings:
             families = item.get("families", [])
@@ -515,6 +514,7 @@ class ScannerEngine:
         return edges
 
     def _record_recon_edges(self, edges: List[dict]):
+        """Function _record_recon_edges."""
         for edge in edges:
             key = self._edge_signature(edge)
             if key in self._recon_edge_keys:
@@ -523,6 +523,7 @@ class ScannerEngine:
             self._recon_edges.append(edge)
 
     def _edge_signature(self, edge: dict) -> tuple:
+        """Function _edge_signature."""
         return (
             edge.get("source"),
             edge.get("target"),
@@ -532,6 +533,7 @@ class ScannerEngine:
         )
 
     def _refresh_enrichment(self) -> tuple[int, int]:
+        """Function _refresh_enrichment."""
         if self._last_results:
             enriched, _, killchain_edges = apply_rules(self._last_results)
         else:
@@ -602,6 +604,7 @@ class ScannerEngine:
         custom_args: List[str] = None,
         cancel_flag=None,
     ) -> List[dict]:
+        """AsyncFunction _run_tool_task."""
         meta_override = self._installed_meta.get(tool)
 
         tool_timeout = self._tool_timeout_seconds()
@@ -740,6 +743,7 @@ class ScannerEngine:
             return []
 
     def _normalize_asset(self, target: str) -> str:
+        """Function _normalize_asset."""
         parsed = urlparse(target)
         host = parsed.hostname or target
         if host.startswith("www."):

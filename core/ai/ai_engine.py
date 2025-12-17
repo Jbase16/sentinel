@@ -1,7 +1,4 @@
-# ============================================================================
-# core/ai/ai_engine.py
-# AI Brain - Analyzes Security Tool Output Using Large Language Models
-# ============================================================================
+"""Module ai_engine: inline documentation for /Users/jason/Developer/sentinelforge/core/ai/ai_engine.py."""
 #
 # PURPOSE:
 # Takes raw output from security tools (like nmap, httpx) and uses AI to:
@@ -27,7 +24,6 @@
 # - Prompt Engineering: Crafting instructions to get good AI responses
 # - JSON Schema Enforcement: Force AI to return structured data, not essays
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -66,6 +62,7 @@ class OllamaClient:
         self.model = model
 
     def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
+        """Function generate."""
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": self.model,
@@ -92,6 +89,7 @@ class OllamaClient:
         return self.generate(prompt, system, force_json=False)
 
     def stream_generate(self, prompt: str, system: str = "") -> Generator[str, None, None]:
+        """Function stream_generate."""
         url = f"{self.base_url}/api/generate"
         payload = {
             "model": self.model,
@@ -125,6 +123,7 @@ class OllamaClient:
             yield f"[Error: {e}]"
 
     def check_connection(self) -> bool:
+        """Function check_connection."""
         try:
             with httpx.Client(timeout=2.0) as client:
                 resp = client.get(f"{self.base_url}/api/tags")
@@ -143,6 +142,7 @@ class AIEngine:
 
     @staticmethod
     def instance():
+        """Function instance."""
         if AIEngine._instance is None:
             AIEngine._instance = AIEngine()
         return AIEngine._instance
@@ -179,6 +179,7 @@ class AIEngine:
     # Status helpers for UI/IPC
     # ---------------------------------------------------------
     def status(self) -> Dict[str, object]:
+        """Function status."""
         connected = self.client is not None
         status = {
             "provider": AI_PROVIDER,
@@ -196,6 +197,7 @@ class AIEngine:
         return status
 
     def available_models(self) -> List[str]:
+        """Function available_models."""
         if not self.client:
             return []
         try:
@@ -404,6 +406,7 @@ class AIEngine:
             return {"findings": [], "next_steps": []}
 
     def _clean_json_response(self, text: str) -> str:
+        """Function _clean_json_response."""
         text = text.strip()
         if text.startswith("```"):
             lines = text.splitlines()
@@ -479,6 +482,7 @@ class AIEngine:
     # Legacy / Fallback Logic
     # ---------------------------------------------------------
     def _summarize_output(self, tool: str, stdout: str, stderr: str, rc: int) -> str:
+        """Function _summarize_output."""
         stdout = (stdout or "").strip()
         stderr = (stderr or "").strip()
 
@@ -573,6 +577,7 @@ class AIEngine:
         findings: List[Dict],
         phases: List[str],
     ) -> str:
+        """Function _live_commentary."""
         tgt = target or "target"
 
         if not findings:
@@ -633,4 +638,5 @@ class AIEngine:
         # ... (Original chat logic preserved for fallback) ...
         # For brevity in this tool call, I'm truncating the fallback implementation 
         # but in a real scenario I would keep the original code here.
+        """Function _chat_fallback."""
         return "AI Chat unavailable (Ollama offline). Please check connection."

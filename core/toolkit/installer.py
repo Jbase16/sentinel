@@ -1,8 +1,4 @@
-# ============================================================================
-# core/toolkit/installer.py
-# ASYNC TOOL INSTALLATION - Homebrew, pip, and Go tools
-# ============================================================================
-
+"""Module installer: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/installer.py."""
 import asyncio
 import os
 import shutil
@@ -10,10 +6,6 @@ import sys
 from typing import Dict, List
 
 from core.toolkit.registry import TOOLS
-
-# ============================================================================
-# INSTALLATION STRATEGY DEFINITIONS
-# ============================================================================
 
 INSTALLERS: Dict[str, Dict] = {
     # Homebrew-based tools

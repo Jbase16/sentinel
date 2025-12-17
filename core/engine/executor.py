@@ -1,7 +1,4 @@
-# ============================================================================
-# core/engine/executor.py
-# Executor Module
-# ============================================================================
+"""Module executor: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/executor.py."""
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import subprocess
 import threading
@@ -27,6 +23,7 @@ from typing import Callable, Optional, Dict, Any
 
 @dataclass
 class Task:
+    """Class Task."""
     task_id: str
     command: str
     callback: Callable[[str, str, int], None]
@@ -45,6 +42,7 @@ class ExecutionEngine:
 
     @staticmethod
     def instance():
+        """Function instance."""
         if ExecutionEngine._instance is None:
             ExecutionEngine._instance = ExecutionEngine()
         return ExecutionEngine._instance
@@ -59,6 +57,7 @@ class ExecutionEngine:
         worker.start()
 
     def submit(self, command: str, callback: Callable, timeout: int = 120, metadata=None):
+        """Function submit."""
         task_id = str(uuid.uuid4())
         task = Task(
             task_id=task_id,
@@ -71,12 +70,14 @@ class ExecutionEngine:
         return task_id
 
     def kill_task(self, task_id: str):
+        """Function kill_task."""
         if task_id in self.active_tasks:
             proc = self.active_tasks[task_id]
             proc.kill()
             del self.active_tasks[task_id]
 
     def _worker_loop(self):
+        """Function _worker_loop."""
         while self.running:
             task = self.task_queue.get()
             if not task:

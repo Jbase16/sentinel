@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/fingerprinters.py
-# Cartographer Sensors: Asset Fingerprinting Logic
-# ============================================================================
+"""Module fingerprinters: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/fingerprinters.py."""
 #
 # PURPOSE:
 # Generates unique fingerprints for assets to enable "Deep Correlation".
@@ -12,7 +9,6 @@
 # 2. FaviconHash: MurmurHash3 of favicon (Shodan style).
 # 3. CertSerial: Extracts SSL certificate serial numbers.
 #
-# ============================================================================
 
 import mmh3
 import codecs
@@ -89,4 +85,5 @@ class CertFingerprinter(Fingerprinter):
         # TODO: Use cryptography library for robust parsing
         # For now, simplistic regex or expectation of input format
         # If passed raw logic here might need external libs.
+        """Function get_serial."""
         return None 

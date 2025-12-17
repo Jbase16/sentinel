@@ -1,3 +1,4 @@
+"""Module verify_strategic_logging: inline documentation for /Users/jason/Developer/sentinelforge/scripts/verify_strategic_logging.py."""
 
 import asyncio
 import logging
@@ -24,6 +25,7 @@ async def mock_dispatch_tool(tool: str) -> List[Dict]:
     return [{"type": "issue", "message": "Simulated finding"}]
 
 async def main():
+    """AsyncFunction main."""
     print("--- Verifying Strategic Logging ---")
     
     # 1. Setup Event Bus
@@ -38,6 +40,7 @@ async def main():
     
     # 3. Start Listener for Events
     async def event_listener():
+        """AsyncFunction event_listener."""
         print("--- Listening for Events ---")
         async for event in store.subscribe():
             if event.type == GraphEventType.DECISION_MADE:

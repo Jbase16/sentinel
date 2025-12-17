@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/ModelRouter.swift
-// Modelrouter Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,16 +10,17 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 
 // Extremely simple heuristic model selector.
 // Swap out rules here to prefer different Ollama models per prompt type.
+/// Struct ModelRouter {.
 struct ModelRouter {
     static let defaultPreferredModel = "llama3:latest"
     static let defaultCandidates = ["llama3:latest", "phi3:mini", "deepseek-coder:6.7b"]
 
+    /// Function routeModel.
     func routeModel(for prompt: String, preferredModel: String, autoRoutingEnabled: Bool, available: [String] = []) -> String {
         guard autoRoutingEnabled else { return preferredModel }
         let lower = prompt.lowercased()
@@ -52,6 +49,7 @@ struct ModelRouter {
         return available.first ?? candidate
     }
 
+    /// Function modelName.
     func modelName(for prompt: String) -> String {
         routeModel(for: prompt, preferredModel: Self.defaultPreferredModel, autoRoutingEnabled: true)
     }

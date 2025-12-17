@@ -1,7 +1,4 @@
-# ============================================================================
-# core/recon/__init__.py
-# Reconnaissance Package - Information Gathering
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/recon/__init__.py."""
 #
 # PURPOSE:
 # Gathers information about targets before active testing. Like a detective
@@ -39,6 +36,5 @@
 # - **OSINT**: Open Source Intelligence (public data sources)
 # - **Attack Surface**: All possible entry points for attacks
 #
-# ============================================================================
 
 from core.recon.behavioral import BehavioralRecon, PassiveReconEngine  # noqa: F401

@@ -1,7 +1,3 @@
-# ============================================================================
-# core/utils/async_helpers.py
-# Async Helpers Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the utils package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/utils/async_helpers.py
 """
@@ -53,6 +48,7 @@ def create_safe_task(
     task = asyncio.create_task(coro, name=name)
     
     def _handle_exception(t: asyncio.Task):
+        """Function _handle_exception."""
         try:
             exc = t.exception()
             if exc and log_errors:
@@ -115,6 +111,7 @@ def fire_and_forget(coro: Coroutine[Any, Any, Any], name: Optional[str] = None) 
         logger.warning(f"[fire_and_forget:{name or 'unknown'}] No running loop, scheduling in new thread")
         import threading
         def run_in_thread():
+            """Function run_in_thread."""
             asyncio.run(coro)
         t = threading.Thread(target=run_in_thread, daemon=True)
         t.start()

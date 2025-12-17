@@ -1,7 +1,4 @@
-# ============================================================================
-# core/engine/pty_manager.py
-# Pty Manager Module
-# ============================================================================
+"""Module pty_manager: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/pty_manager.py."""
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/pty_manager.py
 # Manages pseudo-terminal (PTY) sessions for the web terminal.
@@ -33,6 +29,7 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 class PTYSession:
+    """Class PTYSession."""
     def __init__(self, command: list[str] = ["/bin/zsh"]):
         self.command = command
         self.fd = None
@@ -42,6 +39,7 @@ class PTYSession:
 
     def start(self):
         # Create PTY
+        """Function start."""
         self.pid, self.fd = pty.fork()
         
         if self.pid == 0:
@@ -55,6 +53,7 @@ class PTYSession:
             logger.info(f"PTY started. PID: {self.pid}, FD: {self.fd}")
 
     def read(self) -> bytes:
+        """Function read."""
         if not self.fd: return b""
         try:
             data = os.read(self.fd, 1024)
@@ -64,15 +63,18 @@ class PTYSession:
             return b""
 
     def write(self, data: str):
+        """Function write."""
         if not self.fd: return
         os.write(self.fd, data.encode())
 
     def resize(self, rows: int, cols: int):
+        """Function resize."""
         if not self.fd: return
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, winsize)
 
     def close(self):
+        """Function close."""
         if self.fd:
             os.close(self.fd)
             self.fd = None
@@ -85,10 +87,12 @@ class PTYSession:
             self.pid = None
 
 class PTYManager:
+    """Class PTYManager."""
     _instance = None
     
     @staticmethod
     def instance():
+        """Function instance."""
         if PTYManager._instance is None:
             PTYManager._instance = PTYManager()
         return PTYManager._instance
@@ -97,6 +101,7 @@ class PTYManager:
         self.session: Optional[PTYSession] = None
 
     def get_session(self) -> PTYSession:
+        """Function get_session."""
         if not self.session or not self.session.fd:
             self.session = PTYSession()
             self.session.start()

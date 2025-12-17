@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/policy.py
-# Layer 4: Policy Arbitration (Protocol)
-# ============================================================================
+"""Module policy: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/policy.py."""
 #
 # PURPOSE:
 # Defines the interface for policies that *review* decisions.
@@ -13,7 +10,6 @@
 # - VETO: The decision violates a rule and must be blocked.
 # - MODIFY: The decision is valid IF modified (e.g., "Add rate limit").
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -25,6 +21,7 @@ from typing import Dict, Any, Optional
 from core.scheduler.decisions import DecisionPoint
 
 class Verdict(str, Enum):
+    """Class Verdict."""
     APPROVE = "approve"
     VETO = "veto"
     MODIFY = "modify"
@@ -63,6 +60,7 @@ class ScopePolicy(Policy):
     """
     @property
     def name(self) -> str:
+        """Function name."""
         return "ScopePolicy"
         
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
@@ -71,6 +69,7 @@ class ScopePolicy(Policy):
         # For now, we assume if "target" is in context, it must be safe or explicitly allowed.
         # Real implementation would check `self.scope_manager.is_allowed(target)`.
         
+        """Function evaluate."""
         target = decision.context.get("target") or context.get("target")
         if target:
             # Example: Block .edu or .gov if strict rules apply
@@ -85,12 +84,14 @@ class RiskPolicy(Policy):
     """
     @property
     def name(self) -> str:
+        """Function name."""
         return "RiskPolicy"
         
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         # Example: If Mode is PASSIVE, block ACTIVE tools.
         # This duplicates some reasoning in Strategos, but as a hard safety net.
         
+        """Function evaluate."""
         mode = context.get("mode", "standard")
         tool_risk = decision.context.get("risk", "low") # Assumes tool definition provides risk
         

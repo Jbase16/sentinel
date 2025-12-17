@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/events.py
-# Strategic Event Bus (Restored)
-# ============================================================================
+"""Module events: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/events.py."""
 #
 # PURPOSE:
 # The central nervous system of Strategos.
@@ -11,7 +8,6 @@
 # - EventBus: Singleton-like observable.
 # - emit_*: Helper methods for structured event emission.
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -36,9 +32,11 @@ class GraphEventType(str, Enum):
     TOOL_COMPLETED = "tool_completed"
     FINDING_CREATED = "finding_created"
     NARRATIVE_EMITTED = "narrative_emitted"
+    LOG = "log"  # System/session logging
 
 @dataclass
 class GraphEvent:
+    """Class GraphEvent."""
     type: GraphEventType
     payload: Dict[str, Any]
     timestamp: float = field(default_factory=time.time)
@@ -51,6 +49,7 @@ class EventBus:
         self._subscribers: List[Callable[[GraphEvent], None]] = []
 
     def subscribe(self, callback: Callable[[GraphEvent], None]):
+        """Function subscribe."""
         self._subscribers.append(callback)
 
     def emit(self, event: GraphEvent):
@@ -64,6 +63,7 @@ class EventBus:
     # --- Convenience Methods ---
 
     def emit_decision_made(self, intent: str, reason: str, context: Dict, source: str = "strategos"):
+        """Function emit_decision_made."""
         self.emit(GraphEvent(
             type=GraphEventType.DECISION_MADE,
             payload={
@@ -75,6 +75,7 @@ class EventBus:
         ))
 
     def emit_narrative_emitted(self, narrative: str, decision_id: str, decision_type: str, context: Dict):
+        """Function emit_narrative_emitted."""
         self.emit(GraphEvent(
             type=GraphEventType.NARRATIVE_EMITTED,
             payload={
@@ -86,6 +87,7 @@ class EventBus:
         ))
 
     def emit_scan_phase_changed(self, phase: str, previous_phase: Optional[str] = None):
+        """Function emit_scan_phase_changed."""
         self.emit(GraphEvent(
             type=GraphEventType.SCAN_PHASE_CHANGED,
             payload={
@@ -93,3 +95,14 @@ class EventBus:
                 "previous_phase": previous_phase
             }
         ))
+
+# --- Singleton Accessor ---
+
+_event_bus: Optional[EventBus] = None
+
+def get_event_bus() -> EventBus:
+    """Function get_event_bus."""
+    global _event_bus
+    if _event_bus is None:
+        _event_bus = EventBus()
+    return _event_bus

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/correlator.py
-# Cartographer Engine: Link Prediction & Graph Enrichment
-# ============================================================================
+"""Module correlator: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/correlator.py."""
 #
 # PURPOSE:
 # Analyzes the Knowledge Graph to find implicit connections.
@@ -12,7 +9,6 @@
 # - Process: Group by unique attribute -> Create Clique Edges.
 # - Output: List of "IMPLIED_LINK" edges.
 #
-# ============================================================================
 
 from typing import List, Dict, Any, Tuple
 import logging

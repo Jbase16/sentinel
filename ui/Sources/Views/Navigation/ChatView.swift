@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Navigation/ChatView.swift
-// Chatview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,10 +10,10 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
+/// Struct ChatView.
 struct ChatView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
@@ -116,6 +112,7 @@ struct ChatView: View {
 }
 
 // MARK: - AI Status Header
+/// Struct AIStatusHeader.
 struct AIStatusHeader: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared

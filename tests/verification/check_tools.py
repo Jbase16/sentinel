@@ -1,7 +1,4 @@
-# ============================================================================
-# tests/verification/check_tools.py
-# Check Tools Module
-# ============================================================================
+"""Module check_tools: inline documentation for /Users/jason/Developer/sentinelforge/tests/verification/check_tools.py."""
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import shutil
 import os

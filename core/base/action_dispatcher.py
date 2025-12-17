@@ -1,7 +1,4 @@
-# ============================================================================
-# core/base/action_dispatcher.py
-# AI Action Safety Layer - Human-in-the-Loop Control
-# ============================================================================
+"""Module action_dispatcher: inline documentation for /Users/jason/Developer/sentinelforge/core/base/action_dispatcher.py."""
 #
 # PURPOSE:
 # The AI can suggest running security tools autonomously (like "run nmap on this target").
@@ -23,7 +20,6 @@
 # - Observer Pattern: UI subscribes to action requests/approvals
 # - Deduplication: Don't run the same scan twice
 #
-# ============================================================================
 
 import logging
 import uuid

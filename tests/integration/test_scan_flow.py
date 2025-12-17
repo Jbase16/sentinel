@@ -1,7 +1,4 @@
-# ============================================================================
-# tests/integration/test_scan_flow.py
-# Test Scan Flow Module
-# ============================================================================
+"""Module test_scan_flow: inline documentation for /Users/jason/Developer/sentinelforge/tests/integration/test_scan_flow.py."""
 #
 # PURPOSE:
 # This module is part of the integration package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import requests
 import json
@@ -24,6 +20,7 @@ import sys
 BASE_URL = "http://127.0.0.1:8765"
 
 def stream_events():
+    """Function stream_events."""
     print("[*] connecting to SSE stream...")
     try:
         # Connect to SSE
@@ -45,6 +42,7 @@ def stream_events():
         pass
 
 def run_scan_test():
+    """Function run_scan_test."""
     target = "scanme.nmap.org"
     print(f"[*] Starting scan against {target}...")
     

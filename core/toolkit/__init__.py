@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/__init__.py
-# Toolkit Package - Security Tool Integration Layer
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/__init__.py."""
 #
 # PURPOSE:
 # Provides a unified interface for running security tools (nmap, httpx, nuclei, etc.)
@@ -46,4 +43,3 @@
 # - **Normalization**: Convert diverse outputs into consistent JSON structure
 # - **Classification**: Categorize findings by vulnerability type
 #
-# ============================================================================

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/wraith/__init__.py
-# Wraith Package - Autonomous Browser Automation and Evasion
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/wraith/__init__.py."""
 #
 # PURPOSE:
 # Provides intelligent browser automation for testing modern web applications.
@@ -41,7 +38,6 @@
 # - **Fingerprinting**: Techniques to identify browsers uniquely
 # - **SPA (Single Page Application)**: JavaScript-heavy web apps
 #
-# ============================================================================
 
 from .evasion import WraithEngine
 from .mutator import PayloadMutator

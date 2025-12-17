@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/PTYClient.swift
-// Ptyclient Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 //
 //  PTYClient.swift
@@ -25,12 +20,14 @@
 
 import Foundation
 
+/// Class PTYClient.
 class PTYClient: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     
     @Published var output: String = ""
     @Published var isConnected: Bool = false
     
+    /// Function connect.
     func connect(url: URL) {
         let session = URLSession(configuration: .default)
         webSocketTask = session.webSocketTask(with: url)
@@ -40,6 +37,7 @@ class PTYClient: ObservableObject {
         receiveMessage()
     }
     
+    /// Function write.
     func write(_ command: String) {
         let message = URLSessionWebSocketTask.Message.string(command)
         webSocketTask?.send(message) { error in
@@ -49,6 +47,7 @@ class PTYClient: ObservableObject {
         }
     }
     
+    /// Function sendResize.
     func sendResize(rows: Int, cols: Int) {
         let cmd = "{\"type\":\"resize\", \"rows\":\(rows), \"cols\":\(cols)}"
         write(cmd)

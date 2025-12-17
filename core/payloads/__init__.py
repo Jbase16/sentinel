@@ -1,7 +1,4 @@
-# ============================================================================
-# core/payloads/__init__.py
-# Payloads Package - Attack Payload Library
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/payloads/__init__.py."""
 #
 # PURPOSE:
 # Provides a library of attack payloads for testing various vulnerability types.
@@ -32,4 +29,3 @@
 # - **WAF Evasion**: Techniques to bypass web application firewalls
 # - **Context**: Payloads must be tailored to where they're used (HTML vs. SQL vs. OS)
 #
-# ============================================================================

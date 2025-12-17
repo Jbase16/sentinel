@@ -1,7 +1,4 @@
-# ============================================================================
-# core/ghost/__init__.py
-# Ghost Protocol - Traffic Interception and Business Logic Analysis
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/ghost/__init__.py."""
 #
 # PURPOSE:
 # Intercepts and analyzes HTTP/HTTPS traffic to understand application behavior
@@ -38,7 +35,6 @@
 # - **IDOR**: Insecure Direct Object Reference
 # - **Mass Assignment**: Modifying object properties through API
 #
-# ============================================================================
 
 from .flow import FlowMapper, UserFlow
 from .logic import LogicFuzzer

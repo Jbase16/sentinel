@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/ToolsBankView.swift
-// Toolsbankview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,10 +10,10 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
+/// Struct ToolsBankView.
 struct ToolsBankView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var selectedMissing: Set<String> = []
@@ -141,6 +137,7 @@ struct ToolsBankView: View {
     }
 }
 
+/// Struct StatusBadge.
 struct StatusBadge: View {
     let status: String
     var body: some View {

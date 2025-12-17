@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Tests/Package.swift
-// Package Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 // swift-tools-version: 5.9
 import PackageDescription

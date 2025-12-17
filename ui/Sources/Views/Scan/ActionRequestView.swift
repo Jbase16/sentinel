@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Scan/ActionRequestView.swift
-// Actionrequestview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,10 +10,10 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import SwiftUI
 
+/// Struct ActionRequestView.
 struct ActionRequestView: View {
     @EnvironmentObject var appState: HelixAppState
     
@@ -59,6 +55,7 @@ struct ActionRequestView: View {
     }
 }
 
+/// Struct ActionCard.
 struct ActionCard: View {
     @EnvironmentObject var appState: HelixAppState
     let action: PendingAction

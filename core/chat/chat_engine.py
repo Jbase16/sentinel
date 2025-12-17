@@ -1,7 +1,3 @@
-# ============================================================================
-# core/chat/chat_engine.py
-# Chat Engine Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the chat package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/chat/chat_engine.py
@@ -29,10 +24,12 @@ from core.cortex.memory import KnowledgeGraph, NodeType
 from core.data.findings_store import findings_store
 
 class GraphAwareChat:
+    """Class GraphAwareChat."""
     _instance = None
     
     @staticmethod
     def instance():
+        """Function instance."""
         if GraphAwareChat._instance is None:
             GraphAwareChat._instance = GraphAwareChat()
         return GraphAwareChat._instance

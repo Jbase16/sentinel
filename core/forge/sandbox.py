@@ -1,7 +1,3 @@
-# ============================================================================
-# core/forge/sandbox.py
-# Sandbox Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the forge package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/forge/sandbox.py

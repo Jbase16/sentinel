@@ -1,9 +1,11 @@
+"""Module test_pathfinder: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_pathfinder.py."""
 
 import pytest
 from core.cortex.pathfinder import GraphAnalyzer
 
 def test_attack_path():
     # Linear: A -> B -> C
+    """Function test_attack_path."""
     nodes = [{"id": "A"}, {"id": "B"}, {"id": "C"}]
     edges = [
         {"source": "A", "target": "B"},
@@ -20,6 +22,7 @@ def test_attack_path():
 def test_bridges():
     # Bowtie: (1-2-3) - 4 - (5-6-7)
     # Node 4 is the bridge.
+    """Function test_bridges."""
     nodes = [{"id": str(i)} for i in range(1, 8)]
     edges = [
         {"source": "1", "target": "2"}, {"source": "2", "target": "3"}, # Cluster L
@@ -35,6 +38,7 @@ def test_bridges():
 
 def test_blast_radius():
     # Star: Center -> Leaves (L1, L2)
+    """Function test_blast_radius."""
     nodes = [{"id": "C"}, {"id": "L1"}, {"id": "L2"}]
     edges = [
         {"source": "C", "target": "L1"},

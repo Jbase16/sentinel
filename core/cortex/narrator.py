@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/narrator.py
-# Layer 3: Narrator Engine
-# ============================================================================
+"""Module narrator: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/narrator.py."""
 #
 # PURPOSE:
 # The Narrator Engine gives the system a voice.
@@ -19,7 +16,6 @@
 # 2. Deterministic: Same decision + same context = same narrative.
 # 3. Async-Safe: Must be non-blocking.
 #
-# ============================================================================
 
 from __future__ import annotations
 

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/base/session.py
-# Scan Session Management - Isolated Context for Each Security Test
-# ============================================================================
+"""Module session: inline documentation for /Users/jason/Developer/sentinelforge/core/base/session.py."""
 #
 # PURPOSE:
 # Each security scan gets its own "session" - a container that holds all the
@@ -19,7 +16,6 @@
 # - Threading: Sessions use locks to handle concurrent access safely
 # - Lifecycle: Create → Run Tools → Analyze → Generate Report → Archive
 #
-# ============================================================================
 
 import uuid
 import time

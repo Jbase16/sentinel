@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/raw_classifier.py
-# Raw Classifier Module - Tool Output Parsing & Finding Normalization
-# ============================================================================
+"""Module raw_classifier: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/raw_classifier.py."""
 #
 # PURPOSE:
 # Transforms unstructured security tool output (nmap, nikto, gobuster, etc.) into
@@ -32,7 +29,6 @@
 # Rationale: Security tool output parsing is brittle; comprehensive documentation
 # prevents regressions during tool upgrades and enables safe pattern evolution.
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -278,6 +274,7 @@ FRAMEWORK_MINIMUMS = {
 
 
 def _parse_version(raw: str) -> Tuple[int, ...]:
+    """Function _parse_version."""
     nums = re.findall(r"\d+", raw or "")
     return tuple(int(n) for n in nums[:3])
 
@@ -312,11 +309,13 @@ ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 
 
 def _strip_ansi(text: str) -> str:
+    """Function _strip_ansi."""
     return ANSI_RE.sub("", text or "")
 
 
 @dataclass
 class RawFinding:
+    """Class RawFinding."""
     type: str
     severity: str
     tool: str
@@ -329,6 +328,7 @@ class RawFinding:
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def as_dict(self) -> dict:
+        """Function as_dict."""
         data = asdict(self)
         # Normalize to sorted unique tags/families for downstream consumers.
         data["tags"] = sorted(set(self.tags))
@@ -337,6 +337,7 @@ class RawFinding:
 
 
 def classify(tool: str, target: str, output: str) -> List[dict]:
+    """Function classify."""
     handler = _HANDLERS.get(tool.lower())
     findings: List[RawFinding] = []
     if handler:
@@ -351,6 +352,7 @@ def classify(tool: str, target: str, output: str) -> List[dict]:
 
 
 def _handle_nmap(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_nmap."""
     findings: List[RawFinding] = []
     for line in output.splitlines():
         if "open" not in line or "/" not in line:
@@ -394,6 +396,7 @@ def _handle_nmap(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_whatweb(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_whatweb."""
     findings: List[RawFinding] = []
     for line in output.splitlines():
         line = line.strip()
@@ -461,6 +464,7 @@ def _handle_whatweb(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_wafw00f(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_wafw00f."""
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
@@ -486,6 +490,7 @@ def _handle_wafw00f(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_httpx(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_httpx."""
     findings: List[RawFinding] = []
     
     # Try parsing as JSON lines first (Cartographer Enrichment)
@@ -597,6 +602,7 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_dirsearch(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_dirsearch."""
     findings: List[RawFinding] = []
     # Dirsearch Output Parser
     # Parses dirsearch directory enumeration format: STATUS - SIZE - PATH [-> REDIRECT]
@@ -647,6 +653,7 @@ def _handle_dirsearch(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_gobuster(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_gobuster."""
     findings: List[RawFinding] = []
     # Gobuster Output Parser
     # Parses gobuster dir/vhost mode output: PATH (Status: CODE)
@@ -696,6 +703,7 @@ def _handle_gobuster(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_feroxbuster(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_feroxbuster."""
     findings: List[RawFinding] = []
     # Feroxbuster Output Parser
     # Parses feroxbuster recursive enumeration format: STATUS SIZE WORDS LINES URL
@@ -747,6 +755,7 @@ def _handle_feroxbuster(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_nikto(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_nikto."""
     findings: List[RawFinding] = []
     # Nikto Wrapper Output Parser
     # Parses custom nikto-shim wrapper format: [nikto-shim] SEVERITY: MESSAGE
@@ -797,6 +806,7 @@ def _handle_nikto(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_masscan(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_masscan."""
     findings: List[RawFinding] = []
     # Masscan Output Parser
     # Parses masscan port scan results: "Discovered open port PORT/PROTO on HOST"
@@ -848,6 +858,7 @@ def _handle_masscan(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_naabu(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_naabu."""
     findings: List[RawFinding] = []
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -874,6 +885,7 @@ def _handle_naabu(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_dnsx(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_dnsx."""
     findings: List[RawFinding] = []
     # DNSX Output Parser
     # Parses dnsx DNS enumeration format: HOSTNAME [RECORD_TYPE] [VALUE]
@@ -926,6 +938,7 @@ def _handle_dnsx(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_hakrevdns(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_hakrevdns."""
     findings: List[RawFinding] = []
     # Hakrevdns Wrapper Output Parser
     # Parses custom hakrevdns-shim wrapper format: [hakrevdns-shim] IP -> PTR_RECORD
@@ -978,6 +991,7 @@ def _handle_hakrevdns(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_hakrawler(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_hakrawler."""
     findings: List[RawFinding] = []
     interesting = [
         "admin",
@@ -1014,6 +1028,7 @@ def _handle_hakrawler(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_assetfinder(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_assetfinder."""
     findings: List[RawFinding] = []
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -1035,6 +1050,7 @@ def _handle_assetfinder(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_subfinder(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_subfinder."""
     findings: List[RawFinding] = []
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -1056,6 +1072,7 @@ def _handle_subfinder(target: str, output: str) -> List[RawFinding]:
 
 
 def _handle_httprobe(target: str, output: str) -> List[RawFinding]:
+    """Function _handle_httprobe."""
     findings: List[RawFinding] = []
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -1082,6 +1099,7 @@ def _handle_httprobe(target: str, output: str) -> List[RawFinding]:
 
 
 def _global_detectors(tool: str, target: str, output: str) -> List[RawFinding]:
+    """Function _global_detectors."""
     findings: List[RawFinding] = []
     findings.extend(_detect_user_enum(target, output))
     findings.extend(_detect_metadata_exposure(target, output))
@@ -1101,6 +1119,7 @@ def _global_detectors(tool: str, target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_json_endpoints(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_json_endpoints."""
     findings = []
     for line in output.splitlines():
         if "/api/" not in line.lower():
@@ -1130,6 +1149,7 @@ def _detect_json_endpoints(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_dev_surfaces(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_dev_surfaces."""
     keywords = [
         "/swagger",
         "/api-docs",
@@ -1165,6 +1185,7 @@ def _detect_dev_surfaces(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_cors_headers(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_cors_headers."""
     findings = []
     for block in output.split("\n\n"):
         block_lower = block.lower()
@@ -1211,6 +1232,7 @@ def _detect_cors_headers(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_http_methods(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_http_methods."""
     findings = []
     # HTTP Methods Discovery Pattern
     # Extracts allowed HTTP methods from tool output (typically nmap http-methods script)
@@ -1255,6 +1277,7 @@ def _detect_http_methods(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_upload_endpoints(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_upload_endpoints."""
     findings = []
     # File Upload Endpoint Detection Pattern
     # Identifies URLs/paths containing "upload" keyword, indicating potential file upload functionality
@@ -1303,6 +1326,7 @@ def _detect_upload_endpoints(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_private_ranges(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_private_ranges."""
     matches = PRIVATE_IP_REGEX.findall(output)
     if not matches:
         return []
@@ -1323,6 +1347,7 @@ def _detect_private_ranges(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_verbose_errors(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_verbose_errors."""
     error_keywords = [
         "stacktrace",
         "traceback (most recent call last)",
@@ -1351,6 +1376,7 @@ def _detect_verbose_errors(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_graphql_markers(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_graphql_markers."""
     keywords = ["__schema", "__typename", "introspection query"]
     for keyword in keywords:
         if keyword in output.lower():
@@ -1370,6 +1396,7 @@ def _detect_graphql_markers(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_user_enum(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_user_enum."""
     if "user not found" in output.lower() and "invalid password" in output.lower():
         return [
             RawFinding(
@@ -1387,6 +1414,7 @@ def _detect_user_enum(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_metadata_exposure(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_metadata_exposure."""
     if "169.254.169.254" in output or "/latest/meta-data" in output.lower():
         return [
             RawFinding(
@@ -1404,6 +1432,7 @@ def _detect_metadata_exposure(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_business_logic_hooks(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_business_logic_hooks."""
     suspect_terms = ["user_id", "account_id", "role_id", "permission", "idor", "rbac"]
     hits = [term for term in suspect_terms if term in output.lower()]
     if not hits:
@@ -1424,6 +1453,7 @@ def _detect_business_logic_hooks(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_secrets(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_secrets."""
     findings = []
     for label, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(output):
@@ -1445,6 +1475,7 @@ def _detect_secrets(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_security_headers(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_security_headers."""
     findings = []
     blocks = [block for block in output.split("\n\n") if "http/" in block.lower()]
     for block in blocks:
@@ -1473,6 +1504,7 @@ def _detect_security_headers(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_frameworks(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_frameworks."""
     findings = []
     for framework, pattern in FRAMEWORK_PATTERNS.items():
         for match in pattern.finditer(output):
@@ -1494,6 +1526,7 @@ def _detect_frameworks(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_directory_listing(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_directory_listing."""
     keywords = ["index of /", "parent directory"]
     matches = []
     for keyword in keywords:
@@ -1520,6 +1553,7 @@ def _detect_backup_files(target: str, output: str) -> List[RawFinding]:
     # Detects backup files, archives, and configuration artifacts exposed via web enumeration
     # Security context: These files often contain source code, credentials, or historical data
     
+    """Function _detect_backup_files."""
     patterns = [
         # .bak Extension
         # Pattern: \.bak\b
@@ -1604,6 +1638,7 @@ def _detect_backup_files(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_login_flows(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_login_flows."""
     keywords = ["reset password", "forgot password", "otp", "2fa reset"]
     matches = []
     for keyword in keywords:
@@ -1626,6 +1661,7 @@ def _detect_login_flows(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_session_misconfigs(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_session_misconfigs."""
     findings = []
     # Set-Cookie Header Extraction Pattern
     # Extracts cookie values and attributes to detect security misconfigurations
@@ -1688,10 +1724,12 @@ def _detect_session_misconfigs(target: str, output: str) -> List[RawFinding]:
 
 def _detect_timing_patterns(target: str, output: str) -> List[RawFinding]:
     # Placeholder for advanced timing inference (phase 3); currently no-op.
+    """Function _detect_timing_patterns."""
     return []
 
 
 def _detect_ssrf_indicators(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_ssrf_indicators."""
     keywords = [
         "http://localhost",
         "http://127.0.0.1",
@@ -1724,6 +1762,7 @@ def _detect_ssrf_indicators(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_waf_behaviors(target: str, output: str) -> List[RawFinding]:
+    """Function _detect_waf_behaviors."""
     waf_keywords = ["cloudflare", "akamai", "imperva", "incapsula", "f5", "radware", "datadome"]
     matches = [kw for kw in waf_keywords if kw in output.lower()]
     if not matches:
@@ -1747,6 +1786,7 @@ def _detect_cloud_storage(target: str, output: str) -> List[RawFinding]:
     # Identifies publicly accessible cloud storage URLs in tool output (HTML, headers, JS)
     # Security context: Public bucket URLs may leak sensitive data or indicate misconfigured ACLs
     
+    """Function _detect_cloud_storage."""
     patterns = [
         # AWS S3 Bucket URL Pattern
         # Matches: https://bucket-name.s3.amazonaws.com/path/to/object.txt
@@ -1817,6 +1857,7 @@ def _detect_cloud_storage(target: str, output: str) -> List[RawFinding]:
 
 
 def _extract_snippet(output: str, needle: str, radius: int = 240) -> str:
+    """Function _extract_snippet."""
     match = re.search(re.escape(needle), output, re.IGNORECASE)
     if not match:
         return output[:radius]

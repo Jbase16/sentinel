@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Models/HelixAppState.swift
-// Helixappstate Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,18 +10,19 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Combine
 import Foundation
 import SwiftUI
 
+/// Struct LogItem.
 struct LogItem: Identifiable, Equatable {
     let id: UUID
     let text: String
 }
 
 // Scan Mode (Strategos)
+/// Enum ScanMode.
 enum ScanMode: String, CaseIterable, Identifiable {
     case standard = "standard"
     case bugBounty = "bug_bounty"
@@ -45,6 +42,7 @@ enum ScanMode: String, CaseIterable, Identifiable {
 // Holds shared UI + LLM state.
 // ObservableObject means any @Published changes will re-render SwiftUI views.
 @MainActor
+/// Class HelixAppState.
 class HelixAppState: ObservableObject {
 
     @Published var thread: ChatThread
@@ -255,11 +253,13 @@ class HelixAppState: ObservableObject {
     }
 
     // Reset conversation state.
+    /// Function clear.
     func clear() {
         thread = ChatThread(title: "Main Chat", messages: [])
     }
 
     // Append user message, create assistant bubble, and stream response from backend
+    /// Function send.
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -309,20 +309,24 @@ class HelixAppState: ObservableObject {
     }
 
     // Allows UI Stop button to interrupt generation.
+    /// Function cancelGeneration.
     func cancelGeneration() {
         // No-op for API-based chat
     }
 
+    /// Function updatePreferredModel.
     func updatePreferredModel(_ model: String) {
         llm.updatePreferredModel(model)
     }
 
+    /// Function updateAutoRouting.
     func updateAutoRouting(_ enabled: Bool) {
         llm.updateAutoRouting(enabled)
     }
 
     // MARK: - Report Generation
 
+    /// Function generateReport.
     func generateReport(section: String) {
         guard !reportIsGenerating else { return }
         reportIsGenerating = true
@@ -351,6 +355,7 @@ class HelixAppState: ObservableObject {
 
     // MARK: - Core IPC Helpers (HTTP bridge to Python)
 
+    /// Function clearLogs.
     func clearLogs() {
         self.apiLogs.removeAll()
         self.apiLogItems.removeAll()
@@ -546,6 +551,7 @@ class HelixAppState: ObservableObject {
         }
     }
 
+    /// Function approveAction.
     func approveAction(_ action: PendingAction) {
         Task {
             try? await apiClient.approveAction(id: action.id)
@@ -555,6 +561,7 @@ class HelixAppState: ObservableObject {
         }
     }
 
+    /// Function denyAction.
     func denyAction(_ action: PendingAction) {
         Task {
             try? await apiClient.denyAction(id: action.id)
@@ -564,6 +571,7 @@ class HelixAppState: ObservableObject {
         }
     }
 
+    /// Function toggleGhost.
     func toggleGhost() {
         Task {
             if isGhostActive {
@@ -587,6 +595,7 @@ class HelixAppState: ObservableObject {
     }
 }
 
+/// Struct PendingAction.
 struct PendingAction: Identifiable, Decodable {
     let id: String
     let tool: String
@@ -596,6 +605,7 @@ struct PendingAction: Identifiable, Decodable {
     let timestamp: String?
 }
 
+/// Enum SidebarTab.
 enum SidebarTab: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case chat = "Command Deck"

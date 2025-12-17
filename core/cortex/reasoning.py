@@ -1,8 +1,9 @@
+"""Module reasoning: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/reasoning.py."""
 # core/cortex/reasoning.py
 
 from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.narrator import NarratorEngine
-from core.cortex.events import EventBus
+from core.cortex.events import get_event_bus
 from core.scheduler.decisions import DecisionLedger, DecisionContext
 from core.scheduler.strategos import Strategos
 
@@ -13,7 +14,7 @@ class ReasoningEngine:
     """
 
     def __init__(self):
-        self.event_bus = EventBus()
+        self.event_bus = get_event_bus()  # SINGLETON - never instantiate directly
         self.ledger = DecisionLedger()
         self.narrator = NarratorEngine(event_bus=self.event_bus)
         self.cortex = ArbitrationEngine()
@@ -22,7 +23,25 @@ class ReasoningEngine:
             event_bus=self.event_bus,
             narrator=self.narrator
         )
-
+        
+    def analyze(self) -> dict:
+        """
+        Return a summary of the reasoning state (Decision Ledger).
+        Used by /cortex/reasoning API endpoint.
+        """
+        if self.strategos._decision_ledger:
+            stats = self.strategos._decision_ledger.stats()
+            return {
+                "status": "ok",
+                "scope": "last_active_mission",
+                "stats": stats,
+            }
+        return {
+            "status": "ok", 
+            "scope": "global",
+            "stats": {}, 
+            "message": "No decision ledger active"
+        }
         
     async def start_scan(self, 
         target: str, 

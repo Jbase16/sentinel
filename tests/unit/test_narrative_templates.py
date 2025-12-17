@@ -1,8 +1,4 @@
-# ============================================================================
-# tests/unit/test_narrative_templates.py
-# Verification of Layer 3 Phase 2: Narrative Templates
-# ============================================================================
-
+"""Module test_narrative_templates: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_narrative_templates.py."""
 import pytest
 from core.scheduler.decisions import DecisionPoint, DecisionType
 from core.cortex.narrative_templates import (
@@ -14,6 +10,7 @@ from core.cortex.narrative_templates import (
 )
 
 def test_tool_selection_with_target():
+    """Function test_tool_selection_with_target."""
     tmpl = ToolSelectionTemplate()
     d = DecisionPoint.create(
         DecisionType.TOOL_SELECTION,
@@ -25,6 +22,7 @@ def test_tool_selection_with_target():
     assert "Deploying 1 tools: [nmap] against 10.0.0.1" in msg
 
 def test_tool_rejection_with_blocker():
+    """Function test_tool_rejection_with_blocker."""
     tmpl = ToolRejectionTemplate()
     d = DecisionPoint.create(
         DecisionType.TOOL_REJECTION,
@@ -36,6 +34,7 @@ def test_tool_rejection_with_blocker():
     assert "DEFENSE: Blocked exploit_db by BugBountyRules" in msg
 
 def test_grouped_tool_rejection():
+    """Function test_grouped_tool_rejection."""
     tmpl = ToolRejectionTemplate()
     d = DecisionPoint.create(
         DecisionType.TOOL_REJECTION,
@@ -47,6 +46,7 @@ def test_grouped_tool_rejection():
     assert "DEFENSE: Blocked 2 tools [masscan, zmap] by Mode Overlay" in msg
 
 def test_mode_adaptation():
+    """Function test_mode_adaptation."""
     tmpl = ModeAdaptationTemplate()
     d = DecisionPoint.create(
         DecisionType.MODE_ADAPTATION,
@@ -57,6 +57,7 @@ def test_mode_adaptation():
     assert "ADAPTATION: Stealth mode requires slow scan" in msg
 
 def test_template_matching():
+    """Function test_template_matching."""
     d = DecisionPoint.create(DecisionType.PHASE_TRANSITION, "PHASE_1", "Testing")
     
     assert PhaseTemplate().matches(d.type) is True

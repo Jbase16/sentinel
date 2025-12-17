@@ -1,7 +1,4 @@
-# ============================================================================
-# core/server/api.py
-# Api Module
-# ============================================================================
+"""Module api: inline documentation for /Users/jason/Developer/sentinelforge/core/server/api.py."""
 #
 # PURPOSE:
 # This module is part of the server package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/api.py
 # Production-grade FastAPI server (Hybrid Version)
@@ -61,6 +57,7 @@ logger = logging.getLogger(__name__)
 # --- Models ---
 
 class ScanRequest(BaseModel):
+    """Class ScanRequest."""
     target: str = Field(..., min_length=1, max_length=2048)
     modules: Optional[List[str]] = None
     force: bool = False
@@ -68,6 +65,7 @@ class ScanRequest(BaseModel):
     
     @validator("target")
     def validate_target(cls, v: str) -> str:
+        """Function validate_target."""
         v = v.strip()
         if not v:
             raise ValueError("Target cannot be empty")
@@ -79,6 +77,7 @@ class ScanRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
+    """Class ChatRequest."""
     prompt: str = Field(..., min_length=1, max_length=32000)
 
 
@@ -105,12 +104,14 @@ async def sentinel_error_handler(request: Request, exc: SentinelError):
 # --- Rate Limiting ---
 
 class RateLimiter:
+    """Class RateLimiter."""
     def __init__(self, requests_per_minute: int = 60):
         self.requests_per_minute = requests_per_minute
         self.requests: Dict[str, List[float]] = defaultdict(list)
         self._lock = threading.Lock()
     
     def is_allowed(self, key: str) -> bool:
+        """Function is_allowed."""
         now = time.time()
         window = 60.0
         with self._lock:
@@ -132,40 +133,11 @@ _cancel_requested = threading.Event()
 _active_scan_task: Optional[asyncio.Task] = None
 _scan_lock = asyncio.Lock()
 
-# --- SSE Event Buffer for late-connecting clients ---
+from core.cortex.events import get_event_bus, GraphEventType
+from core.cortex.event_store import get_event_store
 
-class EventBuffer:
-    """Circular buffer to store recent SSE events for replay to late-connecting clients."""
-    
-    def __init__(self, max_size: int = 100):
-        self.max_size = max_size
-        self._buffer: List[Dict[str, Any]] = []
-        self._lock = threading.Lock()
-    
-    def add(self, event_type: str, payload: dict) -> None:
-        """Add an event to the buffer."""
-        with self._lock:
-            self._buffer.append({
-                "type": event_type,
-                "payload": payload,
-                "timestamp": time.time()
-            })
-            # Keep buffer size in check
-            if len(self._buffer) > self.max_size:
-                self._buffer = self._buffer[-self.max_size:]
-    
-    def get_recent(self, since_timestamp: float = 0, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent events, optionally filtered by timestamp."""
-        with self._lock:
-            events = [e for e in self._buffer if e["timestamp"] > since_timestamp]
-            return events[-limit:]
-    
-    def clear(self) -> None:
-        """Clear all buffered events."""
-        with self._lock:
-            self._buffer.clear()
-
-_event_buffer = EventBuffer(max_size=200)
+# Initialize Store (which auto-subscribes to Bus)
+_ = get_event_store()
 
 # --- Session Manager ---
 
@@ -263,10 +235,12 @@ async def _begin_scan(req: ScanRequest) -> str:
         event_bus.emit_scan_started(req.target, allowed_tools, session.id)
 
         async def _runner() -> None:
+            """AsyncFunction _runner."""
             start_time = time.time()
             try:
 
                 async def dispatch_tool(tool: str) -> List[Dict]:
+                    """AsyncFunction dispatch_tool."""
                     findings: List[Dict] = []
                     exit_code = 0
                     session.log(f"[Strategos] Dispatching tool: {tool}")
@@ -358,6 +332,7 @@ async def _begin_scan(req: ScanRequest) -> str:
 # --- Middleware & Auth ---
 
 def get_client_ip(request: Request) -> str:
+    """Function get_client_ip."""
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -367,6 +342,7 @@ async def verify_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> bool:
+    """AsyncFunction verify_token."""
     config = get_config()
     if not config.security.require_auth:
         return True
@@ -385,6 +361,7 @@ async def verify_token(
     return True
 
 async def check_rate_limit(request: Request) -> None:
+    """AsyncFunction check_rate_limit."""
     if not _rate_limiter.is_allowed(get_client_ip(request)):
         raise SentinelError(
             ErrorCode.AUTH_RATE_LIMIT_EXCEEDED,
@@ -393,6 +370,7 @@ async def check_rate_limit(request: Request) -> None:
         )
 
 async def check_ai_rate_limit(request: Request) -> None:
+    """AsyncFunction check_ai_rate_limit."""
     if not _ai_rate_limiter.is_allowed(get_client_ip(request)):
         raise SentinelError(
             ErrorCode.AI_RATE_LIMIT_EXCEEDED,
@@ -402,6 +380,7 @@ async def check_ai_rate_limit(request: Request) -> None:
 
 @app.on_event("startup")
 async def startup_event():
+    """AsyncFunction startup_event."""
     global _api_loop
     config = get_config()
     setup_logging(config)
@@ -418,6 +397,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    """AsyncFunction shutdown_event."""
     logger.info("SentinelForge API Shutting Down...")
     from core.data.blackbox import BlackBox
     await BlackBox.instance().shutdown()
@@ -427,6 +407,7 @@ async def shutdown_event():
     await db.close()
 
 def setup_cors():
+    """Function setup_cors."""
     config = get_config()
     # Simplified CORS for dev
     app.add_middleware(
@@ -441,6 +422,7 @@ setup_cors()
 # --- Helpers ---
 
 def _log_sink_sync(msg: str) -> None:
+    """Function _log_sink_sync."""
     loop: Optional[asyncio.AbstractEventLoop] = None
     try:
         loop = asyncio.get_running_loop()
@@ -455,22 +437,24 @@ def _log_sink_sync(msg: str) -> None:
         except Exception:
             pass
 
-    # Also emit into the event-sourced stream so the UI console can rely on `/events/stream`.
+    # Bridge log to EventBus (Unified Path)
     try:
-        from core.cortex.events import get_event_bus
-        get_event_bus().emit_log(msg, source="core")
+        get_event_bus().emit(GraphEvent(
+            type=GraphEventType.LOG,  # Need to ensure LOG type exists or use generic
+            payload={"line": msg}
+        ))
     except Exception:
         pass
-    
+        
     try:
-        # Bridge to TaskRouter for SSE AND buffer for late-connecting clients
+        # Legacy bridge for TaskRouter (cleanup later?)
         event_payload = {"line": msg}
         TaskRouter.instance().ui_event.emit("log", event_payload)
-        _event_buffer.add("log", event_payload)
     except Exception:
         pass
 
 def _ai_status() -> Dict[str, Any]:
+    """Function _ai_status."""
     try:
         return AIEngine.instance().status()
     except Exception as e:
@@ -489,6 +473,7 @@ def _get_latest_results_sync() -> Dict[str, Any]:
     }
 
 async def _get_latest_results() -> Dict[str, Any]:
+    """AsyncFunction _get_latest_results."""
     from core.data.findings_store import findings_store
     from core.data.issues_store import issues_store
     from core.data.killchain_store import killchain_store
@@ -520,10 +505,12 @@ async def _get_latest_results() -> Dict[str, Any]:
 
 @app.get("/ping")
 async def ping():
+    """AsyncFunction ping."""
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 @app.get("/status")
 async def get_status(_: bool = Depends(verify_token)):
+    """AsyncFunction get_status."""
     from core.toolkit.tools import get_installed_tools, TOOLS
     installed = get_installed_tools()
     all_tools = list(TOOLS.keys())
@@ -544,6 +531,7 @@ async def get_status(_: bool = Depends(verify_token)):
 
 @app.get("/tools/status")
 async def tools_status(_: bool = Depends(verify_token)):
+    """AsyncFunction tools_status."""
     from core.toolkit.tools import get_installed_tools, TOOLS
     installed = get_installed_tools()
     all_tools = list(TOOLS.keys())
@@ -563,6 +551,7 @@ async def tools_status(_: bool = Depends(verify_token)):
 
 @app.get("/logs")
 async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
+    """AsyncFunction get_logs."""
     lines = []
     session_id = _scan_state.get("session_id")
     
@@ -582,15 +571,18 @@ async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
 
 @app.get("/results")
 async def get_results(_: bool = Depends(verify_token)):
+    """AsyncFunction get_results."""
     return await _get_latest_results()
 
 @app.get("/cortex/graph")
 async def get_cortex_graph(_: bool = Depends(verify_token)):
+    """AsyncFunction get_cortex_graph."""
     from core.cortex.memory import KnowledgeGraph
     return KnowledgeGraph.instance().export_json()
 
 @app.get("/cortex/reasoning")
 async def get_cortex_reasoning(_: bool = Depends(verify_token)):
+    """AsyncFunction get_cortex_reasoning."""
     return reasoning_engine.analyze()
 
 # --- God-Tier Endpoints ---
@@ -682,6 +674,7 @@ async def forge_execute(
 # --- Command Deck Endpoints ---
 
 class InstallRequest(BaseModel):
+    """Class InstallRequest."""
     tools: List[str]
 
 @app.post("/tools/install")
@@ -780,6 +773,7 @@ async def mission_start(
 
 @app.websocket("/ws/graph")
 async def ws_graph_endpoint(websocket: WebSocket):
+    """AsyncFunction ws_graph_endpoint."""
     await websocket.accept()
     from core.cortex.memory import KnowledgeGraph
     try:
@@ -793,6 +787,7 @@ async def ws_graph_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/terminal")
 async def ws_terminal_endpoint(websocket: WebSocket):
+    """AsyncFunction ws_terminal_endpoint."""
     await websocket.accept()
     session = PTYManager.instance().get_session()
     
@@ -812,6 +807,7 @@ async def start_scan(
     _: bool = Depends(verify_token),
     __: None = Depends(check_rate_limit),
 ):
+    """AsyncFunction start_scan."""
     session_id = await _begin_scan(req)
     return JSONResponse(
         {"status": "started", "target": req.target, "session_id": session_id},
@@ -820,6 +816,7 @@ async def start_scan(
 
 @app.post("/cancel")
 async def cancel_scan(_: bool = Depends(verify_token)):
+    """AsyncFunction cancel_scan."""
     if _active_scan_task and not _active_scan_task.done():
         _cancel_requested.set()
         _active_scan_task.cancel()
@@ -837,7 +834,9 @@ async def chat(
     _: bool = Depends(verify_token),
     __: None = Depends(check_ai_rate_limit),
 ):
+    """AsyncFunction chat."""
     async def _stream():
+        """AsyncFunction _stream."""
         full_response = ""
         try:
             for token in AIEngine.instance().stream_chat(req.prompt):
@@ -875,59 +874,12 @@ async def chat(
 
 @app.get("/events")
 async def events(request: Request, _: bool = Depends(verify_token)):
-    async def _event_stream():
-        q: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        connection_time = time.time()
-        loop = asyncio.get_running_loop()
-        
-        def _cb(event_type: str, payload: dict) -> None:
-            try:
-                data = json.dumps(payload, default=str)
-                msg = f"event: {event_type}\ndata: {data}\n\n"
-                loop.call_soon_threadsafe(lambda: q.put_nowait(msg) if not q.full() else None)
-                # Also buffer for other late-connecting clients
-                _event_buffer.add(event_type, payload)
-            except Exception:
-                pass
-        
-        def _action_cb(aid: str, action: dict) -> None:
-            _cb("action_needed", action)
-            # Buffer action_needed events too
-            _event_buffer.add("action_needed", action)
-            
-        TaskRouter.instance().ui_event.connect(_cb)
-        ActionDispatcher.instance().action_needed.connect(_action_cb)
-        
-        try:
-            # Send initial connection event
-            yield "event: connected\ndata: {}\n\n"
-            
-            # CRITICAL: Replay recent buffered events for late-connecting clients
-            # Get events from the last 60 seconds (scan might have started before we connected)
-            recent_events = _event_buffer.get_recent(since_timestamp=connection_time - 60, limit=50)
-            for evt in recent_events:
-                data = json.dumps(evt["payload"], default=str)
-                yield f"event: {evt['type']}\ndata: {data}\n\n"
-            
-            # Now stream live events
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    data = await asyncio.wait_for(q.get(), timeout=15.0)
-                    yield data
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            try:
-                TaskRouter.instance().ui_event.disconnect(_cb)
-                ActionDispatcher.instance().action_needed.disconnect(_action_cb)
-            except:
-                pass
-
-    return StreamingResponse(_event_stream(), media_type="text/event-stream")
+    """
+    Unified SSE stream (Legacy Alias).
+    Delegates to the same logic as /events/stream but without history replay (since=0).
+    """
+    # Reuse the same generator logic
+    return await events_stream(request=request, since=0)
 
 
 # ============================================================================
@@ -950,7 +902,7 @@ async def events_stream(
     
     Event format:
         event: <event_type>
-        data: {"id": "...", "type": "...", "sequence": N, "payload": {...}}
+        data: {"sequence": N, "type": "...", "payload": {...}, "timestamp": ...}
     
     The client should track the highest `sequence` received and use it
     as the `since` parameter on reconnection.
@@ -958,19 +910,25 @@ async def events_stream(
     event_store = get_event_store()
     
     async def _generate():
+        """AsyncFunction _generate."""
         try:
             # Phase 1: Replay missed events
-            missed_events = event_store.get_since(since)
-            for event in missed_events:
+            missed_events, truncated = event_store.get_since(since)
+            
+            # Warn client if history was truncated
+            if truncated:
+                yield f"event: warning\ndata: {{\"type\": \"replay_truncated\", \"since\": {since}}}\n\n"
+            
+            for stored in missed_events:
                 if await request.is_disconnected():
                     return
-                yield f"event: {event.type.value}\ndata: {event.to_json()}\n\n"
+                yield f"event: {stored.event.type.value}\ndata: {stored.to_json()}\n\n"
             
             # Phase 2: Stream live events
-            async for event in event_store.subscribe():
+            async for stored in event_store.subscribe():
                 if await request.is_disconnected():
                     break
-                yield f"event: {event.type.value}\ndata: {event.to_json()}\n\n"
+                yield f"event: {stored.event.type.value}\ndata: {stored.to_json()}\n\n"
                 
         except asyncio.CancelledError:
             logger.debug("[EventStream] Client disconnected")
@@ -1000,7 +958,9 @@ async def generate_report(
     section: str = Query(default="executive_summary", pattern="^[a-z_]+$"),
     _: bool = Depends(verify_token),
 ):
+    """AsyncFunction generate_report."""
     async def _stream():
+        """AsyncFunction _stream."""
         try:
             composer = ReportComposer()
             content = await asyncio.to_thread(composer.generate_section, section)
@@ -1020,10 +980,12 @@ async def generate_report(
 
 @app.get("/clipboard")
 async def get_clipboard(_: bool = Depends(verify_token)):
+    """AsyncFunction get_clipboard."""
     return {"content": "Clipboard unavailable in container environment"}
 
 @app.post("/actions/{action_id}/{verb}")
 async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_token)):
+    """AsyncFunction handle_action."""
     dispatcher = ActionDispatcher.instance()
     success = False
     if verb == "approve":
@@ -1052,6 +1014,7 @@ async def terminal_websocket_pty(websocket: WebSocket):
     pty_session = PTYManager.instance().get_session()
     
     async def read_pty():
+        """AsyncFunction read_pty."""
         try:
             while True:
                 data = await asyncio.to_thread(pty_session.read)
@@ -1081,6 +1044,7 @@ async def terminal_websocket_pty(websocket: WebSocket):
         reader_task.cancel()
 
 def serve(port: Optional[int] = None, host: Optional[str] = None):
+    """Function serve."""
     config = get_config()
     uvicorn.run(app, host=host or config.api_host, port=port or config.api_port, log_level="info")
 

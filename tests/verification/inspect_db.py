@@ -1,7 +1,4 @@
-# ============================================================================
-# tests/verification/inspect_db.py
-# Inspect Db Module
-# ============================================================================
+"""Module inspect_db: inline documentation for /Users/jason/Developer/sentinelforge/tests/verification/inspect_db.py."""
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 import sqlite3
 import os

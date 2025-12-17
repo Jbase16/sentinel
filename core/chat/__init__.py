@@ -1,7 +1,4 @@
-# ============================================================================
-# core/chat/__init__.py
-# Chat Interface Package - Conversational Security Analysis
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/chat/__init__.py."""
 #
 # PURPOSE:
 # Provides a chat interface for interacting with the security analysis engine.
@@ -27,6 +24,5 @@
 # - **Context Retention**: Remembers previous conversation turns
 # - **Multi-Turn Dialogue**: Can answer follow-up questions
 #
-# ============================================================================
 
 from .chat_engine import GraphAwareChat

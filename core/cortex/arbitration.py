@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/arbitration.py
-# Layer 4: Policy Arbitration Engine
-# ============================================================================
+"""Module arbitration: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/arbitration.py."""
 #
 # PURPOSE:
 # The "Cortex" acts as the Supreme Court.
@@ -14,7 +11,6 @@
 # - If ANY policy dictates VETO, the decision is blocked.
 # - If policies conflict (one approves, one vetoes), VETO wins (Safety First).
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -27,10 +23,12 @@ from core.cortex.policy import Policy, Judgment, Verdict
 logger = logging.getLogger(__name__)
 
 class ArbitrationEngine:
+    """Class ArbitrationEngine."""
     def __init__(self):
         self._policies: List[Policy] = []
 
     def register_policy(self, policy: Policy):
+        """Function register_policy."""
         self._policies.append(policy)
         logger.debug(f"[Arbitration] Registered policy: {policy.name}")
 

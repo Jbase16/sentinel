@@ -1,7 +1,4 @@
-# ============================================================================
-# core/server/__init__.py
-# Server Package - FastAPI Web Server
-# ============================================================================
+"""Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/server/__init__.py."""
 #
 # PURPOSE:
 # Provides the HTTP API server that the UI communicates with. Think of this as
@@ -35,4 +32,3 @@
 # - **CORS**: Cross-Origin Resource Sharing (allows UI to connect from different origin)
 # - **Async**: Non-blocking request handling (can serve multiple clients simultaneously)
 #
-# ============================================================================

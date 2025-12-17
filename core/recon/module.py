@@ -1,7 +1,3 @@
-# ============================================================================
-# core/recon/module.py
-# Module Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the recon package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 Simple recon module entry point.
@@ -45,6 +40,7 @@ class ReconModule:
         self.engine = PassiveReconEngine()
 
     async def run(self, target: str) -> List[dict]:
+        """AsyncFunction run."""
         self.log(f"[recon] starting passive recon for {target}")
         findings = await self.engine.run_all(target)
         self.log(f"[recon] finished passive recon ({len(findings)} findings)")

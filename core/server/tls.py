@@ -1,7 +1,4 @@
-# ============================================================================
-# core/server/tls.py
-# Tls Module
-# ============================================================================
+"""Module tls: inline documentation for /Users/jason/Developer/sentinelforge/core/server/tls.py."""
 #
 # PURPOSE:
 # This module is part of the server package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 
 import ssl
@@ -88,6 +84,7 @@ class TLSAnalyzer:
             loop = asyncio.get_running_loop()
             
             def _fetch_cert():
+                """Function _fetch_cert."""
                 with socket.create_connection((self.hostname, self.port), timeout=10) as sock:
                     with ctx.wrap_socket(sock, server_hostname=self.hostname) as ssock:
                         der_cert = ssock.getpeercert(binary_form=True)
@@ -155,6 +152,7 @@ class TLSAnalyzer:
                 continue
 
             def _try_connect():
+                """Function _try_connect."""
                 try:
                     ctx = ssl.SSLContext(proto)
                     ctx.check_hostname = False
@@ -183,6 +181,7 @@ class TLSAnalyzer:
             # curl_cffi allows impersonating Chrome/Safari to see how server reacts
             # This is a high-level check
             def _curl_check():
+                """Function _curl_check."""
                 try:
                     r = curl_requests.get(
                         f"https://{self.hostname}:{self.port}",
@@ -228,6 +227,7 @@ class TLSAnalyzer:
 
         for cipher in ciphers_to_test:
             def _test_cipher():
+                """Function _test_cipher."""
                 try:
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False

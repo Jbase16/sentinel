@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/findings.py
-# Legacy Import Shim - Maintains Backward Compatibility
-# ============================================================================
+"""Module findings: inline documentation for /Users/jason/Developer/sentinelforge/core/data/findings.py."""
 #
 # PURPOSE:
 # Provides a simple import path for backward compatibility.
@@ -10,6 +7,5 @@
 #
 # This is just a convenience re-export. All the real logic is in findings_store.py.
 #
-# ============================================================================
 
 from core.data.findings_store import findings_store

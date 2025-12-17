@@ -1,7 +1,3 @@
-# ============================================================================
-# core/scheduler/intents.py
-# Intent Detection - Understanding Scan Objectives
-# ============================================================================
 #
 # PURPOSE:
 # Translates high-level user intent ("find SQLi vulns") into concrete scan tasks.
@@ -24,7 +20,6 @@
 # - **Task Decomposition**: Breaking goals into tool executions
 # - **Context Awareness**: Different intents for web vs. infrastructure
 #
-# ============================================================================
 
 """
 core/scheduler/intents.py
@@ -42,4 +37,5 @@ INTENT_HEAVY_ARTILLERY = "intent_heavy_artillery"   # Opt-in heavy tools
 
 # Helper to get human readable name
 def get_intent_name(intent: str) -> str:
+    """Function get_intent_name."""
     return intent.replace("intent_", "").replace("_", " ").title()

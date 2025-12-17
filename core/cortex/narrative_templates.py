@@ -1,7 +1,4 @@
-# ============================================================================
-# core/cortex/narrative_templates.py
-# Layer 3: Narrative Templates
-# ============================================================================
+"""Module narrative_templates: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/narrative_templates.py."""
 #
 # PURPOSE:
 # Defines HOW decisions are explained.
@@ -12,7 +9,6 @@
 # - Templates extract "Why" from the decision context.
 # - Templates are stateless and deterministic.
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -43,9 +39,11 @@ class PhaseTemplate(NarrativeTemplate):
     Explains major lifecycle changes (e.g. "Entering Attack Phase").
     """
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return decision_type == DecisionType.PHASE_TRANSITION
 
     def render(self, d: DecisionPoint) -> str:
+        """Function render."""
         phase_name = str(d.chosen).replace("_", " ").title()
         return f"PHASE CHANGE: Entering {phase_name}. {d.reason}."
 
@@ -55,10 +53,12 @@ class IntentTemplate(NarrativeTemplate):
     Explains strategic shifts (e.g. "Focusing on SQL Injection").
     """
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return decision_type == DecisionType.INTENT_TRANSITION
     
     def render(self, d: DecisionPoint) -> str:
         # "intent_vuln_scanning" -> "Vuln Scanning"
+        """Function render."""
         intent_name = str(d.chosen).replace("intent_", "").replace("_", " ").title()
         return f"STRATEGY: Transitioning to {intent_name}. ({d.reason})"
 
@@ -68,9 +68,11 @@ class ToolSelectionTemplate(NarrativeTemplate):
     Explains tactical tool choices.
     """
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return decision_type == DecisionType.TOOL_SELECTION
     
     def render(self, d: DecisionPoint) -> str:
+        """Function render."""
         if d.chosen == "SKIP":
             return f"TACTIC: Skipping tool execution. {d.reason}"
         
@@ -89,10 +91,12 @@ class ToolRejectionTemplate(NarrativeTemplate):
     Explains why a tool was BLOCKED (Crucial for trust).
     """
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return decision_type == DecisionType.TOOL_REJECTION
     
     def render(self, d: DecisionPoint) -> str:
         # Grouped Rejection (Phase 4)
+        """Function render."""
         if "tools" in d.context:
             tools = d.context["tools"]
             count = len(tools)
@@ -111,9 +115,11 @@ class EarlyTerminationTemplate(NarrativeTemplate):
     Explains why the mission was aborted.
     """
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return decision_type == DecisionType.EARLY_TERMINATION
     
     def render(self, d: DecisionPoint) -> str:
+        """Function render."""
         return f"MISSION: Terminating scan. {d.reason}"
 
 
@@ -122,9 +128,11 @@ class ModeAdaptationTemplate(NarrativeTemplate):
     Explains mode-specific adjustments (e.g. Bug Bounty vs Stealth).
     """
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return decision_type == DecisionType.MODE_ADAPTATION
     
     def render(self, d: DecisionPoint) -> str:
+        """Function render."""
         return f"ADAPTATION: {d.reason}"
 
 
@@ -132,7 +140,9 @@ class DefaultTemplate(NarrativeTemplate):
     """Fallback for unhandled types."""
     
     def matches(self, decision_type: DecisionType) -> bool:
+        """Function matches."""
         return True
     
     def render(self, d: DecisionPoint) -> str:
+        """Function render."""
         return f"DECISION: {d.type.value} -> {d.chosen}. {d.reason}"

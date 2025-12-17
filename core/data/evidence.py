@@ -1,7 +1,4 @@
-# ============================================================================
-# core/data/evidence.py
-# Evidence Storage - Raw Artifact Preservation
-# ============================================================================
+"""Module evidence: inline documentation for /Users/jason/Developer/sentinelforge/core/data/evidence.py."""
 #
 # PURPOSE:
 # Saves raw outputs from security tools as files for later review/auditing.
@@ -32,7 +29,6 @@
 # - Timestamping: Each artifact gets a unique timestamp
 # - Directory Organization: One folder per tool for easy browsing
 #
-# ============================================================================
 
 from __future__ import annotations
 
@@ -42,6 +38,7 @@ from datetime import datetime
 
 class EvidenceStore:
 
+    """Class EvidenceStore."""
     def __init__(self):
         self.base = os.path.expanduser("~/AraUltra_Evidence")
         os.makedirs(self.base, exist_ok=True)
@@ -94,6 +91,7 @@ class EvidenceStore:
         return path
 
     def _sanitize(self, text: str) -> str:
+        """Function _sanitize."""
         safe = text.replace('://', '_').replace('/', '_').replace('\\', '_')
         return "".join(c for c in safe if c.isalnum() or c in ('_', '-', '.'))
 

@@ -1,13 +1,9 @@
-# ============================================================================
-# core/cortex/synapse.py
-# Temporary Coordination Stub
-# ============================================================================
+"""Module synapse: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/synapse.py."""
 #
 # PURPOSE:
 # Placeholder for future Cortex ↔ Strategos coordination.
 # Currently unused, but required by WraithEngine imports.
 #
-# ============================================================================
 
 class Synapse:
     """

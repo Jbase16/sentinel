@@ -1,7 +1,3 @@
-# ============================================================================
-# core/fuzz/module.py
-# Module Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the fuzz package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 Minimal parameter fuzzing module.
@@ -56,6 +51,7 @@ class ParamFuzzer:
         self.timeout = timeout
 
     async def fuzz(self, url: str, param_name: str = "test") -> List[dict]:
+        """AsyncFunction fuzz."""
         findings: List[dict] = []
 
         async with httpx.AsyncClient(follow_redirects=True, verify=False, timeout=self.timeout) as client:

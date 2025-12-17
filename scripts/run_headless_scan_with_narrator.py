@@ -1,3 +1,4 @@
+"""Module run_headless_scan_with_narrator: inline documentation for /Users/jason/Developer/sentinelforge/scripts/run_headless_scan_with_narrator.py."""
 # scripts/run_headless_scan_with_narrator.py
 import logging
 
@@ -10,6 +11,7 @@ from core.cortex.narrator import NarratorEngine
 from core.scheduler.decisions import DecisionLedger, DecisionPoint, DecisionType
 
 def main():
+    """Function main."""
     print("\n--- Headless Narrator Test ---\n")
 
     ledger = DecisionLedger()

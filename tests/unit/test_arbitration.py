@@ -1,8 +1,4 @@
-# ============================================================================
-# tests/unit/test_arbitration.py
-# Verification of Corrected V2: Policy Arbitration
-# ============================================================================
-
+"""Module test_arbitration: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_arbitration.py."""
 import pytest
 from typing import Dict, Any
 
@@ -11,24 +7,31 @@ from core.cortex.arbitration import ArbitrationEngine
 from core.scheduler.decisions import DecisionPoint, DecisionType
 
 class StrictPolicy(Policy):
+    """Class StrictPolicy."""
     name = "StrictPolicy"
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
+        """Function evaluate."""
         if decision.chosen == "UNSAFE_ACTION":
             return Judgment(Verdict.VETO, self.name, "Unsafe action detected")
         return Judgment(Verdict.APPROVE, self.name, "Looks good")
 
 class LoosePolicy(Policy):
+    """Class LoosePolicy."""
     name = "LoosePolicy"
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         # Always approves
+        """Function evaluate."""
         return Judgment(Verdict.APPROVE, self.name, "Whatever man")
 
 class CrashingPolicy(Policy):
+    """Class CrashingPolicy."""
     name = "CrashingPolicy"
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
+        """Function evaluate."""
         raise ValueError("Boom")
 
 def test_arbitration_approval():
+    """Function test_arbitration_approval."""
     engine = ArbitrationEngine()
     engine.register_policy(StrictPolicy())
     engine.register_policy(LoosePolicy())
@@ -41,6 +44,7 @@ def test_arbitration_approval():
     assert "Consensus" in judgment.reason
 
 def test_arbitration_veto():
+    """Function test_arbitration_veto."""
     engine = ArbitrationEngine()
     engine.register_policy(StrictPolicy())
     engine.register_policy(LoosePolicy())
@@ -54,6 +58,7 @@ def test_arbitration_veto():
     assert "Unsafe action detected" in judgment.reason
 
 def test_arbitration_fail_closed():
+    """Function test_arbitration_fail_closed."""
     engine = ArbitrationEngine()
     engine.register_policy(LoosePolicy())
     engine.register_policy(CrashingPolicy()) # This guy crashes

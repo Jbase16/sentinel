@@ -1,7 +1,3 @@
-# ============================================================================
-# core/engine/orchestrator.py
-# Orchestrator Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/orchestrator.py
@@ -45,6 +40,7 @@ class Orchestrator:
     
     @staticmethod
     def instance():
+        """Function instance."""
         if Orchestrator._instance is None:
             Orchestrator._instance = Orchestrator()
         return Orchestrator._instance
@@ -80,6 +76,7 @@ class Orchestrator:
         self.router.emit("mission_progress", payload)
 
     async def _mission_loop(self, target: str, mission_id: str):
+        """AsyncFunction _mission_loop."""
         logger.info(f"[*] Mission {mission_id} Initialized for {target}")
         
         try:
@@ -114,6 +111,7 @@ class Orchestrator:
     first_pass_context = None
 
     async def _run_recon(self, target: str):
+        """AsyncFunction _run_recon."""
         raise RuntimeError(
             "Recon via Orchestrator is disabled. Use the canonical scan lifecycle (POST /scan) "
             "so scan execution and logs are visible to the UI via /events/stream."

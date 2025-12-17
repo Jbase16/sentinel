@@ -1,7 +1,3 @@
-# ============================================================================
-# tests/verification/verify_god_tier.py
-# Verify God Tier Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the verification package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 tests/verify_god_tier.py
@@ -37,6 +32,7 @@ from core.ghost.flow import FlowMapper, FlowStep
 from core.ghost.logic import LogicFuzzer
 
 async def test_wraith():
+    """AsyncFunction test_wraith."""
     print("[*] Testing Wraith Engine (Evasion)...")
     
     # Mock Client Response for WAF
@@ -55,6 +51,7 @@ async def test_wraith():
     # Mocking the _send method strictly for test logic flow
     # First call -> Blocked, Second call -> OK
     async def mock_send(client, url, method, payload):
+        """AsyncFunction mock_send."""
         if "/**/" in payload: # Simulate the mutation working
             return mock_resp_ok
         return mock_resp_block
@@ -69,6 +66,7 @@ async def test_wraith():
         print(f"    [FAIL] Wraith failed to bypass. Status: {result.get('status')}")
 
 def test_ghost():
+    """Function test_ghost."""
     print("\n[*] Testing Ghost Agent (Logic)...")
     
     mapper = FlowMapper.instance()
@@ -91,6 +89,7 @@ def test_ghost():
         print(f"    [SUCCESS] (Verified logic exists, {len(cases)} cases generated)")
 
 async def main():
+    """AsyncFunction main."""
     await test_wraith()
     test_ghost()
 

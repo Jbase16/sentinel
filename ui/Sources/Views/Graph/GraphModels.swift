@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Views/Graph/GraphModels.swift
-// Graphmodels Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import Foundation
 import SwiftUI
@@ -22,6 +17,7 @@ import Combine
 
 // MARK: - Graph Data Models
 
+/// Struct GraphNode.
 struct GraphNode: Identifiable, Equatable, Hashable {
     let id: UUID
     let label: String
@@ -31,10 +27,12 @@ struct GraphNode: Identifiable, Equatable, Hashable {
     var radius: CGFloat = 20.0
     
     // Hashable conformance for SwiftUI loop
+    /// Function hash.
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
 
+    /// Enum NodeType.
     enum NodeType: String {
         case target
         case domain
@@ -67,6 +65,7 @@ struct GraphNode: Identifiable, Equatable, Hashable {
     }
 }
 
+/// Struct GraphLink.
 struct GraphLink: Identifiable, Equatable {
     let id: UUID = UUID()
     let sourceID: UUID
@@ -75,6 +74,7 @@ struct GraphLink: Identifiable, Equatable {
 
 // MARK: - Physics Engine
 
+/// Class ForceSimulator.
 class ForceSimulator: ObservableObject {
     @Published var nodes: [GraphNode] = []
     @Published var links: [GraphLink] = []
@@ -93,6 +93,7 @@ class ForceSimulator: ObservableObject {
         startSimulation()
     }
     
+    /// Function updateData.
     func updateData(findings: [JSONDict]?, issues: [JSONDict]?, target: String?) {
         // Differential update to avoid resetting positions of existing nodes
         var newNodes = self.nodes
@@ -111,6 +112,7 @@ class ForceSimulator: ObservableObject {
         }
         
         // Helper to find or create node
+        /// Function getOrCreateNode.
         func getOrCreateNode(label: String, type: GraphNode.NodeType, parentID: UUID) -> UUID {
             if let existing = newNodes.first(where: { $0.label == label }) {
                 // Ensure link exists
@@ -159,6 +161,7 @@ class ForceSimulator: ObservableObject {
         self.links = newLinks
     }
     
+    /// Function startSimulation.
     func startSimulation() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0/60.0, repeats: true) { [weak self] _ in
@@ -166,6 +169,7 @@ class ForceSimulator: ObservableObject {
         }
     }
     
+    /// Function stopSimulation.
     func stopSimulation() {
         timer?.invalidate()
     }

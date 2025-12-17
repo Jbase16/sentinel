@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Graph/NeuralGraphView.swift
-// Neuralgraphview Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 //
 //  NeuralGraphView.swift
@@ -28,14 +23,17 @@ import Combine
 import MetalKit
 import SwiftUI
 
+/// Struct NeuralGraphView.
 struct NeuralGraphView: NSViewRepresentable {
     let eventClient: EventStreamClient
 
+    /// Function makeCoordinator.
     func makeCoordinator() -> Coordinator {
         Coordinator(eventClient: eventClient)
     }
 
     @MainActor
+    /// Function makeNSView.
     func makeNSView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.delegate = context.coordinator
@@ -68,10 +66,12 @@ struct NeuralGraphView: NSViewRepresentable {
     }
 
     @MainActor
+    /// Function updateNSView.
     func updateNSView(_ nsView: MTKView, context: Context) {
         context.coordinator.bindEventStream(view: nsView)
     }
 
+    /// Class Coordinator.
     class Coordinator: NSObject, MTKViewDelegate {
         var renderer: GraphRenderer?
         private let eventClient: EventStreamClient
@@ -84,6 +84,7 @@ struct NeuralGraphView: NSViewRepresentable {
         }
 
         @MainActor
+        /// Function bindEventStream.
         func bindEventStream(view: MTKView) {
             self.mtkView = view
             guard graphCancellable == nil else { return }
@@ -99,6 +100,7 @@ struct NeuralGraphView: NSViewRepresentable {
                 }
         }
 
+        /// Function updateInput.
         func updateInput(drag: CGSize, zoom: CGFloat) {
             // Convert pixels to rotation radians
             let sens: Float = 0.01
@@ -109,10 +111,12 @@ struct NeuralGraphView: NSViewRepresentable {
             )
         }
 
+        /// Function mtkView.
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
             renderer?.resize(size: size)
         }
 
+        /// Function draw.
         func draw(in view: MTKView) {
             renderer?.draw(in: view)
         }
@@ -120,6 +124,7 @@ struct NeuralGraphView: NSViewRepresentable {
 }
 
 // MARK: - Interactive Wrapper
+/// Struct InteractiveGraphContainer.
 struct InteractiveGraphContainer: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var lastDrag = CGSize.zero

@@ -7,5 +7,6 @@
     "editor.defaultFormatter": "sswg.swift-lang"
   },
   "zencoder.shellTool.commandConfirmationPolicy": "alwaysAsk",
-  "cursorpyright.analysis.typeCheckingMode": "basic"
+  "cursorpyright.analysis.typeCheckingMode": "basic",
+  "files.autoSave": "afterDelay"
 }

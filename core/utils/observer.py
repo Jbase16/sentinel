@@ -1,7 +1,4 @@
-# ============================================================================
-# core/utils/observer.py
-# Observer Module
-# ============================================================================
+"""Module observer: inline documentation for /Users/jason/Developer/sentinelforge/core/utils/observer.py."""
 #
 # PURPOSE:
 # This module is part of the utils package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 from typing import Any, Callable, List
 

@@ -1,7 +1,4 @@
-# ============================================================================
-# core/toolkit/shims/__main__.py
-#   Main   Module
-# ============================================================================
+"""Module __main__: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/__main__.py."""
 #
 # PURPOSE:
 # This module is part of the shims package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 from . import run_cli
 

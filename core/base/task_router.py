@@ -1,7 +1,4 @@
-# ============================================================================
-# core/base/task_router.py
-# CENTRAL EVENT BUS - Connecting Tools, AI, and UI
-# ============================================================================
+"""Module task_router: inline documentation for /Users/jason/Developer/sentinelforge/core/base/task_router.py."""
 #
 # PURPOSE:
 # TaskRouter is the central nervous system of Sentinel. It receives output
@@ -18,7 +15,6 @@
 # - Singleton: One global instance shared across the application
 # - Lazy Loading: Import dependencies only when needed (avoids circular imports)
 #
-# ============================================================================
 
 import logging
 from core.utils.observer import Observable, Signal

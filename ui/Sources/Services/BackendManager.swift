@@ -1,7 +1,3 @@
-// ============================================================================
-// ui/Sources/Services/BackendManager.swift
-// Backendmanager Component
-// ============================================================================
 //
 // PURPOSE:
 // This Swift component is part of the SentinelForge macOS UI.
@@ -14,7 +10,6 @@
 // - Used by: [To be documented]
 // - Depends on: [To be documented]
 //
-// ============================================================================
 
 import AppKit
 import Foundation
@@ -26,6 +21,7 @@ extension Notification.Name {
 /// Manages the lifecycle of the Python Backend (Neuro-Symbolic Core).
 /// Automatically starts the FastAPI server when the app launches and terminates it on quit.
 @MainActor
+/// Class BackendManager.
 class BackendManager: ObservableObject {
     static let shared = BackendManager()
 
@@ -48,6 +44,7 @@ class BackendManager: ObservableObject {
     private let maxStartupRetries = 30  // 30 seconds max wait
     private let healthCheckInterval: UInt64 = 1_000_000_000  // 1 second
 
+    /// Function start.
     func start() {
         Task {
             // Check if backend is already running externally
@@ -66,6 +63,7 @@ class BackendManager: ObservableObject {
         }
     }
 
+    /// Function stop.
     func stop() {
         healthCheckTask?.cancel()
         healthCheckTask = nil

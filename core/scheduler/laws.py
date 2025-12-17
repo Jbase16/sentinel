@@ -1,7 +1,3 @@
-# ============================================================================
-# core/scheduler/laws.py
-# Laws Module
-# ============================================================================
 #
 # PURPOSE:
 # This module is part of the scheduler package in SentinelForge.
@@ -14,7 +10,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 """
 core/scheduler/laws.py
@@ -30,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Decision:
+    """Class Decision."""
     allowed: bool
     reason: str
     blocking_law: str = None
@@ -37,6 +33,7 @@ class Decision:
 class Law:
     """Base class for a Scan Law."""
     def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
+        """Function check."""
         raise NotImplementedError
 
 class Law1_PassiveBeforeActive(Law):
@@ -45,6 +42,7 @@ class Law1_PassiveBeforeActive(Law):
     Aggressive tools cannot run until Passive Phase is complete.
     """
     def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
+        """Function check."""
         current_phase = getattr(context, "phase_index", 0)
         tool_phase = tool_def.get("phase", 99)
         
@@ -60,6 +58,7 @@ class Law3_EvidenceGates(Law):
     Also enforces Confidence Thresholds in Bug Bounty Mode.
     """
     def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
+        """Function check."""
         gates = tool_def.get("gates", [])
         if not gates:
             return Decision(True, "No prerequisites required")
@@ -115,6 +114,7 @@ class Law4_ResourceAwareness(Law):
     """
     def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
         # Simple implementation: Check active tool count vs max
+        """Function check."""
         active = getattr(context, "active_tools", 0)
         max_concurrent = getattr(context, "max_concurrent", 5)
         

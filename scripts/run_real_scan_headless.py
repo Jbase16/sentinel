@@ -1,8 +1,4 @@
-# ============================================================================
-# scripts/run_real_scan_headless.py
-# True Headless Scan Runner (No UI, No Chat, No Memory)
-# ============================================================================
-
+"""Module run_real_scan_headless: inline documentation for /Users/jason/Developer/sentinelforge/scripts/run_real_scan_headless.py."""
 import asyncio
 from typing import List, Dict
 from core.scheduler.strategos import Strategos
@@ -20,6 +16,7 @@ async def mock_tool_execution(tool: str) -> List[Dict]:
     return [{"type": "mock_finding", "tool": tool, "target": "example.com"}]
 
 async def main():
+    """AsyncFunction main."""
     print("\n--- REAL HEADLESS SCAN TEST ---\n")
 
     # Core plumbing
@@ -30,6 +27,7 @@ async def main():
 
     # Subscribe to events (terminal visibility)
     def print_event(event):
+        """Function print_event."""
         try:
             print(f"[EVENT] {event.type.value}: {event.payload}")
         except:

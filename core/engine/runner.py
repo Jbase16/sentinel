@@ -1,7 +1,4 @@
-# ============================================================================
-# core/engine/runner.py
-# Runner Module
-# ============================================================================
+"""Module runner: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/runner.py."""
 #
 # PURPOSE:
 # This module is part of the engine package in SentinelForge.
@@ -14,7 +11,6 @@
 # - Used by: [To be documented]
 # - Depends on: [To be documented]
 #
-# ============================================================================
 
 # core/runner.py
 # Tool execution + recon phase orchestrator
@@ -31,6 +27,7 @@ OutputCallback = Callable[[str], None]
 
 
 def run_tool(name: str, target: str, on_output: OutputCallback) -> Tuple[int, str]:
+    """Function run_tool."""
     cmd = get_tool_command(name, target)
     on_output(f"[{name}] Executing: {' '.join(cmd)}")
 
@@ -64,6 +61,7 @@ def run_tool(name: str, target: str, on_output: OutputCallback) -> Tuple[int, st
 
 
 def run_all_tools(target: str, on_output: OutputCallback) -> Dict[str, Dict[str, object]]:
+    """Function run_all_tools."""
     results: Dict[str, Dict[str, object]] = {}
     installed = get_installed_tools()
 
@@ -97,6 +95,7 @@ class PhaseRunner:
         self.results: Dict[str, List[dict]] = {}
 
     async def run_all_phases(self) -> Dict[str, List[dict]]:
+        """AsyncFunction run_all_phases."""
         phases = [
             ("behavioral-suite", self._run_behavioral_phase),
         ]
@@ -114,6 +113,7 @@ class PhaseRunner:
         return self.results
 
     async def _run_behavioral_phase(self) -> Dict[str, List[dict]]:
+        """AsyncFunction _run_behavioral_phase."""
         recon = BehavioralRecon(self.on_output)
         findings = await recon.run(self.target)
         buckets: Dict[str, List[dict]] = {
