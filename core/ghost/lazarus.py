@@ -48,11 +48,13 @@ class LazarusEngine:
     @staticmethod
     def instance() -> "LazarusEngine":
         """Function instance."""
+        # Conditional branch.
         if LazarusEngine._instance is None:
             LazarusEngine._instance = LazarusEngine()
         return LazarusEngine._instance
     
     def __init__(self):
+        """Function __init__."""
         self.ai = AIEngine.instance()
         self.cache: dict[str, str] = {}  # hash -> clean_code
         self._processing: set[str] = set()  # Currently processing hashes
@@ -73,15 +75,18 @@ class LazarusEngine:
         3. Not already being processed
         """
         content_type = flow.response.headers.get("content-type", "")
+        # Conditional branch.
         if "javascript" not in content_type:
             return False
         
         content = flow.response.content or b""
+        # Conditional branch.
         if len(content) < self.min_js_size or len(content) > self.max_js_size:
             return False
         
         # Check if already processing
         code_hash = hashlib.md5(content).hexdigest()
+        # Conditional branch.
         if code_hash in self._processing:
             return False
             
@@ -92,6 +97,7 @@ class LazarusEngine:
         Mitmproxy async addon hook.
         Called for every response - processes JS asynchronously.
         """
+        # Conditional branch.
         if not self.should_process(flow):
             return
         
@@ -102,6 +108,7 @@ class LazarusEngine:
         Process JS de-obfuscation asynchronously.
         Uses asyncio.to_thread to avoid blocking the event loop.
         """
+        # Error handling block.
         try:
             original_code = flow.response.text
             if not original_code:

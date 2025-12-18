@@ -47,6 +47,7 @@ class ParamFuzzer:
     """
 
     def __init__(self, log_fn: LogFn | None = None, timeout: float = 10.0):
+        """Function __init__."""
         self.log = log_fn or (lambda msg: None)
         self.timeout = timeout
 

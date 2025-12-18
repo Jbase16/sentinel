@@ -36,6 +36,7 @@ class ReconModule:
     """
 
     def __init__(self, log_fn: LogFn | None = None):
+        """Function __init__."""
         self.log = log_fn or (lambda msg: None)
         self.engine = PassiveReconEngine()
 

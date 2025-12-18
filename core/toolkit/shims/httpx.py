@@ -17,6 +17,7 @@ from ..tool_base import ToolBase
 class Httpx(ToolBase):
     """Class Httpx."""
     def __init__(self):
+        """Function __init__."""
         super().__init__("httpx")
 
     def probe(self, input_file: str):

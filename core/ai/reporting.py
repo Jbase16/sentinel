@@ -64,12 +64,14 @@ class ReportComposer:
     ]
 
     def __init__(self):
+        """Function __init__."""
         self.ai = AIEngine.instance()
 
     def generate_section(self, section_name: str, context_override: Optional[Dict] = None) -> str:
         """
         Generates a specific section of the report using the LLM.
         """
+        # Conditional branch.
         if section_name not in self.SECTIONS:
             return f"Error: Unknown section '{section_name}'"
 
@@ -84,9 +86,11 @@ class ReportComposer:
         }
         
         prompt_fn = prompts.get(section_name)
+        # Conditional branch.
         if not prompt_fn:
             return "Section not implemented."
 
+        # Conditional branch.
         if not self.ai.client:
             return self._fallback_content(section_name, context)
 
@@ -126,6 +130,7 @@ class ReportComposer:
     def _prompt_attack_narrative(self, ctx: Dict) -> str:
         """Function _prompt_attack_narrative."""
         chains = ctx.get("reasoning", {}).get("attack_paths", [])
+        # Conditional branch.
         if not chains:
             return "No complete attack chains were verified. Describe individual vectors found."
         
@@ -177,6 +182,7 @@ def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
     """Function create_report_bundle."""
     composer = ReportComposer()
     full_report = ""
+    # Loop over items.
     for section in composer.SECTIONS:
         full_report += composer.generate_section(section) + "\n\n"
     
@@ -186,6 +192,7 @@ def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
     os.makedirs(bundle_dir, exist_ok=True)
     
     md_path = os.path.join(bundle_dir, "report.md")
+    # Context-managed operation.
     with open(md_path, "w") as f:
         f.write(full_report)
         

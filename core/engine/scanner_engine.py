@@ -47,6 +47,7 @@ MAX_CONCURRENT_TOOLS_BASE = 20  # Base value for small systems
 
 def calculate_concurrent_limit() -> int:
     """Calculate optimal concurrency based on available system resources."""
+    # Error handling block.
     try:
         cpu_count = os.cpu_count() or 2
         
@@ -109,8 +110,10 @@ class ScannerEngine:
         Returns 0 or negative to mean 'disabled' if provided as such.
         """
         val = os.environ.get(name)
+        # Conditional branch.
         if not val:
             return default
+        # Error handling block.
         try:
             return int(val)
         except ValueError:
@@ -132,6 +135,7 @@ class ScannerEngine:
         """Watchdog that enforces a global scan timeout by triggering cancellation and
         attempting to terminate/kill any running subprocesses.
         """
+        # Error handling block.
         try:
             await asyncio.sleep(max(0, timeout_secs))
         except asyncio.CancelledError:
@@ -141,6 +145,7 @@ class ScannerEngine:
             is_canceled = cancel_flag.is_set()
         except Exception:
             is_canceled = False
+        # Conditional branch.
         if is_canceled:
             return
         # Signal cancellation
@@ -162,6 +167,7 @@ class ScannerEngine:
                     await queue.put(f"[{name}] termination error on timeout: {exc}")
         # Give them a moment, then force-kill stubborn ones
         await asyncio.sleep(0.2)
+        # Loop over items.
         for name, proc in list(self._procs.items()):
             if proc.returncode is None:
                 try:
@@ -207,11 +213,14 @@ class ScannerEngine:
         # ... logic continues ...
         tools_to_run = list(installed.keys())
         missing: List[str] = []
+        # Conditional branch.
         if selected_clean:
             tools_to_run = [t for t in selected_clean if t in installed]
             missing = [t for t in selected_clean if t not in installed]
+        # Conditional branch.
         if selected_clean:
             yield f"[scanner] Selected tools: {', '.join(selected_clean)}"
+        # Conditional branch.
         if missing:
             msg = f"[scanner] ⚠️ WARNING: The following tools were requested but NOT found in PATH: {', '.join(missing)}"
             yield msg
@@ -219,6 +228,7 @@ class ScannerEngine:
             print(msg)
             print(f"[scanner] Current PATH: {os.environ.get('PATH')}")
 
+        # Conditional branch.
         if not tools_to_run:
             yield "[scanner] No supported tools available in PATH. Skipping tool phase."
             return
@@ -359,6 +369,7 @@ class ScannerEngine:
 
         # Cancel running tasks first (they may be awaiting process IO).
         tasks = []
+        # Error handling block.
         try:
             tasks = list(self._running_tasks.values())
             for task in tasks:
@@ -368,11 +379,13 @@ class ScannerEngine:
 
         # Terminate processes.
         procs = []
+        # Error handling block.
         try:
             procs = list(self._procs.items())
         except Exception:
             procs = []
 
+        # Loop over items.
         for name, proc in procs:
             if proc is None:
                 continue
@@ -392,6 +405,7 @@ class ScannerEngine:
             # Continue with best-effort cleanup even if cancelled.
             pass
 
+        # Loop over items.
         for name, proc in procs:
             if proc is None:
                 continue
@@ -423,10 +437,12 @@ class ScannerEngine:
             except Exception:
                 pass
 
+        # Error handling block.
         try:
             self._running_tasks.clear()
         except Exception:
             pass
+        # Error handling block.
         try:
             self._procs.clear()
         except Exception:
@@ -437,6 +453,7 @@ class ScannerEngine:
         """
         Dynamically add a task to the running scan.
         """
+        # Conditional branch.
         if hasattr(self, "_pending_tasks"):
             self._pending_tasks.append({"tool": tool, "args": args})
 
@@ -444,6 +461,7 @@ class ScannerEngine:
         """
         Compatibility helper: run the scan generator and return aggregated findings.
         """
+        # Async loop over items.
         async for _ in self.scan(target):
             # Discard streamed lines – this helper mirrors the old API surface.
             pass
@@ -459,9 +477,11 @@ class ScannerEngine:
     def _normalize_findings(self, items: List[dict] | None) -> List[dict]:
         """Function _normalize_findings."""
         normalized: List[dict] = []
+        # Conditional branch.
         if not items:
             return normalized
 
+        # Loop over items.
         for item in items:
             entry = dict(item)
             entry.setdefault("message", entry.get("proof", ""))
@@ -493,6 +513,7 @@ class ScannerEngine:
     def _build_recon_edges(self, findings: List[dict]) -> List[dict]:
         """Function _build_recon_edges."""
         edges: List[dict] = []
+        # Loop over items.
         for item in findings:
             families = item.get("families", [])
             recon_families = [fam for fam in families if fam.startswith("recon-phase")]
@@ -515,6 +536,7 @@ class ScannerEngine:
 
     def _record_recon_edges(self, edges: List[dict]):
         """Function _record_recon_edges."""
+        # Loop over items.
         for edge in edges:
             key = self._edge_signature(edge)
             if key in self._recon_edge_keys:
@@ -534,11 +556,13 @@ class ScannerEngine:
 
     def _refresh_enrichment(self) -> tuple[int, int]:
         """Function _refresh_enrichment."""
+        # Conditional branch.
         if self._last_results:
             enriched, _, killchain_edges = apply_rules(self._last_results)
         else:
             enriched, killchain_edges = [], []
 
+        # Conditional branch.
         if self.session:
             self.session.issues.replace_all(enriched)
             combined_edges = list(killchain_edges) + list(self._recon_edges)
@@ -557,6 +581,7 @@ class ScannerEngine:
         # 2. Transform to Nodes for Correlator
         # Correlator expects: {"id": "asset_name", "attributes": {...}}
         nodes = []
+        # Loop over items.
         for f in source_findings:
             # Only fingerprint "Asset" type findings or those with clear metadata signals
             # Ideally each Asset has one canonical node. This simplification treats every finding as a potential source of traits.
@@ -610,6 +635,7 @@ class ScannerEngine:
         tool_timeout = self._tool_timeout_seconds()
         idle_timeout = self._tool_idle_timeout_seconds()
         
+        # Conditional branch.
         if custom_args:
             # Use custom args directly if provided (for autonomous actions)
             cmd = [tool] + custom_args
@@ -619,6 +645,7 @@ class ScannerEngine:
             cmd = get_tool_command(tool, target, meta_override)
             
         await queue.put(f"--- Running {tool} ---")
+        # Error handling block.
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -646,6 +673,7 @@ class ScannerEngine:
 
         output_lines: List[str] = []
         assert proc.stdout is not None
+        # While loop.
         while True:
             # Cooperative cancellation: terminate and break
             if cancel_flag is not None and cancel_flag.is_set():
@@ -716,6 +744,7 @@ class ScannerEngine:
             "canceled": bool(cancel_flag and getattr(cancel_flag, 'is_set', lambda: False)())
         })
 
+        # Error handling block.
         try:
             findings = ScannerBridge.classify(tool, target, output_text)
             
@@ -746,6 +775,7 @@ class ScannerEngine:
         """Function _normalize_asset."""
         parsed = urlparse(target)
         host = parsed.hostname or target
+        # Conditional branch.
         if host.startswith("www."):
             host = host[4:]
         return host

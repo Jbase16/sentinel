@@ -22,9 +22,11 @@ struct ModelRouter {
 
     /// Function routeModel.
     func routeModel(for prompt: String, preferredModel: String, autoRoutingEnabled: Bool, available: [String] = []) -> String {
+        // Guard condition.
         guard autoRoutingEnabled else { return preferredModel }
         let lower = prompt.lowercased()
 
+        // Conditional branch.
         if lower.contains("func ")
             || lower.contains("class ")
             || lower.contains("struct ")
@@ -35,6 +37,7 @@ struct ModelRouter {
             return pickAvailable("deepseek-coder:6.7b", fallback: preferredModel, available: available)
         }
 
+        // Conditional branch.
         if prompt.count < 120 {
             return pickAvailable("phi3:mini", fallback: preferredModel, available: available)
         }
@@ -43,8 +46,11 @@ struct ModelRouter {
     }
 
     private func pickAvailable(_ candidate: String, fallback: String, available: [String]) -> String {
+        // Guard condition.
         guard !available.isEmpty else { return candidate }
+        // Conditional branch.
         if available.contains(candidate) { return candidate }
+        // Conditional branch.
         if available.contains(fallback) { return fallback }
         return available.first ?? candidate
     }

@@ -30,11 +30,13 @@ class GraphAwareChat:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if GraphAwareChat._instance is None:
             GraphAwareChat._instance = GraphAwareChat()
         return GraphAwareChat._instance
 
     def __init__(self):
+        """Function __init__."""
         self.ai = AIEngine.instance()
         self.graph = KnowledgeGraph.instance()
 

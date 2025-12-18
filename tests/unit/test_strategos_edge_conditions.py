@@ -41,6 +41,7 @@ async def test_tool_cancellation_does_not_deadlock_intent_completion():
         )
     )
 
+    # Loop over items.
     for _ in range(200):
         if brain._tool_tasks.get("subfinder"):
             break
@@ -116,6 +117,7 @@ async def test_bug_bounty_walk_away_uses_surface_delta():
 
     async def dispatch_tool(tool: str):
         """AsyncFunction dispatch_tool."""
+        # Conditional branch.
         if tool == "subfinder":
             return [
                 {
@@ -128,6 +130,7 @@ async def test_bug_bounty_walk_away_uses_surface_delta():
                     "metadata": {"original_target": "example.com"},
                 }
             ]
+        # Conditional branch.
         if tool == "nmap":
             return [
                 {

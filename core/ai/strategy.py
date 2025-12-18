@@ -51,6 +51,7 @@ class StrategyEngine:
     """
 
     def __init__(self, session: ScanSession):
+        """Function __init__."""
         self.session = session
         self.ai = AIEngine.instance()
 
@@ -58,6 +59,7 @@ class StrategyEngine:
         """
         Asks Gemma to analyze a traffic snapshot associated with a session.
         """
+        # Conditional branch.
         if not self.ai.client:
             return []
 
@@ -65,6 +67,7 @@ class StrategyEngine:
         params = flow_data.get("params", [])
         method = flow_data.get("method")
         
+        # Conditional branch.
         if not params:
             return [] # Logic fuzzing needs inputs
 
@@ -130,6 +133,7 @@ class StrategyEngine:
         vectors = await self.analyze_traffic(flow_data)
         print(f"[DEBUG] propose_attacks got {len(vectors)} vectors")
         
+        # Loop over items.
         for vec in vectors:
             # Create a "Neural Finding" - a finding that is a HYPOTHESIS, not a fact.
             self.session.findings.add_finding({

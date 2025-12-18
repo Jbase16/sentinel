@@ -43,11 +43,13 @@ class ExecutionEngine:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if ExecutionEngine._instance is None:
             ExecutionEngine._instance = ExecutionEngine()
         return ExecutionEngine._instance
 
     def __init__(self):
+        """Function __init__."""
         self.task_queue = queue.Queue()
         self.active_tasks = {}
         self.running = True
@@ -71,6 +73,7 @@ class ExecutionEngine:
 
     def kill_task(self, task_id: str):
         """Function kill_task."""
+        # Conditional branch.
         if task_id in self.active_tasks:
             proc = self.active_tasks[task_id]
             proc.kill()
@@ -78,6 +81,7 @@ class ExecutionEngine:
 
     def _worker_loop(self):
         """Function _worker_loop."""
+        # While loop.
         while self.running:
             task = self.task_queue.get()
             if not task:

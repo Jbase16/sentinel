@@ -47,6 +47,7 @@ struct ChatView: View {
                     .padding()
                 }
                 .onChange(of: appState.thread.messages.count) {
+                    // Conditional branch.
                     if let last = appState.thread.messages.last {
                         withAnimation {
                             proxy.scrollTo(last.id, anchor: .bottom)
@@ -65,6 +66,7 @@ struct ChatView: View {
             
             // Input area with processing indicator
             VStack(spacing: 8) {
+                // Conditional branch.
                 if appState.isProcessing {
                     IndeterminateProgressBar(color: .blue)
                 }
@@ -80,6 +82,7 @@ struct ChatView: View {
                         .disabled(!backend.isRunning || appState.isProcessing)
                     
                     Button(action: sendMessage) {
+                        // Conditional branch.
                         if appState.isProcessing {
                             ProgressView()
                                 .scaleEffect(0.8)
@@ -104,6 +107,7 @@ struct ChatView: View {
     }
     
     private func sendMessage() {
+        // Guard condition.
         guard backend.isRunning else { return }
         let text = input
         input = ""
@@ -144,6 +148,7 @@ struct AIStatusHeader: View {
     }
     
     private var currentStatus: StatusPill.ConnectionStatus {
+        // Conditional branch.
         if !backend.isRunning {
             return .connecting
         } else if !aiConnected {

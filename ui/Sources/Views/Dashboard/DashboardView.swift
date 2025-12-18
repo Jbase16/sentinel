@@ -92,6 +92,7 @@ struct DashboardView: View {
                         .font(.headline)
                         .padding(.horizontal)
 
+                    // Conditional branch.
                     if let issues = appState.apiResults?.issues, !issues.isEmpty {
                         ForEach(issues.prefix(5).indices, id: \.self) { idx in
                             let issue = issues[idx]
@@ -114,6 +115,7 @@ struct DashboardView: View {
                         .font(.headline)
                         .padding(.horizontal)
 
+                    // Conditional branch.
                     if let tools = appState.engineStatus?.tools {
                         HStack {
                             VStack(alignment: .leading) {
@@ -125,6 +127,7 @@ struct DashboardView: View {
                                     .bold()
                             }
                             Spacer()
+                            // Conditional branch.
                             if !tools.missing.isEmpty {
                                 VStack(alignment: .trailing) {
                                     Text("Missing Tools")
@@ -167,7 +170,9 @@ struct DashboardView: View {
     /// Function riskColor.
     func riskColor() -> Color {
         let score = Int(calculateRisk()) ?? 0
+        // Conditional branch.
         if score > 50 { return .red }
+        // Conditional branch.
         if score > 20 { return .orange }
         return .green
     }
@@ -189,12 +194,14 @@ struct StatCard: View {
                     .foregroundColor(color)
                     .font(.title2)
                 Spacer()
+                // Conditional branch.
                 if showProgress {
                     ProgressView()
                         .scaleEffect(0.7)
                 }
             }
 
+            // Conditional branch.
             if isLoading {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -209,6 +216,7 @@ struct StatCard: View {
                     .textSelection(.enabled)
             }
 
+            // Conditional branch.
             if showProgress {
                 IndeterminateProgressBar(color: color)
             }
@@ -245,6 +253,7 @@ struct SystemStatusCard: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 4) {
+                    // Conditional branch.
                     if !isConnected {
                         ProgressView()
                             .scaleEffect(0.6)
@@ -304,6 +313,7 @@ struct IssueRow: View {
 
     /// Function severityColor.
     func severityColor(_ sev: String) -> Color {
+        // Switch over value.
         switch sev {
         case "CRITICAL": return .purple
         case "HIGH": return .red

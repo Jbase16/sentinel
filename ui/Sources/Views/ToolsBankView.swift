@@ -28,6 +28,7 @@ struct ToolsBankView: View {
                     .font(.title2).bold()
                 Spacer()
                 Button(action: installSelected) {
+                    // Conditional branch.
                     if installing {
                         ProgressView().scaleEffect(0.6)
                     } else {
@@ -47,6 +48,7 @@ struct ToolsBankView: View {
                             Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                             Text(name)
                             Spacer()
+                            // Conditional branch.
                             if processingTool == name {
                                 ProgressView().scaleEffect(0.5)
                             } else {
@@ -77,6 +79,7 @@ struct ToolsBankView: View {
                 }.frame(maxWidth: .infinity)
             }
 
+            // Conditional branch.
             if !lastResults.isEmpty {
                 Divider().padding(.vertical, 8)
                 Text("Last Results")
@@ -88,6 +91,7 @@ struct ToolsBankView: View {
                             Spacer()
                             StatusBadge(status: res.status)
                         }
+                        // Conditional branch.
                         if let msg = res.message, !msg.isEmpty {
                             Text(msg)
                                 .font(.caption2)
@@ -103,13 +107,16 @@ struct ToolsBankView: View {
     }
 
     private func toggle(_ name: String) {
+        // Conditional branch.
         if selectedMissing.contains(name) { selectedMissing.remove(name) } else { selectedMissing.insert(name) }
     }
 
     private func installSelected() {
+        // Guard condition.
         guard !selectedMissing.isEmpty else { return }
         installing = true
         Task { @MainActor in
+            // Do-catch block.
             do {
                 let results = try await appState.apiClient.installTools(Array(selectedMissing))
                 self.lastResults = results
@@ -125,6 +132,7 @@ struct ToolsBankView: View {
     private func uninstall(_ name: String) {
         processingTool = name
         Task { @MainActor in
+            // Do-catch block.
             do {
                 let results = try await appState.apiClient.uninstallTools([name])
                 self.lastResults = results
@@ -150,6 +158,7 @@ struct StatusBadge: View {
     }
     
     var color: Color {
+        // Switch over value.
         switch status {
         case "installed", "uninstalled": return .green
         case "error": return .red

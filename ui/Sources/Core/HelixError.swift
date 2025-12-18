@@ -27,6 +27,7 @@ enum HelixError: Error, LocalizedError, Identifiable {
     var id: String { localizedDescription }
 
     var errorDescription: String? {
+        // Switch over value.
         switch self {
         case .network(let underlying):
             return "Network error: \(underlying.localizedDescription)"

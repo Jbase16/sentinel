@@ -252,6 +252,7 @@ class SentinelConfig:
         # Create storage directories if they don't exist
         # parents=True means "create parent directories too if needed"
         # exist_ok=True means "don't error if the directory already exists"
+        """Function __post_init__."""
         self.storage.base_dir.mkdir(parents=True, exist_ok=True)
         self.storage.evidence_path.mkdir(parents=True, exist_ok=True)
         self.storage.reports_path.mkdir(parents=True, exist_ok=True)
@@ -281,6 +282,7 @@ class SentinelConfig:
         
         # Get API token from environment, generate random one if not provided
         token = os.getenv("SENTINEL_API_TOKEN")
+        # Conditional branch.
         if not token:
             # No token provided, generate a cryptographically secure random token
             token = secrets.token_urlsafe(32)
@@ -346,6 +348,7 @@ def get_config() -> SentinelConfig:
         The shared SentinelConfig instance (creates it if it doesn't exist yet)
     """
     global _config  # Access the module-level _config variable
+    # Conditional branch.
     if _config is None:
         # First time being called - load config from environment
         _config = SentinelConfig.from_env()

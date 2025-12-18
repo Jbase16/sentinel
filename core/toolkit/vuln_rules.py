@@ -134,6 +134,7 @@ def _pluck_text(finding: dict) -> str:
         Most matcher functions use this to search finding text for keywords.
     """
     parts = []
+    # Loop over items.
     for key in ("type", "message", "proof", "evidence"):
         val = finding.get(key)
         if isinstance(val, str):
@@ -170,6 +171,7 @@ def _extract_paths(text: str) -> List[str]:
     # Deduplicate while preserving order
     seen = set()
     ordered = []
+    # Loop over items.
     for path in matches:
         if path not in seen:
             seen.add(path)
@@ -219,6 +221,7 @@ def _parse_version(raw: str) -> Tuple[int, ...]:
         - False positives: Flagging safe versions as vulnerable
     """
     nums = re.findall(r"\d+", raw)
+    # Conditional branch.
     if not nums:
         return tuple()
     return tuple(int(n) for n in nums[:3])
@@ -274,6 +277,7 @@ def _version_lt(current: Tuple[int, ...], minimum: Tuple[int, ...]) -> bool:
         - (5, 2, 3) < (6, 4, 0) = True → VULNERABLE
         - Issue created: "Outdated Public CMS" (MEDIUM severity)
     """
+    # Conditional branch.
     if not current:
         return False  # Can't determine if unknown version is vulnerable
     length = max(len(current), len(minimum))
@@ -316,6 +320,7 @@ def _gather_findings(findings: Iterable[dict], predicate: Callable[[dict], bool]
         - Evidence chains are built from all findings for that target
     """
     buckets: Dict[str, List[dict]] = {}
+    # Loop over items.
     for item in findings:
         if predicate(item):
             target = item.get("target", "unknown")
@@ -401,6 +406,7 @@ class VulnRule:
         """
         matches = self.matcher(findings)
         enriched = []
+        # Loop over items.
         for idx, match in enumerate(matches, start=1):
             target = match.get("target", "unknown")
             evidence = match.get("evidence", [])
@@ -425,9 +431,11 @@ class VulnRule:
     @staticmethod
     def _summarize_evidence(evidence: List[dict]) -> str:
         """Function _summarize_evidence."""
+        # Conditional branch.
         if not evidence:
             return ""
         samples = []
+        # Loop over items.
         for item in evidence[:3]:
             msg = item.get("message") or item.get("proof") or item.get("type")
             if msg:
@@ -513,6 +521,7 @@ def _match_admin_interfaces(findings: List[dict]) -> List[dict]:
         or any(key in _pluck_text(f) for key in ADMIN_KEYWORDS),
     )
     results: List[dict] = []
+    # Loop over items.
     for target, items in buckets.items():
         texts = " ".join(_pluck_text(f) for f in items)
         results.append({
@@ -534,6 +543,7 @@ def _match_weak_ssl_on_login(findings: List[dict]) -> List[dict]:
     def predicate(item: dict) -> bool:
         """Function predicate."""
         text = _pluck_text(item)
+        # Conditional branch.
         if not any(token in text for token in SSL_KEYWORDS):
             return False
         return any(token in text for token in LOGIN_KEYWORDS) or any(
@@ -542,6 +552,7 @@ def _match_weak_ssl_on_login(findings: List[dict]) -> List[dict]:
 
     buckets = _gather_findings(findings, predicate)
     results = []
+    # Loop over items.
     for target, items in buckets.items():
         results.append({
             "target": target,
@@ -634,6 +645,7 @@ def _match_outdated_cms(findings: List[dict]) -> List[dict]:
         for attackers. This rule helps prioritize patching.
     """
     hits = []
+    # Loop over items.
     for item in findings:
         text = _pluck_text(item)
         for match in CMS_REGEX_EXTENDED.finditer(text):
@@ -666,6 +678,7 @@ PORT_REGEX = re.compile(r"(\d{2,5})/(tcp|udp)")
 def _match_management_ports(findings: List[dict]) -> List[dict]:
     """Function _match_management_ports."""
     buckets: Dict[Tuple[str, int], List[dict]] = {}
+    # Loop over items.
     for item in findings:
         text_candidates = [item.get("proof"), item.get("message"), item.get("evidence")]
         port_num = None
@@ -684,6 +697,7 @@ def _match_management_ports(findings: List[dict]) -> List[dict]:
         buckets.setdefault((target, port_num), []).append(item)
 
     results = []
+    # Loop over items.
     for (target, port), items in buckets.items():
         service = MANAGEMENT_PORTS[port]
         results.append({
@@ -706,6 +720,7 @@ def _match_by_tag(required_tags: List[str]):
     def matcher(findings: List[dict]) -> List[dict]:
         """Function matcher."""
         results = []
+        # Loop over items.
         for item in findings:
             tags = set(item.get("tags", []))
             if all(tag in tags for tag in required_tags):
@@ -725,6 +740,7 @@ def _match_api_exposure(findings: List[dict]) -> List[dict]:
     """Function _match_api_exposure."""
     matcher = _match_by_tag(["api", "exposure", "no-auth"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -738,6 +754,7 @@ def _match_cors(findings: List[dict]) -> List[dict]:
     """Function _match_cors."""
     matcher = _match_by_tag(["cors", "misconfiguration"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -750,6 +767,7 @@ def _match_dev_surfaces(findings: List[dict]) -> List[dict]:
     """Function _match_dev_surfaces."""
     matcher = _match_by_tag(["dev-surface", "exposure"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -762,6 +780,7 @@ def _match_user_enum(findings: List[dict]) -> List[dict]:
     """Function _match_user_enum."""
     matcher = _match_by_tag(["auth", "user-enum"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -774,6 +793,7 @@ def _match_metadata(findings: List[dict]) -> List[dict]:
     """Function _match_metadata."""
     matcher = _match_by_tag(["cloud", "ssrf"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -788,6 +808,7 @@ def _match_dangerous_http(findings: List[dict]) -> List[dict]:
     """Function _match_dangerous_http."""
     matcher = _match_by_tag(["surface-expansion"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -800,6 +821,7 @@ def _match_uploads(findings: List[dict]) -> List[dict]:
     """Function _match_uploads."""
     matcher = _match_by_tag(["upload"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -812,6 +834,7 @@ def _match_private_ip(findings: List[dict]) -> List[dict]:
     """Function _match_private_ip."""
     matcher = _match_by_tag(["private-ip"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -824,6 +847,7 @@ def _match_verbose_errors(findings: List[dict]) -> List[dict]:
     """Function _match_verbose_errors."""
     matcher = _match_by_tag(["error-leakage"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -836,6 +860,7 @@ def _match_graphql(findings: List[dict]) -> List[dict]:
     """Function _match_graphql."""
     matcher = _match_by_tag(["graphql"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -848,6 +873,7 @@ def _match_business_logic(findings: List[dict]) -> List[dict]:
     """Function _match_business_logic."""
     matcher = _match_by_tag(["business-logic"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -862,6 +888,7 @@ def _match_session_header_chain(findings: List[dict]) -> List[dict]:
     """Function _match_session_header_chain."""
     results = []
     targets = _gather_target_tag_map(findings)
+    # Loop over items.
     for target, tags in targets.items():
         if "session" not in tags:
             continue
@@ -891,6 +918,7 @@ def _match_api_rate_limit_gap(findings: List[dict]) -> List[dict]:
     """Function _match_api_rate_limit_gap."""
     results = []
     targets = _gather_target_tag_map(findings)
+    # Loop over items.
     for target, tags in targets.items():
         if "api" not in tags or "no-auth" not in tags:
             continue
@@ -917,6 +945,7 @@ def _match_cloud_storage_chain(findings: List[dict]) -> List[dict]:
     """Function _match_cloud_storage_chain."""
     results = []
     targets = _gather_target_tag_map(findings)
+    # Loop over items.
     for target, tags in targets.items():
         if "cloud-storage" not in tags:
             continue
@@ -941,6 +970,7 @@ def _match_waf_param_combo(findings: List[dict]) -> List[dict]:
     """Function _match_waf_param_combo."""
     results = []
     targets = _gather_target_tag_map(findings)
+    # Loop over items.
     for target, tags in targets.items():
         if "waf-bypass" in tags and any(tag.startswith("param-fuzz") for tag in tags):
             evidence = [f for f in findings if f.get("target") == target and "waf-bypass" in f.get("tags", [])]
@@ -959,6 +989,7 @@ def _match_timing_debug_combo(findings: List[dict]) -> List[dict]:
     """Function _match_timing_debug_combo."""
     results = []
     targets = _gather_target_tag_map(findings)
+    # Loop over items.
     for target, tags in targets.items():
         if "timing-variance" in tags and "debug-toggle" in tags:
             evidence = [f for f in findings if f.get("target") == target]
@@ -977,6 +1008,7 @@ def _match_tls_timing(findings: List[dict]) -> List[dict]:
     """Function _match_tls_timing."""
     results = []
     targets = _gather_target_tag_map(findings)
+    # Loop over items.
     for target, tags in targets.items():
         if "tls-probe" in tags and "timing-anomaly" in tags:
             evidence = [f for f in findings if f.get("target") == target]
@@ -995,6 +1027,7 @@ def _match_secret_exposure(findings: List[dict]) -> List[dict]:
     """Function _match_secret_exposure."""
     matcher = _match_by_tag(["secret-leak"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault("severity", "CRITICAL")
         match.setdefault("score", 9.5)
@@ -1009,6 +1042,7 @@ def _match_session_weakness(findings: List[dict]) -> List[dict]:
     """Function _match_session_weakness."""
     matcher = _match_by_tag(["session", "cookie"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -1021,6 +1055,7 @@ def _match_session_weakness(findings: List[dict]) -> List[dict]:
 def _gather_target_tag_map(findings: List[dict]) -> Dict[str, set]:
     """Function _gather_target_tag_map."""
     tag_map: Dict[str, set] = {}
+    # Loop over items.
     for item in findings:
         target = item.get("target", "unknown")
         for tag in item.get("tags", []):
@@ -1032,6 +1067,7 @@ def _match_auth_chain(findings: List[dict]) -> List[dict]:
     """Function _match_auth_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
+    # Loop over items.
     for target, tags in tag_map.items():
         signals = [
             any(t in tags for t in ("pw-reset", "auth")),
@@ -1056,6 +1092,7 @@ def _match_directory_upload_chain(findings: List[dict]) -> List[dict]:
     """Function _match_directory_upload_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
+    # Loop over items.
     for target, tags in tag_map.items():
         if "directory-listing" in tags and "upload" in tags:
             evidence = [f for f in findings if f.get("target", "unknown") == target]
@@ -1074,6 +1111,7 @@ def _match_ssrf_chain(findings: List[dict]) -> List[dict]:
     """Function _match_ssrf_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
+    # Loop over items.
     for target, tags in tag_map.items():
         if "ssrf-source" in tags and "cloud" in tags:
             evidence = [f for f in findings if f.get("target", "unknown") == target and any(tag in f.get("tags", []) for tag in ("ssrf-source", "cloud", "ssrf"))]
@@ -1092,6 +1130,7 @@ def _match_cloud_storage_rule(findings: List[dict]) -> List[dict]:
     """Function _match_cloud_storage_rule."""
     matcher = _match_by_tag(["cloud-storage"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -1104,6 +1143,7 @@ def _match_cloud_storage_rule(findings: List[dict]) -> List[dict]:
 def _match_outdated_frameworks(findings: List[dict]) -> List[dict]:
     """Function _match_outdated_frameworks."""
     hits = []
+    # Loop over items.
     for item in findings:
         meta = item.get("metadata") or {}
         framework = meta.get("framework")
@@ -1130,6 +1170,7 @@ def _match_header_chain(findings: List[dict]) -> List[dict]:
     """Function _match_header_chain."""
     tag_map = _gather_target_tag_map(findings)
     results = []
+    # Loop over items.
     for target, tags in tag_map.items():
         missing_csp = any(f.get("metadata", {}).get("header") == "content-security-policy" for f in findings if f.get("target", "unknown") == target)
         upload_surface = "upload" in tags
@@ -1161,6 +1202,7 @@ def _match_backup_rule(findings: List[dict]) -> List[dict]:
     """Function _match_backup_rule."""
     matcher = _match_by_tag(["backup-leak"])
     matches = matcher(findings)
+    # Loop over items.
     for match in matches:
         match.setdefault(
             "impact",
@@ -1538,9 +1580,11 @@ def load_rules_from_yaml() -> List[VulnRule]:
     """
     Load external rules from rules.yaml and hydrate them with matcher functions.
     """
+    # Conditional branch.
     if not RULES_FILE.exists():
         return []
 
+    # Error handling block.
     try:
         with open(RULES_FILE, "r") as f:
             data = yaml.safe_load(f)
@@ -1660,10 +1704,12 @@ def apply_rules(findings: List[dict]):
         - Consider caching if findings list is very large (>10k)
     """
     enriched: List[dict] = []
+    # Loop over items.
     for rule in RULES:
         enriched.extend(rule.apply(findings))
 
     grouped: Dict[str, List[dict]] = {}
+    # Loop over items.
     for issue in enriched:
         grouped.setdefault(issue["target"], []).append(issue)
 

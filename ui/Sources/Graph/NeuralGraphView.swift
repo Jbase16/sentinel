@@ -48,6 +48,7 @@ struct NeuralGraphView: NSViewRepresentable {
         mtkView.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.1, alpha: 1.0)
         mtkView.drawableSize = mtkView.frame.size
 
+        // Conditional branch.
         if let device = mtkView.device {
             context.coordinator.renderer = GraphRenderer(device: device)
         }
@@ -55,6 +56,7 @@ struct NeuralGraphView: NSViewRepresentable {
         // Listen for interaction (Simple Bus)
         NotificationCenter.default.addObserver(forName: .cameraMove, object: nil, queue: .main) {
             note in
+            // Conditional branch.
             if let delta = note.userInfo?["delta"] as? CGSize {
                 context.coordinator.updateInput(drag: delta, zoom: 0)
             }
@@ -87,11 +89,13 @@ struct NeuralGraphView: NSViewRepresentable {
         /// Function bindEventStream.
         func bindEventStream(view: MTKView) {
             self.mtkView = view
+            // Guard condition.
             guard graphCancellable == nil else { return }
 
             graphCancellable = eventClient.eventPublisher
                 .receive(on: RunLoop.main)
                 .sink { [weak self] event in
+                    // Guard condition.
                     guard let self, let renderer = self.renderer else { return }
                     renderer.handleGraphEvent(
                         GraphRenderer.Event(typeString: event.type, payload: event.payload)

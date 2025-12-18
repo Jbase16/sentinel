@@ -49,6 +49,7 @@ def create_safe_task(
     
     def _handle_exception(t: asyncio.Task):
         """Function _handle_exception."""
+        # Error handling block.
         try:
             exc = t.exception()
             if exc and log_errors:
@@ -81,6 +82,7 @@ async def run_with_timeout(
     Returns:
         The coroutine result, or default if timeout occurred
     """
+    # Error handling block.
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
     except asyncio.TimeoutError:
@@ -103,6 +105,7 @@ def fire_and_forget(coro: Coroutine[Any, Any, Any], name: Optional[str] = None) 
         coro: The coroutine to run
         name: Optional name for logging
     """
+    # Error handling block.
     try:
         loop = asyncio.get_running_loop()
         create_safe_task(coro, name=name)

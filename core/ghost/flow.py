@@ -24,6 +24,7 @@ import time
 class FlowStep:
     """Class FlowStep."""
     def __init__(self, method: str, url: str, params: Dict, headers: Dict):
+        """Function __init__."""
         self.id = str(uuid.uuid4())
         self.method = method
         self.url = url
@@ -38,6 +39,7 @@ class UserFlow:
     Ghost uses this to understand STATE.
     """
     def __init__(self, name: str):
+        """Function __init__."""
         self.name = name
         self.steps: List[FlowStep] = []
         self.auth_tokens: Dict[str, str] = {} # Extracted tokens
@@ -49,6 +51,7 @@ class UserFlow:
     def extract_tokens(self, headers: Dict):
         # Heuristic: Find Bearer/Cookie
         """Function extract_tokens."""
+        # Loop over items.
         for k, v in headers.items():
             if k.lower() in ["authorization", "cookie", "x-csrf-token"]:
                 self.auth_tokens[k] = v
@@ -62,11 +65,13 @@ class FlowMapper:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if FlowMapper._instance is None:
             FlowMapper._instance = FlowMapper()
         return FlowMapper._instance
 
     def __init__(self):
+        """Function __init__."""
         self.active_flows: Dict[str, UserFlow] = {}
 
     def start_recording(self, flow_name: str) -> str:
@@ -77,6 +82,7 @@ class FlowMapper:
 
     def record_request(self, flow_id: str, method, url, params, headers):
         """Function record_request."""
+        # Conditional branch.
         if flow_id in self.active_flows:
             step = FlowStep(method, url, params, headers)
             self.active_flows[flow_id].add_step(step)

@@ -47,6 +47,7 @@ def main():
         ),
     ]
 
+    # Loop over items.
     for d in decisions:
         committed = ledger.commit(d)
         narrator.narrate(committed)

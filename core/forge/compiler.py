@@ -36,11 +36,13 @@ class ExploitCompiler:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if ExploitCompiler._instance is None:
             ExploitCompiler._instance = ExploitCompiler()
         return ExploitCompiler._instance
 
     def __init__(self):
+        """Function __init__."""
         self.ai = AIEngine.instance()
         self.output_dir = os.path.join(os.getcwd(), "artifacts", "exploits")
         os.makedirs(self.output_dir, exist_ok=True)
@@ -50,6 +52,7 @@ class ExploitCompiler:
         Asks the Forge (LLM) to write a script.
         Returns the path to the generated script.
         """
+        # Conditional branch.
         if not self.ai.client:
             raise RuntimeError("Forge requires AI connection.")
 
@@ -78,6 +81,7 @@ class ExploitCompiler:
         filename = f"exploit_{uuid.uuid4().hex[:8]}.py"
         filepath = os.path.join(self.output_dir, filename)
         
+        # Context-managed operation.
         with open(filepath, "w") as f:
             f.write(code)
             
@@ -86,6 +90,7 @@ class ExploitCompiler:
 
     def _extract_code(self, text: str) -> str:
         """Function _extract_code."""
+        # Conditional branch.
         if "```" in text:
             # Simple markdown extraction
             parts = text.split("```python")

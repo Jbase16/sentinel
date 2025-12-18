@@ -24,9 +24,11 @@ class GraphAnalyzer:
         """
         self.graph = nx.DiGraph()
         
+        # Loop over items.
         for node in nodes:
             self.graph.add_node(node["id"], **node.get("attributes", {}), type=node.get("type", "unknown"))
             
+        # Loop over items.
         for edge in edges:
             # Directed graph: source -> target
             # Weight defaults to 1.0. Lower weight = "easier" path usually, 
@@ -45,6 +47,7 @@ class GraphAnalyzer:
         Finds the shortest operational path from source to target.
         Returns list of node IDs or None.
         """
+        # Error handling block.
         try:
             return nx.shortest_path(self.graph, source=source, target=target, weight="weight")
         except (nx.NetworkXNoPath, nx.NodeNotFound):
@@ -67,6 +70,7 @@ class GraphAnalyzer:
         Returns all nodes reachable from `node` within `depth` hops.
         Simulates lateral movement potential.
         """
+        # Conditional branch.
         if node not in self.graph:
             return []
             
@@ -90,6 +94,7 @@ class GraphAnalyzer:
         components = list(nx.weakly_connected_components(self.graph))
         # Map node_id -> component_id
         partition = {}
+        # Loop over items.
         for idx, comp in enumerate(components):
             for node in comp:
                 partition[node] = idx

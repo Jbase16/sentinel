@@ -18,6 +18,7 @@ struct ActionRequestView: View {
     @EnvironmentObject var appState: HelixAppState
     
     var body: some View {
+        // Conditional branch.
         if !appState.pendingActions.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {

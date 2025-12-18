@@ -31,6 +31,7 @@ enum ScanMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var displayName: String {
+        // Switch over value.
         switch self {
         case .standard: return "Standard"
         case .bugBounty: return "Bug Bounty"
@@ -108,9 +109,11 @@ class HelixAppState: ObservableObject {
 
     private func connectServices() {
         print("[AppState] Backend Ready. Connecting Services...")
+        // Conditional branch.
         if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
             cortexStream.connect(url: wsURL)
         }
+        // Conditional branch.
         if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/terminal") {
             ptyClient.connect(url: ptyURL)
         }
@@ -118,6 +121,7 @@ class HelixAppState: ObservableObject {
         self.startEventStream()
         self.refreshStatus()
 
+        // Conditional branch.
         if !didSetupEventStreamSubscriptions {
             didSetupEventStreamSubscriptions = true
 
@@ -125,6 +129,7 @@ class HelixAppState: ObservableObject {
             eventClient.eventPublisher
                 .receive(on: RunLoop.main)
                 .sink { [weak self] event in
+                    // Guard condition.
                     guard let self else { return }
 
                     // Deduplicate by immutable event UUID (survives backend restarts/replays).
@@ -132,6 +137,7 @@ class HelixAppState: ObservableObject {
                         return
                     }
                     self.seenEventIDs.insert(event.id)
+                    // Conditional branch.
                     if self.seenEventIDs.count > 50_000 {
                         self.seenEventIDs.removeAll(keepingCapacity: true)
                     }
@@ -158,6 +164,7 @@ class HelixAppState: ObservableObject {
 
                     // Render selected events into the Live Logs console.
                     let rendered = self.renderLiveLogLine(event: event)
+                    // Guard condition.
                     guard let rendered else { return }
 
                     self.apiLogItems.append(LogItem(id: UUID(), text: rendered))
@@ -170,6 +177,7 @@ class HelixAppState: ObservableObject {
     }
 
     private func renderLiveLogLine(event: GraphEvent) -> String? {
+        // Switch over value.
         switch event.eventType {
         case .logEmitted:
             return event.payload["message"]?.stringValue
@@ -262,6 +270,7 @@ class HelixAppState: ObservableObject {
     /// Function send.
     func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Guard condition.
         guard !trimmed.isEmpty else { return }
 
         let userMessage = ChatMessage(role: .user, text: trimmed)
@@ -283,11 +292,14 @@ class HelixAppState: ObservableObject {
                     BackendManager.shared.isActiveOperation = false
                 }
             }
+            // Do-catch block.
             do {
                 var accumulated = ""
+                // Loop over items.
                 for try await token in apiClient.streamChat(prompt: trimmed) {
                     accumulated += token
                     await MainActor.run {
+                        // Conditional branch.
                         if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
                             self.objectWillChange.send()
                             self.thread.messages[idx].text = accumulated
@@ -299,6 +311,7 @@ class HelixAppState: ObservableObject {
                 }
             } catch {
                 await MainActor.run {
+                    // Conditional branch.
                     if let idx = self.thread.messages.firstIndex(where: { $0.id == replyID }) {
                         self.thread.messages[idx].text = "Error: \(error.localizedDescription)"
                     }
@@ -328,6 +341,7 @@ class HelixAppState: ObservableObject {
 
     /// Function generateReport.
     func generateReport(section: String) {
+        // Guard condition.
         guard !reportIsGenerating else { return }
         reportIsGenerating = true
         reportContent[section] = ""  // Clear previous content
@@ -338,7 +352,9 @@ class HelixAppState: ObservableObject {
                     self.reportIsGenerating = false
                 }
             }
+            // Do-catch block.
             do {
+                // Loop over items.
                 for try await token in apiClient.streamReportSection(section: section) {
                     await MainActor.run {
                         self.reportContent[section, default: ""] += token
@@ -374,6 +390,7 @@ class HelixAppState: ObservableObject {
                     BackendManager.shared.isActiveOperation = false
                 }
             }
+            // Do-catch block.
             do {
                 try await apiClient.startScan(target: target, modules: modules, mode: mode.rawValue)
                 await MainActor.run {
@@ -382,12 +399,14 @@ class HelixAppState: ObservableObject {
                 // Light polling loop to keep UI fresh in case SSE misses events
                 // Poll logs and results every 2s until scanRunning goes false
                 Task { [weak self] in
+                    // While loop.
                     while let self = self, self.isScanRunning {
                         self.refreshLogs()
                         self.refreshResults()
                         try? await Task.sleep(nanoseconds: 2 * 1_000_000_000)
                         // Optionally refresh status to detect completion
                         self.refreshStatus()
+                        // Conditional branch.
                         if let running = self.engineStatus?.scanRunning, running == false {
                             self.isScanRunning = false
                         }
@@ -402,6 +421,7 @@ class HelixAppState: ObservableObject {
     /// Poll for new log lines from Python and append to our buffer.
     func refreshLogs() {
         Task {
+            // Conditional branch.
             if let lines = try? await apiClient.fetchLogs(), !lines.isEmpty {
                 await MainActor.run {
                     self.mergePolledLogs(lines)
@@ -413,9 +433,11 @@ class HelixAppState: ObservableObject {
     /// Fetch engine/AI status (model availability + running scan).
     func refreshStatus() {
         Task {
+            // Conditional branch.
             if let status = try? await apiClient.fetchStatus() {
                 await MainActor.run {
                     self.engineStatus = status
+                    // Conditional branch.
                     if let ai = status.ai {
                         self.aiStatus = ai
                         let models = ai.availableModels ?? []
@@ -433,6 +455,7 @@ class HelixAppState: ObservableObject {
     /// Pull the latest scan snapshot (findings/issues/etc.) from Python.
     func refreshResults() {
         Task {
+            // Conditional branch.
             if let results = try? await apiClient.fetchResults() {
                 await MainActor.run {
                     self.apiResults = results
@@ -455,7 +478,9 @@ class HelixAppState: ObservableObject {
     /// Start SSE stream to receive real-time updates from Python
     func startEventStream() {
         Task {
+            // Do-catch block.
             do {
+                // Loop over items.
                 for try await event in apiClient.streamEvents() {
                     // handleSSEEvent is @MainActor but synchronous logic, so await isn't strictly needed
                     // for suspension, but MainActor isolation requires it if we weren't already on MainActor.
@@ -476,8 +501,10 @@ class HelixAppState: ObservableObject {
 
     @MainActor
     private func handleSSEEvent(_ event: SSEEvent) {
+        // Switch over value.
         switch event.type {
         case "log":
+            // Conditional branch.
             if let data = event.data.data(using: .utf8),
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let line = json["line"] as? String
@@ -492,6 +519,7 @@ class HelixAppState: ObservableObject {
             self.refreshResults()
 
         case "decision_made":
+            // Conditional branch.
             if let data = event.data.data(using: .utf8),
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let intent = json["intent"] as? String,
@@ -503,6 +531,7 @@ class HelixAppState: ObservableObject {
             }
 
         case "scan_phase_changed":
+            // Conditional branch.
             if let data = event.data.data(using: .utf8),
                 let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let phase = json["phase"] as? String
@@ -512,6 +541,7 @@ class HelixAppState: ObservableObject {
                 self.apiLogItems.append(LogItem(id: UUID(), text: text))
             }
         case "action_needed":
+            // Conditional branch.
             if let data = event.data.data(using: .utf8),
                 let action = try? JSONDecoder().decode(PendingAction.self, from: data)
             {
@@ -527,11 +557,13 @@ class HelixAppState: ObservableObject {
 
     @MainActor
     private func mergePolledLogs(_ lines: [String]) {
+        // Guard condition.
         guard !lines.isEmpty else { return }
 
         // `/logs` returns a tail window; merge by finding the last seen line.
         let lastText = apiLogs.last
         let startIndex: Int
+        // Conditional branch.
         if let lastText, let idx = lines.lastIndex(of: lastText) {
             startIndex = idx + 1
         } else {
@@ -539,11 +571,14 @@ class HelixAppState: ObservableObject {
         }
 
         let newLines = startIndex < lines.count ? Array(lines[startIndex...]) : []
+        // Guard condition.
         guard !newLines.isEmpty else { return }
 
         apiLogs.append(contentsOf: newLines)
 
+        // Conditional branch.
         if !eventClient.isConnected {
+            // Loop over items.
             for line in newLines {
                 // let nextID = (apiLogItems.last?.id ?? 0) + 1
                 apiLogItems.append(LogItem(id: UUID(), text: line))
@@ -574,6 +609,7 @@ class HelixAppState: ObservableObject {
     /// Function toggleGhost.
     func toggleGhost() {
         Task {
+            // Conditional branch.
             if isGhostActive {
                 _ = try? await apiClient.stopGhost()
                 await MainActor.run {
@@ -581,6 +617,7 @@ class HelixAppState: ObservableObject {
                     self.ghostPort = nil
                 }
             } else {
+                // Do-catch block.
                 do {
                     let port = try await apiClient.startGhost(port: 8080)
                     await MainActor.run {

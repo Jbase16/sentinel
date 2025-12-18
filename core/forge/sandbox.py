@@ -35,6 +35,7 @@ class SandboxRunner:
         """
         cmd = [sys.executable, script_path]
         
+        # Error handling block.
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,

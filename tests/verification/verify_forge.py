@@ -47,6 +47,7 @@ async def test_forge():
     script_path = compiler.compile_exploit(target, anomaly)
     print(f"    > Compiled exploit to: {script_path}")
     
+    # Conditional branch.
     if os.path.exists(script_path):
         print("    [SUCCESS] Script file created.")
     else:
@@ -57,6 +58,7 @@ async def test_forge():
     print("    > Executing in Sandbox...")
     result = await SandboxRunner.run(script_path)
     
+    # Conditional branch.
     if result.get("success_flag"):
         print("    [SUCCESS] Sandbox captured 'EXPLOIT SUCCESS'")
     else:

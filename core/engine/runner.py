@@ -31,6 +31,7 @@ def run_tool(name: str, target: str, on_output: OutputCallback) -> Tuple[int, st
     cmd = get_tool_command(name, target)
     on_output(f"[{name}] Executing: {' '.join(cmd)}")
 
+    # Error handling block.
     try:
         proc = subprocess.Popen(
             cmd,
@@ -47,6 +48,7 @@ def run_tool(name: str, target: str, on_output: OutputCallback) -> Tuple[int, st
 
     combined = []
 
+    # Conditional branch.
     if proc.stdout:
         for line in proc.stdout:
             line = line.rstrip("\n")
@@ -65,12 +67,14 @@ def run_all_tools(target: str, on_output: OutputCallback) -> Dict[str, Dict[str,
     results: Dict[str, Dict[str, object]] = {}
     installed = get_installed_tools()
 
+    # Conditional branch.
     if not installed:
         on_output("No supported tools found in PATH.")
         return results
 
     on_output(f"Installed tools: {', '.join(installed.keys())}")
 
+    # Loop over items.
     for name in installed:
         on_output(f"--- Running {name} ---")
         exit_code, output = run_tool(name, target, on_output)
@@ -90,6 +94,7 @@ class PhaseRunner:
     """
 
     def __init__(self, target: str, on_output: OutputCallback):
+        """Function __init__."""
         self.target = target
         self.on_output = on_output
         self.results: Dict[str, List[dict]] = {}
@@ -100,6 +105,7 @@ class PhaseRunner:
             ("behavioral-suite", self._run_behavioral_phase),
         ]
 
+        # Loop over items.
         for label, handler in phases:
             self.on_output(f"[phase] Starting {label} analysis…")
             try:
@@ -122,6 +128,7 @@ class PhaseRunner:
             "tls-active": [],
         }
 
+        # Loop over items.
         for item in findings:
             families = item.get("families", [])
             placed = False

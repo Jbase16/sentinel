@@ -42,6 +42,7 @@ def test_chat():
     response = chat.query("What is the status of target A?")
     print(f"    > AI Response: {response}")
     
+    # Conditional branch.
     if response == "Verified RAG Response.":
         print("    [SUCCESS] Chat Engine Functional.")
     else:
@@ -56,6 +57,7 @@ async def test_orchestrator():
     mission_id = await orch.start_mission("example.com")
     print(f"    > Mission Started: {mission_id}")
     
+    # Conditional branch.
     if mission_id.startswith("mission_example.com"):
         print("    [SUCCESS] Orchestrator running.")
     else:

@@ -19,20 +19,24 @@ class Signal:
     A simple pure-Python signal implementation to replace PyQt6.pyqtSignal.
     """
     def __init__(self):
+        """Function __init__."""
         self._observers: List[Callable[..., Any]] = []
 
     def connect(self, callback: Callable[..., Any]):
         """Subscribe a callback function."""
+        # Conditional branch.
         if callback not in self._observers:
             self._observers.append(callback)
 
     def disconnect(self, callback: Callable[..., Any]):
         """Unsubscribe a callback function."""
+        # Conditional branch.
         if callback in self._observers:
             self._observers.remove(callback)
 
     def emit(self, *args, **kwargs):
         """Notify all subscribers."""
+        # Loop over items.
         for callback in self._observers:
             try:
                 callback(*args, **kwargs)

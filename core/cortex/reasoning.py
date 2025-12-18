@@ -14,6 +14,7 @@ class ReasoningEngine:
     """
 
     def __init__(self):
+        """Function __init__."""
         self.event_bus = get_event_bus()  # SINGLETON - never instantiate directly
         self.ledger = DecisionLedger()
         self.narrator = NarratorEngine(event_bus=self.event_bus)
@@ -29,6 +30,7 @@ class ReasoningEngine:
         Return a summary of the reasoning state (Decision Ledger).
         Used by /cortex/reasoning API endpoint.
         """
+        # Conditional branch.
         if self.strategos._decision_ledger:
             stats = self.strategos._decision_ledger.stats()
             return {
@@ -54,6 +56,7 @@ class ReasoningEngine:
         Entry point used by API.
         """
         from core.scheduler.modes import ScanMode
+        # Error handling block.
         try:
             scan_mode = ScanMode(mode)
         except ValueError:

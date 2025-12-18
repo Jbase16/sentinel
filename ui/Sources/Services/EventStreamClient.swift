@@ -79,6 +79,7 @@ public struct AnyCodable: Decodable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
+        // Conditional branch.
         if let string = try? container.decode(String.self) {
             value = string
         } else if let int = try? container.decode(Int.self) {
@@ -193,6 +194,7 @@ public class EventStreamClient: ObservableObject {
 
     /// Start consuming the event stream
     func connect() {
+        // Guard condition.
         guard task == nil else { return }
 
         task = Task { [weak self] in
@@ -212,7 +214,9 @@ public class EventStreamClient: ObservableObject {
     // MARK: - Connection Loop
 
     private func connectionLoop() async {
+        // While loop.
         while !Task.isCancelled && reconnectAttempt < maxReconnectAttempts {
+            // Do-catch block.
             do {
                 try await consumeStream()
                 // If we exit cleanly, reset reconnect counter
@@ -234,6 +238,7 @@ public class EventStreamClient: ObservableObject {
             }
         }
 
+        // Conditional branch.
         if reconnectAttempt >= maxReconnectAttempts {
             print("[EventStreamClient] Max reconnect attempts reached")
         }
@@ -244,6 +249,7 @@ public class EventStreamClient: ObservableObject {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "since", value: "\(lastSequence)")]
 
+        // Guard condition.
         guard let finalURL = components.url else {
             throw URLError(.badURL)
         }
@@ -255,6 +261,7 @@ public class EventStreamClient: ObservableObject {
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
+        // Guard condition.
         guard let httpResponse = response as? HTTPURLResponse,
             httpResponse.statusCode == 200
         else {
@@ -267,13 +274,17 @@ public class EventStreamClient: ObservableObject {
 
         // Parse SSE stream
         for try await line in bytes.lines {
+            // Conditional branch.
             if Task.isCancelled { break }
 
+            // Conditional branch.
             if line.hasPrefix("data:") {
                 let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
 
+                // Guard condition.
                 guard let data = json.data(using: .utf8) else { continue }
 
+                // Do-catch block.
                 do {
                     let event = try JSONDecoder().decode(GraphEvent.self, from: data)
                     await handleEvent(event)

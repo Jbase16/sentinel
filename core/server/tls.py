@@ -36,6 +36,7 @@ class TLSAnalyzer:
     """
 
     def __init__(self, target: str, port: int = 443):
+        """Function __init__."""
         self.target = target
         self.port = port
         self.hostname = target
@@ -74,6 +75,7 @@ class TLSAnalyzer:
 
     async def get_cert_chain(self) -> Dict[str, Any]:
         """Retrieve and parse certificate chain using cryptography."""
+        # Error handling block.
         try:
             # Use standard SSL to fetch cert bytes, then parse with cryptography
             # This avoids nassl dependency
@@ -85,6 +87,7 @@ class TLSAnalyzer:
             
             def _fetch_cert():
                 """Function _fetch_cert."""
+                # Context-managed operation.
                 with socket.create_connection((self.hostname, self.port), timeout=10) as sock:
                     with ctx.wrap_socket(sock, server_hostname=self.hostname) as ssock:
                         der_cert = ssock.getpeercert(binary_form=True)
@@ -146,6 +149,7 @@ class TLSAnalyzer:
 
         loop = asyncio.get_running_loop()
 
+        # Loop over items.
         for name, proto in versions:
             if not proto:
                 results[name] = "Unsupported by local OpenSSL"
@@ -153,6 +157,7 @@ class TLSAnalyzer:
 
             def _try_connect():
                 """Function _try_connect."""
+                # Error handling block.
                 try:
                     ctx = ssl.SSLContext(proto)
                     ctx.check_hostname = False
@@ -177,11 +182,13 @@ class TLSAnalyzer:
         """
         Use curl_cffi to impersonate a browser and capture TLS fingerprint details.
         """
+        # Error handling block.
         try:
             # curl_cffi allows impersonating Chrome/Safari to see how server reacts
             # This is a high-level check
             def _curl_check():
                 """Function _curl_check."""
+                # Error handling block.
                 try:
                     r = curl_requests.get(
                         f"https://{self.hostname}:{self.port}",
@@ -225,9 +232,11 @@ class TLSAnalyzer:
 
         loop = asyncio.get_running_loop()
 
+        # Loop over items.
         for cipher in ciphers_to_test:
             def _test_cipher():
                 """Function _test_cipher."""
+                # Error handling block.
                 try:
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False

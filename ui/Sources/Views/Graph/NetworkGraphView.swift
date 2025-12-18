@@ -33,6 +33,7 @@ struct NetworkGraphView: View {
                         .background(.ultraThinMaterial)
                         .cornerRadius(4)
 
+                    // Conditional branch.
                     if appState.cortexStream.isConnected {
                         Text("CORTEX STREAM :: CONNECTED")
                             .font(.custom("Courier New", size: 14))
@@ -42,6 +43,7 @@ struct NetworkGraphView: View {
                             .cornerRadius(4)
                     }
 
+                    // Conditional branch.
                     if appState.eventClient.isConnected {
                         Text("EVENT STREAM :: CONNECTED")
                             .font(.custom("Courier New", size: 14))
@@ -51,6 +53,7 @@ struct NetworkGraphView: View {
                             .cornerRadius(4)
                     }
 
+                    // Conditional branch.
                     if appState.isGhostActive {
                         Text("GHOST PROTOCOL :: ACTIVE")
                             .font(.custom("Courier New", size: 14))

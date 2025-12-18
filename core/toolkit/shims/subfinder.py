@@ -17,6 +17,7 @@ from ..tool_base import ToolBase
 class Subfinder(ToolBase):
     """Class Subfinder."""
     def __init__(self):
+        """Function __init__."""
         super().__init__("subfinder")
 
     def enumerate(self, domain: str):

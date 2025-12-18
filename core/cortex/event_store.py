@@ -50,6 +50,7 @@ class EventStore:
     3. Subscriber notification is loop-safe across sync/async boundaries.
     """
     def __init__(self, max_size: int = 5000):
+        """Function __init__."""
         self._events: deque[StoredEvent] = deque(maxlen=max_size)
         self._lock = threading.RLock()
         self._sequence: int = 0
@@ -66,6 +67,7 @@ class EventStore:
         Commit an event to the store and notify live subscribers.
         This is called automatically by the EventBus.
         """
+        # Context-managed operation.
         with self._lock:
             self._sequence += 1
             stored = StoredEvent(sequence=self._sequence, event=event)
@@ -83,6 +85,7 @@ class EventStore:
             Tuple of (events, truncated) where truncated=True if oldest 
             available event is newer than requested since_sequence.
         """
+        # Context-managed operation.
         with self._lock:
             oldest_seq = self._events[0].sequence if self._events else 0
             truncated = since_sequence > 0 and since_sequence < oldest_seq
@@ -101,9 +104,11 @@ class EventStore:
         loop = asyncio.get_running_loop()
         q: asyncio.Queue = asyncio.Queue()
         
+        # Context-managed operation.
         with self._subscribers_lock:
             self._subscribers.append((q, loop))
         
+        # Error handling block.
         try:
             while True:
                 stored_event = await q.get()
@@ -117,9 +122,11 @@ class EventStore:
         Push event to all active subscriber queues.
         Uses loop.call_soon_threadsafe for cross-thread safety.
         """
+        # Context-managed operation.
         with self._subscribers_lock:
             subscribers_copy = list(self._subscribers)
         
+        # Loop over items.
         for q, loop in subscribers_copy:
             try:
                 # Thread-safe delivery: schedule on subscriber's event loop
@@ -132,6 +139,7 @@ class EventStore:
 
     def stats(self) -> dict:
         """Function stats."""
+        # Context-managed operation.
         with self._lock:
             return {
                 "events_stored": len(self._events),
@@ -148,6 +156,7 @@ _store: Optional[EventStore] = None
 def get_event_store() -> EventStore:
     """Function get_event_store."""
     global _store
+    # Conditional branch.
     if _store is None:
         _store = EventStore()
     return _store

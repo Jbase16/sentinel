@@ -21,9 +21,11 @@ struct ChatBubbleView: View {
 
     var body: some View {
         HStack {
+            // Conditional branch.
             if message.role == .assistant { Spacer() }
             
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
+                // Conditional branch.
                 if message.text.isEmpty && isStreaming {
                     HStack(spacing: 4) {
                         ProgressView()
@@ -55,6 +57,7 @@ struct ChatBubbleView: View {
                 }
             }
             
+            // Conditional branch.
             if message.role == .user { Spacer() }
         }
     }

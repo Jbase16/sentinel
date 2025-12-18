@@ -28,6 +28,7 @@ async def main():
     # Subscribe to events (terminal visibility)
     def print_event(event):
         """Function print_event."""
+        # Error handling block.
         try:
             print(f"[EVENT] {event.type.value}: {event.payload}")
         except:

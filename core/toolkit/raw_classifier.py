@@ -340,6 +340,7 @@ def classify(tool: str, target: str, output: str) -> List[dict]:
     """Function classify."""
     handler = _HANDLERS.get(tool.lower())
     findings: List[RawFinding] = []
+    # Conditional branch.
     if handler:
         findings.extend(handler(target, output))
     findings.extend(_global_detectors(tool, target, output))
@@ -354,6 +355,7 @@ def classify(tool: str, target: str, output: str) -> List[dict]:
 def _handle_nmap(target: str, output: str) -> List[RawFinding]:
     """Function _handle_nmap."""
     findings: List[RawFinding] = []
+    # Loop over items.
     for line in output.splitlines():
         if "open" not in line or "/" not in line:
             continue
@@ -398,6 +400,7 @@ def _handle_nmap(target: str, output: str) -> List[RawFinding]:
 def _handle_whatweb(target: str, output: str) -> List[RawFinding]:
     """Function _handle_whatweb."""
     findings: List[RawFinding] = []
+    # Loop over items.
     for line in output.splitlines():
         line = line.strip()
         if not line:
@@ -465,11 +468,13 @@ def _handle_whatweb(target: str, output: str) -> List[RawFinding]:
 
 def _handle_wafw00f(target: str, output: str) -> List[RawFinding]:
     """Function _handle_wafw00f."""
+    # Error handling block.
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
         return []
 
+    # Conditional branch.
     if not data.get("identified"):
         return []
 
@@ -564,6 +569,7 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
     #   - httpx format changes in future versions: Pattern assumes [field] bracketing convention
     #   - Malformed URLs (missing protocol): Won't match, which is correct (invalid httpx output)
     pattern = re.compile(r"(https?://\S+)\s+\[(\d{3})\]\s*(?:\[(.*?)\])?\s*(?:\[(.*?)\])?")
+    # Loop over items.
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
         if not clean.startswith("http"):
@@ -628,6 +634,7 @@ def _handle_dirsearch(target: str, output: str) -> List[RawFinding]:
     #   - Dirsearch format change (e.g., different separators): Would require pattern update
     #   - Missing size field: [^\-]* handles zero-length, pattern still matches
     pattern = re.compile(r"(\d{3})\s*-\s*[^\-]*-\s*(\S+)(?:\s*->\s*(\S+))?")
+    # Loop over items.
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
         match = pattern.search(clean)
@@ -679,6 +686,7 @@ def _handle_gobuster(target: str, output: str) -> List[RawFinding]:
     #   ^ prevents matching "Status: 200" in progress messages or headers
     #   Ensures only actual finding lines are captured
     pattern = re.compile(r"^([^\s]+)\s+\(Status:\s*(\d{3})\)")
+    # Loop over items.
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
         match = pattern.match(clean)
@@ -731,6 +739,7 @@ def _handle_feroxbuster(target: str, output: str) -> List[RawFinding]:
     # Anchoring rationale:
     #   ^ prevents matching status codes embedded in URLs or other fields
     pattern = re.compile(r"^(\d{3})\s+\S+\s+\S+\s+(https?://\S+)")
+    # Loop over items.
     for raw in output.splitlines():
         clean = _strip_ansi(raw).strip()
         match = pattern.match(clean)
@@ -783,6 +792,7 @@ def _handle_nikto(target: str, output: str) -> List[RawFinding]:
     #   Pattern is tightly coupled to wrapper format for deterministic parsing
     #   Alternative approach (parsing native nikto) would require complex OSVDB lookup and heuristic severity assignment
     pattern = re.compile(r"\[nikto-shim\]\s+([A-Z]+):\s+(.*)")
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         match = pattern.match(clean)
@@ -834,6 +844,7 @@ def _handle_masscan(target: str, output: str) -> List[RawFinding]:
     #   (tcp|udp) = exact alternation; masscan doesn't report other protocols (SCTP, etc.) in standard mode
     #   Future-proofing: If masscan adds protocols, pattern would need |(sctp|...) extension
     pattern = re.compile(r"Discovered open port (\d+)/(tcp|udp) on ([^\s]+)")
+    # Loop over items.
     for line in output.splitlines():
         match = pattern.search(line)
         if not match:
@@ -860,6 +871,7 @@ def _handle_masscan(target: str, output: str) -> List[RawFinding]:
 def _handle_naabu(target: str, output: str) -> List[RawFinding]:
     """Function _handle_naabu."""
     findings: List[RawFinding] = []
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         if ":" not in clean or clean.startswith("["):
@@ -916,6 +928,7 @@ def _handle_dnsx(target: str, output: str) -> List[RawFinding]:
     #   - DNSX format change (different bracketing): Would require pattern update
     #   - Records with literal ] in value: Would terminate Group 3 early (extremely rare in DNS)
     pattern = re.compile(r"([^\s]+)\s+\[(\w+)\]\s+\[([^\]]+)\]")
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         match = pattern.search(clean)
@@ -968,6 +981,7 @@ def _handle_hakrevdns(target: str, output: str) -> List[RawFinding]:
     #   -> indicates direction of resolution (IP resolves to PTR)
     #   Distinct from forward DNS lookups (hostname -> IP)
     pattern = re.compile(r"\[hakrevdns-shim\]\s+([^\s]+)\s*->\s*(.*)")
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         match = pattern.match(clean)
@@ -1004,6 +1018,7 @@ def _handle_hakrawler(target: str, output: str) -> List[RawFinding]:
         "secret",
         "staff",
     ]
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         if not clean.startswith("http"):
@@ -1030,6 +1045,7 @@ def _handle_hakrawler(target: str, output: str) -> List[RawFinding]:
 def _handle_assetfinder(target: str, output: str) -> List[RawFinding]:
     """Function _handle_assetfinder."""
     findings: List[RawFinding] = []
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         if not clean or "." not in clean:
@@ -1052,6 +1068,7 @@ def _handle_assetfinder(target: str, output: str) -> List[RawFinding]:
 def _handle_subfinder(target: str, output: str) -> List[RawFinding]:
     """Function _handle_subfinder."""
     findings: List[RawFinding] = []
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         if not clean or "." not in clean:
@@ -1074,6 +1091,7 @@ def _handle_subfinder(target: str, output: str) -> List[RawFinding]:
 def _handle_httprobe(target: str, output: str) -> List[RawFinding]:
     """Function _handle_httprobe."""
     findings: List[RawFinding] = []
+    # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
         if not clean.startswith("http"):
@@ -1121,6 +1139,7 @@ def _global_detectors(tool: str, target: str, output: str) -> List[RawFinding]:
 def _detect_json_endpoints(target: str, output: str) -> List[RawFinding]:
     """Function _detect_json_endpoints."""
     findings = []
+    # Loop over items.
     for line in output.splitlines():
         if "/api/" not in line.lower():
             continue
@@ -1162,6 +1181,7 @@ def _detect_dev_surfaces(target: str, output: str) -> List[RawFinding]:
         "/phpinfo.php",
     ]
     matches = []
+    # Loop over items.
     for line in output.splitlines():
         lowered = line.lower()
         for keyword in keywords:
@@ -1187,6 +1207,7 @@ def _detect_dev_surfaces(target: str, output: str) -> List[RawFinding]:
 def _detect_cors_headers(target: str, output: str) -> List[RawFinding]:
     """Function _detect_cors_headers."""
     findings = []
+    # Loop over items.
     for block in output.split("\n\n"):
         block_lower = block.lower()
         if "access-control-allow-origin" not in block_lower:
@@ -1255,10 +1276,12 @@ def _detect_http_methods(target: str, output: str) -> List[RawFinding]:
     #   - Multi-line method lists: Only first line captured (acceptable; nmap emits single line)
     #   - Non-standard methods (PROPFIND, PATCH): Captured correctly by .+
     method_line = re.search(r"Allowed methods:\s*(.+)", output, re.IGNORECASE)
+    # Conditional branch.
     if not method_line:
         return findings
     methods = [m.strip().upper() for m in method_line.group(1).split(",")]
     dangerous = [m for m in methods if m in {"PUT", "DELETE", "TRACE", "OPTIONS"}]
+    # Conditional branch.
     if dangerous:
         findings.append(
             RawFinding(
@@ -1308,6 +1331,7 @@ def _detect_upload_endpoints(target: str, output: str) -> List[RawFinding]:
     #   - Documentation paths like "/docs/upload-guide" (acceptable; better to flag and review)
     #   - Download endpoints named "uploaded-files" (mitigated by requiring "upload" not "uploaded")
     pattern = re.compile(r"/[A-Za-z0-9_\-]+upload[a-z/0-9_\-]*", re.IGNORECASE)
+    # Loop over items.
     for match in pattern.findall(output):
         findings.append(
             RawFinding(
@@ -1328,6 +1352,7 @@ def _detect_upload_endpoints(target: str, output: str) -> List[RawFinding]:
 def _detect_private_ranges(target: str, output: str) -> List[RawFinding]:
     """Function _detect_private_ranges."""
     matches = PRIVATE_IP_REGEX.findall(output)
+    # Conditional branch.
     if not matches:
         return []
     sample = sorted(set(matches))[:5]
@@ -1358,6 +1383,7 @@ def _detect_verbose_errors(target: str, output: str) -> List[RawFinding]:
         "unhandled exception",
     ]
     findings = []
+    # Loop over items.
     for keyword in error_keywords:
         if keyword in output.lower():
             findings.append(
@@ -1378,6 +1404,7 @@ def _detect_verbose_errors(target: str, output: str) -> List[RawFinding]:
 def _detect_graphql_markers(target: str, output: str) -> List[RawFinding]:
     """Function _detect_graphql_markers."""
     keywords = ["__schema", "__typename", "introspection query"]
+    # Loop over items.
     for keyword in keywords:
         if keyword in output.lower():
             return [
@@ -1397,6 +1424,7 @@ def _detect_graphql_markers(target: str, output: str) -> List[RawFinding]:
 
 def _detect_user_enum(target: str, output: str) -> List[RawFinding]:
     """Function _detect_user_enum."""
+    # Conditional branch.
     if "user not found" in output.lower() and "invalid password" in output.lower():
         return [
             RawFinding(
@@ -1415,6 +1443,7 @@ def _detect_user_enum(target: str, output: str) -> List[RawFinding]:
 
 def _detect_metadata_exposure(target: str, output: str) -> List[RawFinding]:
     """Function _detect_metadata_exposure."""
+    # Conditional branch.
     if "169.254.169.254" in output or "/latest/meta-data" in output.lower():
         return [
             RawFinding(
@@ -1435,6 +1464,7 @@ def _detect_business_logic_hooks(target: str, output: str) -> List[RawFinding]:
     """Function _detect_business_logic_hooks."""
     suspect_terms = ["user_id", "account_id", "role_id", "permission", "idor", "rbac"]
     hits = [term for term in suspect_terms if term in output.lower()]
+    # Conditional branch.
     if not hits:
         return []
     return [
@@ -1455,6 +1485,7 @@ def _detect_business_logic_hooks(target: str, output: str) -> List[RawFinding]:
 def _detect_secrets(target: str, output: str) -> List[RawFinding]:
     """Function _detect_secrets."""
     findings = []
+    # Loop over items.
     for label, pattern in SECRET_PATTERNS:
         for match in pattern.finditer(output):
             snippet = _extract_snippet(output, match.group(0))
@@ -1478,6 +1509,7 @@ def _detect_security_headers(target: str, output: str) -> List[RawFinding]:
     """Function _detect_security_headers."""
     findings = []
     blocks = [block for block in output.split("\n\n") if "http/" in block.lower()]
+    # Loop over items.
     for block in blocks:
         lowered = block.lower()
         uses_https = "https://" in lowered or target.lower().startswith("https")
@@ -1506,6 +1538,7 @@ def _detect_security_headers(target: str, output: str) -> List[RawFinding]:
 def _detect_frameworks(target: str, output: str) -> List[RawFinding]:
     """Function _detect_frameworks."""
     findings = []
+    # Loop over items.
     for framework, pattern in FRAMEWORK_PATTERNS.items():
         for match in pattern.finditer(output):
             version = match.group(1) or ""
@@ -1529,9 +1562,11 @@ def _detect_directory_listing(target: str, output: str) -> List[RawFinding]:
     """Function _detect_directory_listing."""
     keywords = ["index of /", "parent directory"]
     matches = []
+    # Loop over items.
     for keyword in keywords:
         if keyword in output.lower():
             matches.append(keyword)
+    # Conditional branch.
     if not matches:
         return []
     return [
@@ -1619,6 +1654,7 @@ def _detect_backup_files(target: str, output: str) -> List[RawFinding]:
         r"config\.php\.old",
     ]
     findings = []
+    # Loop over items.
     for pattern in patterns:
         match = re.search(pattern, output, re.IGNORECASE)
         if match:
@@ -1641,9 +1677,11 @@ def _detect_login_flows(target: str, output: str) -> List[RawFinding]:
     """Function _detect_login_flows."""
     keywords = ["reset password", "forgot password", "otp", "2fa reset"]
     matches = []
+    # Loop over items.
     for keyword in keywords:
         if keyword in output.lower():
             matches.append(keyword)
+    # Conditional branch.
     if not matches:
         return []
     return [
@@ -1745,6 +1783,7 @@ def _detect_ssrf_indicators(target: str, output: str) -> List[RawFinding]:
         "url=",
     ]
     matches = [kw for kw in keywords if kw in output.lower()]
+    # Conditional branch.
     if not matches:
         return []
     return [
@@ -1765,6 +1804,7 @@ def _detect_waf_behaviors(target: str, output: str) -> List[RawFinding]:
     """Function _detect_waf_behaviors."""
     waf_keywords = ["cloudflare", "akamai", "imperva", "incapsula", "f5", "radware", "datadome"]
     matches = [kw for kw in waf_keywords if kw in output.lower()]
+    # Conditional branch.
     if not matches:
         return []
     return [
@@ -1839,6 +1879,7 @@ def _detect_cloud_storage(target: str, output: str) -> List[RawFinding]:
         (r"https?://[a-z0-9\-\.]+\.blob\.core\.windows\.net/[^\s\"']+", "azure-blob"),
     ]
     findings = []
+    # Loop over items.
     for pattern, label in patterns:
         for match in re.findall(pattern, output, re.IGNORECASE):
             findings.append(
@@ -1859,6 +1900,7 @@ def _detect_cloud_storage(target: str, output: str) -> List[RawFinding]:
 def _extract_snippet(output: str, needle: str, radius: int = 240) -> str:
     """Function _extract_snippet."""
     match = re.search(re.escape(needle), output, re.IGNORECASE)
+    # Conditional branch.
     if not match:
         return output[:radius]
     start = max(0, match.start() - radius // 2)

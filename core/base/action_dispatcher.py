@@ -61,6 +61,7 @@ class ActionDispatcher(Observable):
         Returns:
             The shared ActionDispatcher instance
         """
+        # Conditional branch.
         if ActionDispatcher._instance is None:
             ActionDispatcher._instance = ActionDispatcher()
         return ActionDispatcher._instance
@@ -113,6 +114,7 @@ class ActionDispatcher(Observable):
         # Deduplication: have we already processed this exact action?
         # Signature = "tool:sorted_args" (e.g., "nmap:['-p80,443', 'example.com']")
         signature = f"{tool}:{sorted(args)}"
+        # Conditional branch.
         if signature in self.history:
             # Already ran this, don't run again
             return "DROPPED"
@@ -159,6 +161,7 @@ class ActionDispatcher(Observable):
         Returns:
             True if action was found and approved, False if not found
         """
+        # Conditional branch.
         if action_id in self._pending_actions:
             # Remove from pending queue
             action = self._pending_actions.pop(action_id)
@@ -179,6 +182,7 @@ class ActionDispatcher(Observable):
         Returns:
             True if action was found and denied, False if not found
         """
+        # Conditional branch.
         if action_id in self._pending_actions:
             # Remove from pending queue without executing
             self._pending_actions.pop(action_id)

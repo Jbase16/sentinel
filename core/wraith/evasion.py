@@ -36,11 +36,13 @@ class WraithEngine:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if WraithEngine._instance is None:
             WraithEngine._instance = WraithEngine()
         return WraithEngine._instance
 
     def __init__(self):
+        """Function __init__."""
         self.mutator = PayloadMutator()
         self.synapse = Synapse.instance()
         
@@ -60,6 +62,7 @@ class WraithEngine:
         # 1. Try Base Payload
         response = await self._send(client, url, method, base_payload)
         
+        # Conditional branch.
         if self._is_blocked(response):
             logger.warning(f"[Wraith] Payload Blocked! Engaing Mutation Loop for {url}")
             return await self._enter_mutation_loop(client, url, method, base_payload, payload_type)
@@ -75,6 +78,7 @@ class WraithEngine:
         """
         candidates = self.mutator.evolve(base_payload, type)
         
+        # Loop over items.
         for i, candidate in enumerate(candidates):
             logger.info(f"[Wraith] Trying Mutation #{i+1}: {candidate[:20]}...")
             response = await self._send(client, url, method, candidate)
@@ -100,6 +104,7 @@ class WraithEngine:
         Abstracted sender. Handles injection point (query param vs body).
         Simple implementation: Appends to query param 'q' for demo.
         """
+        # Error handling block.
         try:
             # TODO: Smarter injection point handling
             target_url = f"{url}?q={payload}"
@@ -112,6 +117,7 @@ class WraithEngine:
         """
         Detects WAF signatures in response.
         """
+        # Conditional branch.
         if not response: return True
         
         # Status Codes
@@ -125,6 +131,7 @@ class WraithEngine:
             "forbidden", "not acceptable", "mod_security"
         ]
         
+        # Conditional branch.
         if any(sig in body for sig in waf_sigs):
             return True
             

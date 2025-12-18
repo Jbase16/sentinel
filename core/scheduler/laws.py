@@ -60,6 +60,7 @@ class Law3_EvidenceGates(Law):
     def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
         """Function check."""
         gates = tool_def.get("gates", [])
+        # Conditional branch.
         if not gates:
             return Decision(True, "No prerequisites required")
             
@@ -71,6 +72,7 @@ class Law3_EvidenceGates(Law):
         tags: set[str] = set()
 
         known_tags = knowledge.get("tags")
+        # Conditional branch.
         if isinstance(known_tags, set):
             tags.update(t for t in known_tags if isinstance(t, str) and t)
         elif isinstance(known_tags, list):
@@ -80,12 +82,15 @@ class Law3_EvidenceGates(Law):
         # Supports both legacy `knowledge['findings']` and `context.findings`.
         findings_sources: List[Any] = []
         knowledge_findings = knowledge.get("findings")
+        # Conditional branch.
         if isinstance(knowledge_findings, list):
             findings_sources.append(knowledge_findings)
         context_findings = getattr(context, "findings", None)
+        # Conditional branch.
         if isinstance(context_findings, list):
             findings_sources.append(context_findings)
 
+        # Loop over items.
         for findings in findings_sources:
             for f in findings:
                 if not isinstance(f, dict):
@@ -120,6 +125,7 @@ class Law4_ResourceAwareness(Law):
         
         cost = tool_def.get("resource_cost", 1) # 1=Low, 3=High
         
+        # Conditional branch.
         if active + cost > max_concurrent:
             return Decision(False, f"System load too high ({active}+{cost} > {max_concurrent})", "Law4_ResourceAwareness")
         return Decision(True, "Resource check passed")
@@ -127,6 +133,7 @@ class Law4_ResourceAwareness(Law):
 class Constitution:
     """Enforces all laws."""
     def __init__(self):
+        """Function __init__."""
         self.laws = [
             Law1_PassiveBeforeActive(),
             Law3_EvidenceGates(),
@@ -138,6 +145,7 @@ class Constitution:
         Returns a Decision. If blocked, returns the first blocking decision.
         If allowed, returns an Allowed decision.
         """
+        # Loop over items.
         for law in self.laws:
             decision = law.check(context, tool_def)
             if not decision.allowed:

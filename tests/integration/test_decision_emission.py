@@ -228,6 +228,7 @@ class TestEarlyTerminationEmission:
         
         # Check for Walk Away specifically (may or may not trigger based on findings)
         walk_away = [d for d in termination_decisions if d.chosen == "WALK_AWAY"]
+        # Conditional branch.
         if walk_away:
             decision = walk_away[0]
             assert "surface_delta" in decision.evidence or "surface_delta_this_intent" in decision.evidence
@@ -370,6 +371,7 @@ async def test_dump_decision_trace_for_inspection(strategos_with_events, decisio
     print("DECISION TRACE (Layer 2 Emission Verification)")
     print("=" * 80)
     
+    # Loop over items.
     for i, decision in enumerate(decisions, 1):
         indent = "  " if decision.parent_id else ""
         print(f"\n{indent}[{i}] {decision.type.value}")

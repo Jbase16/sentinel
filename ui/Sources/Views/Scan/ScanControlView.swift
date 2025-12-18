@@ -23,6 +23,7 @@ enum ToolSelectionMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var displayName: String {
+        // Switch over value.
         switch self {
         case .scheduler: return "Strategos"
         case .custom: return "Custom"
@@ -94,16 +95,21 @@ struct ScanControlView: View {
                 .frame(width: 180)
                 .disabled(isScanning)
                 .onChange(of: toolSelectionMode) { _, newMode in
+                    // Guard condition.
                     guard newMode == .custom else { return }
+                    // Guard condition.
                     guard selectedTools.isEmpty, !installedTools.isEmpty else { return }
                     selectedTools = Set(installedTools)
                 }
                 .onChange(of: installedTools) { _, newInstalled in
+                    // Guard condition.
                     guard toolSelectionMode == .custom else { return }
+                    // Guard condition.
                     guard selectedTools.isEmpty, !newInstalled.isEmpty else { return }
                     selectedTools = Set(newInstalled)
                 }
 
+                // Conditional branch.
                 if toolSelectionMode == .custom {
                     // Tool Configuration
                     Button(action: { showToolConfig.toggle() }) {
@@ -120,6 +126,7 @@ struct ScanControlView: View {
                     .disabled(isScanning)
                 }
 
+                // Conditional branch.
                 if isScanning {
                     Button(action: { appState.cancelScan() }) {
                         HStack(spacing: 4) {
@@ -159,12 +166,15 @@ struct ScanControlView: View {
     }
 
     private func startScan() {
+        // Conditional branch.
         if !scanTarget.isEmpty && backend.isRunning {
+            // Conditional branch.
             if toolSelectionMode == .custom && selectedTools.isEmpty {
                 showToolConfig = true
                 return
             }
             let modules: [String]
+            // Switch over value.
             switch toolSelectionMode {
             case .scheduler:
                 modules = []
@@ -212,6 +222,7 @@ struct ToolSelectionView: View {
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
+                        // Conditional branch.
                         if selection.contains(tool) {
                             selection.remove(tool)
                         } else {
@@ -288,6 +299,7 @@ struct FindingsListView: View {
     var body: some View {
         List {
             Section(header: Text("Findings")) {
+                // Conditional branch.
                 if let findings = appState.apiResults?.findings {
                     ForEach(findings.indices, id: \.self) { idx in
                         let f = findings[idx]
@@ -370,6 +382,7 @@ struct LogConsoleView: View {
                     .padding(8)
                 }
                 .onChange(of: appState.apiLogItems.count) { _, _ in
+                    // Conditional branch.
                     if let last = appState.apiLogItems.last {
                         // Keep the newest scan activity visible. Avoid per-line animations to
                         // prevent stutter under high-volume logs.

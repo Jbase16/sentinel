@@ -48,11 +48,13 @@ class Database:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if Database._instance is None:
             Database._instance = Database()
         return Database._instance
 
     def __init__(self):
+        """Function __init__."""
         config = get_config()
         self.db_path = str(config.storage.db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
@@ -68,6 +70,7 @@ class Database:
 
     async def init(self):
         """AsyncFunction init."""
+        # Conditional branch.
         if self._initialized:
             return
             
@@ -97,6 +100,7 @@ class Database:
 
     async def close(self):
         """Close the database connection safely."""
+        # Conditional branch.
         if self._db_connection:
             try:
                 await self._db_connection.close()
@@ -156,11 +160,13 @@ class Database:
 
     async def _execute_internal(self, query: str, params: tuple = ()):
         """Internal low-level execute used by BlackBox worker."""
+        # Conditional branch.
         if not self._initialized:
              await self.init()
         
         # Simple retry loop for robustness against external lockers
         max_retries = 5
+        # Loop over items.
         for attempt in range(max_retries):
             try:
                 async with self._db_lock:
@@ -196,6 +202,7 @@ class Database:
 
     async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
         """AsyncFunction fetch_all."""
+        # Conditional branch.
         if not self._initialized:
             await self.init()
         async with self._db_lock:
@@ -302,16 +309,19 @@ class Database:
         if summary is not None:
             updates.append("metadata = json_set(metadata, '$.summary', ?)")
             params.append(summary)
+        # Conditional branch.
         if findings is not None:
             updates.append("metadata = json_set(metadata, '$.findings', ?)")
             params.append(json.dumps(findings))
         
+        # Conditional branch.
         if not updates:
             return
         
         params.append(evidence_id)
         query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ?"
         
+        # Error handling block.
         try:
             await self._execute_internal(query, tuple(params))
         except Exception:
@@ -323,6 +333,7 @@ class Database:
         """AsyncFunction get_findings."""
         query = "SELECT data FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
         params = (session_id,)
+        # Conditional branch.
         if session_id is None:
             query = "SELECT data FROM findings ORDER BY timestamp DESC"
             params = ()
@@ -337,6 +348,7 @@ class Database:
         """AsyncFunction get_issues."""
         query = "SELECT data FROM issues WHERE session_id = ? ORDER BY timestamp DESC"
         params = (session_id,)
+        # Conditional branch.
         if session_id is None:
             query = "SELECT data FROM issues ORDER BY timestamp DESC"
             params = ()
@@ -351,12 +363,14 @@ class Database:
         """AsyncFunction get_evidence."""
         query = "SELECT id, tool, raw_output, metadata, timestamp FROM evidence"
         params = ()
+        # Conditional branch.
         if session_id is not None:
             query += " WHERE session_id = ?"
             params = (session_id,)
         query += " ORDER BY timestamp DESC"
         rows = await self.fetch_all(query, params)
         results = []
+        # Loop over items.
         for row in rows:
             metadata = json.loads(row[3]) if row[3] else {}
             results.append({

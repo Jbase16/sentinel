@@ -232,6 +232,7 @@ class ToolRegistry:
             "gates": []
         }).copy()
         
+        # Conditional branch.
         if mode:
             overlay_map = ModeRegistry.get_overlay(mode)
             overlay = overlay_map.get(tool_name)
@@ -249,6 +250,7 @@ class ToolRegistry:
         # Legacy support mostly
         """Function get_tools_for_phase."""
         candidates = [t for t, meta in cls.METADATA.items() if meta["phase"] == phase]
+        # Conditional branch.
         if mode:
             return cls._filter_by_mode(candidates, mode)
         return candidates
@@ -260,6 +262,7 @@ class ToolRegistry:
         Filters disabled tools based on Mode.
         """
         candidates = [t for t, meta in cls.METADATA.items() if meta.get("intent") == intent]
+        # Conditional branch.
         if mode:
             return cls._filter_by_mode(candidates, mode)
         return candidates
@@ -271,6 +274,7 @@ class ToolRegistry:
         overlay_map = ModeRegistry.get_overlay(mode)
         
         filtered = []
+        # Loop over items.
         for t in tools:
             overlay = overlay_map.get(t)
             if overlay and overlay.disabled:

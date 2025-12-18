@@ -33,12 +33,14 @@ class ContentHasher(Fingerprinter):
         # Tokenize (2-char shingles)
         text = text.lower()
         tokens = [text[i:i+3] for i in range(len(text)-2)]
+        # Conditional branch.
         if not tokens:
             return "0"
             
         # Initialize 64-bit vector
         v = [0] * 64
         
+        # Loop over items.
         for token in tokens:
             # Hash token
             h = int(hashlib.md5(token.encode('utf-8')).hexdigest(), 16)
@@ -51,6 +53,7 @@ class ContentHasher(Fingerprinter):
                     
         # Construct fingerprint
         fingerprint = 0
+        # Loop over items.
         for i in range(64):
             if v[i] > 0:
                 fingerprint |= (1 << i)

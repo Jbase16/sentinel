@@ -52,6 +52,7 @@ class RiskEngine(Observable):
     scores_changed = Signal()
 
     def __init__(self):
+        """Function __init__."""
         super().__init__()
         self._scores: Dict[str, float] = {}
         issues_store.issues_changed.connect(self.recalculate)
@@ -61,6 +62,7 @@ class RiskEngine(Observable):
         """Function recalculate."""
         raw = issues_store.get_all()
         scores = defaultdict(float)
+        # Loop over items.
         for issue in raw:
             asset = issue.get("target") or issue.get("asset") or "unknown"
             severity = str(issue.get("severity", "INFO")).upper()

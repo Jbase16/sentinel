@@ -97,6 +97,7 @@ class Strategos:
         decision_ledger: Optional[DecisionLedger] = None,
         narrator: Optional["NarratorEngine"] = None,
     ):
+        """Function __init__."""
         self.constitution = Constitution()
         self.registry = ToolRegistry()
         self.context: Optional[ScanContext] = None
@@ -125,12 +126,14 @@ class Strategos:
 
     def _emit_log(self, message: str, level: str = "info") -> None:
         """Function _emit_log."""
+        # Error handling block.
         try:
             log_method = getattr(logger, level, logger.info)
             log_method(message)
         except Exception:
             pass
 
+        # Conditional branch.
         if hasattr(self, "_current_mission_log_fn") and self._current_mission_log_fn:
             try:
                 self._current_mission_log_fn(message)
@@ -182,6 +185,7 @@ class Strategos:
         # Seed baseline protocol tags for deterministic tool gating
         # Assumption: HTTP/HTTPS targets until proven otherwise
         existing_tags = self.context.knowledge.get("tags")
+        # Conditional branch.
         if not isinstance(existing_tags, set):
             existing_tags = set()
         existing_tags.update({"protocol:http", "protocol:https"})
@@ -207,6 +211,7 @@ class Strategos:
         # Start event listener in background
         listener_task = asyncio.create_task(self._event_listener())
         
+        # Error handling block.
         try:
             # === THE AGENT LOOP (Decision-Driven) ===
             while not self._terminated:
@@ -320,6 +325,7 @@ class Strategos:
         """
         Fire-and-forget dispatch with concurrency throttling.
         """
+        # Loop over items.
         for tool in tools:
             if tool in self.context.running_tools:
                 logger.debug(f"[Strategos] Skipping {tool}: already running.")
@@ -343,30 +349,37 @@ class Strategos:
     
     def _surface_key(self, finding: Dict[str, Any]) -> Optional[str]:
         """Function _surface_key."""
+        # Conditional branch.
         if not isinstance(finding, dict):
             return None
         metadata = finding.get("metadata") or {}
         raw = metadata.get("original_target") or finding.get("target") or finding.get("asset")
+        # Conditional branch.
         if not raw or not isinstance(raw, str):
             return None
         raw = raw.strip()
+        # Conditional branch.
         if not raw:
             return None
 
+        # Conditional branch.
         if "://" not in raw:
             host = raw.lower().rstrip(".")
             if host.startswith("www."):
                 host = host[4:]
             return host
 
+        # Error handling block.
         try:
             parsed = urlparse(raw)
         except Exception:
             return raw
 
         host = (parsed.hostname or "").lower().rstrip(".")
+        # Conditional branch.
         if not host:
             return raw
+        # Conditional branch.
         if host.startswith("www."):
             host = host[4:]
 
@@ -375,6 +388,7 @@ class Strategos:
         netloc = host if port is None else f"{host}:{port}"
 
         path = parsed.path or ""
+        # Conditional branch.
         if path and path != "/":
             path = path.rstrip("/")
         else:
@@ -384,6 +398,7 @@ class Strategos:
 
     def _enqueue_event(self, event: Any) -> bool:
         """Function _enqueue_event."""
+        # Error handling block.
         try:
             self.event_queue.put_nowait(event)
             return True
@@ -402,6 +417,7 @@ class Strategos:
         findings = []
         success = True
         start = asyncio.get_running_loop().time()
+        # Error handling block.
         try:
             findings = await self._dispatch_callback(tool)
             if findings is None:
@@ -439,6 +455,7 @@ class Strategos:
         """
         Background task: Consumes events from queue.
         """
+        # While loop.
         while not self._terminated:
             try:
                 event = await asyncio.wait_for(self.event_queue.get(), timeout=0.5)
@@ -461,6 +478,7 @@ class Strategos:
         """
         Block until all tools for current intent are finished.
         """
+        # While loop.
         while self.context.running_tools:
             await asyncio.sleep(0.1)
     
@@ -468,9 +486,11 @@ class Strategos:
         """
         Active Feedback.
         """
+        # Conditional branch.
         if not self.context:
             return
             
+        # Loop over items.
         for finding in findings:
             self.context.findings.append(finding)
             self.context.findings_this_intent += 1
@@ -516,6 +536,7 @@ class Strategos:
         rejected_count = 0
         reasons: Dict[str, List[str]] = {}
         
+        # Loop over items.
         for t in candidates:
             tool_def = ToolRegistry.get(t, mode=mode)
             tool_def["name"] = t
@@ -762,10 +783,15 @@ class Strategos:
     
     def _get_phase_for_intent(self, intent: str) -> int:
         """Map intent to numeric phase for compatibility with existing phase tracking."""
+        # Conditional branch.
         if intent == INTENT_PASSIVE_RECON: return PHASE_1_PASSIVE
+        # Conditional branch.
         if intent == INTENT_ACTIVE_LIVE_CHECK: return PHASE_2_LIGHT
+        # Conditional branch.
         if intent == INTENT_SURFACE_ENUMERATION: return PHASE_3_SURFACE
+        # Conditional branch.
         if intent == INTENT_VULN_SCANNING: return PHASE_4_DEEP
+        # Conditional branch.
         if intent == INTENT_HEAVY_ARTILLERY: return PHASE_5_HEAVY
         return 0
     
@@ -780,15 +806,18 @@ class Strategos:
         if current_intent == INTENT_PASSIVE_RECON:
             return [INTENT_ACTIVE_LIVE_CHECK, None]  # Could terminate early
         
+        # Conditional branch.
         if current_intent == INTENT_ACTIVE_LIVE_CHECK:
             return [INTENT_SURFACE_ENUMERATION, None]
         
+        # Conditional branch.
         if current_intent == INTENT_SURFACE_ENUMERATION:
             if mode == ScanMode.BUG_BOUNTY:
                 # Bug bounty has Walk Away option
                 return [INTENT_VULN_SCANNING, None]
             return [INTENT_VULN_SCANNING, None]
         
+        # Conditional branch.
         if current_intent == INTENT_VULN_SCANNING:
             if mode == ScanMode.BUG_BOUNTY:
                 # No heavy artillery in bug bounty

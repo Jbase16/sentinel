@@ -53,8 +53,10 @@ final class LLMService: ObservableObject {
     func applyAvailability(connected: Bool, models: [String], defaultModel: String? = nil) {
         ollamaOnline = connected
         let cleaned = models.filter { !$0.isEmpty }
+        // Conditional branch.
         if !cleaned.isEmpty {
             availableModels = cleaned
+            // Conditional branch.
             if let incoming = defaultModel, !incoming.isEmpty {
                 preferredModel = incoming
             } else if !cleaned.contains(preferredModel) {
@@ -70,6 +72,7 @@ final class LLMService: ObservableObject {
         cancel()
 
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Guard condition.
         guard !trimmed.isEmpty else { return }
 
         streamedResponse = ""
@@ -78,12 +81,15 @@ final class LLMService: ObservableObject {
         let client = self.api // Capture value type for detached task
 
         currentTask = Task.detached { [weak self] in
+            // Guard condition.
             guard let self else { return }
             defer { Task { @MainActor in self.isGenerating = false } }
 
+            // Do-catch block.
             do {
                 // Use the new Python API streamChat which is context-aware
                 for try await token in client.streamChat(prompt: trimmed) {
+                    // Conditional branch.
                     if Task.isCancelled { break }
                     await MainActor.run {
                         self.streamedResponse += token
@@ -91,6 +97,7 @@ final class LLMService: ObservableObject {
                     }
                 }
             } catch {
+                // Conditional branch.
                 if !Task.isCancelled {
                     print("[LLMService] Request failed: \(error)")
                     await MainActor.run {

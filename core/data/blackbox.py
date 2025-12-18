@@ -25,11 +25,13 @@ class BlackBox:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if BlackBox._instance is None:
             BlackBox._instance = BlackBox()
         return BlackBox._instance
 
     def __init__(self):
+        """Function __init__."""
         self._queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
@@ -38,6 +40,7 @@ class BlackBox:
 
     def start(self):
         """Start the writer loop if not already running."""
+        # Conditional branch.
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._writer_loop(), name="BlackBox-Writer")
             logger.info("[BlackBox] Writer loop started.")
@@ -45,6 +48,7 @@ class BlackBox:
     async def _writer_loop(self):
         """Forever loop consuming write tasks."""
         logger.debug("[BlackBox] Loop active.")
+        # While loop.
         while not self._stopped:
             try:
                 # Get a task
@@ -90,9 +94,11 @@ class BlackBox:
         Returns a Future that resolves when the write is COMPLETE.
         Use this if you need backpressure or confirmation.
         """
+        # Conditional branch.
         if self._draining or self._stopped:
              raise RuntimeError("[BlackBox] Cannot write: System is shutting down.")
              
+        # Conditional branch.
         if self._worker_task is None:
             self.start()
             
@@ -104,10 +110,12 @@ class BlackBox:
         """
         Schedule a write without waiting for it.
         """
+        # Conditional branch.
         if self._draining or self._stopped:
              logger.warning(f"[BlackBox] Drop write to {func.__name__}: draining/stopped.")
              return
              
+        # Conditional branch.
         if self._worker_task is None:
             self.start()
 
@@ -139,6 +147,7 @@ class BlackBox:
         
         self._stopped = True
         
+        # Conditional branch.
         if self._worker_task:
             # It should have exited due to None sentinel, but ensure it
             try:

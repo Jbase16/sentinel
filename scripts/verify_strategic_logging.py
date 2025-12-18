@@ -42,6 +42,7 @@ async def main():
     async def event_listener():
         """AsyncFunction event_listener."""
         print("--- Listening for Events ---")
+        # Async loop over items.
         async for event in store.subscribe():
             if event.type == GraphEventType.DECISION_MADE:
                 intent = event.payload.get("intent")
@@ -58,6 +59,7 @@ async def main():
     
     # 4. Run Mission (Short)
     print("--- Starting Mission ---")
+    # Error handling block.
     try:
         await brain.run_mission(
             target="http://testphp.vulnweb.com",
@@ -73,6 +75,7 @@ async def main():
     listener_task.cancel()
     
     print(f"--- Event Store Dump ({len(store._events)} events) ---")
+    # Loop over items.
     for e in store._events:
         print(f"Stored Event: {e.type} | {e.payload}")
 

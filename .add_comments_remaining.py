@@ -32,6 +32,7 @@ HEADERS = {
 
 def add_header_to_file(filepath: Path, header: str):
     """Add educational header to a file if it doesn't have comprehensive comments."""
+    # Error handling block.
     try:
         content = filepath.read_text()
         
@@ -52,6 +53,7 @@ def main():
     """Process all configured files."""
     base_dir = Path("/Users/jason/Developer/sentinelforge")
     
+    # Loop over items.
     for rel_path, header in HEADERS.items():
         filepath = base_dir / rel_path
         if filepath.exists():

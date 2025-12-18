@@ -119,6 +119,7 @@ class PayloadMutator:
         # 2. Layered Mutations (Chain 2 strategies)
         # E.g. Case Toggle -> URL Encode
         layers = list(pool)
+        # Loop over items.
         for base_mutant in layers[:5]: # Mutate top 5 candidates further
              # Apply hex encoding
              pool.add(self._hex_encode(base_mutant))

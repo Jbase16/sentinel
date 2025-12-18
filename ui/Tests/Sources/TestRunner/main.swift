@@ -25,6 +25,7 @@ struct TestRunner {
         // 1. Test Ping
         print("[*] Testing Ping...")
         let alive = await client.ping()
+        // Conditional branch.
         if alive {
             print("    SUCCESS: Backend is reachable")
         } else {
@@ -34,6 +35,7 @@ struct TestRunner {
         
         // 2. Test Scan
         print("[*] Testing Start Scan...")
+        // Do-catch block.
         do {
             try await client.startScan(target: "scanme.nmap.org")
             print("    SUCCESS: Scan started")
@@ -44,7 +46,9 @@ struct TestRunner {
         
         // 3. Test Chat Stream
         print("[*] Testing Chat Stream...")
+        // Do-catch block.
         do {
+            // Loop over items.
             for try await token in client.streamChat(prompt: "hello") {
                 print("    Received token: \(token)")
                 break // Just need one to prove it works

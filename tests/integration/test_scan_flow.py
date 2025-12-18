@@ -22,6 +22,7 @@ BASE_URL = "http://127.0.0.1:8765"
 def stream_events():
     """Function stream_events."""
     print("[*] connecting to SSE stream...")
+    # Error handling block.
     try:
         # Connect to SSE
         with requests.get(f"{BASE_URL}/events", stream=True, timeout=30) as resp:
@@ -48,6 +49,7 @@ def run_scan_test():
     
     # 1. Force start scan
     resp = requests.post(f"{BASE_URL}/scan", json={"target": target, "force": True})
+    # Conditional branch.
     if resp.status_code != 202:
         print(f"!!! Scan start failed: {resp.status_code} {resp.text}")
         return

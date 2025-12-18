@@ -8,9 +8,11 @@ from core.scheduler.decisions import DecisionContext, DecisionType, DecisionLedg
 class MockSubscriber:
     """Class MockSubscriber."""
     def __init__(self):
+        """Function __init__."""
         self.events: List[GraphEvent] = []
         
     def __call__(self, event: GraphEvent):
+        """Function __call__."""
         self.events.append(event)
 
 def test_narrator_integration():

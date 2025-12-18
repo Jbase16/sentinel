@@ -28,6 +28,8 @@ SKIP_PARTS: Tuple[str, ...] = (
 
 
 def iter_source_files(root: Path) -> Iterable[Path]:
+    """Function iter_source_files."""
+    # Loop over items.
     for p in root.rglob("*"):
         if not p.is_file():
             continue
@@ -39,7 +41,9 @@ def iter_source_files(root: Path) -> Iterable[Path]:
 
 
 def is_banner_line(line: str, comment_prefix: str) -> bool:
+    """Function is_banner_line."""
     s = line.strip()
+    # Conditional branch.
     if not s.startswith(comment_prefix):
         return False
     s = s[len(comment_prefix) :].lstrip()
@@ -47,7 +51,9 @@ def is_banner_line(line: str, comment_prefix: str) -> bool:
 
 
 def strip_banner_block(text: str, is_python: bool) -> str:
+    """Function strip_banner_block."""
     lines = text.splitlines(True)
+    # Conditional branch.
     if not lines:
         return text
     prefix = "#" if is_python else "//"
@@ -55,6 +61,7 @@ def strip_banner_block(text: str, is_python: bool) -> str:
 
     i = 0
     changed = False
+    # While loop.
     while i < len(lines) and i < max_scan:
         if is_banner_line(lines[i], prefix):
             # Find end banner
@@ -85,9 +92,11 @@ def strip_banner_block(text: str, is_python: bool) -> str:
 
 
 def main() -> int:
+    """Function main."""
     root = Path(__file__).resolve().parents[1]
     changed = 0
     scanned = 0
+    # Loop over items.
     for p in iter_source_files(root):
         scanned += 1
         try:

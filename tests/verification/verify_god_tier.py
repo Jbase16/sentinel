@@ -52,6 +52,7 @@ async def test_wraith():
     # First call -> Blocked, Second call -> OK
     async def mock_send(client, url, method, payload):
         """AsyncFunction mock_send."""
+        # Conditional branch.
         if "/**/" in payload: # Simulate the mutation working
             return mock_resp_ok
         return mock_resp_block
@@ -60,6 +61,7 @@ async def test_wraith():
 
     result = await wraith.stealth_send(mock_client, "http://test.com", "GET", "UNION SELECT 1")
     
+    # Conditional branch.
     if result.get("status") == "bypassed":
         print(f"    [SUCCESS] Wraith bypassed WAF! Payload: {result.get('bypass_payload')}")
     else:
@@ -83,6 +85,7 @@ def test_ghost():
     print(f"    > Generated {len(cases)} logic test cases.")
     
     neg_test = next((c for c in cases if c['name'] == "Negative qty"), None)
+    # Conditional branch.
     if neg_test:
         print(f"    [SUCCESS] Found Negative Quantity Test: {neg_test['mutation']}")
     else:

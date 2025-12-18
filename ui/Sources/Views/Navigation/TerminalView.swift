@@ -55,6 +55,7 @@ struct TerminalView: NSViewRepresentable {
               const ws = new WebSocket("ws://127.0.0.1:8765/ws/terminal");
 
               term.onData(data => {
+                // Conditional branch.
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send(data);
                 }

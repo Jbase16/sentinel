@@ -41,10 +41,12 @@ class IssuesStore(Observable):
     issues_changed = Signal()
 
     def __init__(self, session_id: str = None):
+        """Function __init__."""
         super().__init__()
         self._issues = []
         self.session_id = session_id
         self.db = Database.instance()
+        # Error handling block.
         try:
             asyncio.get_running_loop()
             create_safe_task(self._init_load(), name="issues_init_load")
@@ -55,6 +57,7 @@ class IssuesStore(Observable):
         # DB init is idempotent/shared
         """AsyncFunction _init_load."""
         await self.db.init()
+        # Conditional branch.
         if self.session_id:
             loaded = await self.db.get_issues(self.session_id)
         else:
@@ -65,6 +68,7 @@ class IssuesStore(Observable):
     def add_issue(self, issue: dict):
         """Function add_issue."""
         self._issues.append(issue)
+        # Error handling block.
         try:
             asyncio.get_running_loop()
             create_safe_task(
@@ -88,6 +92,7 @@ class IssuesStore(Observable):
     def replace_all(self, issues: list):
         """Replace all issues with a new list"""
         self._issues = list(issues)
+        # Error handling block.
         try:
             asyncio.get_running_loop()
             for issue in issues:

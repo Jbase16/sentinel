@@ -41,11 +41,13 @@ class Orchestrator:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if Orchestrator._instance is None:
             Orchestrator._instance = Orchestrator()
         return Orchestrator._instance
 
     def __init__(self):
+        """Function __init__."""
         self.scanner = ScannerEngine()
         self.router = TaskRouter.instance()
         self.active_missions = {}
@@ -69,6 +71,7 @@ class Orchestrator:
             "phase": phase,
             "details": details or {}
         }
+        # Conditional branch.
         if mission_id in self.active_missions:
             self.active_missions[mission_id]["status"] = status
             if phase:
@@ -79,6 +82,7 @@ class Orchestrator:
         """AsyncFunction _mission_loop."""
         logger.info(f"[*] Mission {mission_id} Initialized for {target}")
         
+        # Error handling block.
         try:
             # Phase 1: Recon (Cortex Ingestion)
             logger.info("    > Phase 1: Deep Recon")
@@ -124,6 +128,7 @@ class Orchestrator:
         import httpx
         
         total = len(opportunities)
+        # Loop over items.
         for idx, op in enumerate(opportunities, 1):
             tool = op.get("tool")
             sub_target = op.get("target") or main_target

@@ -46,6 +46,7 @@ async def main():
     # mocking cancel flag
     cancel_event = asyncio.Event()
     
+    # Error handling block.
     try:
         # Use run_all to consume generator and get results
         # Note: run_all signature in ScannerEngine: run_all(target) -> List[dict]

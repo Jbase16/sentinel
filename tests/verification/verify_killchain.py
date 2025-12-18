@@ -64,6 +64,7 @@ async def test_full_killchain():
     
     # Wait for Wraith (Simulated delay + processing)
     print("    Waiting for Wraith Automator...")
+    # Loop over items.
     for i in range(4):
         print(f"    ... {3-i}")
         await asyncio.sleep(1)
@@ -71,11 +72,13 @@ async def test_full_killchain():
     # Check Logs
     print("[*] Inspecting Logs...")
     hit_confirmed = False
+    # Loop over items.
     for log in session.logs:
         if "TARGET HIT" in log:
             print(f"    [LOG] {log}")
             hit_confirmed = True
             
+    # Conditional branch.
     if not hit_confirmed:
         print("[FAILED] Wraith did not report a hit.")
         print("Logs:", session.logs)
@@ -85,6 +88,7 @@ async def test_full_killchain():
     print("[*] Inspecting DB for High-Sev Vuln...")
     findings = session.findings.get_all()
     found_vuln = False
+    # Loop over items.
     for f in findings:
         if f['type'] == 'vuln::idor':
             print(f"    [SUCCESS] Confirmed Vulnerability Found!")
@@ -93,6 +97,7 @@ async def test_full_killchain():
             found_vuln = True
             break
             
+    # Conditional branch.
     if found_vuln:
         print("\n[SUCCESS] Killchain Verified. Autonomous Hacking is Live.")
     else:

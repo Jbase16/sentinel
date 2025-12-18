@@ -22,6 +22,7 @@ BASE_URL = "http://127.0.0.1:8765"
 def test_ping():
     """Function test_ping."""
     print("[*] Testing /ping...")
+    # Error handling block.
     try:
         resp = requests.get(f"{BASE_URL}/ping", timeout=2)
         if resp.status_code == 200 and resp.json().get("status") == "ok":
@@ -34,6 +35,7 @@ def test_ping():
 def test_scan():
     """Function test_scan."""
     print("[*] Testing /scan (mock target)...")
+    # Error handling block.
     try:
         # We use a dummy target to just check if the orchestrator starts
         resp = requests.post(f"{BASE_URL}/scan", json={"target": "127.0.0.1"}, timeout=5)
@@ -49,6 +51,7 @@ def test_scan():
 def test_chat():
     """Function test_chat."""
     print("[*] Testing /chat (mock prompt)...")
+    # Error handling block.
     try:
         # We stream the response
         resp = requests.post(f"{BASE_URL}/chat", json={"prompt": "Who are you and what vulnerabilities did you find?"}, stream=True, timeout=120)

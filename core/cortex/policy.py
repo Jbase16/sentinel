@@ -71,6 +71,7 @@ class ScopePolicy(Policy):
         
         """Function evaluate."""
         target = decision.context.get("target") or context.get("target")
+        # Conditional branch.
         if target:
             # Example: Block .edu or .gov if strict rules apply
             if "forbidden.com" in target:
@@ -95,6 +96,7 @@ class RiskPolicy(Policy):
         mode = context.get("mode", "standard")
         tool_risk = decision.context.get("risk", "low") # Assumes tool definition provides risk
         
+        # Conditional branch.
         if mode == "passive" and tool_risk in ["high", "critical"]:
              return Judgment(Verdict.VETO, self.name, f"High risk tool blocked in PASSIVE mode.")
              

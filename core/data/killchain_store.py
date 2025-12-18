@@ -39,6 +39,7 @@ class KillchainStore(Observable):
     edges_changed = Signal()
 
     def __init__(self, session_id: str = None):
+        """Function __init__."""
         super().__init__()
         self._edges = []
         self.session_id = session_id

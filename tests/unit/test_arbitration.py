@@ -11,6 +11,7 @@ class StrictPolicy(Policy):
     name = "StrictPolicy"
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         """Function evaluate."""
+        # Conditional branch.
         if decision.chosen == "UNSAFE_ACTION":
             return Judgment(Verdict.VETO, self.name, "Unsafe action detected")
         return Judgment(Verdict.APPROVE, self.name, "Looks good")

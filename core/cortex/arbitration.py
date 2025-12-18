@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 class ArbitrationEngine:
     """Class ArbitrationEngine."""
     def __init__(self):
+        """Function __init__."""
         self._policies: List[Policy] = []
 
     def register_policy(self, policy: Policy):

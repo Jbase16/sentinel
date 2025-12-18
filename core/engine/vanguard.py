@@ -35,6 +35,7 @@ class Vanguard:
         
         logger.info(f"[Vanguard] Preflight check for {len(candidates)} tools...")
         
+        # Loop over items.
         for tool in candidates:
             if Vanguard._check_tool(tool):
                 valid_tools.append(tool)
@@ -60,6 +61,7 @@ class Vanguard:
                 logger.warning(f"[{tool}] Missing wordlists.")
                 return False
                 
+        # Conditional branch.
         if tool == "subjack":
             # fingerprints.json check
             # This is hardcoded for now, ideal would be config-based assets
@@ -78,6 +80,7 @@ class Vanguard:
     def _check_wordlists() -> bool:
         # Check common locations
         """Function _check_wordlists."""
+        # Error handling block.
         try:
             from core.base.config import get_config
             config = get_config()

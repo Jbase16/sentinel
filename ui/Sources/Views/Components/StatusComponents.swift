@@ -19,6 +19,7 @@ struct ConnectionStatusBanner: View {
     @StateObject var backend = BackendManager.shared
     
     var body: some View {
+        // Conditional branch.
         if !backend.isRunning {
             HStack(spacing: 8) {
                 ProgressView()
@@ -80,6 +81,7 @@ struct StatusPill: View {
         case error(String)
         
         var icon: String {
+            // Switch over value.
             switch self {
             case .connecting: return "antenna.radiowaves.left.and.right"
             case .connected: return "checkmark.circle.fill"
@@ -90,6 +92,7 @@ struct StatusPill: View {
         }
         
         var color: Color {
+            // Switch over value.
             switch self {
             case .connecting: return .orange
             case .connected: return .green
@@ -100,6 +103,7 @@ struct StatusPill: View {
         }
         
         var text: String {
+            // Switch over value.
             switch self {
             case .connecting: return "Connecting..."
             case .connected: return "Connected"
@@ -112,6 +116,7 @@ struct StatusPill: View {
     
     var body: some View {
         HStack(spacing: 6) {
+            // Conditional branch.
             if status.text.contains("...") {
                 ProgressView()
                     .scaleEffect(0.6)
@@ -138,6 +143,7 @@ struct ActivityIndicator: View {
     let isActive: Bool
     
     var body: some View {
+        // Conditional branch.
         if isActive {
             HStack(spacing: 8) {
                 ProgressView()
@@ -199,12 +205,14 @@ struct ScanProgressCard: View {
                 Text(isRunning ? "Scan In Progress" : "Ready")
                     .font(.headline)
                 Spacer()
+                // Conditional branch.
                 if isRunning {
                     ProgressView()
                         .scaleEffect(0.7)
                 }
             }
             
+            // Conditional branch.
             if isRunning {
                 IndeterminateProgressBar(color: .blue)
                 
@@ -242,6 +250,7 @@ struct AIStatusCard: View {
                 StatusPill(status: isConnected ? (isGenerating ? .processing : .connected) : .disconnected)
             }
             
+            // Conditional branch.
             if isConnected {
                 HStack {
                     Text("Model:")
@@ -253,6 +262,7 @@ struct AIStatusCard: View {
                 }
             }
             
+            // Conditional branch.
             if isGenerating {
                 IndeterminateProgressBar(color: .purple)
             }
@@ -270,6 +280,7 @@ struct LoadingOverlay: View {
     let isShowing: Bool
     
     var body: some View {
+        // Conditional branch.
         if isShowing {
             ZStack {
                 Color.black.opacity(0.3)
@@ -301,6 +312,7 @@ struct EmptyStateView: View {
     
     var body: some View {
         VStack(spacing: 16) {
+            // Conditional branch.
             if isLoading {
                 ProgressView()
                     .scaleEffect(1.5)

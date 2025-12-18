@@ -21,6 +21,7 @@ class GraphCorrelator:
     """
     
     def __init__(self):
+        """Function __init__."""
         pass
         
     def process(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -42,6 +43,7 @@ class GraphCorrelator:
         """
         # Group nodes by attribute value
         groups: Dict[str, List[str]] = {}
+        # Loop over items.
         for node in nodes:
             val = node.get("attributes", {}).get(attr)
             if val:

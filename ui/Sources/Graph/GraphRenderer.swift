@@ -87,6 +87,7 @@ class GraphRenderer: NSObject {
 
     private func buildPipeline() {
         print("GraphRenderer: buildPipeline()")
+        // Guard condition.
         guard let library = device.makeDefaultLibrary() else {
             print("GraphRenderer: Default library not found")
             return
@@ -127,6 +128,7 @@ class GraphRenderer: NSObject {
 
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
 
+        // Do-catch block.
         do {
             pipelineState = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
             print("GraphRenderer: Pipeline State created successfully")
@@ -145,6 +147,7 @@ class GraphRenderer: NSObject {
             lineDescriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             lineDescriptor.vertexDescriptor = vertexDescriptor
 
+            // Do-catch block.
             do {
                 linePipelineState = try device.makeRenderPipelineState(descriptor: lineDescriptor)
                 print("GraphRenderer: Line Pipeline State created successfully")
@@ -179,6 +182,7 @@ class GraphRenderer: NSObject {
 
     /// Handle a live graph event from EventStreamClient
     func handleGraphEvent(_ event: Event) {
+        // Switch over value.
         switch event.eventType {
         case .nodeAdded:
             addNodeFromEvent(event)
@@ -199,6 +203,7 @@ class GraphRenderer: NSObject {
 
     /// Add a node from a NODE_ADDED event
     private func addNodeFromEvent(_ event: Event) {
+        // Guard condition.
         guard let nodeId = event.payload["node_id"]?.stringValue,
             let nodeType = event.payload["node_type"]?.stringValue
         else {
@@ -236,6 +241,7 @@ class GraphRenderer: NSObject {
 
     /// Add an edge from an EDGE_ADDED event (if endpoints exist; otherwise, queue it)
     private func addEdgeFromEvent(_ event: Event) {
+        // Guard condition.
         guard let sourceId = event.payload["source_id"]?.stringValue,
             let targetId = event.payload["target_id"]?.stringValue
         else {
@@ -248,8 +254,10 @@ class GraphRenderer: NSObject {
 
         // Deduplicate
         let key = "\(sourceId)->\(targetId):\(edgeType)"
+        // Conditional branch.
         if edgeKeys.contains(key) { return }
 
+        // Guard condition.
         guard let sourceIndex = nodePositions[sourceId],
             let targetIndex = nodePositions[targetId]
         else {
@@ -272,12 +280,14 @@ class GraphRenderer: NSObject {
 
     /// Add a finding as a prominent node
     private func addFindingNode(_ event: Event) {
+        // Guard condition.
         guard let findingId = event.payload["finding_id"]?.stringValue,
             let severity = event.payload["severity"]?.stringValue
         else {
             return
         }
 
+        // Conditional branch.
         if nodePositions[findingId] != nil { return }
 
         // Findings appear in outer ring
@@ -305,6 +315,7 @@ class GraphRenderer: NSObject {
 
     /// Add the scan target as the central node
     private func addScanTargetNode(_ event: Event) {
+        // Guard condition.
         guard let target = event.payload["target"]?.stringValue else { return }
 
         let targetNode = Node(
@@ -344,6 +355,7 @@ class GraphRenderer: NSObject {
         lock.lock()
         defer { lock.unlock() }
 
+        // Guard condition.
         guard !nodes.isEmpty else { return }
         let dataSize = nodes.count * MemoryLayout<Node>.stride
         vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
@@ -351,6 +363,7 @@ class GraphRenderer: NSObject {
 
     /// Upload current edges to GPU
     private func uploadEdgesToGPU() {
+        // Guard condition.
         guard !edgeVertices.isEmpty else { return }
         let dataSize = edgeVertices.count * MemoryLayout<Node>.stride
         edgeVertexBuffer = device.makeBuffer(bytes: edgeVertices, length: dataSize, options: [])
@@ -361,13 +374,17 @@ class GraphRenderer: NSObject {
         lock.lock()
         defer { lock.unlock() }
 
+        // Guard condition.
         guard !pendingEdges.isEmpty else { return }
 
         var remaining: [(sourceId: String, targetId: String, edgeType: String)] = []
+        // Loop over items.
         for edge in pendingEdges {
             let key = "\(edge.sourceId)->\(edge.targetId):\(edge.edgeType)"
+            // Conditional branch.
             if edgeKeys.contains(key) { continue }
 
+            // Guard condition.
             guard let sourceIndex = nodePositions[edge.sourceId],
                 let targetIndex = nodePositions[edge.targetId]
             else {
@@ -395,6 +412,7 @@ class GraphRenderer: NSObject {
     // MARK: - Visual Mapping
 
     private func colorForNodeType(_ type: String) -> SIMD4<Float> {
+        // Switch over value.
         switch type {
         case "asset":
             return SIMD4<Float>(0.0, 0.8, 1.0, 1.0)  // Cyan
@@ -412,6 +430,7 @@ class GraphRenderer: NSObject {
     }
 
     private func sizeForNodeType(_ type: String) -> Float {
+        // Switch over value.
         switch type {
         case "asset": return 40.0
         case "port": return 20.0
@@ -423,6 +442,7 @@ class GraphRenderer: NSObject {
     }
 
     private func colorForSeverity(_ severity: String) -> SIMD4<Float> {
+        // Switch over value.
         switch severity.uppercased() {
         case "CRITICAL":
             return SIMD4<Float>(1.0, 0.0, 0.0, 1.0)  // Bright red
@@ -438,6 +458,7 @@ class GraphRenderer: NSObject {
     }
 
     private func colorForEdgeType(_ edgeType: String) -> SIMD4<Float> {
+        // Switch over value.
         switch edgeType {
         case "EXPOSES", "VULNERABLE_TO":
             return SIMD4<Float>(1.0, 0.3, 0.3, 0.15)
@@ -451,8 +472,10 @@ class GraphRenderer: NSObject {
     }
 
     private func stableFloat(seed: String, min: Float, max: Float) -> Float {
+        // Guard condition.
         guard min < max else { return min }
         var hash: UInt64 = 1469598103934665603  // FNV-1a offset basis
+        // Loop over items.
         for byte in seed.utf8 {
             hash ^= UInt64(byte)
             hash &*= 1099511628211
@@ -489,6 +512,7 @@ class GraphRenderer: NSObject {
         }
 
         let dataSize = nodes.count * MemoryLayout<Node>.stride
+        // Conditional branch.
         if dataSize > 0 {
             // Create a new buffer explicitly
             // (In a real engine, we'd use triple buffering, but this prevents the crash)
@@ -521,10 +545,12 @@ class GraphRenderer: NSObject {
 
         // Watchdog: Log every 60 frames (approx 1 sec)
         frameCount += 1
+        // Conditional branch.
         if frameCount % 60 == 0 {
             print("GraphRenderer: Watchdog - Drawing frame \(frameCount). Nodes: \(nodes.count)")
         }
 
+        // Guard condition.
         guard let drawable = view.currentDrawable,
             let descriptor = view.currentRenderPassDescriptor,
             let commandQueue = commandQueue,
@@ -537,6 +563,7 @@ class GraphRenderer: NSObject {
         descriptor.colorAttachments[0].clearColor = MTLClearColor(
             red: 0.1, green: 0.1, blue: 0.2, alpha: 1.0)
 
+        // Guard condition.
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
             let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor)
         else {
@@ -591,6 +618,7 @@ class GraphRenderer: NSObject {
 
         // Nodes
         guard !nodes.isEmpty, let vBuffer = vertexBuffer else {
+            // Conditional branch.
             if frameCount % 60 == 0 {
                 print("GraphRenderer: Nodes empty. Skipping draw primitives.")
             }
@@ -633,6 +661,7 @@ extension matrix_float4x4 {
         let c = cos(angle)
         let s = sin(angle)
 
+        // Conditional branch.
         if axis.x > 0 {  // Rotate X
             return self
                 * matrix_float4x4(

@@ -28,6 +28,7 @@ async def test_ghost_protocol():
     print("[*] Initializing Ghost Protocol...")
     session = ScanSession("example.com")
     
+    # Error handling block.
     try:
         session.start_ghost(port=8082)
         print("    Proxy Start Task Created.")
@@ -38,6 +39,7 @@ async def test_ghost_protocol():
     await asyncio.sleep(5) # Generous warmup
     
     print("[*] Sending Traffic through Proxy (127.0.0.1:8082)...")
+    # Error handling block.
     try:
         # Use short timeout
         proc = await asyncio.create_subprocess_exec(
@@ -52,6 +54,7 @@ async def test_ghost_protocol():
     print("[*] Checking Evidence/Findings...")
     findings = session.findings.get_all()
     found_ghost = False
+    # Loop over items.
     for f in findings:
         if f.get("tool") == "ghost_proxy":
             print(f"    [FOUND] Ghost Intercepted: {f}")
@@ -61,6 +64,7 @@ async def test_ghost_protocol():
     
     session.stop_ghost()
     
+    # Conditional branch.
     if found_ghost:
         print("\n[SUCCESS] Ghost Protocol Verified.")
     else:

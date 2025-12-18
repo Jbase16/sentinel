@@ -20,6 +20,7 @@ import sys
 
 def check_file(path, description):
     """Function check_file."""
+    # Conditional branch.
     if os.path.exists(path):
         print(f"[PASS] {description} found at {os.path.basename(path)}")
         return True
@@ -47,6 +48,7 @@ def main():
     
     # 3. Check App State
     app_state = os.path.join(root, "ui/Sources/SentinelForgeUI/Models/HelixAppState.swift")
+    # Conditional branch.
     if check_file(app_state, "HelixAppState"):
         with open(app_state, 'r') as f:
             content = f.read()

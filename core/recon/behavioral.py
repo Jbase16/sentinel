@@ -59,6 +59,7 @@ class PassiveReconEngine:
         """AsyncFunction run_all."""
         results = []
 
+        # Loop over items.
         for tool, meta in self.TOOLS.items():
             if shutil.which(meta["cmd"][0]) is None:
                 continue
@@ -85,6 +86,7 @@ class PassiveReconEngine:
     async def parse_httpx(self, target: str, output: str):
         """AsyncFunction parse_httpx."""
         findings = []
+        # Loop over items.
         for line in output.splitlines():
             if not line.strip():
                 continue
@@ -114,6 +116,7 @@ class PassiveReconEngine:
     async def parse_dnsx(self, target: str, output: str):
         """AsyncFunction parse_dnsx."""
         findings = []
+        # Loop over items.
         for line in output.splitlines():
             if not line.strip():
                 continue
@@ -140,6 +143,7 @@ class PassiveReconEngine:
         """AsyncFunction parse_sslscan."""
         findings = []
 
+        # Conditional branch.
         if "SSLv2" in output or "SSLv3" in output:
             findings.append({
                 "type": "Weak SSL Protocol",
@@ -153,6 +157,7 @@ class PassiveReconEngine:
             })
 
         ciphers = [line.strip() for line in output.splitlines() if "Cipher" in line]
+        # Conditional branch.
         if ciphers:
             findings.append({
                 "type": "Cipher Enumeration",
@@ -248,11 +253,14 @@ class BehavioralRecon:
     ]
 
     def __init__(self, log_fn=None, verify_ssl: Optional[bool] = None):
+        """Function __init__."""
         self.log = log_fn or (lambda msg: None)
+        # Conditional branch.
         if verify_ssl is None:
             verify_ssl = os.getenv("ARAULTRA_BEHAVIORAL_STRICT_SSL", "").lower() in ("1", "true", "yes", "on")
         self.verify_ssl = verify_ssl
         self._ssl_context = ssl.create_default_context()
+        # Conditional branch.
         if not self.verify_ssl:
             self._ssl_context.check_hostname = False
             self._ssl_context.verify_mode = ssl.CERT_NONE
@@ -270,11 +278,13 @@ class BehavioralRecon:
         """AsyncFunction _execute_variants."""
         loop = asyncio.get_running_loop()
         tasks = []
+        # Loop over items.
         for variant in self.VARIANTS:
             self.log(f"[behavioral] {variant.name} probe → {url}")
             tasks.append(loop.run_in_executor(None, self._perform_request, url, variant))
         gathered = await asyncio.gather(*tasks, return_exceptions=True)
         results: List[Dict[str, object]] = []
+        # Loop over items.
         for variant, result in zip(self.VARIANTS, gathered):
             if isinstance(result, Exception):
                 self.log(f"[behavioral] {variant.name} execution error: {result}")
@@ -287,9 +297,11 @@ class BehavioralRecon:
         start = time.perf_counter()
         mutated_url = self._apply_variant_url(url, variant)
         req = urllib.request.Request(mutated_url, method=variant.method)
+        # Loop over items.
         for key, value in variant.headers.items():
             req.add_header(key, value)
 
+        # Error handling block.
         try:
             with urllib.request.urlopen(req, data=variant.body, timeout=15, context=self._ssl_context) as resp:
                 body = resp.read()
@@ -339,6 +351,7 @@ class BehavioralRecon:
         """Function _analyze_differentials."""
         findings: List[dict] = []
         baseline = next((r for r in results if r["variant"] == "baseline" and r.get("status") is not None), None)
+        # Conditional branch.
         if not baseline:
             return findings
 
@@ -346,6 +359,7 @@ class BehavioralRecon:
         base_length = baseline["length"] or 1
         base_elapsed = baseline["elapsed_ms"]
 
+        # Loop over items.
         for res in results:
             if res["variant"] == "baseline":
                 continue
@@ -441,6 +455,7 @@ class BehavioralRecon:
     def _normalize_target(target: str) -> str:
         """Function _normalize_target."""
         parsed = urlparse(target)
+        # Conditional branch.
         if not parsed.scheme:
             return f"https://{target}"
         return target
@@ -449,6 +464,7 @@ class BehavioralRecon:
     def _make_finding(target: str, ftype: str, severity: str, message: str, proof: str, tags: List[str], variant: Optional[str] = None, families: Optional[List[str]] = None, metadata: Optional[Dict[str, object]] = None):
         """Function _make_finding."""
         metadata = metadata.copy() if metadata else {}
+        # Conditional branch.
         if variant:
             metadata.setdefault("variant", variant)
         return {
@@ -466,8 +482,10 @@ class BehavioralRecon:
 
     def _apply_variant_url(self, url: str, variant: RequestVariant) -> str:
         """Function _apply_variant_url."""
+        # Conditional branch.
         if variant.url_transform:
             return variant.url_transform(url)
+        # Conditional branch.
         if not variant.query_suffix:
             return url
         parsed = urlsplit(url)
@@ -488,12 +506,14 @@ class BehavioralRecon:
             "",
             "Headers:",
         ]
+        # Loop over items.
         for key, value in headers.items():
             lines.append(f"{key}: {value}")
         lines.append("")
         lines.append("Body Preview:")
         lines.append(preview)
         content = "\n".join(lines)
+        # Error handling block.
         try:
             return evidence_store.save_text(f"behavioral_{variant}", host, content)
         except Exception as exc:
@@ -503,6 +523,7 @@ class BehavioralRecon:
     async def _run_tls_probe(self, url: str) -> List[dict]:
         """AsyncFunction _run_tls_probe."""
         parsed = urlparse(url)
+        # Conditional branch.
         if parsed.scheme != "https" or not parsed.hostname:
             return []
         
@@ -517,6 +538,7 @@ class BehavioralRecon:
         findings: List[dict] = []
         cert = results.get("certificate", {})
         
+        # Conditional branch.
         if "error" in cert:
             self.log(f"[behavioral] TLS probe error: {cert['error']}")
             return []
@@ -549,6 +571,7 @@ class BehavioralRecon:
 
         # Check Expiration
         status = cert.get("status")
+        # Conditional branch.
         if status == "EXPIRED":
             findings.append(self._make_finding(
                 url,
@@ -575,6 +598,7 @@ class BehavioralRecon:
         # Check Weak Versions
         weak_versions = {"TLSv1", "TLSv1.1", "SSLv3", "SSLv2"}
         found_weak = [v for v in supported_versions if v in weak_versions]
+        # Conditional branch.
         if found_weak:
             findings.append(self._make_finding(
                 url,
@@ -592,12 +616,14 @@ class BehavioralRecon:
     async def _run_timing_phase(self, url: str) -> List[dict]:
         """AsyncFunction _run_timing_phase."""
         samples = await self._collect_timing_samples(url)
+        # Conditional branch.
         if len(samples) < 5:
             return []
         median = statistics.median(samples)
         stdev = statistics.pstdev(samples)
         delta = max(samples) - min(samples)
         findings: List[dict] = []
+        # Conditional branch.
         if stdev > 150 or delta > 500:
             severity = "MEDIUM" if delta > 750 else "LOW"
             proof = json.dumps({
@@ -624,6 +650,7 @@ class BehavioralRecon:
         tasks = [loop.run_in_executor(None, self._time_single_request, url) for _ in range(count)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         samples = []
+        # Loop over items.
         for res in results:
             if isinstance(res, Exception):
                 continue
@@ -635,6 +662,7 @@ class BehavioralRecon:
         """Function _time_single_request."""
         req = urllib.request.Request(url, method="GET")
         start = time.perf_counter()
+        # Error handling block.
         try:
             with urllib.request.urlopen(req, timeout=10, context=self._ssl_context) as resp:
                 resp.read(256)

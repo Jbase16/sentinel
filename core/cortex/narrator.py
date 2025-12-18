@@ -45,6 +45,7 @@ class NarratorEngine:
     """
     
     def __init__(self, event_bus: Optional[EventBus] = None):
+        """Function __init__."""
         self._event_bus = event_bus
         self._templates: List[NarrativeTemplate] = [
             PhaseTemplate(),
@@ -61,6 +62,7 @@ class NarratorEngine:
         Produce a narrative for the given decision and emit it.
         """
         narrative = self._generate_narrative(decision)
+        # Conditional branch.
         if not narrative:
             return
 
@@ -81,6 +83,7 @@ class NarratorEngine:
         The Core Logic: Data -> Text.
         Delegates to registered templates.
         """
+        # Loop over items.
         for template in self._templates:
             if template.matches(d.type):
                 try:

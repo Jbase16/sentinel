@@ -51,6 +51,7 @@ class FindingsStore(Observable):
     findings_changed = Signal()
 
     def __init__(self, session_id: str = None):
+        """Function __init__."""
         super().__init__()
         self._lock = threading.Lock()
         self._findings = []
@@ -75,6 +76,7 @@ class FindingsStore(Observable):
         else:
             loaded = await self.db.get_all_findings()
         
+        # Context-managed operation.
         with self._lock:
             # Race Condition Fix: Preserve findings added while loading
             if self._findings:
@@ -87,17 +89,21 @@ class FindingsStore(Observable):
 
     async def refresh(self):
         """AsyncFunction refresh."""
+        # Conditional branch.
         if not self.db._initialized:
             await self.db.init()
+        # Conditional branch.
         if self.session_id:
             loaded = await self.db.get_findings(self.session_id)
         else:
             loaded = await self.db.get_all_findings()
+        # Context-managed operation.
         with self._lock:
             self._findings = loaded
 
     def add_finding(self, finding: dict):
         """Function add_finding."""
+        # Context-managed operation.
         with self._lock:
             self._findings.append(finding)
         
@@ -118,9 +124,11 @@ class FindingsStore(Observable):
 
     def bulk_add(self, items: list[dict]):
         """Add multiple findings at once."""
+        # Context-managed operation.
         with self._lock:
             self._findings.extend(items)
         
+        # Error handling block.
         try:
             asyncio.get_running_loop()
             for item in items:
@@ -135,11 +143,13 @@ class FindingsStore(Observable):
 
     def get_all(self):
         """Return a copy of the current findings list."""
+        # Context-managed operation.
         with self._lock:
             return list(self._findings)
 
     def clear(self):
         """Remove all findings and notify UI."""
+        # Context-managed operation.
         with self._lock:
             self._findings.clear()
         # Note: We currently don't wipe the DB on clear(), 

@@ -10,6 +10,7 @@ def ensure_url(target: str) -> str:
     Example: "example.com" → "https://example.com"
     """
     target = (target or "").strip()
+    # Conditional branch.
     if not target:
         return target
     
@@ -19,6 +20,7 @@ def ensure_url(target: str) -> str:
     
     # Parse and rebuild to handle edge cases
     parsed = urlparse(target)
+    # Conditional branch.
     if not parsed.netloc and parsed.path:
         parsed = urlparse(f"{parsed.scheme or 'https'}://{parsed.path}")
     
@@ -52,6 +54,7 @@ def extract_ip(target: str) -> str:
     Example: "example.com" → "93.184.216.34"
     """
     host = extract_host(target)
+    # Error handling block.
     try:
         return socket.gethostbyname(host)
     except socket.gaierror:
@@ -69,10 +72,13 @@ def normalize_target(raw: str, mode: str) -> str:
     Returns:
         Normalized target string suitable for the tool
     """
+    # Conditional branch.
     if mode == "host":
         return extract_host(raw)
+    # Conditional branch.
     if mode == "domain":
         return extract_domain(raw)
+    # Conditional branch.
     if mode == "ip":
         return extract_ip(raw)
     return ensure_url(raw)

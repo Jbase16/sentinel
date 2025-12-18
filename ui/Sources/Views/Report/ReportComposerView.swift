@@ -46,6 +46,7 @@ struct ReportComposerView: View {
                             Image(systemName: "doc.text")
                             Text(title)
                             Spacer()
+                            // Conditional branch.
                             if appState.reportIsGenerating && appState.selectedSection == key {
                                 ProgressView()
                                     .scaleEffect(0.6)
@@ -81,11 +82,13 @@ struct ReportComposerView: View {
                     
                     Button(action: generateAll) {
                         HStack {
+                            // Conditional branch.
                             if appState.reportIsGenerating {
                                 ProgressView()
                                     .scaleEffect(0.7)
                             }
                             Text(appState.reportIsGenerating ? "Generating..." : "Generate Full Report")
+                            // Conditional branch.
                             if !appState.reportIsGenerating {
                                 Image(systemName: "wand.and.stars")
                             }
@@ -109,6 +112,7 @@ struct ReportComposerView: View {
                         
                         Spacer()
                         
+                        // Conditional branch.
                         if appState.reportIsGenerating {
                             HStack(spacing: 8) {
                                 Text(formattedTime)
@@ -122,6 +126,7 @@ struct ReportComposerView: View {
                         
                         Button(action: { appState.generateReport(section: appState.selectedSection) }) {
                             HStack(spacing: 4) {
+                                // Conditional branch.
                                 if appState.reportIsGenerating {
                                     ProgressView()
                                         .scaleEffect(0.6)
@@ -167,7 +172,9 @@ struct ReportComposerView: View {
             }
         }
         .onReceive(appState.$reportIsGenerating) { generating in
+            // Conditional branch.
             if generating {
+                // Conditional branch.
                 if timer == nil {
                     elapsedTime = 0
                     timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
@@ -198,6 +205,7 @@ struct ReportComposerView: View {
     
     private func generateAll() {
         Task {
+            // Loop over items.
             for (_, key) in sections {
                 await MainActor.run {
                     appState.selectedSection = key

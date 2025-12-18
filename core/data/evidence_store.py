@@ -54,6 +54,7 @@ class EvidenceStore(Observable):
     @staticmethod
     def instance():
         """Legacy global singleton access."""
+        # Conditional branch.
         if EvidenceStore._instance is None:
             EvidenceStore._instance = EvidenceStore()
         return EvidenceStore._instance
@@ -61,6 +62,7 @@ class EvidenceStore(Observable):
     # ---------------------------------------------------------
 
     def __init__(self, session_id: str = None):
+        """Function __init__."""
         super().__init__()
         self._evidence = {}
         self._counter = 0
@@ -78,6 +80,7 @@ class EvidenceStore(Observable):
         """Load existing evidence from database."""
         await self.db.init()
         loaded = await self.db.get_evidence(self.session_id)
+        # Loop over items.
         for item in loaded:
             eid = item.get('id', self._counter + 1)
             self._counter = max(self._counter, eid)
@@ -115,11 +118,14 @@ class EvidenceStore(Observable):
 
     def update_evidence(self, evidence_id: int, summary=None, findings=None):
         """Function update_evidence."""
+        # Conditional branch.
         if evidence_id not in self._evidence:
             return
 
+        # Conditional branch.
         if summary:
             self._evidence[evidence_id]["summary"] = summary
+        # Conditional branch.
         if findings:
             self._evidence[evidence_id]["findings"] = findings
 

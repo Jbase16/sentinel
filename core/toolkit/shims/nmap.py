@@ -17,6 +17,7 @@ from ..tool_base import ToolBase
 class NmapScan(ToolBase):
     """Class NmapScan."""
     def __init__(self):
+        """Function __init__."""
         super().__init__("nmap")
 
     def scan_basic(self, target: str):

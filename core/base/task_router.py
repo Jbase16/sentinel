@@ -62,6 +62,7 @@ class TaskRouter(Observable):
         Returns:
             The global TaskRouter instance (creates it if it doesn't exist)
         """
+        # Conditional branch.
         if TaskRouter._instance is None:
             TaskRouter._instance = TaskRouter()
         return TaskRouter._instance
@@ -122,6 +123,7 @@ class TaskRouter(Observable):
         - If signal emission fails, we log but don't crash
         - This ensures one bad subscriber doesn't break the whole system
         """
+        # Error handling block.
         try:
             # Emit the signal to all connected subscribers
             # The Signal class handles calling each subscriber's callback function
@@ -179,6 +181,7 @@ class TaskRouter(Observable):
         # Detailed logging for debugging tool execution issues
         logger.debug(f"[TaskRouter] Processing output from {tool_name} (rc={rc}, stdout={len(stdout)} bytes)")
         
+        # Error handling block.
         try:
             # STEP 1: Send output to AIEngine for semantic analysis
             # AIEngine will:
@@ -255,6 +258,7 @@ class TaskRouter(Observable):
         # STEP 3: Emit live AI commentary (optional, for chat-like UI updates)
         # This provides a natural language explanation of what was discovered
         live_comment = result.get("live_comment")
+        # Conditional branch.
         if live_comment:
             try:
                 self.emit_ui_event("ai_live_comment", {

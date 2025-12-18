@@ -31,6 +31,7 @@ class WraithAutomator:
     """
     
     def __init__(self, session: ScanSession):
+        """Function __init__."""
         self.session = session
         # Subscribe to findings updates? 
         # Ideally we hook into the store. But FindingsStore is global-ish notification, local storage.
@@ -46,6 +47,7 @@ class WraithAutomator:
         Decides whether to Launch an Attack.
         """
         ftype = finding.get("type", "")
+        # Conditional branch.
         if not ftype.startswith("hypothesis::"):
             return
 
@@ -78,6 +80,7 @@ class WraithAutomator:
         success = False
         used_payload = None
         
+        # Loop over items.
         for p in payloads:
             # Simulation: If payload is "1" or "' OR 1=1", we call it a hit for demo
             if p in ["1", "' OR 1=1", "<script>alert(1)</script>"]:
@@ -85,6 +88,7 @@ class WraithAutomator:
                 used_payload = p
                 break
         
+        # Conditional branch.
         if success:
             self.session.log(f"[Wraith] ⚔️ TARGET HIT! verified {ftype} with payload: {used_payload}")
             

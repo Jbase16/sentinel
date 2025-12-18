@@ -44,6 +44,7 @@ class TestStrategosIntentProgression:
         
         intents = []
         current = None
+        # Loop over items.
         for _ in range(5):
             current = brain._decide_next_step(current)
             if current is None:

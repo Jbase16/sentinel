@@ -46,6 +46,7 @@ class EventBus:
     Synchronous Event Bus for strategic observability.
     """
     def __init__(self):
+        """Function __init__."""
         self._subscribers: List[Callable[[GraphEvent], None]] = []
 
     def subscribe(self, callback: Callable[[GraphEvent], None]):
@@ -54,6 +55,7 @@ class EventBus:
 
     def emit(self, event: GraphEvent):
         """Broadcast event to all subscribers."""
+        # Loop over items.
         for callback in self._subscribers:
             try:
                 callback(event)
@@ -103,6 +105,7 @@ _event_bus: Optional[EventBus] = None
 def get_event_bus() -> EventBus:
     """Function get_event_bus."""
     global _event_bus
+    # Conditional branch.
     if _event_bus is None:
         _event_bus = EventBus()
     return _event_bus

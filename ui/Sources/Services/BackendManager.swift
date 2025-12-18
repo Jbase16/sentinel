@@ -68,6 +68,7 @@ class BackendManager: ObservableObject {
         healthCheckTask?.cancel()
         healthCheckTask = nil
 
+        // Conditional branch.
         if let p = process, p.isRunning {
             print("[BackendManager] Terminating backend process...")
             p.terminate()
@@ -83,8 +84,10 @@ class BackendManager: ObservableObject {
         let url = URL(string: "http://127.0.0.1:8765/ping")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 10.0  // Allow more time for slow responses
+        // Do-catch block.
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
+            // Guard condition.
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
             // Verify it's actually our API
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -101,6 +104,7 @@ class BackendManager: ObservableObject {
     /// Monitors backend health and updates UI status
     private func startHealthMonitor() {
         healthCheckTask = Task {
+            // While loop.
             while !Task.isCancelled {
                 // Skip health check if there's an active operation
                 // (LLM requests can take 60+ seconds and block /ping)
@@ -112,8 +116,10 @@ class BackendManager: ObservableObject {
 
                 let healthy = await checkBackendHealth()
                 await MainActor.run {
+                    // Conditional branch.
                     if healthy {
                         self.consecutiveFailures = 0
+                        // Conditional branch.
                         if !self.isRunning {
                             // Reconnected!
                             self.status = "Core Online"
@@ -121,6 +127,7 @@ class BackendManager: ObservableObject {
                         }
                     } else if self.isRunning {
                         self.consecutiveFailures += 1
+                        // Conditional branch.
                         if self.consecutiveFailures >= self.maxConsecutiveFailures {
                             self.status = "Core Disconnected"
                             self.isRunning = false
@@ -162,6 +169,7 @@ class BackendManager: ObservableObject {
 
         // Find Python executable (prefer venv)
         let pythonExecutable = findPythonExecutable(in: repoPath)
+        // Guard condition.
         guard let python = pythonExecutable else {
             await MainActor.run { self.status = "Error: Python not found" }
             return
@@ -210,8 +218,10 @@ class BackendManager: ObservableObject {
 
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
+            // Conditional branch.
             if let str = String(data: data, encoding: .utf8), !str.isEmpty {
                 let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Conditional branch.
                 if !trimmed.isEmpty {
                     print("[Core] \(trimmed)")
                 }
@@ -241,7 +251,9 @@ class BackendManager: ObservableObject {
 
     /// Polls the health endpoint until the server is ready
     private func waitForServerReady() async {
+        // Loop over items.
         for attempt in 1...maxStartupRetries {
+            // Conditional branch.
             if await checkBackendHealth() {
                 await MainActor.run {
                     self.status = "Core Online"
@@ -287,7 +299,9 @@ class BackendManager: ObservableObject {
             repoPath.appendingPathComponent("venv/bin/python"),
         ]
 
+        // Loop over items.
         for venv in venvPaths {
+            // Conditional branch.
             if fileManager.fileExists(atPath: venv.path) {
                 return venv
             }
@@ -300,7 +314,9 @@ class BackendManager: ObservableObject {
             URL(fileURLWithPath: "/usr/bin/python3"),  // System Python
         ]
 
+        // Loop over items.
         for path in systemPaths {
+            // Conditional branch.
             if fileManager.fileExists(atPath: path.path) {
                 return path
             }

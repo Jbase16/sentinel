@@ -40,6 +40,7 @@ class EvidenceStore:
 
     """Class EvidenceStore."""
     def __init__(self):
+        """Function __init__."""
         self.base = os.path.expanduser("~/AraUltra_Evidence")
         os.makedirs(self.base, exist_ok=True)
 
@@ -53,6 +54,7 @@ class EvidenceStore:
         safe_target = self._sanitize(target)
         path = os.path.join(folder, f"{safe_target}_{stamp}.txt")
 
+        # Context-managed operation.
         with open(path, "w") as f:
             f.write(content)
 
@@ -70,6 +72,7 @@ class EvidenceStore:
         safe_target = self._sanitize(target)
         path = os.path.join(folder, f"{safe_target}_{stamp}.json")
 
+        # Context-managed operation.
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
 
@@ -85,6 +88,7 @@ class EvidenceStore:
         safe_target = self._sanitize(target)
         path = os.path.join(folder, f"{safe_target}_{stamp}{ext}")
 
+        # Context-managed operation.
         with open(path, "wb") as f:
             f.write(content)
 

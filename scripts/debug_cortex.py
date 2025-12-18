@@ -20,6 +20,7 @@ async def monitor_cortex():
     """AsyncFunction monitor_cortex."""
     uri = "ws://127.0.0.1:8765/ws/graph"
     print(f"Connecting to {uri}...")
+    # Error handling block.
     try:
         async with websockets.connect(uri) as websocket:
             print("Connected! Listening for graph updates...")

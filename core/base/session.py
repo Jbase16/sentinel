@@ -123,6 +123,7 @@ class ScanSession:
         Shuts down the proxy server and cleans up resources.
         Safe to call even if Ghost isn't running.
         """
+        # Conditional branch.
         if self.ghost:
             self.ghost.stop()  # Shut down the proxy
             self.ghost = None  # Clear the reference

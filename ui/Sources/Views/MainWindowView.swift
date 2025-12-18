@@ -30,6 +30,7 @@ struct MainWindowView: View {
 
         var id: String { rawValue }
         var icon: String {
+            // Switch over value.
             switch self {
             case .dashboard: return "gauge"
             case .scan: return "dot.scope"
@@ -97,6 +98,7 @@ struct MainWindowView: View {
 
                 // Main Content Area
                 ZStack {
+                    // Switch over value.
                     switch selection {
                     case .dashboard: DashboardView()
                     case .scan: ScanControlView()
@@ -139,6 +141,7 @@ struct BackendStatusBadge: View {
                     .foregroundColor(.gray)
 
                 HStack(spacing: 6) {
+                    // Conditional branch.
                     if backend.isRunning {
                         Circle()
                             .fill(Color.green)
@@ -169,6 +172,7 @@ struct BackendStatusBadge: View {
                 HStack(spacing: 6) {
                     let aiConnected = appState.aiStatus?.connected ?? false
                     
+                    // Conditional branch.
                     if aiConnected {
                         Circle()
                             .fill(appState.isProcessing ? Color.blue : Color.green)
@@ -190,6 +194,7 @@ struct BackendStatusBadge: View {
                             .foregroundColor(aiConnected ? .white : .gray)
                             .lineLimit(1)
                         
+                        // Conditional branch.
                         if appState.isProcessing {
                             Text("Processing...")
                                 .font(.caption2)

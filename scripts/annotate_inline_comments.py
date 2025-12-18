@@ -38,6 +38,7 @@ SKIP_PARTS: Tuple[str, ...] = (
 
 def iter_source_files(root: Path) -> Iterable[Path]:
     """Function iter_source_files."""
+    # Loop over items.
     for path in root.rglob("*"):
         if not path.is_file():
             continue
@@ -52,22 +53,18 @@ def iter_source_files(root: Path) -> Iterable[Path]:
 
 
 def file_has_any_comment(path: Path) -> bool:
-    """Detect if a file already contains comments (anywhere).
-
-    For Python: look for lines starting with '#', ignoring shebang.
-    For Swift: look for lines starting with '//' or '///'.
-    """
+    """Detect if a file contains any comments (unused now for skipping)."""
+    # Error handling block.
     try:
         txt = path.read_text(encoding="utf-8")
     except Exception:
         return False
+    # Loop over items.
     for line in txt.splitlines():
         s = line.lstrip()
         if path.suffix == ".py":
-            if s.startswith("#"):
-                # Ignore shebang strictly at first line
-                if not s.startswith("#!"):
-                    return True
+            if s.startswith("#") and not s.startswith("#!"):
+                return True
         elif path.suffix == ".swift":
             if s.startswith("//"):
                 return True
@@ -83,6 +80,7 @@ class _DocInserter(ast.NodeVisitor):
     """
 
     def __init__(self):
+        """Function __init__."""
         self.inserts: list[tuple[int, str]] = []  # (insert_before_line_1based, text)
         self._func_inserts: list[tuple[ast.AST, str]] = []
         self._class_inserts: list[tuple[ast.AST, str]] = []
@@ -90,6 +88,7 @@ class _DocInserter(ast.NodeVisitor):
     @staticmethod
     def _has_docstring(node: ast.AST) -> bool:
         """Function _has_docstring."""
+        # Error handling block.
         try:
             return bool(ast.get_docstring(node, clean=False))
         except Exception:
@@ -97,12 +96,14 @@ class _DocInserter(ast.NodeVisitor):
 
     def _add_insert(self, node: ast.AST, label: str, lines: list[str]):
         """Function _add_insert."""
+        # Conditional branch.
         if not getattr(node, "body", None):
             return
         first_body = node.body[0]
         # Determine indentation from first body line
         line_idx = max(0, first_body.lineno - 1)
         indent = ""
+        # Conditional branch.
         if 0 <= line_idx < len(lines):
             indent = lines[line_idx][: len(lines[line_idx]) - len(lines[line_idx].lstrip(" \t"))]
         # Prepare a very short docstring
@@ -112,6 +113,7 @@ class _DocInserter(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef):
         """Function visit_ClassDef."""
+        # Conditional branch.
         if not self._has_docstring(node):
             label = f"Class {node.name}"
             self._class_inserts.append((node, label))
@@ -128,11 +130,8 @@ class _DocInserter(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _handle_func_like(self, node):
-        # Skip dunders and trivial builtins
         """Function _handle_func_like."""
         name = getattr(node, "name", "func")
-        if name.startswith("__") and name.endswith("__"):
-            return
         # If already documented, skip
         if self._has_docstring(node):
             return
@@ -143,14 +142,17 @@ class _DocInserter(ast.NodeVisitor):
     def prepare(self, lines: list[str]):
         # Resolve _func_inserts here to know indentation reliably
         """Function prepare."""
+        # Loop over items.
         for node, label in getattr(self, "_func_inserts", []):
             self._add_insert(node, label, lines)
+        # Loop over items.
         for node, label in getattr(self, "_class_inserts", []):
             self._add_insert(node, label, lines)
 
     def run(self, source: str) -> str:
         """Function run."""
         lines = source.splitlines(True)  # keepends
+        # Error handling block.
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -161,6 +163,7 @@ class _DocInserter(ast.NodeVisitor):
         self.visit(tree)
         self.prepare(lines)
 
+        # Conditional branch.
         if not self.inserts:
             return source
 
@@ -171,25 +174,114 @@ class _DocInserter(ast.NodeVisitor):
         return "".join(lines)
 
 
+class _BodyExplainer(ast.NodeVisitor):
+    """Insert short inline comments before key control-flow nodes in functions.
+
+    Adds one-liner comments before If/For/While/Try/With that don't already
+    have a comment immediately above. Keeps comments short and generic.
+    """
+
+    def __init__(self, source: str):
+        """Function __init__."""
+        self.source = source
+        self.lines = source.splitlines(True)
+        self.inserts: list[tuple[int, str]] = []
+
+    def _indent_of(self, lineno: int) -> str:
+        """Function _indent_of."""
+        idx = max(0, min(len(self.lines) - 1, lineno - 1))
+        line = self.lines[idx]
+        return line[: len(line) - len(line.lstrip(" \t"))]
+
+    def _has_comment_immediately_above(self, lineno: int) -> bool:
+        """Function _has_comment_immediately_above."""
+        i = lineno - 2
+        # While loop.
+        while i >= 0 and self.lines[i].strip() == "":
+            i -= 1
+        # Conditional branch.
+        if i >= 0:
+            return self.lines[i].lstrip().startswith("#")
+        return False
+
+    def _add(self, lineno: int, label: str):
+        """Function _add."""
+        # Conditional branch.
+        if self._has_comment_immediately_above(lineno):
+            return
+        indent = self._indent_of(lineno)
+        self.inserts.append((lineno, f"{indent}# {label}.\n"))
+
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        """Function visit_FunctionDef."""
+        # Loop over items.
+        for n in getattr(node, "body", []):
+            self._maybe_label(n)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        """Function visit_AsyncFunctionDef."""
+        # Loop over items.
+        for n in getattr(node, "body", []):
+            self._maybe_label(n)
+        self.generic_visit(node)
+
+    def _maybe_label(self, n: ast.AST):
+        """Function _maybe_label."""
+        # Conditional branch.
+        if not hasattr(n, "lineno"):
+            return
+        # Conditional branch.
+        if isinstance(n, ast.For):
+            self._add(n.lineno, "Loop over items")
+        elif isinstance(n, ast.AsyncFor):
+            self._add(n.lineno, "Async loop over items")
+        elif isinstance(n, ast.While):
+            self._add(n.lineno, "While loop")
+        elif isinstance(n, ast.If):
+            self._add(n.lineno, "Conditional branch")
+        elif isinstance(n, ast.Try):
+            self._add(n.lineno, "Error handling block")
+        elif isinstance(n, ast.With):
+            self._add(n.lineno, "Context-managed operation")
+
+    def run(self) -> str:
+        """Function run."""
+        # Error handling block.
+        try:
+            tree = ast.parse(self.source)
+        except SyntaxError:
+            return self.source
+        self.visit(tree)
+        # Conditional branch.
+        if not self.inserts:
+            return self.source
+        out = self.lines[:]
+        # Loop over items.
+        for lineno, text in sorted(self.inserts, key=lambda x: -x[0]):
+            idx = max(0, min(len(out), lineno - 1))
+            out.insert(idx, text)
+        return "".join(out)
+
+
 def annotate_python(path: Path) -> bool:
     """Function annotate_python."""
+    # Error handling block.
     try:
         src = path.read_text(encoding="utf-8")
     except Exception:
         return False
 
-    # If file already has any comments, skip entire file per user preference
-    if file_has_any_comment(path):
-        return False
-
     # Ensure brief module-level docstring exists at top
     module_doc_added = False
+    # Error handling block.
     try:
         tree = ast.parse(src)
         has_module_doc = bool(ast.get_docstring(tree, clean=False))
     except SyntaxError:
         has_module_doc = True  # do not touch unusual files
 
+    # Conditional branch.
     if not has_module_doc:
         lines = src.splitlines(True)
         insert_at = 0
@@ -206,9 +298,11 @@ def annotate_python(path: Path) -> bool:
         module_doc_added = True
 
     inserter = _DocInserter()
-    new_src = inserter.run(src)
-    if module_doc_added or new_src != src:
-        path.write_text(new_src, encoding="utf-8")
+    intermediate = inserter.run(src)
+    body_explained = _BodyExplainer(intermediate).run()
+    # Conditional branch.
+    if module_doc_added or body_explained != src:
+        path.write_text(body_explained, encoding="utf-8")
         return True
     return False
 
@@ -237,10 +331,7 @@ def swift_entity_label(signature: str) -> str:
 
 def annotate_swift(path: Path) -> bool:
     """Function annotate_swift."""
-    # If file already has any comments, skip entire file per user preference
-    if file_has_any_comment(path):
-        return False
-
+    # Error handling block.
     try:
         text = path.read_text(encoding="utf-8")
         lines = text.splitlines(True)
@@ -250,8 +341,10 @@ def annotate_swift(path: Path) -> bool:
     changed = False
     # Add a tiny file-level doc at the top if first non-empty line isn't a comment
     k = 0
+    # While loop.
     while k < len(lines) and lines[k].strip() == "":
         k += 1
+    # Conditional branch.
     if k < len(lines):
         first = lines[k].lstrip()
         if not first.startswith("//") and not first.startswith("///"):
@@ -262,6 +355,7 @@ def annotate_swift(path: Path) -> bool:
         lines.append(f"/// File {path.name}: inline overview.\n")
         changed = True
     i = 0
+    # While loop.
     while i < len(lines):
         line = lines[i]
         stripped = line.lstrip()
@@ -281,6 +375,42 @@ def annotate_swift(path: Path) -> bool:
                 i += 1  # skip the inserted doc line
         i += 1
 
+    # Add simple control-flow comments inside Swift functions (heuristic)
+    i = 0
+    # While loop.
+    while i < len(lines):
+        stripped = lines[i].lstrip()
+        # Detect control-flow starts
+        cf = None
+        if stripped.startswith("if "):
+            cf = "Conditional branch"
+        elif stripped.startswith("guard "):
+            cf = "Guard condition"
+        elif stripped.startswith("for "):
+            cf = "Loop over items"
+        elif stripped.startswith("while "):
+            cf = "While loop"
+        elif stripped.startswith("switch "):
+            cf = "Switch over value"
+        elif stripped.startswith("do {") or stripped.startswith("do\n"):
+            cf = "Do-catch block"
+        elif stripped.startswith("catch "):
+            cf = "Error handling"
+
+        if cf:
+            # look back for immediate comment
+            j = i - 1
+            while j >= 0 and lines[j].strip() == "":
+                j -= 1
+            has_comment = j >= 0 and lines[j].lstrip().startswith("//")
+            if not has_comment:
+                indent = lines[i][: len(lines[i]) - len(lines[i].lstrip(" \t"))]
+                lines.insert(i, f"{indent}// {cf}.\n")
+                changed = True
+                i += 1
+        i += 1
+
+    # Conditional branch.
     if changed:
         path.write_text("".join(lines), encoding="utf-8")
     return changed
@@ -291,6 +421,7 @@ def main(argv: list[str]) -> int:
     root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
     annotated = 0
     scanned = 0
+    # Loop over items.
     for file in iter_source_files(root):
         scanned += 1
         if file.suffix == ".py":

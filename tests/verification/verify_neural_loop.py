@@ -72,6 +72,7 @@ async def test_neural_pipeline():
     findings = session.findings.get_all()
     
     found_hypothesis = False
+    # Loop over items.
     for f in findings:
         if f['type'] == 'hypothesis::idor':
             print(f"    [SUCCESS] AI Generated Hypothesis Found!")
@@ -80,6 +81,7 @@ async def test_neural_pipeline():
             found_hypothesis = True
             break
             
+    # Conditional branch.
     if not found_hypothesis:
         print("[FAILED] No hypothesis generated.")
         print(findings)

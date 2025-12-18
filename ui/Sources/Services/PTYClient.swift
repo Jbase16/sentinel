@@ -41,6 +41,7 @@ class PTYClient: ObservableObject {
     func write(_ command: String) {
         let message = URLSessionWebSocketTask.Message.string(command)
         webSocketTask?.send(message) { error in
+            // Conditional branch.
             if let error = error {
                 print("PTY Write Error: \(error)")
             }
@@ -55,17 +56,20 @@ class PTYClient: ObservableObject {
     
     private func receiveMessage() {
         webSocketTask?.receive { [weak self] result in
+            // Switch over value.
             switch result {
             case .failure(let error):
                 print("PTY Read Error: \(error)")
                 self?.isConnected = false
             case .success(let message):
+                // Switch over value.
                 switch message {
                 case .string(let text):
                     DispatchQueue.main.async {
                         self?.output += text
                     }
                 case .data(let data):
+                    // Conditional branch.
                     if let text = String(data: data, encoding: .utf8) {
                         DispatchQueue.main.async {
                             self?.output += text

@@ -256,6 +256,7 @@ class DecisionLedger:
         Thread-safety:
             Uses RLock to ensure atomic sequence allocation
         """
+        # Context-managed operation.
         with self._lock:
             self._sequence += 1
             sequenced_decision = decision.with_sequence(self._sequence)
@@ -274,6 +275,7 @@ class DecisionLedger:
         Get all decisions that were made as a result of this decision.
         Enables decision tree reconstruction.
         """
+        # Context-managed operation.
         with self._lock:
             return list(self._by_parent.get(decision_id, []))
     
@@ -282,6 +284,7 @@ class DecisionLedger:
         Get the causal chain leading to this decision.
         Returns [root_decision, ..., this_decision].
         """
+        # Context-managed operation.
         with self._lock:
             chain = []
             current_id = decision_id
@@ -298,11 +301,13 @@ class DecisionLedger:
     
     def get_all(self) -> List[DecisionPoint]:
         """Get all decisions in sequence order."""
+        # Context-managed operation.
         with self._lock:
             return list(self._decisions)
     
     def clear(self) -> None:
         """Clear all decisions. Primarily for testing."""
+        # Context-managed operation.
         with self._lock:
             self._decisions.clear()
             self._sequence = 0
@@ -310,6 +315,7 @@ class DecisionLedger:
     
     def stats(self) -> Dict[str, Any]:
         """Return diagnostic statistics."""
+        # Context-managed operation.
         with self._lock:
             type_counts = {}
             for d in self._decisions:
@@ -384,6 +390,7 @@ class DecisionContext:
         Exit context manager.
         Commits any pending decisions even if exception occurred.
         """
+        # Conditional branch.
         if self._pending:
             self.flush()
         return False  # Don't suppress exceptions
@@ -500,6 +507,7 @@ class DecisionContext:
         Useful for batched decision emission.
         """
         committed = []
+        # Loop over items.
         for decision in self._pending:
             committed.append(self._commit_and_emit(decision))
         self._pending.clear()
@@ -516,6 +524,7 @@ class DecisionContext:
                 sub_decision = ctx.choose(...)  # auto-linked as child
         """
         self._parent_stack.append(parent_decision.id)
+        # Error handling block.
         try:
             yield self
         finally:
@@ -559,6 +568,7 @@ def get_global_ledger() -> DecisionLedger:
     For isolated testing, create separate ledgers.
     """
     global _global_ledger
+    # Conditional branch.
     if _global_ledger is None:
         with _ledger_lock:
             if _global_ledger is None:

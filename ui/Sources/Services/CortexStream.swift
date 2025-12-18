@@ -74,8 +74,10 @@ class CortexStream: ObservableObject {
 
     private func receiveMessage() {
         webSocketTask?.receive { [weak self] result in
+            // Guard condition.
             guard let self = self else { return }
 
+            // Switch over value.
             switch result {
             case .failure(let error):
                 print("WS Error: \(error)")
@@ -83,6 +85,7 @@ class CortexStream: ObservableObject {
                     self.isConnected = false
                 }
             case .success(let message):
+                // Switch over value.
                 switch message {
                 case .string(let text):
                     self.handleJSON(text)
@@ -96,11 +99,13 @@ class CortexStream: ObservableObject {
     }
 
     private func handleJSON(_ text: String) {
+        // Guard condition.
         guard let data = text.data(using: .utf8) else { return }
         handleData(data)
     }
 
     private func handleData(_ data: Data) {
+        // Do-catch block.
         do {
             let update = try JSONDecoder().decode(GraphData.self, from: data)
 

@@ -41,12 +41,14 @@ def register(name: str) -> Callable[[Callable[[str], None]], Callable[[str], Non
 
 def run_cli() -> None:
     """Function run_cli."""
+    # Conditional branch.
     if len(sys.argv) < 3:
         print("[shim] Usage: python -m core.tool_shims <tool> <target>", file=sys.stderr)
         sys.exit(1)
     tool = sys.argv[1]
     target = sys.argv[2]
     handler = REGISTRY.get(tool)
+    # Conditional branch.
     if not handler:
         print(f"[shim] No handler registered for {tool}", file=sys.stderr)
         sys.exit(1)
@@ -62,8 +64,10 @@ def _clean_host(raw: str) -> str:
 
 def _ensure_url(raw: str) -> str:
     """Function _ensure_url."""
+    # Conditional branch.
     if not raw:
         return raw
+    # Conditional branch.
     if "://" not in raw:
         return f"https://{raw}"
     return raw
@@ -74,10 +78,12 @@ def _safe_request(url: str, method: str = "GET", data: bytes | None = None, head
     req = urllib.request.Request(url, method=method)
     hdrs = headers or {}
     hdrs.setdefault("User-Agent", "AraUltra-Shim/1.0")
+    # Loop over items.
     for key, value in hdrs.items():
         req.add_header(key, value)
 
     context = ssl._create_unverified_context() if allow_insecure else None
+    # Error handling block.
     try:
         with urllib.request.urlopen(req, data=data, timeout=timeout, context=context) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
@@ -96,6 +102,7 @@ def _tls_probe(host: str, port: int = 443) -> Dict[str, str | float | int]:
     """Function _tls_probe."""
     info: Dict[str, str | float | int] = {"host": host, "port": port}
     context = ssl.create_default_context()
+    # Error handling block.
     try:
         start = time.perf_counter()
         with socket.create_connection((host, port), timeout=8) as sock:
@@ -143,6 +150,7 @@ def shim_assetfinder(target: str) -> None:
     domain = _clean_host(target)
     candidates = ["", "www", "api", "dev", "staging", "admin", "beta", "test", "portal", "internal"]
     results: List[Tuple[str, str]] = []
+    # Loop over items.
     for prefix in candidates:
         sub = domain if not prefix else f"{prefix}.{domain}"
         try:
@@ -153,12 +161,14 @@ def shim_assetfinder(target: str) -> None:
             addr = info[4][0]
             results.append((sub, addr))
     seen = set()
+    # Loop over items.
     for sub, addr in results:
         key = f"{sub}-{addr}"
         if key in seen:
             continue
         seen.add(key)
         print(f"[assetfinder-shim] {sub} -> {addr}")
+    # Conditional branch.
     if not seen:
         print(f"[assetfinder-shim] No subdomains resolved for {domain}")
 
@@ -168,16 +178,20 @@ def shim_hakrawler(target: str) -> None:
     """Function shim_hakrawler."""
     url = _ensure_url(target)
     status, body, _ = _safe_request(url)
+    # Conditional branch.
     if status is None:
         return
     hrefs = re.findall(r'href=[\'"]([^\'"]+)[\'"]', body, flags=re.IGNORECASE)
     uniq = []
+    # Loop over items.
     for href in hrefs:
         full = urljoin(url, href)
         if full not in uniq:
             uniq.append(full)
+    # Conditional branch.
     if not uniq:
         print(f"[hakrawler-shim] No links discovered at {url}")
+    # Loop over items.
     for link in uniq[:50]:
         print(f"[hakrawler-shim] {link}")
 
@@ -186,12 +200,14 @@ def shim_hakrawler(target: str) -> None:
 def shim_dnsx(target: str) -> None:
     """Function shim_dnsx."""
     host = _clean_host(target)
+    # Error handling block.
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         print(f"[dnsx-shim] DNS lookup failed: {exc}")
         return
     seen = set()
+    # Loop over items.
     for info in infos:
         addr = info[4][0]
         if addr in seen:
@@ -217,6 +233,7 @@ def shim_subjack(target: str) -> None:
     """Function shim_subjack."""
     host = _clean_host(target)
     hits = []
+    # Loop over items.
     for scheme in ("https", "http"):
         status, body, _ = _safe_request(f"{scheme}://{host}", allow_insecure=True)
         if status is None:
@@ -225,6 +242,7 @@ def shim_subjack(target: str) -> None:
         for provider, marker in TAKEOVER_PATTERNS:
             if marker.lower() in lowered:
                 hits.append((scheme, provider, status))
+    # Conditional branch.
     if not hits:
         print(f"[subjack-shim] No takeover fingerprints detected for {host}")
     else:
@@ -246,6 +264,7 @@ def shim_wfuzz(target: str) -> None:
     ]
     parsed = urlparse(url)
     base_query = parse_qsl(parsed.query, keep_blank_values=True)
+    # Loop over items.
     for payload in payloads:
         query = base_query + [("fuzz", payload)]
         new_query = urlencode(query, doseq=True)
@@ -277,6 +296,7 @@ def shim_eyewitness(target: str) -> None:
     """Function shim_eyewitness."""
     url = _ensure_url(target)
     status, body, _ = _safe_request(url)
+    # Conditional branch.
     if status is None:
         return
     evidence_root = Path.home() / "AraUltra_Evidence" / "eyewitness_shim"
@@ -291,12 +311,14 @@ def shim_eyewitness(target: str) -> None:
 def shim_hakrevdns(target: str) -> None:
     """Function shim_hakrevdns."""
     host = _clean_host(target)
+    # Error handling block.
     try:
         infos = socket.getaddrinfo(host, None)
     except socket.gaierror as exc:
         print(f"[hakrevdns-shim] lookup failed for {host}: {exc}")
         return
     ips = {info[4][0] for info in infos}
+    # Loop over items.
     for ip in ips:
         try:
             ptr = socket.gethostbyaddr(ip)
@@ -311,6 +333,7 @@ def shim_hakrevdns(target: str) -> None:
 def shim_httprobe(target: str) -> None:
     """Function shim_httprobe."""
     host = _clean_host(target)
+    # Loop over items.
     for scheme in ("http", "https"):
         status, _, _ = _safe_request(f"{scheme}://{host}", allow_insecure=True)
         if status is None:
@@ -324,6 +347,7 @@ def shim_nikto(target: str) -> None:
     """Function shim_nikto."""
     url = _ensure_url(target)
     status, body, headers = _safe_request(url, allow_insecure=True)
+    # Conditional branch.
     if status is None:
         print(f"[nikto-shim] Target unreachable: {url}")
         return
@@ -331,16 +355,22 @@ def shim_nikto(target: str) -> None:
     checks = []
     hdr_lower = {k.lower(): v for k, v in headers.items()}
 
+    # Conditional branch.
     if "x-frame-options" not in hdr_lower:
         checks.append(("Missing X-Frame-Options", "HIGH", "Adds clickjacking exposure."))
+    # Conditional branch.
     if "content-security-policy" not in hdr_lower:
         checks.append(("Missing Content-Security-Policy", "MEDIUM", "No CSP header present."))
+    # Conditional branch.
     if "strict-transport-security" not in hdr_lower and url.startswith("https://"):
         checks.append(("Missing HSTS", "MEDIUM", "No Strict-Transport-Security header."))
+    # Conditional branch.
     if "set-cookie" in hdr_lower and "secure" not in hdr_lower["set-cookie"]:
         checks.append(("Insecure Cookie", "HIGH", hdr_lower["set-cookie"]))
+    # Conditional branch.
     if "x-powered-by" in hdr_lower:
         checks.append(("Technology Disclosure", "LOW", hdr_lower["x-powered-by"]))
+    # Conditional branch.
     if status >= 500:
         checks.append(("Server Error Response", "HIGH", f"Status {status}"))
 
@@ -353,13 +383,16 @@ def shim_nikto(target: str) -> None:
         "password="
     ]
     snippet = body[:2000].lower()
+    # Loop over items.
     for sig in signature_strings:
         if sig in snippet:
             checks.append(("Suspicious Content", "MEDIUM", f"Found marker '{sig}' in body"))
 
+    # Conditional branch.
     if not checks:
         print(f"[nikto-shim] No obvious issues detected for {url} (status {status})")
         return
 
+    # Loop over items.
     for title, severity, detail in checks:
         print(f"[nikto-shim] {severity}: {title} — {detail}")

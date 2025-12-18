@@ -67,9 +67,11 @@ class ScanRequest(BaseModel):
     def validate_target(cls, v: str) -> str:
         """Function validate_target."""
         v = v.strip()
+        # Conditional branch.
         if not v:
             raise ValueError("Target cannot be empty")
         dangerous_patterns = [";", "&&", "||", "`", "$(", "\n", "\r"]
+        # Loop over items.
         for pattern in dangerous_patterns:
             if pattern in v:
                 raise ValueError(f"Invalid character in target: {pattern}")
@@ -106,6 +108,7 @@ async def sentinel_error_handler(request: Request, exc: SentinelError):
 class RateLimiter:
     """Class RateLimiter."""
     def __init__(self, requests_per_minute: int = 60):
+        """Function __init__."""
         self.requests_per_minute = requests_per_minute
         self.requests: Dict[str, List[float]] = defaultdict(list)
         self._lock = threading.Lock()
@@ -114,6 +117,7 @@ class RateLimiter:
         """Function is_allowed."""
         now = time.time()
         window = 60.0
+        # Context-managed operation.
         with self._lock:
             self.requests[key] = [t for t in self.requests[key] if now - t < window]
             if len(self.requests[key]) >= self.requests_per_minute:
@@ -237,6 +241,7 @@ async def _begin_scan(req: ScanRequest) -> str:
         async def _runner() -> None:
             """AsyncFunction _runner."""
             start_time = time.time()
+            # Error handling block.
             try:
 
                 async def dispatch_tool(tool: str) -> List[Dict]:
@@ -246,6 +251,7 @@ async def _begin_scan(req: ScanRequest) -> str:
                     session.log(f"[Strategos] Dispatching tool: {tool}")
                     engine = ScannerEngine(session=session)
 
+                    # Error handling block.
                     try:
                         event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[])
 
@@ -334,6 +340,7 @@ async def _begin_scan(req: ScanRequest) -> str:
 def get_client_ip(request: Request) -> str:
     """Function get_client_ip."""
     forwarded = request.headers.get("X-Forwarded-For")
+    # Conditional branch.
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
@@ -344,14 +351,17 @@ async def verify_token(
 ) -> bool:
     """AsyncFunction verify_token."""
     config = get_config()
+    # Conditional branch.
     if not config.security.require_auth:
         return True
+    # Conditional branch.
     if credentials is None:
         raise SentinelError(
             ErrorCode.AUTH_TOKEN_MISSING,
             "Authentication token required",
             details={"endpoint": str(request.url.path)}
         )
+    # Conditional branch.
     if credentials.credentials != config.security.api_token:
         raise SentinelError(
             ErrorCode.AUTH_TOKEN_INVALID,
@@ -362,6 +372,7 @@ async def verify_token(
 
 async def check_rate_limit(request: Request) -> None:
     """AsyncFunction check_rate_limit."""
+    # Conditional branch.
     if not _rate_limiter.is_allowed(get_client_ip(request)):
         raise SentinelError(
             ErrorCode.AUTH_RATE_LIMIT_EXCEEDED,
@@ -371,6 +382,7 @@ async def check_rate_limit(request: Request) -> None:
 
 async def check_ai_rate_limit(request: Request) -> None:
     """AsyncFunction check_ai_rate_limit."""
+    # Conditional branch.
     if not _ai_rate_limiter.is_allowed(get_client_ip(request)):
         raise SentinelError(
             ErrorCode.AI_RATE_LIMIT_EXCEEDED,
@@ -386,6 +398,7 @@ async def startup_event():
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
 
+    # Error handling block.
     try:
         _api_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -424,11 +437,13 @@ setup_cors()
 def _log_sink_sync(msg: str) -> None:
     """Function _log_sink_sync."""
     loop: Optional[asyncio.AbstractEventLoop] = None
+    # Error handling block.
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         loop = _api_loop
 
+    # Conditional branch.
     if loop is not None:
         try:
             loop.call_soon_threadsafe(
@@ -446,6 +461,7 @@ def _log_sink_sync(msg: str) -> None:
     except Exception:
         pass
         
+    # Error handling block.
     try:
         # Legacy bridge for TaskRouter (cleanup later?)
         event_payload = {"line": msg}
@@ -455,6 +471,7 @@ def _log_sink_sync(msg: str) -> None:
 
 def _ai_status() -> Dict[str, Any]:
     """Function _ai_status."""
+    # Error handling block.
     try:
         return AIEngine.instance().status()
     except Exception as e:
@@ -481,6 +498,7 @@ async def _get_latest_results() -> Dict[str, Any]:
     # Use session-scoped stores if available, otherwise fallback to global singletons
     session_id = _scan_state.get("session_id")
     
+    # Conditional branch.
     if session_id:
         # Session-based query using session manager
         session = await get_session(session_id)
@@ -622,6 +640,7 @@ async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
     session_id = _scan_state.get("session_id")
     session = await get_session(session_id) if session_id else None
     
+    # Conditional branch.
     if not session:
         # Create a dedicated Ghost session if no scan is active
         session = ScanSession("ghost-mode")
@@ -639,6 +658,7 @@ async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
 @app.post("/ghost/stop")
 async def ghost_stop(_: bool = Depends(verify_token)):
     """Stop the passive interception proxy."""
+    # Conditional branch.
     if hasattr(app.state, "ghost") and app.state.ghost:
         app.state.ghost.stop()
         del app.state.ghost
@@ -654,6 +674,7 @@ async def forge_compile(
     """
     Trigger the JIT Exploit Compiler.
     """
+    # Error handling block.
     try:
         script_path = ExploitCompiler.instance().compile_exploit(target, anomaly)
         return {"status": "compiled", "script_path": script_path}
@@ -776,6 +797,7 @@ async def ws_graph_endpoint(websocket: WebSocket):
     """AsyncFunction ws_graph_endpoint."""
     await websocket.accept()
     from core.cortex.memory import KnowledgeGraph
+    # Error handling block.
     try:
         while True:
             # Stream the graph state every 500ms
@@ -817,6 +839,7 @@ async def start_scan(
 @app.post("/cancel")
 async def cancel_scan(_: bool = Depends(verify_token)):
     """AsyncFunction cancel_scan."""
+    # Conditional branch.
     if _active_scan_task and not _active_scan_task.done():
         _cancel_requested.set()
         _active_scan_task.cancel()
@@ -838,6 +861,7 @@ async def chat(
     async def _stream():
         """AsyncFunction _stream."""
         full_response = ""
+        # Error handling block.
         try:
             for token in AIEngine.instance().stream_chat(req.prompt):
                 if await request.is_disconnected():
@@ -911,6 +935,7 @@ async def events_stream(
     
     async def _generate():
         """AsyncFunction _generate."""
+        # Error handling block.
         try:
             # Phase 1: Replay missed events
             missed_events, truncated = event_store.get_since(since)
@@ -961,6 +986,7 @@ async def generate_report(
     """AsyncFunction generate_report."""
     async def _stream():
         """AsyncFunction _stream."""
+        # Error handling block.
         try:
             composer = ReportComposer()
             content = await asyncio.to_thread(composer.generate_section, section)
@@ -988,11 +1014,13 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
     """AsyncFunction handle_action."""
     dispatcher = ActionDispatcher.instance()
     success = False
+    # Conditional branch.
     if verb == "approve":
         success = dispatcher.approve_action(action_id)
     elif verb == "deny":
         success = dispatcher.deny_action(action_id)
     
+    # Conditional branch.
     if not success:
         raise SentinelError(
             ErrorCode.SYSTEM_INTERNAL_ERROR,
@@ -1006,6 +1034,7 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
 async def terminal_websocket_pty(websocket: WebSocket):
     """Alternative terminal endpoint at /ws/pty for PTY access."""
     config = get_config()
+    # Conditional branch.
     if not config.security.terminal_enabled:
         await websocket.close(code=4003)
         return
@@ -1015,6 +1044,7 @@ async def terminal_websocket_pty(websocket: WebSocket):
     
     async def read_pty():
         """AsyncFunction read_pty."""
+        # Error handling block.
         try:
             while True:
                 data = await asyncio.to_thread(pty_session.read)
@@ -1026,6 +1056,7 @@ async def terminal_websocket_pty(websocket: WebSocket):
             pass
     
     reader_task = asyncio.create_task(read_pty())
+    # Error handling block.
     try:
         while True:
             msg = await websocket.receive_text()

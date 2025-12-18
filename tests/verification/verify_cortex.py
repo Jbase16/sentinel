@@ -45,6 +45,7 @@ def test_nmap_ingestion():
     
     # Assertions
     port_80 = next((n for n in nodes if n['id'] == "192.168.1.5:80"), None)
+    # Conditional branch.
     if port_80:
         print("    [SUCCESS] Port 80 Node created.")
     else:
@@ -56,6 +57,7 @@ def test_nmap_ingestion():
     print(f"    > Reasoning identified {len(ops)} opportunities.")
     
     nikto_op = next((op for op in ops if op['tool'] == 'nikto'), None)
+    # Conditional branch.
     if nikto_op:
         print(f"    [SUCCESS] Cortex suggested Nikto: {nikto_op['reason']}")
     else:

@@ -22,6 +22,7 @@ class ToolBase:
     """
 
     def __init__(self, name: str):
+        """Function __init__."""
         self.name = name
 
     def run(self, command: str, timeout: int = 120, metadata=None):

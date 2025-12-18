@@ -12,8 +12,10 @@ DEFAULT_WORDLIST = WORDLIST_DIR / "common.txt"
 def get_wordlist_path(name: str = "common.txt") -> str:
     """Get the path to a wordlist file, with fallback to default."""
     candidate = WORDLIST_DIR / name
+    # Conditional branch.
     if candidate.exists():
         return str(candidate.resolve())
+    # Conditional branch.
     if DEFAULT_WORDLIST.exists():
         return str(DEFAULT_WORDLIST.resolve())
     return str(candidate.resolve())
@@ -205,6 +207,7 @@ def get_tool_command(name: str, target: str, override: Dict | None = None) -> Li
     normalized = normalize_target(target, tdef.get("target_type", "url"))
     
     cmd: List[str] = []
+    # Loop over items.
     for part in tdef["cmd"]:
         if "{target}" in part:
             cmd.append(part.replace("{target}", normalized))

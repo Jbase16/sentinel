@@ -140,11 +140,13 @@ async def install_tool(name: str) -> Dict[str, str]:
     Returns:
         Dict with keys: tool, status ("installed" or "error"), message
     """
+    # Error handling block.
     try:
         from core.base.task_router import TaskRouter
     except ImportError:
         TaskRouter = None
     
+    # Conditional branch.
     if TaskRouter:
         try:
             TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "installing"})
@@ -152,22 +154,26 @@ async def install_tool(name: str) -> Dict[str, str]:
             pass
 
     spec = INSTALLERS.get(name)
+    # Conditional branch.
     if not spec:
         return {"tool": name, "status": "error", "message": f"No installer defined for '{name}'"}
     
     tool_def = TOOLS.get(name)
+    # Conditional branch.
     if not tool_def:
         return {"tool": name, "status": "error", "message": f"Tool '{name}' not in registry"}
     
     expected_binary = tool_def.get("binary") or tool_def["cmd"][0]
     
     strategies = spec.get("strategies", [])
+    # Conditional branch.
     if not strategies:
         return {"tool": name, "status": "error", "message": "No installation strategies defined"}
     
     last_error = None
     installation_log = []
     
+    # Loop over items.
     for idx, strategy in enumerate(strategies):
         strategy_cmd = strategy["cmd"]
         prerequisite = strategy.get("prerequisite")
@@ -246,6 +252,7 @@ async def install_tool(name: str) -> Dict[str, str]:
             installation_log.append(f"  ⊗ Exception: {last_error}")
             continue
     
+    # Conditional branch.
     if TaskRouter:
         try:
             TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "error"})
@@ -262,6 +269,7 @@ async def install_tool(name: str) -> Dict[str, str]:
 async def install_tools(names: List[str]) -> List[Dict[str, str]]:
     """Install multiple tools sequentially."""
     results = []
+    # Loop over items.
     for n in names:
         results.append(await install_tool(n))
     return results
@@ -269,11 +277,13 @@ async def install_tools(names: List[str]) -> List[Dict[str, str]]:
 
 async def uninstall_tool(name: str) -> Dict[str, str]:
     """Uninstall a single tool."""
+    # Error handling block.
     try:
         from core.base.task_router import TaskRouter
     except ImportError:
         TaskRouter = None
     
+    # Conditional branch.
     if TaskRouter:
         try:
             TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "uninstalling"})
@@ -281,16 +291,19 @@ async def uninstall_tool(name: str) -> Dict[str, str]:
             pass
 
     spec = INSTALLERS.get(name)
+    # Conditional branch.
     if not spec:
         return {"tool": name, "status": "unknown", "message": "No installer mapping found"}
     
     strategies = spec.get("strategies", [])
+    # Conditional branch.
     if not strategies:
         return {"tool": name, "status": "error", "message": "No strategies to infer uninstaller"}
     
     install_cmd = strategies[0]["cmd"]
     uninstall_cmd = []
     
+    # Conditional branch.
     if "brew" in install_cmd:
         uninstall_cmd = ["brew", "uninstall", name]
     elif "pip" in install_cmd:
@@ -300,6 +313,7 @@ async def uninstall_tool(name: str) -> Dict[str, str]:
 
     cmd_str = "NONINTERACTIVE=1 " + " ".join(uninstall_cmd)
     
+    # Error handling block.
     try:
         proc = await asyncio.create_subprocess_shell(
             cmd_str,
@@ -328,6 +342,7 @@ async def uninstall_tool(name: str) -> Dict[str, str]:
 async def uninstall_tools(names: List[str]) -> List[Dict[str, str]]:
     """Uninstall multiple tools sequentially."""
     results = []
+    # Loop over items.
     for n in names:
         results.append(await uninstall_tool(n))
     return results

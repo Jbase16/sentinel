@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class HeadlessRunner:
     """Class HeadlessRunner."""
     def __init__(self):
+        """Function __init__."""
         raise RuntimeError(
             "HeadlessRunner has been superseded by the canonical scan lifecycle. "
             "Start the backend (or use POST /scan) so all scan activity emits EventBus "
@@ -48,6 +49,7 @@ class HeadlessRunner:
         print(f"[*] Starting Headless Scan against: {target}")
         print("[*] Press Ctrl+C to stop.")
         
+        # Error handling block.
         try:
             # Run the orchestrator
             # The orchestrator runs the scanner, which runs tools and yields logs

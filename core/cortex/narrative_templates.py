@@ -73,6 +73,7 @@ class ToolSelectionTemplate(NarrativeTemplate):
     
     def render(self, d: DecisionPoint) -> str:
         """Function render."""
+        # Conditional branch.
         if d.chosen == "SKIP":
             return f"TACTIC: Skipping tool execution. {d.reason}"
         
@@ -97,6 +98,7 @@ class ToolRejectionTemplate(NarrativeTemplate):
     def render(self, d: DecisionPoint) -> str:
         # Grouped Rejection (Phase 4)
         """Function render."""
+        # Conditional branch.
         if "tools" in d.context:
             tools = d.context["tools"]
             count = len(tools)

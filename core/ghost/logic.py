@@ -35,6 +35,7 @@ class LogicFuzzer:
         """
         tests = []
         
+        # Loop over items.
         for step in flow.steps:
             # Look for numerical params
             for key, val in step.params.items():
@@ -70,6 +71,7 @@ class LogicFuzzer:
         if not alt_tokens:
             return []
             
+        # Loop over items.
         for step in flow.steps:
             # If request has IDs in URL/Params, keep them, but SWAP the Auth Headers
             tests.append({
@@ -87,6 +89,7 @@ class LogicFuzzer:
         Identifies steps that modify state (POST/PUT) and suggests parellel execution.
         """
         tests = []
+        # Loop over items.
         for step in flow.steps:
             if step.method in ["POST", "PUT", "DELETE"]:
                 tests.append({

@@ -35,6 +35,7 @@ class GhostAddon:
     Now equipped with Neural Strategy Engine.
     """
     def __init__(self, session: ScanSession):
+        """Function __init__."""
         self.session = session
         self.strategy = StrategyEngine(session)
         
@@ -46,6 +47,7 @@ class GhostAddon:
         """
         Intercept requests to identify new endpoints/params.
         """
+        # Error handling block.
         try:
             url = flow.request.pretty_url
             method = flow.request.method
@@ -93,6 +95,7 @@ class GhostAddon:
         """
         Intercept responses to identify tech stack / leaks.
         """
+        # Error handling block.
         try:
             # Simple header check for now
             server = flow.response.headers.get("Server", "")
@@ -135,6 +138,7 @@ class GhostInterceptor:
     def _find_free_port() -> int:
         """Find an available port for the proxy."""
         import socket
+        # Context-managed operation.
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(('127.0.0.1', 0))
             s.listen(1)
@@ -157,6 +161,7 @@ class GhostInterceptor:
 
     async def _run_master(self):
         """Run the mitmproxy master with error handling."""
+        # Error handling block.
         try:
             await self.master.run()
         except Exception as e:
@@ -165,8 +170,10 @@ class GhostInterceptor:
 
     def stop(self):
         """Shutdown the proxy gracefully."""
+        # Conditional branch.
         if self.master:
             self.master.shutdown()
+        # Conditional branch.
         if self._task and not self._task.done():
             self._task.cancel()
         logger.info("[*] Ghost Protocol Deactivated.")

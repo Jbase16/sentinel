@@ -81,8 +81,10 @@ class ModeRegistry:
     @staticmethod
     def get_overlay(mode: ScanMode) -> Dict[str, ToolOverlay]:
         """Function get_overlay."""
+        # Conditional branch.
         if mode == ScanMode.BUG_BOUNTY:
             return ModeRegistry.BUG_BOUNTY_OVERLAY
+        # Conditional branch.
         if mode == ScanMode.STEALTH:
             return ModeRegistry.STEALTH_OVERLAY
         return {}

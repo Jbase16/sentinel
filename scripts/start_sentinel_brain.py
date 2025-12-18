@@ -44,6 +44,7 @@ tokenizer = None
 def ensure_model_loaded():
     """Function ensure_model_loaded."""
     global model, tokenizer
+    # Conditional branch.
     if model is None:
         import mlx.core as mx
         from mlx_lm import load
@@ -60,6 +61,7 @@ class SentinelHandler(BaseHTTPRequestHandler):
     
     def do_GET(self):
         """Function do_GET."""
+        # Conditional branch.
         if self.path == "/api/tags":
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
@@ -77,6 +79,7 @@ class SentinelHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         """Function do_POST."""
+        # Conditional branch.
         if self.path == "/api/generate":
             ensure_model_loaded()
             from mlx_lm import generate

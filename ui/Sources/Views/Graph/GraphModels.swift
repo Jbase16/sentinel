@@ -42,6 +42,7 @@ struct GraphNode: Identifiable, Equatable, Hashable {
         case finding
         
         var color: Color {
+            // Switch over value.
             switch self {
             case .target: return .blue
             case .domain: return .purple
@@ -53,6 +54,7 @@ struct GraphNode: Identifiable, Equatable, Hashable {
         }
         
         var icon: String {
+            // Switch over value.
             switch self {
             case .target: return "target"
             case .domain: return "network"
@@ -103,6 +105,7 @@ class ForceSimulator: ObservableObject {
         let rootLabel = target?.isEmpty == false ? target! : "Target"
         let rootID: UUID
         
+        // Conditional branch.
         if let idx = newNodes.firstIndex(where: { $0.type == .target }) {
             newNodes[idx] = GraphNode(id: newNodes[idx].id, label: rootLabel, type: .target, position: newNodes[idx].position, velocity: newNodes[idx].velocity, radius: 30)
             rootID = newNodes[idx].id
@@ -114,6 +117,7 @@ class ForceSimulator: ObservableObject {
         // Helper to find or create node
         /// Function getOrCreateNode.
         func getOrCreateNode(label: String, type: GraphNode.NodeType, parentID: UUID) -> UUID {
+            // Conditional branch.
             if let existing = newNodes.first(where: { $0.label == label }) {
                 // Ensure link exists
                 if !newLinks.contains(where: { $0.sourceID == parentID && $0.targetID == existing.id }) {
@@ -135,7 +139,9 @@ class ForceSimulator: ObservableObject {
 
         // 2. Map Findings
         if let findings = findings {
+            // Loop over items.
             for finding in findings {
+                // Guard condition.
                 guard let type = finding["type"]?.stringValue,
                       let severity = finding["severity"]?.stringValue else { continue }
                 
@@ -146,6 +152,7 @@ class ForceSimulator: ObservableObject {
                 
                 // Determine node type based on finding
                 var nodeType: GraphNode.NodeType = .finding
+                // Conditional branch.
                 if severity == "HIGH" || severity == "CRITICAL" {
                     nodeType = .vulnerability
                 } else if type.lowercased().contains("port") {
@@ -175,17 +182,20 @@ class ForceSimulator: ObservableObject {
     }
     
     private func tick() {
+        // Loop over items.
         for i in 0..<nodes.count {
             var force = CGPoint.zero
             
             // 1. Repulsion (Coulomb's Law-ish)
             for j in 0..<nodes.count {
+                // Conditional branch.
                 if i == j { continue }
                 let dx = nodes[i].position.x - nodes[j].position.x
                 let dy = nodes[i].position.y - nodes[j].position.y
                 let distSq = dx*dx + dy*dy
                 let dist = sqrt(distSq)
                 
+                // Conditional branch.
                 if dist > 0 {
                     let f = repulsionForce / distSq
                     force.x += (dx / dist) * f
@@ -197,12 +207,14 @@ class ForceSimulator: ObservableObject {
             // Naive O(N^2) search for links for simplicity in this demo, optimize later
             for link in links {
                 var otherIdx: Int? = nil
+                // Conditional branch.
                 if link.sourceID == nodes[i].id {
                     otherIdx = nodes.firstIndex(where: { $0.id == link.targetID })
                 } else if link.targetID == nodes[i].id {
                     otherIdx = nodes.firstIndex(where: { $0.id == link.sourceID })
                 }
                 
+                // Conditional branch.
                 if let idx = otherIdx {
                     let other = nodes[idx]
                     let dx = nodes[i].position.x - other.position.x
@@ -212,6 +224,7 @@ class ForceSimulator: ObservableObject {
                     let displacement = dist - springLength
                     let f = displacement * springForce
                     
+                    // Conditional branch.
                     if dist > 0 {
                         force.x -= (dx / dist) * f
                         force.y -= (dy / dist) * f

@@ -29,6 +29,7 @@ def run_scan(args):
     print(f"🎯 Starting Scan against: {args.target}")
     # Forward to the moved script
     cmd = [sys.executable, "scripts/manual_scan.py", args.target]
+    # Conditional branch.
     if args.modules:
         cmd.extend(["--modules", args.modules])
     subprocess.run(cmd)
@@ -62,6 +63,7 @@ def main():
 
     args = parser.parse_args()
     
+    # Conditional branch.
     if hasattr(args, "func"):
         args.func(args)
     else:

@@ -70,9 +70,11 @@ class OllamaClient:
             "system": system,
             "stream": False,
         }
+        # Conditional branch.
         if force_json:
             payload["format"] = "json"
         
+        # Error handling block.
         try:
             with httpx.Client(timeout=300.0) as client:
                 resp = client.post(url, json=payload)
@@ -100,6 +102,7 @@ class OllamaClient:
         
         logger.info(f"Ollama Request: {url} | Model: {self.model}")
         
+        # Error handling block.
         try:
             with httpx.Client(timeout=300.0) as client:
                 with client.stream("POST", url, json=payload) as response:
@@ -124,6 +127,7 @@ class OllamaClient:
 
     def check_connection(self) -> bool:
         """Function check_connection."""
+        # Error handling block.
         try:
             with httpx.Client(timeout=2.0) as client:
                 resp = client.get(f"{self.base_url}/api/tags")
@@ -143,12 +147,15 @@ class AIEngine:
     @staticmethod
     def instance():
         """Function instance."""
+        # Conditional branch.
         if AIEngine._instance is None:
             AIEngine._instance = AIEngine()
         return AIEngine._instance
 
     def __init__(self):
+        """Function __init__."""
         self.client = None
+        # Conditional branch.
         if AI_PROVIDER == "ollama":
             self.client = OllamaClient(OLLAMA_URL, AI_MODEL)
             if not self.client.check_connection():
@@ -159,6 +166,7 @@ class AIEngine:
         """
         Specialized pipeline for JS de-obfuscation.
         """
+        # Conditional branch.
         if not self.client:
             return ""
             
@@ -188,6 +196,7 @@ class AIEngine:
             "fallback_enabled": AI_FALLBACK_ENABLED,
             "available_models": [],
         }
+        # Conditional branch.
         if connected:
             try:
                 status["available_models"] = self.available_models()
@@ -198,8 +207,10 @@ class AIEngine:
 
     def available_models(self) -> List[str]:
         """Function available_models."""
+        # Conditional branch.
         if not self.client:
             return []
+        # Error handling block.
         try:
             with httpx.Client(timeout=1.0) as client:
                 resp = client.get(f"{self.client.base_url}/api/tags")
@@ -239,6 +250,7 @@ class AIEngine:
             "- If asked about the app, explain your role within SentinelForge.\n"
         )
         
+        # Conditional branch.
         if self.client:
             context_block = ""
             if findings:
@@ -322,6 +334,7 @@ class AIEngine:
         for f in findings:
             findings_store.add_finding(f)
 
+        # Loop over items.
         for p in phases:
             killchain_store.add_phase(p)
 
@@ -376,9 +389,11 @@ class AIEngine:
         )
 
         response_json = self.client.generate(user_prompt, system_prompt)
+        # Conditional branch.
         if not response_json:
             return {"findings": [], "next_steps": []}
 
+        # Error handling block.
         try:
             clean_json = self._clean_json_response(response_json)
             data = json.loads(clean_json)
@@ -408,6 +423,7 @@ class AIEngine:
     def _clean_json_response(self, text: str) -> str:
         """Function _clean_json_response."""
         text = text.strip()
+        # Conditional branch.
         if text.startswith("```"):
             lines = text.splitlines()
             if len(lines) >= 3:
@@ -418,12 +434,14 @@ class AIEngine:
         """
         Generates a professional executive summary based on findings and issues.
         """
+        # Conditional branch.
         if not self.client:
             return self._generate_fallback_summary(findings, issues)
 
         # Summarize data to fit context window
         summary_text = f"Total Findings: {len(findings)}\nTotal Issues: {len(issues)}\n\n"
         
+        # Conditional branch.
         if issues:
             summary_text += "Key Issues:\n"
             for i in issues[:10]:  # Top 10 issues
@@ -448,6 +466,7 @@ class AIEngine:
             "Write the Executive Summary:"
         )
 
+        # Error handling block.
         try:
             result = self.client.generate(user_prompt, system_prompt)
             return result if result else self._generate_fallback_summary(findings, issues)
@@ -461,6 +480,7 @@ class AIEngine:
         summary += f"**Total Findings:** {len(findings)}\n"
         summary += f"**Total Issues:** {len(issues)}\n\n"
         
+        # Conditional branch.
         if issues:
             summary += "## Key Issues Detected\n\n"
             for issue in issues[:10]:
@@ -486,11 +506,13 @@ class AIEngine:
         stdout = (stdout or "").strip()
         stderr = (stderr or "").strip()
 
+        # Conditional branch.
         if not stdout and not stderr:
             return f"{tool} produced no output (rc={rc})."
 
         parts = [f"{tool} completed with exit code {rc}."]
 
+        # Conditional branch.
         if stdout:
             parts.append(f"Stdout length: {len(stdout)} characters.")
         else:
@@ -555,6 +577,7 @@ class AIEngine:
         """
         phases = set()
 
+        # Loop over items.
         for f in findings:
             ftype = f.get("type", "").lower()
             if any(x in ftype for x in ["port", "tech", "fingerprint", "recon"]):
@@ -580,10 +603,12 @@ class AIEngine:
         """Function _live_commentary."""
         tgt = target or "target"
 
+        # Conditional branch.
         if not findings:
             return f"{tool_name} finished against {tgt}; no concrete issues extracted."
 
         sev_counts: Dict[str, int] = {}
+        # Loop over items.
         for f in findings:
             sev = f.get("severity", "unknown")
             sev_counts[sev] = sev_counts.get(sev, 0) + 1
@@ -612,6 +637,7 @@ class AIEngine:
         evidence = EvidenceStore.instance().get_all()
         findings = findings_store.get_all()
         
+        # Conditional branch.
         if self.client:
             # Construct context for the LLM
             context = "Current Findings:\n"
