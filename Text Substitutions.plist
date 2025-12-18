@@ -1,0 +1,1226 @@
+# SentinelForge — Code Review
+_Generated: 2025-12-18 03:51:50_
+## What you asked for
+You asked for a review of every line. This repo is ~27,386 lines across 163 code-ish files, so I produced a **file-by-file audit report** with **line-numbered findings** for anything that looks risky, buggy, confusing, or just unnecessarily loud.
+Where a file had no flagged lines, I still list it and call out structural/maintainability notes.
+## High-signal findings
+- **Swift print debug (use OSLog / Logger; remove noisy prints)** — 48 occurrence(s)- **subprocess call (ensure args list, check return codes, timeouts)** — 5 occurrence(s)- **requests call (verify timeout and error handling)** — 5 occurrence(s)- **subprocess with shell=True (avoid unless necessary; injection risk)** — 3 occurrence(s)- **requests call without timeout (can hang indefinitely)** — 2 occurrence(s)- **TODO/FIXME present** — 2 occurrence(s)- **possible hardcoded secret/token** — 2 occurrence(s)- **private key marker detected (likely sample text—verify)** — 1 occurrence(s)- **os.system usage (prefer subprocess.run with args list)** — 1 occurrence(s)
+### My top priorities to fix first
+1) **Network calls without timeouts** (Python `requests`): these can hang your orchestrator forever.
+2) **Shelling out** (`shell=True`, `os.system`, un-checked `subprocess`): biggest injection + reliability foot-gun.
+3) **Error handling / crash paths** (Swift `try!`, `fatalError`): fine for prototypes, nasty for shipping.
+4) **Repo hygiene**: test/verification scripts and model artifacts should be **excluded** from any “share/review” bundle.
+## File-by-file review
+> Format: **path** (lines, sha) — summary
+> - Line notes: `Lx` — observation / fix
+### `.add_comments_remaining.py`
+- **Lines:** 67  
+- **SHA1:** `42bb02d1ee`
+- **Stated intent:** Batch adds educational header comments to remaining SentinelForge files.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `.github/workflows/ci.yml`
+- **Lines:** 103  
+- **SHA1:** `b6b4282e59`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `.vscode/extensions.json`
+- **Lines:** 10  
+- **SHA1:** `6074fd3833`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `.vscode/settings.json`
+- **Lines:** 12  
+- **SHA1:** `a65bae13b5`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `add_all_comments.py`
+- **Lines:** 173  
+- **SHA1:** `eaa8fb3ce9`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/__init__.py`
+- **Lines:** 15  
+- **SHA1:** `5ee4a4c3ea`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ai/ai_engine.py`
+- **Lines:** 668  
+- **SHA1:** `a5e5a7e563`
+- **Stated intent:** Module ai_engine: inline documentation for /Users/jason/Developer/sentinelforge/core/ai/ai_engine.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ai/reporting.py`
+- **Lines:** 199  
+- **SHA1:** `4d39491903`
+- **Stated intent:** Module reporting: inline documentation for /Users/jason/Developer/sentinelforge/core/ai/reporting.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ai/strategy.py`
+- **Lines:** 158  
+- **SHA1:** `930518e678`
+- **Stated intent:** Module strategy: inline documentation for /Users/jason/Developer/sentinelforge/core/ai/strategy.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/analyze/__init__.py`
+- **Lines:** 18  
+- **SHA1:** `b534986ac5`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/analyze/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/base/__init__.py`
+- **Lines:** 16  
+- **SHA1:** `99c150d16e`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/base/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/base/action_dispatcher.py`
+- **Lines:** 201  
+- **SHA1:** `e03a127bf4`
+- **Stated intent:** Module action_dispatcher: inline documentation for /Users/jason/Developer/sentinelforge/core/base/action_dispatcher.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/base/config.py`
+- **Lines:** 423  
+- **SHA1:** `180aa35bc8`
+- **Stated intent:** Module config: inline documentation for /Users/jason/Developer/sentinelforge/core/base/config.py.
+- **Note:** Uses logging.basicConfig; consider central logging config to avoid duplicate handlers.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/base/session.py`
+- **Lines:** 183  
+- **SHA1:** `22083f1a1b`
+- **Stated intent:** Module session: inline documentation for /Users/jason/Developer/sentinelforge/core/base/session.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/base/task_router.py`
+- **Lines:** 332  
+- **SHA1:** `570b38a23d`
+- **Stated intent:** Module task_router: inline documentation for /Users/jason/Developer/sentinelforge/core/base/task_router.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/chat/__init__.py`
+- **Lines:** 28  
+- **SHA1:** `007b6135e0`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/chat/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/chat/chat_engine.py`
+- **Lines:** 90  
+- **SHA1:** `eabad11562`
+- **Stated intent:** core/chat/chat_engine.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/arbitration.py`
+- **Lines:** 79  
+- **SHA1:** `55b4d1bc57`
+- **Stated intent:** Module arbitration: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/arbitration.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/correlator.py`
+- **Lines:** 73  
+- **SHA1:** `a4e0ce7b7d`
+- **Stated intent:** Module correlator: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/correlator.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/event_store.py`
+- **Lines:** 162  
+- **SHA1:** `7fa1669ce4`
+- **Stated intent:** Module event_store: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/event_store.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/events.py`
+- **Lines:** 111  
+- **SHA1:** `0b8c1955a6`
+- **Stated intent:** Module events: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/events.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/narrative_templates.py`
+- **Lines:** 150  
+- **SHA1:** `d51b80a1c6`
+- **Stated intent:** Module narrative_templates: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/narrative_template
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/narrator.py`
+- **Lines:** 95  
+- **SHA1:** `6b5565480c`
+- **Stated intent:** Module narrator: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/narrator.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/pathfinder.py`
+- **Lines:** 101  
+- **SHA1:** `316aef135c`
+- **Stated intent:** Module pathfinder: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/pathfinder.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/policy.py`
+- **Lines:** 103  
+- **SHA1:** `f1ae2db151`
+- **Stated intent:** Module policy: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/policy.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/reasoning.py`
+- **Lines:** 74  
+- **SHA1:** `29430fe33f`
+- **Stated intent:** Module reasoning: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/reasoning.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/rules.yaml`
+- **Lines:** 66  
+- **SHA1:** `3c622de87b`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/cortex/synapse.py`
+- **Lines:** 17  
+- **SHA1:** `e6e730f095`
+- **Stated intent:** Module synapse: inline documentation for /Users/jason/Developer/sentinelforge/core/cortex/synapse.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/__init__.py`
+- **Lines:** 22  
+- **SHA1:** `8d80a3e85a`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/data/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/blackbox.py`
+- **Lines:** 159  
+- **SHA1:** `30e61cf445`
+- **Stated intent:** Module blackbox: inline documentation for /Users/jason/Developer/sentinelforge/core/data/blackbox.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/db.py`
+- **Lines:** 389  
+- **SHA1:** `3e7bce3c0f`
+- **Stated intent:** Module db: inline documentation for /Users/jason/Developer/sentinelforge/core/data/db.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/evidence.py`
+- **Lines:** 104  
+- **SHA1:** `396c914ace`
+- **Stated intent:** Module evidence: inline documentation for /Users/jason/Developer/sentinelforge/core/data/evidence.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/evidence_store.py`
+- **Lines:** 152  
+- **SHA1:** `0339d8bed9`
+- **Stated intent:** Module evidence_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/evidence_store.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/findings.py`
+- **Lines:** 11  
+- **SHA1:** `1f9a64b645`
+- **Stated intent:** Module findings: inline documentation for /Users/jason/Developer/sentinelforge/core/data/findings.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/findings_store.py`
+- **Lines:** 161  
+- **SHA1:** `9d0de5d714`
+- **Stated intent:** Module findings_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/findings_store.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/issues_store.py`
+- **Lines:** 109  
+- **SHA1:** `1ad9ee49c8`
+- **Stated intent:** Module issues_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/issues_store.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/killchain_store.py`
+- **Lines:** 62  
+- **SHA1:** `d56573c291`
+- **Stated intent:** Module killchain_store: inline documentation for /Users/jason/Developer/sentinelforge/core/data/killchain_store.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/data/risk.py`
+- **Lines:** 79  
+- **SHA1:** `707df2a494`
+- **Stated intent:** Module risk: inline documentation for /Users/jason/Developer/sentinelforge/core/data/risk.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/__init__.py`
+- **Lines:** 24  
+- **SHA1:** `3d27b2e3eb`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/executor.py`
+- **Lines:** 118  
+- **SHA1:** `2c3264fdff`
+- **Stated intent:** Module executor: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/executor.py.
+
+**Line notes**
+- `L91` — **subprocess call (ensure args list, check return codes, timeouts)**. `proc = subprocess.Popen(`
+- `L95` — **subprocess with shell=True (avoid unless necessary; injection risk)**. `shell=True,`
+
+### `core/engine/headless_runner.py`
+- **Lines:** 77  
+- **SHA1:** `deb592c4bb`
+- **Stated intent:** Module headless_runner: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/headless_runner.py.
+- **Note:** Uses logging.basicConfig; consider central logging config to avoid duplicate handlers.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/orchestrator.py`
+- **Lines:** 179  
+- **SHA1:** `9297ba7ef8`
+- **Stated intent:** core/orchestrator.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/pty_manager.py`
+- **Lines:** 119  
+- **SHA1:** `d73fdc855b`
+- **Stated intent:** Module pty_manager: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/pty_manager.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/runner.py`
+- **Lines:** 144  
+- **SHA1:** `b36e67a318`
+- **Stated intent:** Module runner: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/runner.py.
+
+**Line notes**
+- `L36` — **subprocess call (ensure args list, check return codes, timeouts)**. `proc = subprocess.Popen(`
+
+### `core/engine/scan_orchestrator.py`
+- **Lines:** 96  
+- **SHA1:** `b6df704e63`
+- **Stated intent:** core/engine/scan_orchestrator.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/scanner_engine.py`
+- **Lines:** 781  
+- **SHA1:** `209d45e68f`
+- **Stated intent:** Module scanner_engine: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/scanner_engine.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/engine/vanguard.py`
+- **Lines:** 92  
+- **SHA1:** `fd99d9c9cb`
+- **Stated intent:** Module vanguard: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/vanguard.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/errors.py`
+- **Lines:** 247  
+- **SHA1:** `f41908aebf`
+- **Stated intent:** Module errors: inline documentation for /Users/jason/Developer/sentinelforge/core/errors.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/forge/__init__.py`
+- **Lines:** 35  
+- **SHA1:** `6ef0dd80b8`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/forge/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/forge/compiler.py`
+- **Lines:** 102  
+- **SHA1:** `70b0420854`
+- **Stated intent:** core/forge/compiler.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/forge/sandbox.py`
+- **Lines:** 63  
+- **SHA1:** `9d2360b0b5`
+- **Stated intent:** core/forge/sandbox.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/fuzz/__init__.py`
+- **Lines:** 30  
+- **SHA1:** `d3f8b325c5`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/fuzz/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/fuzz/module.py`
+- **Lines:** 108  
+- **SHA1:** `126573aea0`
+- **Stated intent:** Minimal parameter fuzzing module.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ghost/__init__.py`
+- **Lines:** 40  
+- **SHA1:** `7ea2f7f630`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/ghost/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ghost/flow.py`
+- **Lines:** 90  
+- **SHA1:** `6ce46a4f56`
+- **Stated intent:** core/ghost/flow.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ghost/lazarus.py`
+- **Lines:** 166  
+- **SHA1:** `062fe3ab60`
+- **Stated intent:** core/ghost/lazarus.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ghost/logic.py`
+- **Lines:** 101  
+- **SHA1:** `37cd023802`
+- **Stated intent:** core/ghost/logic.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/ghost/proxy.py`
+- **Lines:** 180  
+- **SHA1:** `6948ae21a1`
+- **Stated intent:** core/ghost/proxy.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/payloads/__init__.py`
+- **Lines:** 31  
+- **SHA1:** `7488d07010`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/payloads/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/recon/__init__.py`
+- **Lines:** 40  
+- **SHA1:** `087424fa20`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/recon/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/recon/behavioral.py`
+- **Lines:** 672  
+- **SHA1:** `d11e4ec5ef`
+- **Stated intent:** Module behavioral: inline documentation for /Users/jason/Developer/sentinelforge/core/recon/behavioral.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/recon/module.py`
+- **Lines:** 54  
+- **SHA1:** `c2c21d19df`
+- **Stated intent:** Simple recon module entry point.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/decisions.py`
+- **Lines:** 629  
+- **SHA1:** `29e1ca5eab`
+- **Stated intent:** Module decisions: inline documentation for /Users/jason/Developer/sentinelforge/core/scheduler/decisions.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/events.py`
+- **Lines:** 43  
+- **SHA1:** `a8a1daea9a`
+- **Stated intent:** core/scheduler/events.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/intents.py`
+- **Lines:** 41  
+- **SHA1:** `41bc977188`
+- **Stated intent:** core/scheduler/intents.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/laws.py`
+- **Lines:** 153  
+- **SHA1:** `2e4430e0d1`
+- **Stated intent:** core/scheduler/laws.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/modes.py`
+- **Lines:** 90  
+- **SHA1:** `3b1028b7ee`
+- **Stated intent:** core/scheduler/modes.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/registry.py`
+- **Lines:** 286  
+- **SHA1:** `c852af57ca`
+- **Stated intent:** core/scheduler/registry.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/scheduler/strategos.py`
+- **Lines:** 828  
+- **SHA1:** `3c1438bf44`
+- **Stated intent:** core/scheduler/strategos.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/server/__init__.py`
+- **Lines:** 34  
+- **SHA1:** `93a75fbb7a`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/server/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/server/api.py`
+- **Lines:** 1083  
+- **SHA1:** `eecf577007`
+- **Stated intent:** Module api: inline documentation for /Users/jason/Developer/sentinelforge/core/server/api.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/server/tls.py`
+- **Lines:** 255  
+- **SHA1:** `8c927e0925`
+- **Stated intent:** Module tls: inline documentation for /Users/jason/Developer/sentinelforge/core/server/tls.py.
+
+**Line notes**
+- `L193` — **requests call without timeout (can hang indefinitely)**. `r = curl_requests.get(`
+
+### `core/toolkit/__init__.py`
+- **Lines:** 45  
+- **SHA1:** `9ed24b13d5`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/fingerprinters.py`
+- **Lines:** 92  
+- **SHA1:** `ddf5dcff72`
+- **Stated intent:** Module fingerprinters: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/fingerprinters.py.
+- **Note:** Contains TODO/FIXME markers—decide whether to ship, delete, or track in issues.
+
+**Line notes**
+- `L88` — **TODO/FIXME present**. `TODO/FIXME present (first occurrence)`
+
+### `core/toolkit/installer.py`
+- **Lines:** 348  
+- **SHA1:** `03c7fe17a0`
+- **Stated intent:** Module installer: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/installer.py.
+
+**Line notes**
+- `L207` — **subprocess with shell=True (avoid unless necessary; injection risk)**. `shell=True,`
+- `L322` — **subprocess with shell=True (avoid unless necessary; injection risk)**. `shell=True,`
+
+### `core/toolkit/normalizer.py`
+- **Lines:** 84  
+- **SHA1:** `e2636bbee0`
+- **Stated intent:** Module normalizer: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/normalizer.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/raw_classifier.py`
+- **Lines:** 1931  
+- **SHA1:** `cd2fdd5617`
+- **Stated intent:** Module raw_classifier: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/raw_classifier.py.
+
+**Line notes**
+- `L174` — **possible hardcoded secret/token**. `# Example: twilio_auth_token="1234567890abcdef1234567890abcdef"`
+- `L181` — **private key marker detected (likely sample text—verify)**. `# Example: -----BEGIN RSA PRIVATE KEY-----`
+- `L192` — **possible hardcoded secret/token**. `# Example: api_key="abcdef1234567890ghijklmnopqrstuvwxyz"`
+
+### `core/toolkit/registry.py`
+- **Lines:** 217  
+- **SHA1:** `365b53227d`
+- **Stated intent:** Module registry: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/registry.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/shims/__init__.py`
+- **Lines:** 398  
+- **SHA1:** `9f221228ec`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/shims/__main__.py`
+- **Lines:** 18  
+- **SHA1:** `bdd0a77810`
+- **Stated intent:** Module __main__: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/__main__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/shims/httpx.py`
+- **Lines:** 26  
+- **SHA1:** `667836cfea`
+- **Stated intent:** Module httpx: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/httpx.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/shims/nmap.py`
+- **Lines:** 26  
+- **SHA1:** `47b62dbb7d`
+- **Stated intent:** Module nmap: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/nmap.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/shims/subfinder.py`
+- **Lines:** 26  
+- **SHA1:** `e0e093e9a1`
+- **Stated intent:** Module subfinder: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/shims/subfinder.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/tool_base.py`
+- **Lines:** 36  
+- **SHA1:** `dc367d740c`
+- **Stated intent:** Module tool_base: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/tool_base.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/tool_callbacks.py`
+- **Lines:** 28  
+- **SHA1:** `ee097cf972`
+- **Stated intent:** Module tool_callbacks: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/tool_callbacks.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/tools.py`
+- **Lines:** 30  
+- **SHA1:** `60a5af0332`
+- **Stated intent:** Module tools: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/tools.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/toolkit/vuln_rules.py`
+- **Lines:** 1729  
+- **SHA1:** `8c7ae01e45`
+- **Stated intent:** Module vuln_rules: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/vuln_rules.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/utils/__init__.py`
+- **Lines:** 25  
+- **SHA1:** `14769beff1`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/utils/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/utils/async_helpers.py`
+- **Lines:** 120  
+- **SHA1:** `c81cc4c570`
+- **Stated intent:** Async utilities for safe task management.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/utils/observer.py`
+- **Lines:** 52  
+- **SHA1:** `7f8dcf181c`
+- **Stated intent:** Module observer: inline documentation for /Users/jason/Developer/sentinelforge/core/utils/observer.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/wraith/__init__.py`
+- **Lines:** 43  
+- **SHA1:** `a8b0a6ed87`
+- **Stated intent:** Module __init__: inline documentation for /Users/jason/Developer/sentinelforge/core/wraith/__init__.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/wraith/automator.py`
+- **Lines:** 109  
+- **SHA1:** `0cf8cea5bb`
+- **Stated intent:** core/wraith/automator.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `core/wraith/evasion.py`
+- **Lines:** 138  
+- **SHA1:** `3c508de299`
+- **Stated intent:** core/wraith/evasion.py
+- **Note:** Contains TODO/FIXME markers—decide whether to ship, delete, or track in issues.
+
+**Line notes**
+- `L109` — **TODO/FIXME present**. `TODO/FIXME present (first occurrence)`
+
+### `core/wraith/mutator.py`
+- **Lines:** 132  
+- **SHA1:** `6e36b8085e`
+- **Stated intent:** core/wraith/mutator.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `debug_imports.py`
+- **Lines:** 18  
+- **SHA1:** `afabfa5a78`
+- **Stated intent:** Module debug_imports: inline documentation for /Users/jason/Developer/sentinelforge/debug_imports.py.
+
+**Line notes**
+- `L18` — **os.system usage (prefer subprocess.run with args list)**. `os.system("grep -r 'class EventStore' core")`
+
+### `docker-compose.yml`
+- **Lines:** 34  
+- **SHA1:** `2d5520943f`
+- **Stated intent:** host.docker.internal:11434
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `repro_import.py`
+- **Lines:** 18  
+- **SHA1:** `2a99a9b61a`
+- **Stated intent:** Module repro_import: inline documentation for /Users/jason/Developer/sentinelforge/repro_import.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/annotate_inline_comments.py`
+- **Lines:** 438  
+- **SHA1:** `b5cd12b0e1`
+- **Stated intent:** Annotate Python and Swift source files with concise, human-friendly inline comments.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/debug_cortex.py`
+- **Lines:** 41  
+- **SHA1:** `9b1bf8be71`
+- **Stated intent:** Module debug_cortex: inline documentation for /Users/jason/Developer/sentinelforge/scripts/debug_cortex.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/manual_scan.py`
+- **Lines:** 78  
+- **SHA1:** `64504f6b07`
+- **Stated intent:** Module manual_scan: inline documentation for /Users/jason/Developer/sentinelforge/scripts/manual_scan.py.
+- **Note:** Uses logging.basicConfig; consider central logging config to avoid duplicate handlers.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/run_headless_scan_with_narrator.py`
+- **Lines:** 58  
+- **SHA1:** `6c52b66a08`
+- **Stated intent:** Module run_headless_scan_with_narrator: inline documentation for /Users/jason/Developer/sentinelforge/scripts/run_headle
+- **Note:** Uses logging.basicConfig; consider central logging config to avoid duplicate handlers.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/run_real_scan_headless.py`
+- **Lines:** 58  
+- **SHA1:** `d6278d1551`
+- **Stated intent:** Module run_real_scan_headless: inline documentation for /Users/jason/Developer/sentinelforge/scripts/run_real_scan_headl
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/start_sentinel_brain.py`
+- **Lines:** 130  
+- **SHA1:** `b44c9f7152`
+- **Stated intent:** start_sentinel_brain.py
+- **Note:** Uses logging.basicConfig; consider central logging config to avoid duplicate handlers.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/start_servers.sh`
+- **Lines:** 99  
+- **SHA1:** `782e6e1201`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/strip_banners.py`
+- **Lines:** 118  
+- **SHA1:** `96149c4aab`
+- **Stated intent:** Remove large banner header blocks from Python and Swift source files.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/test_tools_install.py`
+- **Lines:** 31  
+- **SHA1:** `433d88c447`
+- **Stated intent:** Quick test for the tools install API endpoint
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `scripts/verify_strategic_logging.py`
+- **Lines:** 85  
+- **SHA1:** `5b6caa2ab0`
+- **Stated intent:** Module verify_strategic_logging: inline documentation for /Users/jason/Developer/sentinelforge/scripts/verify_strategic_
+- **Note:** Uses logging.basicConfig; consider central logging config to avoid duplicate handlers.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `sentinel.py`
+- **Lines:** 73  
+- **SHA1:** `a6144cd194`
+- **Stated intent:** Module sentinel: inline documentation for /Users/jason/Developer/sentinelforge/sentinel.py.
+- **Note:** CLI-style module; consider packaging entrypoint for reproducible usage.
+
+**Line notes**
+- `L25` — **subprocess call (ensure args list, check return codes, timeouts)**. `subprocess.run(["bash", script_path], check=True)`
+- `L35` — **subprocess call (ensure args list, check return codes, timeouts)**. `subprocess.run(cmd)`
+- `L43` — **subprocess call (ensure args list, check return codes, timeouts)**. `subprocess.run(cmd)`
+
+### `tests/integration/test_api_basic.py`
+- **Lines:** 66  
+- **SHA1:** `8871a1f95d`
+- **Stated intent:** Module test_api_basic: inline documentation for /Users/jason/Developer/sentinelforge/tests/integration/test_api_basic.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/integration/test_decision_emission.py`
+- **Lines:** 398  
+- **SHA1:** `938fe42434`
+- **Stated intent:** tests/integration/test_decision_emission.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/integration/test_scan_flow.py`
+- **Lines:** 66  
+- **SHA1:** `e6cd51483f`
+- **Stated intent:** Module test_scan_flow: inline documentation for /Users/jason/Developer/sentinelforge/tests/integration/test_scan_flow.py
+
+**Line notes**
+- `L28` — **requests call (verify timeout and error handling)**. `with requests.get(f"{BASE_URL}/events", stream=True, timeout=30) as resp:`
+- `L51` — **requests call (verify timeout and error handling)**. `resp = requests.post(f"{BASE_URL}/scan", json={"target": target, "force": True})`
+- `L51` — **requests call without timeout (can hang indefinitely)**. `resp = requests.post(f"{BASE_URL}/scan", json={"target": target, "force": True})`
+
+### `tests/unit/test_arbitration.py`
+- **Lines:** 73  
+- **SHA1:** `6395a16c0c`
+- **Stated intent:** Module test_arbitration: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_arbitration.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_correlator.py`
+- **Lines:** 45  
+- **SHA1:** `ae3fcbd607`
+- **Stated intent:** Module test_correlator: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_correlator.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_fingerprinters.py`
+- **Lines:** 33  
+- **SHA1:** `c9a123eaab`
+- **Stated intent:** Module test_fingerprinters: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_fingerprinters
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_narrative_templates.py`
+- **Lines:** 64  
+- **SHA1:** `e46c686073`
+- **Stated intent:** Module test_narrative_templates: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_narrative
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_narrator.py`
+- **Lines:** 90  
+- **SHA1:** `ef1785b171`
+- **Stated intent:** Module test_narrator: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_narrator.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_pathfinder.py`
+- **Lines:** 55  
+- **SHA1:** `e125945084`
+- **Stated intent:** Module test_pathfinder: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_pathfinder.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_strategos_decisions.py`
+- **Lines:** 165  
+- **SHA1:** `5243832460`
+- **Stated intent:** tests/unit/test_strategos_decisions.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/unit/test_strategos_edge_conditions.py`
+- **Lines:** 160  
+- **SHA1:** `3e5d8d7523`
+- **Stated intent:** Module test_strategos_edge_conditions: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_str
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/check_tools.py`
+- **Lines:** 30  
+- **SHA1:** `c17c35f966`
+- **Stated intent:** Module check_tools: inline documentation for /Users/jason/Developer/sentinelforge/tests/verification/check_tools.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/inspect_db.py`
+- **Lines:** 55  
+- **SHA1:** `9e86d31a56`
+- **Stated intent:** Module inspect_db: inline documentation for /Users/jason/Developer/sentinelforge/tests/verification/inspect_db.py.
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_architecture.py`
+- **Lines:** 91  
+- **SHA1:** `fedb56e0a2`
+- **Stated intent:** tests/verify_architecture.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_assemblage.py`
+- **Lines:** 61  
+- **SHA1:** `d6548eda62`
+- **Stated intent:** tests/verify_assemblage.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_backend.py`
+- **Lines:** 98  
+- **SHA1:** `c8152a1f73`
+- **Stated intent:** Module verify_backend: inline documentation for /Users/jason/Developer/sentinelforge/tests/verification/verify_backend.p
+
+**Line notes**
+- `L27` — **requests call (verify timeout and error handling)**. `resp = requests.get(f"{BASE_URL}/ping", timeout=2)`
+- `L41` — **requests call (verify timeout and error handling)**. `resp = requests.post(f"{BASE_URL}/scan", json={"target": "127.0.0.1"}, timeout=5)`
+- `L57` — **requests call (verify timeout and error handling)**. `resp = requests.post(f"{BASE_URL}/chat", json={"prompt": "Who are you and what vulnerabilities did you find?"}, stream=True, timeout=120)`
+
+### `tests/verification/verify_command_deck.py`
+- **Lines:** 71  
+- **SHA1:** `fa2e22751d`
+- **Stated intent:** tests/verify_command_deck.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_cortex.py`
+- **Lines:** 71  
+- **SHA1:** `b0aafcdae7`
+- **Stated intent:** tests/verify_cortex.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_forge.py`
+- **Lines:** 68  
+- **SHA1:** `4196d900d6`
+- **Stated intent:** tests/verify_forge.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_ghost.py`
+- **Lines:** 78  
+- **SHA1:** `03ea76aeb7`
+- **Stated intent:** tests/verify_ghost.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_god_tier.py`
+- **Lines:** 100  
+- **SHA1:** `1c3950a51e`
+- **Stated intent:** tests/verify_god_tier.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_killchain.py`
+- **Lines:** 109  
+- **SHA1:** `06067a91e9`
+- **Stated intent:** tests/verify_killchain.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `tests/verification/verify_neural_loop.py`
+- **Lines:** 94  
+- **SHA1:** `e340be2786`
+- **Stated intent:** tests/verify_neural_loop.py
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Core/HelixError.swift`
+- **Lines:** 50  
+- **SHA1:** `e370d3d6e5`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Graph/GraphRenderer.swift`
+- **Lines:** 709  
+- **SHA1:** `9b20a63aa9`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L78` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: init() called")`
+- `L82` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: commandQueue created: \(self.commandQueue != nil)")`
+- `L85` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: init() complete")`
+- `L89` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: buildPipeline()")`
+- `L92` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: Default library not found")`
+- `L98` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print(`
+- `L134` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: Pipeline State created successfully")`
+- `L136` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("Failed to create point pipeline: \(error)")`
+- `L153` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: Line Pipeline State created successfully")`
+- `L155` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("Failed to create line pipeline: \(error)")`
+- `L158` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: fragment_line not found; edges disabled")`
+- `L550` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: Watchdog - Drawing frame \(frameCount). Nodes: \(nodes.count)")`
+- `L623` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("GraphRenderer: Nodes empty. Skipping draw primitives.")`
+
+### `ui/Sources/Graph/NeuralGraphView.swift`
+- **Lines:** 160  
+- **SHA1:** `87f328dbc2`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Graph/Shaders.metal`
+- **Lines:** 86  
+- **SHA1:** `eed6727071`
+- **Stated intent:** xyz = pos, w = size
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Models/ChatModels.swift`
+- **Lines:** 59  
+- **SHA1:** `5184fd15f0`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Models/HelixAppState.swift`
+- **Lines:** 653  
+- **SHA1:** `4a2b1930b8`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L111` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[AppState] Backend Ready. Connecting Services...")`
+- `L383` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print(`
+- `L416` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[AppState] Failed to start scan: \(error)")`
+- `L495` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[AppState] SSE Stream error: \(error), retrying in 5s...")`
+- `L628` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[AppState] Failed to start Ghost Protocol: \(error)")`
+
+### `ui/Sources/Resources/terminal/index.html`
+- **Lines:** 54  
+- **SHA1:** `68f447ebc8`
+- **Stated intent:** cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/SentinelForgeApp.swift`
+- **Lines:** 71  
+- **SHA1:** `a959f8e600`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Services/BackendManager.swift`
+- **Lines:** 327  
+- **SHA1:** `37953fb5eb`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L73` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[BackendManager] Terminating backend process...")`
+- `L168` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[BackendManager] Repository: \(repoPath.path)")`
+- `L182` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[BackendManager] Python: \(python.path)")`
+- `L226` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[Core] \(trimmed)")`
+- `L237` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[BackendManager] Process started (PID: \(p.processIdentifier))")`
+- `L263` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[BackendManager] Server ready after \(attempt) attempt(s)")`
+
+### `ui/Sources/Services/CortexStream.swift`
+- **Lines:** 161  
+- **SHA1:** `a0c5a6c8c1`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L83` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("WS Error: \(error)")`
+- `L158` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("Graph Decode Error: \(error)")`
+
+### `ui/Sources/Services/EventStreamClient.swift`
+- **Lines:** 385  
+- **SHA1:** `248879a35b`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L234` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print(`
+- `L243` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[EventStreamClient] Max reconnect attempts reached")`
+- `L273` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[EventStreamClient] Connected, replaying from sequence \(lastSequence)")`
+- `L292` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[EventStreamClient] Failed to decode event: \(json)")`
+- `L330` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[EventStreamClient] Unknown event type: \(event.type)")`
+
+### `ui/Sources/Services/GenerateModels.swift`
+- **Lines:** 27  
+- **SHA1:** `8771e20408`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Services/LLMService.swift`
+- **Lines:** 110  
+- **SHA1:** `e62f094a66`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L102` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[LLMService] Request failed: \(error)")`
+
+### `ui/Sources/Services/ModelRouter.swift`
+- **Lines:** 62  
+- **SHA1:** `7a9c822539`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Services/PTYClient.swift`
+- **Lines:** 84  
+- **SHA1:** `989a47decd`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L46` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("PTY Write Error: \(error)")`
+- `L62` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("PTY Read Error: \(error)")`
+
+### `ui/Sources/Services/SentinelAPIClient.swift`
+- **Lines:** 684  
+- **SHA1:** `b775e82245`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L308` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[Swift] Attempting to stream chat...")`
+- `L324` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[Swift] Received response headers: \(response)")`
+
+### `ui/Sources/Views/ChatBubbleView.swift`
+- **Lines:** 64  
+- **SHA1:** `46d5d18c94`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Components/StatusComponents.swift`
+- **Lines:** 336  
+- **SHA1:** `96f3ac2709`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Dashboard/DashboardView.swift`
+- **Lines:** 325  
+- **SHA1:** `510e8e7050`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Graph/GraphModels.swift`
+- **Lines:** 250  
+- **SHA1:** `71af2a4750`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Graph/NetworkGraphView.swift`
+- **Lines:** 97  
+- **SHA1:** `f986a919c8`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/MainWindowView.swift`
+- **Lines:** 218  
+- **SHA1:** `49723686f2`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Navigation/ChatView.swift`
+- **Lines:** 162  
+- **SHA1:** `9c171d3f30`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Navigation/TerminalView.swift`
+- **Lines:** 94  
+- **SHA1:** `a9743e862d`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Report/ReportComposerView.swift`
+- **Lines:** 222  
+- **SHA1:** `d9f446df94`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Scan/ActionRequestView.swift`
+- **Lines:** 111  
+- **SHA1:** `91f201a754`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/Scan/ScanControlView.swift`
+- **Lines:** 427  
+- **SHA1:** `716c3ad123`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Sources/Views/ToolsBankView.swift`
+- **Lines:** 168  
+- **SHA1:** `471ed1325d`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Tests/.build/workspace-state.json`
+- **Lines:** 27  
+- **SHA1:** `ccd7f044f7`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Tests/Package.swift`
+- **Lines:** 31  
+- **SHA1:** `5407aebed4`
+- **Stated intent:** // PURPOSE:
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
+### `ui/Tests/Sources/TestRunner/main.swift`
+- **Lines:** 64  
+- **SHA1:** `f51b82a9cd`
+- **Stated intent:** // PURPOSE:
+
+**Line notes**
+- `L21` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("--- Starting Swift Client Test ---")`
+- `L26` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[*] Testing Ping...")`
+- `L30` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    SUCCESS: Backend is reachable")`
+- `L32` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    FAILED: Backend unreachable")`
+- `L37` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[*] Testing Start Scan...")`
+- `L41` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    SUCCESS: Scan started")`
+- `L43` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    FAILED: \(error)")`
+- `L48` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("[*] Testing Chat Stream...")`
+- `L53` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    Received token: \(token)")`
+- `L56` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    SUCCESS: Stream working")`
+- `L58` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("    FAILED: Chat stream error: \(error)")`
+- `L62` — **Swift print debug (use OSLog / Logger; remove noisy prints)**. `print("--- Tests Complete ---")`
+
+### `ui/project.yml`
+- **Lines:** 29  
+- **SHA1:** `46e79b458a`
+
+- **Line notes:** No automated red flags matched. Manual review still recommended for logic/flow.
+
