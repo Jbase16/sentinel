@@ -69,23 +69,31 @@ class FindingsStore(Observable):
 
     async def _init_load(self):
         """AsyncFunction _init_load."""
-        await self.db.init()
-        # Load only for this session if ID provided
-        if self.session_id:
-            loaded = await self.db.get_findings(self.session_id)
-        else:
-            loaded = await self.db.get_all_findings()
-        
-        # Context-managed operation.
-        with self._lock:
-            # Race Condition Fix: Preserve findings added while loading
-            if self._findings:
-                # Deduplicate? For now, just append loaded to existing (or vice versa)
-                # Ideally, loaded is 'old' state, _findings is 'new' state.
-                self._findings = loaded + self._findings
+        try:
+            await self.db.init()
+            # Load only for this session if ID provided
+            if self.session_id:
+                loaded = await self.db.get_findings(self.session_id)
             else:
-                self._findings = loaded
-        self.findings_changed.emit()
+                loaded = await self.db.get_all_findings()
+            
+            # Context-managed operation.
+            with self._lock:
+                # Race Condition Fix: Preserve findings added while loading
+                if self._findings:
+                    # Deduplicate? For now, just append loaded to existing (or vice versa)
+                    # Ideally, loaded is 'old' state, _findings is 'new' state.
+                    self._findings = loaded + self._findings
+                else:
+                    self._findings = loaded
+            self.findings_changed.emit()
+        except (sqlite3.ProgrammingError, aiosqlite.Error, ValueError) as e:
+            if "closed" in str(e).lower():
+                logger.debug("[FindingsStore] DB closed during init_load")
+                return
+            logger.error(f"[FindingsStore] DB error during init_load: {e}")
+        except Exception as e:
+            logger.error(f"[FindingsStore] Failed to load findings: {e}")
 
     async def refresh(self):
         """AsyncFunction refresh."""

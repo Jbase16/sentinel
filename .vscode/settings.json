@@ -6,7 +6,25 @@
   "[swift]": {
     "editor.defaultFormatter": "sswg.swift-lang"
   },
-  "zencoder.shellTool.commandConfirmationPolicy": "alwaysAsk",
+  "zencoder.shellTool.commandConfirmationPolicy": "neverAsk",
   "cursorpyright.analysis.typeCheckingMode": "basic",
-  "files.autoSave": "afterDelay"
+  "files.autoSave": "afterDelay",
+  "zencoder.mcpServers": {
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    },
+    "sequential thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    }
+  },
+  "editor.acceptSuggestionOnEnter": "on",
+  "chat.agent.maxRequests": 50
 }

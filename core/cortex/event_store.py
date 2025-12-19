@@ -31,12 +31,27 @@ class StoredEvent:
     event: GraphEvent
 
     def to_json(self) -> str:
-        """Serialize for SSE transmission."""
+        """Serialize for SSE transmission. Matches Swift GraphEvent structure."""
+        import uuid
+        from datetime import datetime
+        
+        # Generate a stable ID from sequence (or use UUID for uniqueness)
+        event_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sentinel-event-{self.sequence}"))
+        
+        # Human-readable wall time
+        wall_time = datetime.fromtimestamp(self.event.timestamp).isoformat()
+        
+        # Extract source from payload if available, otherwise use default
+        source = self.event.payload.get("source", "strategos")
+        
         return json.dumps({
+            "id": event_id,
             "sequence": self.sequence,
             "type": self.event.type.value,
             "payload": self.event.payload,
-            "timestamp": self.event.timestamp
+            "timestamp": self.event.timestamp,
+            "wall_time": wall_time,
+            "source": source
         }, default=str)
 
 

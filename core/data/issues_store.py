@@ -56,14 +56,21 @@ class IssuesStore(Observable):
     async def _init_load(self):
         # DB init is idempotent/shared
         """AsyncFunction _init_load."""
-        await self.db.init()
-        # Conditional branch.
-        if self.session_id:
-            loaded = await self.db.get_issues(self.session_id)
-        else:
-            loaded = await self.db.get_all_issues()
-        self._issues = loaded
-        self.issues_changed.emit()
+        try:
+            await self.db.init()
+            # Conditional branch.
+            if self.session_id:
+                loaded = await self.db.get_issues(self.session_id)
+            else:
+                loaded = await self.db.get_all_issues()
+            self._issues = loaded
+            self.issues_changed.emit()
+        except (sqlite3.ProgrammingError, aiosqlite.Error, ValueError) as e:
+            if "closed" in str(e).lower():
+                return
+            logger.error(f"[IssuesStore] DB error during init_load: {e}")
+        except Exception as e:
+            logger.error(f"[IssuesStore] Failed to load issues: {e}")
 
     def add_issue(self, issue: dict):
         """Function add_issue."""

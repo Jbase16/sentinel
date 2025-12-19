@@ -32,7 +32,7 @@ public struct GraphEvent: Decodable, Identifiable {
     public let wall_time: String
     public let sequence: Int
     public let payload: [String: AnyCodable]
-    public let source: String
+    public let source: String?  // Made optional: not all events have source
 
     /// Event type as enum for pattern matching
     public var eventType: GraphEventType {
@@ -53,20 +53,21 @@ public enum GraphEventType: String, CaseIterable {
     case scanStarted = "scan_started"
     case scanPhaseChanged = "scan_phase_changed"
     case scanCompleted = "scan_completed"
-    case scanError = "scan_error"
+    case scanFailed = "scan_failed"  // Aligned: was "scan_error"
 
     // Findings
-    case findingDiscovered = "finding_discovered"
+    case findingCreated = "finding_created"  // Aligned: was "finding_discovered"
     case findingConfirmed = "finding_confirmed"
     case findingDismissed = "finding_dismissed"
 
     // Tool Execution
-    case toolInvoked = "tool_invoked"
+    case toolStarted = "tool_started"  // Aligned: was "tool_invoked"
     case toolCompleted = "tool_completed"
 
-    // Logging
-    case logEmitted = "log_emitted"
+    // Logging & Reasoning
+    case log = "log"  // Aligned: was "log_emitted"
     case narrativeEmitted = "narrative_emitted"
+    case decisionMade = "decision_made"  // NEW: Added for Strategos decisions
 
     // Fallback
     case unknown = "unknown"
@@ -273,13 +274,33 @@ public class EventStreamClient: ObservableObject {
         print("[EventStreamClient] Connected, replaying from sequence \(lastSequence)")
 
         // Parse SSE stream
+        // Track the current SSE event type for filtering control events
+        var currentEventType: String? = nil
+
         for try await line in bytes.lines {
             // Conditional branch.
             if Task.isCancelled { break }
 
+            // Track SSE event type (e.g., "event: warning")
+            if line.hasPrefix("event:") {
+                currentEventType = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+
             // Conditional branch.
             if line.hasPrefix("data:") {
+                // Skip control events like "warning" that aren't GraphEvents
+                if currentEventType == "warning" {
+                    let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                    print(
+                        "[EventStreamClient] Control event (\(currentEventType ?? "unknown")): \(json)"
+                    )
+                    currentEventType = nil
+                    continue
+                }
+
                 let json = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                currentEventType = nil  // Reset for next event
 
                 // Guard condition.
                 guard let data = json.data(using: .utf8) else { continue }
@@ -289,7 +310,8 @@ public class EventStreamClient: ObservableObject {
                     let event = try JSONDecoder().decode(GraphEvent.self, from: data)
                     await handleEvent(event)
                 } catch {
-                    print("[EventStreamClient] Failed to decode event: \(json)")
+                    print("[EventStreamClient] Decode error: \(error)")
+                    print("[EventStreamClient] Raw JSON: \(json)")
                 }
             }
         }
@@ -316,14 +338,14 @@ public class EventStreamClient: ObservableObject {
         case .nodeAdded, .nodeUpdated, .nodeRemoved, .edgeAdded, .edgeUpdated:
             graphEventPublisher.send(event)
 
-        case .logEmitted:
+        case .log:
             logEventPublisher.send(event)
 
-        case .findingDiscovered, .findingConfirmed, .findingDismissed:
+        case .findingCreated, .findingConfirmed, .findingDismissed:
             findingEventPublisher.send(event)
 
-        case .scanStarted, .scanPhaseChanged, .scanCompleted, .scanError, .toolInvoked,
-            .toolCompleted, .narrativeEmitted:
+        case .scanStarted, .scanPhaseChanged, .scanCompleted, .scanFailed, .toolStarted,
+            .toolCompleted, .narrativeEmitted, .decisionMade:
             scanEventPublisher.send(event)
 
         case .unknown:

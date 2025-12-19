@@ -162,7 +162,10 @@ class Database:
         """Internal low-level execute used by BlackBox worker."""
         # Conditional branch.
         if not self._initialized:
-             await self.init()
+             try:
+                 await self.init()
+             except Exception:
+                 return # Init failed/cancelled during shutdown
         
         # Simple retry loop for robustness against external lockers
         max_retries = 5
@@ -170,44 +173,67 @@ class Database:
         for attempt in range(max_retries):
             try:
                 async with self._db_lock:
+                    if self._db_connection is None:
+                        return
                     await self._db_connection.execute(query, params)
                     await self._db_connection.commit()
                 return
-            except Exception as e:
+            except (sqlite3.ProgrammingError, aiosqlite.Error, ValueError) as e:
+                if "closed" in str(e).lower():
+                    return # Shutdown in progress
+                
                 is_locked = "database is locked" in str(e).lower()
                 if is_locked and attempt < max_retries - 1:
                     await asyncio.sleep(0.1 * (attempt + 1))
                     continue
                 # If filtered or final attempt, raise
                 raise e
+            except Exception as e:
+                # Catch-all for any other errors during execution that shouldn't crash the worker
+                logger.debug(f"[Database] Execution error: {e}")
+                raise e
 
     async def execute(self, query: str, params: tuple = ()):
         """
         Public execute. Prefer specific save_* methods which route to BlackBox.
-        If used for writes, this bypasses the BlackBox, which is unsafe.
-        Assuming this is mostly used for reads or ad-hoc queries?
-        Actually, let's funnel it too if it's a write? 
-        Regexing query is brittle. 
-        For now, we leave this for READ operations or direct usage, 
-        and update save_* to use the queue.
         """
-        # ... logic as before or simplified ...
-        # Simplified:
         if not self._initialized:
-            await self.init()
-        async with self._db_lock:
-            cursor = await self._db_connection.execute(query, params)
-            await self._db_connection.commit()
-            return cursor
+            try:
+                await self.init()
+            except Exception:
+                return None
+
+        try:
+            async with self._db_lock:
+                if self._db_connection is None:
+                    return None
+                cursor = await self._db_connection.execute(query, params)
+                await self._db_connection.commit()
+                return cursor
+        except (sqlite3.ProgrammingError, aiosqlite.Error, ValueError) as e:
+            if "closed" in str(e).lower():
+                return None
+            raise e
 
     async def fetch_all(self, query: str, params: tuple = ()) -> List[Any]:
         """AsyncFunction fetch_all."""
         # Conditional branch.
         if not self._initialized:
-            await self.init()
-        async with self._db_lock:
-            async with self._db_connection.execute(query, params) as cursor:
-                return await cursor.fetchall()
+            try:
+                await self.init()
+            except Exception:
+                return []
+        
+        try:
+            async with self._db_lock:
+                if self._db_connection is None:
+                    return []
+                async with self._db_connection.execute(query, params) as cursor:
+                    return await cursor.fetchall()
+        except (sqlite3.ProgrammingError, aiosqlite.Error, ValueError) as e:
+            if "closed" in str(e).lower():
+                return []
+            raise e
 
     # -------- Session Methods --------
 

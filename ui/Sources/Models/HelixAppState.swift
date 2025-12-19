@@ -49,8 +49,16 @@ class HelixAppState: ObservableObject {
     @Published var thread: ChatThread
     @Published var isProcessing: Bool = false
     @Published var currentTab: SidebarTab = .dashboard
-    @Published var isScanRunning: Bool = false
-    @Published var apiLogItems: [LogItem] = []  // Stable-identity log items (Option A)
+
+    // MARK: - Centralized State (via Reducer)
+    /// The unified state store - all scan state is derived from events
+    let store = AppStore()
+
+    /// Derived: scan running state (from reducer, not independent variable)
+    var isScanRunning: Bool { store.isRunning }
+
+    /// Derived: log items (from reducer)
+    var apiLogItems: [LogItem] { store.logItems }
 
     // Services
     let eventClient = EventStreamClient()
@@ -61,8 +69,9 @@ class HelixAppState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var didSetupEventStreamSubscriptions = false
     private var seenEventIDs: Set<String> = []
-    private var eventSequenceEpoch: Int = 1
-    private var lastEventSequence: Int = 0
+    // Sequence tracking moved to AppStore
+    // private var eventSequenceEpoch: Int = 1
+    // private var lastEventSequence: Int = 0
 
     @Published var apiLogs: [String] = []  // Buffered logs from Python core
     @Published var apiResults: SentinelResults?  // Latest scan snapshot

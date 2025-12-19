@@ -78,14 +78,21 @@ class EvidenceStore(Observable):
 
     async def _init_load(self):
         """Load existing evidence from database."""
-        await self.db.init()
-        loaded = await self.db.get_evidence(self.session_id)
-        # Loop over items.
-        for item in loaded:
-            eid = item.get('id', self._counter + 1)
-            self._counter = max(self._counter, eid)
-            self._evidence[eid] = item
-        self.evidence_changed.emit()
+        try:
+            await self.db.init()
+            loaded = await self.db.get_evidence(self.session_id)
+            # Loop over items.
+            for item in loaded:
+                eid = item.get('id', self._counter + 1)
+                self._counter = max(self._counter, eid)
+                self._evidence[eid] = item
+            self.evidence_changed.emit()
+        except (sqlite3.ProgrammingError, aiosqlite.Error, ValueError) as e:
+            if "closed" in str(e).lower():
+                return
+            logger.error(f"[EvidenceStore] DB error during init_load: {e}")
+        except Exception as e:
+            logger.error(f"[EvidenceStore] Failed to load evidence: {e}")
 
     def add_evidence(self, tool: str, raw_output: str, metadata: dict):
         """Function add_evidence."""
