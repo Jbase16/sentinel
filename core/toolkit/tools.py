@@ -11,7 +11,12 @@
 # PUBLIC API - Used by the scanner and API server
 # CALLBACK PLUMBING - Integration with TaskRouter
 
+import shutil
+from typing import Dict, Any
 from core.base.task_router import TaskRouter
+from core.toolkit.registry import TOOLS, get_tool_command
+
+__all__ = ["TaskRouter", "tool_callback_factory", "TOOLS", "get_tool_command", "get_installed_tools"]
 
 
 def tool_callback_factory(tool_name: str):
@@ -28,3 +33,17 @@ def tool_callback_factory(tool_name: str):
             metadata=metadata
         )
     return callback
+
+
+def get_installed_tools() -> Dict[str, Dict[str, Any]]:
+    """
+    Detect which tools from the registry are installed on the system.
+    Returns a dictionary of installed tools and their metadata.
+    """
+    installed = {}
+    for name, config in TOOLS.items():
+        # Check if binary (or cmd[0]) exists in PATH
+        binary = config.get("binary") or config["cmd"][0]
+        if shutil.which(binary):
+            installed[name] = config
+    return installed

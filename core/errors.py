@@ -1,5 +1,7 @@
 """Module errors: inline documentation for /Users/jason/Developer/sentinelforge/core/errors.py."""
 #
+from enum import Enum
+from typing import Dict, Any, Optional, List
 # PURPOSE:
 # Provides a structured error taxonomy for SentinelForge with error codes,
 # typed exceptions, and consistent error handling across the codebase.
@@ -28,16 +30,67 @@
 #       details={"active_target": "example.com"}
 #   )
 #
-    # Scan Errors (SCAN_XXX)
-    # Tool Errors (TOOL_XXX)
-    # AI/LLM Errors (AI_XXX)
-    # Database Errors (DB_XXX)
-    # Authentication/Authorization Errors (AUTH_XXX)
-    # IPC Errors (IPC_XXX)
-    # Configuration Errors (CONFIG_XXX)
-    # Session Errors (SESSION_XXX)
-    # Event System Errors (EVENT_XXX)
-    # Generic/Unknown Errors (SYSTEM_XXX)
+class ErrorCode(Enum):
+    # Scan Errors
+    SCAN_ALREADY_RUNNING = "SCAN_001"
+    SCAN_TARGET_INVALID = "SCAN_002"
+    SCAN_TIMEOUT = "SCAN_003"
+    SCAN_CANCELLED = "SCAN_004"
+    SCAN_SESSION_NOT_FOUND = "SCAN_005"
+    SCAN_NO_TOOLS_AVAILABLE = "SCAN_006"
+
+    # Tool Errors
+    TOOL_NOT_INSTALLED = "TOOL_001"
+    TOOL_EXEC_FAILED = "TOOL_002"
+    TOOL_TIMEOUT = "TOOL_003"
+    TOOL_OUTPUT_PARSE_ERROR = "TOOL_004"
+    TOOL_BINARY_NOT_FOUND = "TOOL_005"
+    TOOL_PERMISSION_DENIED = "TOOL_006"
+
+    # AI Errors
+    AI_OFFLINE = "AI_001"
+    AI_TIMEOUT = "AI_002"
+    AI_INVALID_RESPONSE = "AI_003"
+    AI_JSON_PARSE_ERROR = "AI_004"
+    AI_MODEL_NOT_FOUND = "AI_005"
+    AI_RATE_LIMIT_EXCEEDED = "AI_006"
+
+    # Database Errors
+    DB_CONNECTION_FAILED = "DB_001"
+    DB_LOCK_TIMEOUT = "DB_002"
+    DB_QUERY_FAILED = "DB_003"
+    DB_INIT_FAILED = "DB_004"
+    DB_TRANSACTION_FAILED = "DB_005"
+
+    # Auth Errors
+    AUTH_TOKEN_INVALID = "AUTH_001"
+    AUTH_TOKEN_MISSING = "AUTH_002"
+    AUTH_PERMISSION_DENIED = "AUTH_003"
+    AUTH_RATE_LIMIT_EXCEEDED = "AUTH_004"
+
+    # IPC Errors
+    IPC_CONNECTION_FAILED = "IPC_001"
+    IPC_TIMEOUT = "IPC_002"
+    IPC_PROTOCOL_ERROR = "IPC_003"
+    IPC_VERSION_MISMATCH = "IPC_004"
+
+    # Config Errors
+    CONFIG_INVALID = "CONFIG_001"
+    CONFIG_MISSING_REQUIRED = "CONFIG_002"
+    CONFIG_FILE_NOT_FOUND = "CONFIG_003"
+    CONFIG_PARSE_ERROR = "CONFIG_004"
+
+    # Session Errors
+    SESSION_NOT_FOUND = "SESSION_001"
+    SESSION_ALREADY_EXISTS = "SESSION_002"
+    SESSION_INVALID_STATE = "SESSION_003"
+
+    # Event Errors
+    EVENT_STORE_FULL = "EVENT_001"
+    EVENT_SERIALIZATION_FAILED = "EVENT_002"
+    EVENT_SUBSCRIBER_ERROR = "EVENT_003"
+
+    # System Errors
     SYSTEM_INTERNAL_ERROR = "SYSTEM_001"
     SYSTEM_RESOURCE_EXHAUSTED = "SYSTEM_002"
     SYSTEM_NOT_IMPLEMENTED = "SYSTEM_003"

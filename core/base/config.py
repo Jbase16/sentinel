@@ -17,9 +17,28 @@
 # - Changing a setting in one place (here) affects the whole system
 #
 # AI Engine Configuration
+
+import os
+import secrets
+import logging
+from pathlib import Path
+from typing import Optional, List
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)
+class AIConfig:
+    """Class AIConfig."""
+    provider: str = "ollama"
+    ollama_url: str = "http://localhost:11434"
+    model: str = "sentinel-9b-god-tier"
+    fallback_enabled: bool = True
+    request_timeout: float = 300.0
+    max_concurrent_requests: int = 2
+
 # Security & Access Control Configuration
 # Controls who can access the API and what operations are allowed.
 # These defaults are permissive for local development - tighten for production.
+
 
 @dataclass(frozen=True)
 class SecurityConfig:
@@ -270,7 +289,7 @@ class SentinelConfig:
         ai = AIConfig(
             provider=os.getenv("SENTINEL_AI_PROVIDER", "ollama"),
             # AI Config - defaults to Sentinel Brain (local fine-tuned model on port 8009)
-            ollama_url=os.getenv("SENTINEL_OLLAMA_URL", "http://localhost:8009"),
+            ollama_url=os.getenv("SENTINEL_OLLAMA_URL", "http://localhost:11434"),
             model=os.getenv("SENTINEL_AI_MODEL", "sentinel-9b-god-tier"),
             # Convert "true"/"false" string to actual Python boolean
             fallback_enabled=os.getenv("SENTINEL_AI_FALLBACK", "true").lower() == "true",

@@ -98,6 +98,50 @@ class EventBus:
             }
         ))
 
+    def emit_scan_started(self, target: str, allowed_tools: List[str], session_id: str):
+        """Function emit_scan_started."""
+        self.emit(GraphEvent(
+            type=GraphEventType.SCAN_STARTED,
+            payload={
+                "target": target,
+                "allowed_tools": allowed_tools,
+                "session_id": session_id
+            }
+        ))
+
+    def emit_scan_completed(self, status: str, findings_count: int, duration: float):
+        """Function emit_scan_completed."""
+        self.emit(GraphEvent(
+            type=GraphEventType.SCAN_COMPLETED,
+            payload={
+                "status": status,
+                "findings_count": findings_count,
+                "duration_seconds": duration
+            }
+        ))
+
+    def emit_tool_invoked(self, tool: str, target: str, args: List[str]):
+        """Function emit_tool_invoked."""
+        self.emit(GraphEvent(
+            type=GraphEventType.TOOL_STARTED,
+            payload={
+                "tool": tool,
+                "target": target,
+                "args": args
+            }
+        ))
+
+    def emit_tool_completed(self, tool: str, exit_code: int, findings_count: int):
+        """Function emit_tool_completed."""
+        self.emit(GraphEvent(
+            type=GraphEventType.TOOL_COMPLETED,
+            payload={
+                "tool": tool,
+                "exit_code": exit_code,
+                "findings_count": findings_count
+            }
+        ))
+
 # --- Singleton Accessor ---
 
 _event_bus: Optional[EventBus] = None

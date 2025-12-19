@@ -1,23 +1,21 @@
+
 # Build artifacts
-ui/.build/
-
-# Python venv and caches
-.venv/
-__pycache__/
-*.pyc
-
-# macOS cruft
-.DS_Store
-
 # Logs and temporary files
-*.log
-*.tmp
-
+# Python venv and caches
+# Swift Package Manager (if unused)
 # Xcode Generation
+# macOS cruft
+*.log
+*.pyc
+*.tmp
 *.xcodeproj
 *.xcworkspace
-xcuserdata/
-DerivedData/
-
-# Swift Package Manager (if unused)
+*.zip
+.DS_Store
 .swiftpm/
+.venv/
+DerivedData/
+__pycache__/
+ui/.build/
+venv/
+xcuserdata/

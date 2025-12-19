@@ -209,6 +209,9 @@ async def _begin_scan(req: ScanRequest) -> str:
         session.set_external_log_sink(_log_sink_sync)
         await register_session(session.id, session)
 
+        # Persist session to DB to satisfy foreign key constraints in findings/evidence tables
+        await Database.instance().save_session(session.to_dict())
+
         # Compute tool allowlist up-front so the UI can trust SCAN_STARTED payload immediately.
         installed_tools = list(get_installed_tools().keys())
         requested_tools = list(dict.fromkeys(req.modules or []))
