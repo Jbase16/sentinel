@@ -38,7 +38,7 @@ enum ScanMode: String, CaseIterable, Identifiable {
 // ObservableObject means any @Published changes will re-render SwiftUI views.
 @MainActor
 /// Class HelixAppState.
-class HelixAppState: ObservableObject {
+public class HelixAppState: ObservableObject {
 
     @Published var thread: ChatThread
     @Published var isProcessing: Bool = false
@@ -82,7 +82,7 @@ class HelixAppState: ObservableObject {
 
     private let llm: LLMService
 
-    init(llm: LLMService) {
+    public init(llm: LLMService) {
         self.llm = llm
 
         // Initialize Services
@@ -272,7 +272,7 @@ class HelixAppState: ObservableObject {
             .store(in: &cancellables)
     }
 
-    convenience init() {
+    public convenience init() {
         self.init(llm: LLMService())
     }
 
