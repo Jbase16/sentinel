@@ -82,7 +82,7 @@ public class HelixAppState: ObservableObject {
 
     private let llm: LLMService
 
-    public init(llm: LLMService) {
+    init(llm: LLMService) {
         self.llm = llm
 
         // Initialize Services
