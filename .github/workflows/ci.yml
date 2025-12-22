@@ -1,5 +1,8 @@
 name: CI
 
+# Main CI pipeline with security gates
+# This runs on all pushes and PRs to main/develop
+
 on:
   push:
     branches: [main, develop]
@@ -7,10 +10,43 @@ on:
     branches: [main]
 
 jobs:
+  # Security gate: Must pass before tests run
+  security-gate:
+    name: Security Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check for critical security issues
+        run: |
+          echo "🔒 Running security gate checks..."
+
+          # Critical: No shell=True allowed
+          if grep -r "shell=True" core/ --include="*.py"; then
+            echo "❌ BLOCKED: shell=True found (command injection risk)"
+            exit 1
+          fi
+
+          # Critical: No hardcoded secrets
+          if grep -r -E "(password|secret|api_key)\s*=\s*['\"][^'\"]{12,}" core/ --include="*.py"; then
+            echo "⚠️  Warning: Potential hardcoded secrets"
+            # Don't block yet, just warn
+          fi
+
+          echo "✅ Security gate passed"
+
   python-tests:
     name: Python Tests
     runs-on: macos-latest
-    
+    needs: security-gate  # Only run if security gate passes
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,27 +80,32 @@ jobs:
   python-lint:
     name: Python Lint
     runs-on: ubuntu-latest
-    
+    needs: security-gate  # Only run if security gate passes
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install linters
         run: |
           pip install ruff mypy
-      
-      - name: Run ruff
+
+      - name: Run ruff (BLOCKING)
         run: |
-          ruff check core/ --exit-zero
-      
-      - name: Type check
+          echo "🔍 Running ruff linter (blocking mode)..."
+          # Remove --exit-zero to make this blocking
+          ruff check core/
+
+      - name: Type check (BLOCKING)
         run: |
-          mypy core/ --ignore-missing-imports --exit-zero
+          echo "🔍 Running mypy type checker (blocking mode)..."
+          # Remove --exit-zero to make this blocking
+          mypy core/ --ignore-missing-imports
 
   swift-build:
     name: Swift Build
