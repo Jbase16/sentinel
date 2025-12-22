@@ -27,8 +27,8 @@ public struct SentinelAPIClient: Sendable {
         } else {
             let config = URLSessionConfiguration.default
             config.requestCachePolicy = .reloadIgnoringLocalCacheData
-            config.timeoutIntervalForRequest = 120.0 // Increased for slow local LLMs
-            config.timeoutIntervalForResource = 600.0 // Allow very long streams
+            config.timeoutIntervalForRequest = 120.0  // Increased for slow local LLMs
+            config.timeoutIntervalForResource = 600.0  // Allow very long streams
             self.session = URLSession(configuration: config)
         }
     }
@@ -43,7 +43,9 @@ public struct SentinelAPIClient: Sendable {
         do {
             let (data, response) = try await session.data(for: request)
             // Guard condition.
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return false }
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return false
+            }
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (json?["status"] as? String) == "ok"
         } catch {
@@ -52,16 +54,18 @@ public struct SentinelAPIClient: Sendable {
     }
 
     // Kick off a scan for a given target.
-    public func startScan(target: String, modules: [String] = [], mode: String = "standard") async throws {
+    public func startScan(target: String, modules: [String] = [], mode: String = "standard")
+        async throws
+    {
         // Guard condition.
         guard let url = URL(string: "/scan", relativeTo: baseURL) else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+
         // Force by default to clean up zombie states
         var body: [String: Any] = ["target": target, "force": true, "mode": mode]
-        
+
         // Conditional branch.
         if !modules.isEmpty {
             body["modules"] = modules
@@ -124,7 +128,9 @@ public struct SentinelAPIClient: Sendable {
         /// Struct InstallResponse.
         struct InstallResponse: Decodable { let results: [InstallResult] }
         // Guard condition.
-        guard let url = URL(string: "/tools/install", relativeTo: baseURL) else { throw APIError.badStatus }
+        guard let url = URL(string: "/tools/install", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -142,7 +148,9 @@ public struct SentinelAPIClient: Sendable {
         /// Struct InstallResponse.
         struct InstallResponse: Decodable { let results: [InstallResult] }
         // Guard condition.
-        guard let url = URL(string: "/tools/uninstall", relativeTo: baseURL) else { throw APIError.badStatus }
+        guard let url = URL(string: "/tools/uninstall", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -193,7 +201,9 @@ public struct SentinelAPIClient: Sendable {
     /// Stop the passive interception proxy (Ghost Protocol).
     public func stopGhost() async throws -> Bool {
         // Guard condition.
-        guard let url = URL(string: "/ghost/stop", relativeTo: baseURL) else { throw APIError.badStatus }
+        guard let url = URL(string: "/ghost/stop", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         let (data, response) = try await session.data(for: request)
@@ -212,7 +222,9 @@ public struct SentinelAPIClient: Sendable {
     /// Record a user flow for Logic Fuzzing (FlowMapper), not the interception proxy.
     public func startGhostRecording(flowName: String) async throws -> Bool {
         // Guard condition.
-        guard let url = URL(string: "/ghost/record/\(flowName)", relativeTo: baseURL) else { return false }
+        guard let url = URL(string: "/ghost/record/\(flowName)", relativeTo: baseURL) else {
+            return false
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         let (_, response) = try await session.data(for: request)
@@ -225,19 +237,20 @@ public struct SentinelAPIClient: Sendable {
             let status: String
             let mission_id: String
         }
-        
+
         // Guard condition.
         guard let base = URL(string: "/mission/start", relativeTo: baseURL),
-              var components = URLComponents(url: base, resolvingAgainstBaseURL: true) else { throw APIError.badStatus }
+            var components = URLComponents(url: base, resolvingAgainstBaseURL: true)
+        else { throw APIError.badStatus }
         components.queryItems = [URLQueryItem(name: "target", value: target)]
         // Guard condition.
         guard let finalURL = components.url else { throw APIError.badStatus }
         var request = URLRequest(url: finalURL)
         request.httpMethod = "POST"
-        
+
         // Add auth token if we had one (Placeholder)
         // request.setValue("Bearer ...", forHTTPHeaderField: "Authorization")
-        
+
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(MissionResponse.self, from: data)
         return response.mission_id
@@ -245,43 +258,47 @@ public struct SentinelAPIClient: Sendable {
 
     public func chatQuery(question: String) async throws -> String {
         // Guard condition.
-        guard let url = URL(string: "/chat/query", relativeTo: baseURL) else { throw APIError.badStatus }
+        guard let url = URL(string: "/chat/query", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        
+
         var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
         components.queryItems = [URLQueryItem(name: "question", value: question)]
         request.url = components.url
-        
+
         /// Struct ChatResponse.
         struct ChatResponse: Decodable {
             let response: String
         }
-        
+
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(ChatResponse.self, from: data)
         return response.response
     }
-    
+
     public func compileExploit(target: String, anomaly: String) async throws -> String {
         // Guard condition.
-        guard let url = URL(string: "/forge/compile", relativeTo: baseURL) else { throw APIError.badStatus }
+        guard let url = URL(string: "/forge/compile", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        
+
         var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
         components.queryItems = [
             URLQueryItem(name: "target", value: target),
-            URLQueryItem(name: "anomaly", value: anomaly)
+            URLQueryItem(name: "anomaly", value: anomaly),
         ]
         request.url = components.url
-        
+
         /// Struct ForgeResponse.
         struct ForgeResponse: Decodable {
             let status: String
             let script_path: String
         }
-        
+
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(ForgeResponse.self, from: data)
         return response.script_path
@@ -322,7 +339,7 @@ public struct SentinelAPIClient: Sendable {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
                     let (bytes, response) = try await session.bytes(for: request)
                     print("[Swift] Received response headers: \(response)")
-                    
+
                     // Loop over items.
                     for try await line in bytes.lines {
                         // Conditional branch.
@@ -332,8 +349,10 @@ public struct SentinelAPIClient: Sendable {
                             if jsonStr == "[DONE]" { break }
                             // Conditional branch.
                             if let data = jsonStr.data(using: .utf8),
-                               let obj = try? JSONDecoder().decode([String: String].self, from: data),
-                               let token = obj["token"] {
+                                let obj = try? JSONDecoder().decode(
+                                    [String: String].self, from: data),
+                                let token = obj["token"]
+                            {
                                 continuation.yield(token)
                             }
                         }
@@ -362,12 +381,13 @@ public struct SentinelAPIClient: Sendable {
                     let (bytes, _) = try await session.bytes(for: request)
                     var currentEvent = ""
                     var currentData = ""
-                    
+
                     // Loop over items.
                     for try await line in bytes.lines {
                         // Conditional branch.
                         if line.hasPrefix("event: ") {
-                            currentEvent = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                            currentEvent = String(line.dropFirst(7)).trimmingCharacters(
+                                in: .whitespaces)
                         } else if line.hasPrefix("data: ") {
                             currentData = String(line.dropFirst(6))
                         } else if line.isEmpty {
@@ -387,7 +407,7 @@ public struct SentinelAPIClient: Sendable {
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
-    
+
     // Approve a pending action
     public func approveAction(id: String) async throws {
         // Guard condition.
@@ -418,13 +438,16 @@ public struct SentinelAPIClient: Sendable {
         AsyncThrowingStream { continuation in
             let task = Task {
                 // Guard condition.
-                guard let url = URL(string: "/report/generate?section=\(section)", relativeTo: baseURL) else {
+                guard
+                    let url = URL(
+                        string: "/report/generate?section=\(section)", relativeTo: baseURL)
+                else {
                     continuation.finish(throwing: APIError.badStatus)
                     return
                 }
                 var request = URLRequest(url: url)
                 request.httpMethod = "GET"
-                
+
                 // Do-catch block.
                 do {
                     let (bytes, _) = try await session.bytes(for: request)
@@ -437,8 +460,10 @@ public struct SentinelAPIClient: Sendable {
                             if jsonStr == "[DONE]" { break }
                             // Conditional branch.
                             if let data = jsonStr.data(using: .utf8),
-                               let obj = try? JSONDecoder().decode([String: String].self, from: data),
-                               let token = obj["token"] {
+                                let obj = try? JSONDecoder().decode(
+                                    [String: String].self, from: data),
+                                let token = obj["token"]
+                            {
                                 continuation.yield(token)
                             }
                         }
@@ -477,7 +502,7 @@ public struct EngineStatus: Decodable {
     public let latestTarget: String?
     public let ai: AIStatus?
     public let tools: ToolStatus?
-    public let scanState: ScanState?
+    public let scanState: ScanStateDTO?
     public let cancelRequested: Bool?
 
     /// Enum CodingKeys.
@@ -495,7 +520,7 @@ public struct ToolStatus: Decodable {
     public let missing: [String]
     public let countInstalled: Int
     public let countTotal: Int
-    
+
     /// Enum CodingKeys.
     enum CodingKeys: String, CodingKey {
         case installed, missing
@@ -504,7 +529,7 @@ public struct ToolStatus: Decodable {
     }
 }
 
-public struct ScanState: Decodable {
+public struct ScanStateDTO: Decodable {
     public let target: String?
     public let modules: [String]?
     public let status: String?
@@ -597,7 +622,8 @@ public struct ResultCounts: Decodable {
         issues = try container.decodeIfPresent(Int.self, forKey: .issues) ?? 0
         killchainEdges = try container.decodeIfPresent(Int.self, forKey: .killchainEdges) ?? 0
         logs = try container.decodeIfPresent(Int.self, forKey: .logs) ?? 0
-        phaseResults = try container.decodeIfPresent([String: Int].self, forKey: .phaseResults) ?? [:]
+        phaseResults =
+            try container.decodeIfPresent([String: Int].self, forKey: .phaseResults) ?? [:]
     }
 }
 
@@ -666,9 +692,9 @@ public enum JSONValue: Decodable {
 
 public typealias JSONDict = [String: JSONValue]
 
-public extension JSONValue {
+extension JSONValue {
     /// Convenience to unwrap a string if present.
-    var stringValue: String? {
+    public var stringValue: String? {
         // Switch over value.
         switch self {
         case .string(let s): return s

@@ -25,7 +25,7 @@ import Foundation
 // MARK: - Event Models
 
 /// Typed event received from the backend EventStore
-public struct GraphEvent: Decodable, Identifiable {
+public struct GraphEvent: Decodable, Identifiable, Equatable {
     public let id: String
     public let type: String
     public let timestamp: Double
@@ -37,6 +37,10 @@ public struct GraphEvent: Decodable, Identifiable {
     /// Event type as enum for pattern matching
     public var eventType: GraphEventType {
         GraphEventType(rawValue: type) ?? .unknown
+    }
+
+    public static func == (lhs: GraphEvent, rhs: GraphEvent) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
@@ -68,6 +72,7 @@ public enum GraphEventType: String, CaseIterable {
     case log = "log"  // Aligned: was "log_emitted"
     case narrativeEmitted = "narrative_emitted"
     case decisionMade = "decision_made"  // NEW: Added for Strategos decisions
+    case actionNeeded = "action_needed"
 
     // Fallback
     case unknown = "unknown"
@@ -345,7 +350,7 @@ public class EventStreamClient: ObservableObject {
             findingEventPublisher.send(event)
 
         case .scanStarted, .scanPhaseChanged, .scanCompleted, .scanFailed, .toolStarted,
-            .toolCompleted, .narrativeEmitted, .decisionMade:
+            .toolCompleted, .narrativeEmitted, .decisionMade, .actionNeeded:
             scanEventPublisher.send(event)
 
         case .unknown:

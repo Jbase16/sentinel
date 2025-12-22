@@ -115,7 +115,6 @@ struct MainWindowView: View {
         }
         .frame(minWidth: 800, idealWidth: 1000, minHeight: 500, idealHeight: 700)
         .onAppear {
-            appState.startEventStream()
             appState.refreshStatus()
         }
     }
@@ -162,7 +161,7 @@ struct BackendStatusBadge: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.black.opacity(0.4))
             .cornerRadius(4)
-            
+
             // AI Status
             VStack(alignment: .leading, spacing: 4) {
                 Text("AI ENGINE")
@@ -171,7 +170,7 @@ struct BackendStatusBadge: View {
 
                 HStack(spacing: 6) {
                     let aiConnected = appState.aiStatus?.connected ?? false
-                    
+
                     // Conditional branch.
                     if aiConnected {
                         Circle()
@@ -193,7 +192,7 @@ struct BackendStatusBadge: View {
                             .font(.caption)
                             .foregroundColor(aiConnected ? .white : .gray)
                             .lineLimit(1)
-                        
+
                         // Conditional branch.
                         if appState.isProcessing {
                             Text("Processing...")
@@ -202,7 +201,7 @@ struct BackendStatusBadge: View {
                         }
                     }
                 }
-                
+
                 // Show progress bar when AI is processing
                 if appState.isProcessing {
                     IndeterminateProgressBar(color: .blue)

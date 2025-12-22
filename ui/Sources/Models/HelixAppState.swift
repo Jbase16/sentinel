@@ -15,12 +15,6 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Struct LogItem.
-struct LogItem: Identifiable, Equatable {
-    let id: UUID
-    let text: String
-}
-
 // Scan Mode (Strategos)
 /// Enum ScanMode.
 enum ScanMode: String, CaseIterable, Identifiable {
@@ -50,15 +44,12 @@ class HelixAppState: ObservableObject {
     @Published var isProcessing: Bool = false
     @Published var currentTab: SidebarTab = .dashboard
 
-    // MARK: - Centralized State (via Reducer)
-    /// The unified state store - all scan state is derived from events
-    let store = AppStore()
+    // MARK: - Centralized State
+    /// Scan running state
+    @Published var isScanRunning: Bool = false
 
-    /// Derived: scan running state (from reducer, not independent variable)
-    var isScanRunning: Bool { store.isRunning }
-
-    /// Derived: log items (from reducer)
-    var apiLogItems: [LogItem] { store.logItems }
+    /// Log items
+    @Published var apiLogItems: [LogItem] = []
 
     // Services
     let eventClient = EventStreamClient()
@@ -127,7 +118,7 @@ class HelixAppState: ObservableObject {
             ptyClient.connect(url: ptyURL)
         }
         // Kick off HTTP streams
-        self.startEventStream()
+        // self.startEventStream() // REMOVED: Unifying on EventStreamClient
         self.refreshStatus()
 
         // Conditional branch.
@@ -151,22 +142,43 @@ class HelixAppState: ObservableObject {
                         self.seenEventIDs.removeAll(keepingCapacity: true)
                     }
 
-                    // Maintain a stable, strictly increasing local ID even if the backend
-                    // restarts and its sequence counter resets.
-                    if event.sequence < self.lastEventSequence {
-                        self.eventSequenceEpoch += 1
-                    }
-                    self.lastEventSequence = event.sequence
-                    self.lastEventSequence = event.sequence
-                    // let stableID = (self.eventSequenceEpoch * 1_000_000) + event.sequence
-                    // We use UUID for view identity now, so stableID logic is obsolete for View ID.
-
                     // Update scan-running state from the authoritative scan lifecycle events.
                     switch event.eventType {
                     case .scanStarted:
                         self.isScanRunning = true
-                    case .scanCompleted, .scanError:
+                        let target = event.payload["target"]?.stringValue ?? "unknown"
+                        let toolCount = (event.payload["modules"]?.value as? [Any])?.count ?? 0
+                        self.apiLogItems.append(
+                            LogItem(
+                                id: UUID(), text: "[Scan] started: \(target) (\(toolCount) tools)"))
+                    case .scanCompleted:
                         self.isScanRunning = false
+                        self.refreshResults()
+                    case .scanFailed:
+                        self.isScanRunning = false
+                        self.refreshResults()
+                    case .scanPhaseChanged:
+                        if let phase = event.payload["phase"]?.stringValue {
+                            let text = "🔄 [Phase] Transitioned to \(phase)"
+                            self.apiLogs.append(text)
+                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        }
+                    case .decisionMade:
+                        if let intent = event.payload["intent"]?.stringValue,
+                            let reason = event.payload["reason"]?.stringValue
+                        {
+                            let text = "🧠 [Decision] \(intent) → \(reason)"
+                            self.apiLogs.append(text)
+                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        }
+                    case .actionNeeded:
+                        if let action = self.decodeAction(from: event.payload) {
+                            if !self.pendingActions.contains(where: { $0.id == action.id }) {
+                                self.pendingActions.append(action)
+                            }
+                        }
+                    case .findingCreated, .findingConfirmed, .findingDismissed, .toolCompleted:
+                        self.refreshResults()
                     default:
                         break
                     }
@@ -188,7 +200,7 @@ class HelixAppState: ObservableObject {
     private func renderLiveLogLine(event: GraphEvent) -> String? {
         // Switch over value.
         switch event.eventType {
-        case .logEmitted:
+        case .log:
             return event.payload["message"]?.stringValue
                 ?? event.payload["line"]?.stringValue
                 ?? event.type
@@ -205,11 +217,11 @@ class HelixAppState: ObservableObject {
             return String(
                 format: "[Scan] %@(findings=%d, duration=%.1fs)", status, findings, duration)
 
-        case .scanError:
+        case .scanFailed:
             let error = event.payload["error"]?.stringValue ?? "unknown error"
             return "[Scan] error: \(error)"
 
-        case .toolInvoked:
+        case .toolStarted:
             let tool = event.payload["tool"]?.stringValue ?? "unknown"
             return "[Tool] start: \(tool)"
 
@@ -484,84 +496,20 @@ class HelixAppState: ObservableObject {
         }
     }
 
-    /// Start SSE stream to receive real-time updates from Python
-    func startEventStream() {
-        Task {
-            // Do-catch block.
-            do {
-                // Loop over items.
-                for try await event in apiClient.streamEvents() {
-                    // handleSSEEvent is @MainActor but synchronous logic, so await isn't strictly needed
-                    // for suspension, but MainActor isolation requires it if we weren't already on MainActor.
-                    // However, since we are inside a Task, we are likely off-main.
-                    // The warning "No async operations" suggests swift compiler sees it as synchronous.
-                    // Let's rely on MainActor.run to be explicit and avoid the warning.
-                    await MainActor.run {
-                        self.handleSSEEvent(event)
-                    }
-                }
-            } catch {
-                print("[AppState] SSE Stream error: \(error), retrying in 5s...")
-                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
-                startEventStream()
-            }
-        }
-    }
+    private func decodeAction(from payload: [String: AnyCodable]) -> PendingAction? {
+        guard let id = payload["id"]?.stringValue,
+            let tool = payload["tool"]?.stringValue,
+            let args = payload["args"]?.value as? [String]
+        else { return nil }
 
-    @MainActor
-    private func handleSSEEvent(_ event: SSEEvent) {
-        // Switch over value.
-        switch event.type {
-        case "log":
-            // Conditional branch.
-            if let data = event.data.data(using: .utf8),
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let line = json["line"] as? String
-            {
-                self.apiLogs.append(line)
-                // Prefer `/events/stream` matches usually, but allow legacy logs redundantly
-                // to prevent silence if the graph stream stalls.
-                // let nextID = (self.apiLogItems.last?.id ?? 0) + 1
-                self.apiLogItems.append(LogItem(id: UUID(), text: line))
-            }
-            // For now, just trigger a full refresh of results to keep it simple and consistent
-            self.refreshResults()
-
-        case "decision_made":
-            // Conditional branch.
-            if let data = event.data.data(using: .utf8),
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let intent = json["intent"] as? String,
-                let reason = json["reason"] as? String
-            {
-                let text = "🧠 [Decision] \(intent) → \(reason)"
-                self.apiLogs.append(text)
-                self.apiLogItems.append(LogItem(id: UUID(), text: text))
-            }
-
-        case "scan_phase_changed":
-            // Conditional branch.
-            if let data = event.data.data(using: .utf8),
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let phase = json["phase"] as? String
-            {
-                let text = "🔄 [Phase] Transitioned to \(phase)"
-                self.apiLogs.append(text)
-                self.apiLogItems.append(LogItem(id: UUID(), text: text))
-            }
-        case "action_needed":
-            // Conditional branch.
-            if let data = event.data.data(using: .utf8),
-                let action = try? JSONDecoder().decode(PendingAction.self, from: data)
-            {
-                // Avoid duplicates
-                if !self.pendingActions.contains(where: { $0.id == action.id }) {
-                    self.pendingActions.append(action)
-                }
-            }
-        default:
-            break
-        }
+        return PendingAction(
+            id: id,
+            tool: tool,
+            args: args,
+            reason: payload["reason"]?.stringValue,
+            target: payload["target"]?.stringValue,
+            timestamp: payload["timestamp"]?.stringValue
+        )
     }
 
     @MainActor
@@ -649,14 +597,4 @@ struct PendingAction: Identifiable, Decodable {
     let reason: String?
     let target: String?
     let timestamp: String?
-}
-
-/// Enum SidebarTab.
-enum SidebarTab: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard"
-    case chat = "Command Deck"
-    case graph = "Neural Graph"
-    case settings = "Settings"
-
-    var id: String { rawValue }
 }

@@ -24,80 +24,6 @@ import Foundation
 
 // MARK: - Derived State Types
 
-/// Immutable snapshot of scan progress, derived from events
-public struct ScanProgress: Equatable {
-    public let state: ScanState
-    public let target: String?
-    public let sessionId: String?
-    public let phase: String?
-    public let toolsStarted: Int
-    public let toolsCompleted: Int
-    public let findingsCount: Int
-    public let startedAt: Date?
-    public let completedAt: Date?
-
-    /// Computed from state
-    public var isRunning: Bool {
-        switch state {
-        case .starting, .running:
-            return true
-        default:
-            return false
-        }
-    }
-
-    public var isComplete: Bool {
-        state == .complete || state == .failed
-    }
-
-    public var duration: TimeInterval? {
-        guard let start = startedAt else { return nil }
-        let end = completedAt ?? Date()
-        return end.timeIntervalSince(start)
-    }
-
-    /// Initial state
-    public static let idle = ScanProgress(
-        state: .idle,
-        target: nil,
-        sessionId: nil,
-        phase: nil,
-        toolsStarted: 0,
-        toolsCompleted: 0,
-        findingsCount: 0,
-        startedAt: nil,
-        completedAt: nil
-    )
-}
-
-/// Scan lifecycle states (mirrors Python ScanState)
-public enum ScanState: String, Codable, Equatable {
-    case idle = "idle"
-    case starting = "starting"
-    case running = "running"
-    case paused = "paused"
-    case completing = "completing"
-    case complete = "complete"
-    case failed = "failed"
-}
-
-/// Tool execution state
-public struct ToolProgress: Identifiable, Equatable {
-    public let id: String  // tool name
-    public let name: String
-    public let startedAt: Date
-    public var completedAt: Date?
-    public var exitCode: Int?
-    public var findingsCount: Int
-
-    public var isRunning: Bool { completedAt == nil }
-
-    public var duration: TimeInterval? {
-        guard let end = completedAt else { return nil }
-        return end.timeIntervalSince(startedAt)
-    }
-}
-
 // MARK: - Scan Projection (Pure Fold)
 
 /// Pure projection of event stream into scan state
@@ -198,8 +124,6 @@ public class ScanProjection: ObservableObject {
                 id: tool,
                 name: tool,
                 startedAt: Date(timeIntervalSince1970: event.timestamp),
-                completedAt: nil,
-                exitCode: nil,
                 findingsCount: 0
             )
             return ScanProgress(
