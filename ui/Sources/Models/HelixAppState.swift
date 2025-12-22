@@ -15,12 +15,6 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// Struct LogItem.
-struct LogItem: Identifiable, Equatable {
-    let id: UUID
-    let text: String
-}
-
 // Scan Mode (Strategos)
 /// Enum ScanMode.
 enum ScanMode: String, CaseIterable, Identifiable {
@@ -649,14 +643,4 @@ struct PendingAction: Identifiable, Decodable {
     let reason: String?
     let target: String?
     let timestamp: String?
-}
-
-/// Enum SidebarTab.
-enum SidebarTab: String, CaseIterable, Identifiable {
-    case dashboard = "Dashboard"
-    case chat = "Command Deck"
-    case graph = "Neural Graph"
-    case settings = "Settings"
-
-    var id: String { rawValue }
 }
