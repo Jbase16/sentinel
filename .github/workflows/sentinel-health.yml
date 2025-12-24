@@ -142,13 +142,13 @@ jobs:
 
           authority = ScanAuthority()
 
-          # Try invalid transition
+          # Try invalid transition - use internal method
           try:
               # Can't go from IDLE to PAUSED
-              authority.transition_to(ScanState.PAUSED, 'test', 'invalid')
+              authority._transition_to(ScanState.PAUSED, 'test', 'invalid')
               print('❌ Invalid transition was allowed!')
               sys.exit(1)
-          except ValueError:
+          except (ValueError, RuntimeError):
               print('✅ Invalid transition correctly blocked')
           "
 
