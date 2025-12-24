@@ -95,7 +95,7 @@ jobs:
       - name: Run Swift tests
         run: |
           cd ui
-          xcodebuild -project SentinelForge.xcodeproj \
+          xcodebuild -project /Users/jason/Developer/sentinelforge/ui/SentinelForge.xcodeproj \
             -scheme SentinelForge \
             -destination 'platform=macOS' \
             test \
