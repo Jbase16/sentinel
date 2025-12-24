@@ -50,11 +50,11 @@ class EventBus:
     """
     def __init__(self, event_store: Optional["EventStore"] = None):
         """Function __init__."""
-        self._subscribers: List[Callable[[GraphEvent], None]] = []
+        self._subscribers: List[Callable[[GraphEvent], object]] = []
         if event_store is not None:
             self.subscribe(event_store.append)
 
-    def subscribe(self, callback: Callable[[GraphEvent], None]):
+    def subscribe(self, callback: Callable[[GraphEvent], object]):
         """Function subscribe."""
         self._subscribers.append(callback)
 

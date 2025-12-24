@@ -75,7 +75,11 @@ class EventStore:
     3. Subscriber notification is loop-safe across sync/async boundaries.
     """
     def __init__(self, max_size: int = 5000, max_events: Optional[int] = None):
-        """Function __init__."""
+        """
+        Initialize the store.
+
+        `max_events` is a backwards-compatibility alias for `max_size`.
+        """
         maxlen = max_events if max_events is not None else max_size
         self._events: deque[StoredEvent] = deque(maxlen=maxlen)
         self._lock = threading.RLock()

@@ -39,4 +39,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 
 [tool.mypy]
-ignore_errors = true
+ignore_missing_imports = true
+files = [
+    "core/cortex/event_store.py",
+    "core/cortex/events.py"
+]
