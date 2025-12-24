@@ -262,7 +262,7 @@ class BehavioralRecon:
         # Conditional branch.
         if not self.verify_ssl:
             self._ssl_context.check_hostname = False
-            self._ssl_context.verify_mode = ssl.CERT_NONE
+            self._ssl_context.verify_mode = ssl.CERT_NONE  # nosec B501 - intentional for security testing
 
     async def run(self, target: str) -> List[dict]:
         """AsyncFunction run."""
@@ -317,9 +317,8 @@ class BehavioralRecon:
 
         # Error handling block.
         try:
-            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
             # URL scheme already validated above (http/https only)
-            with urllib.request.urlopen(req, data=variant.body, timeout=15, context=self._ssl_context) as resp:
+            with urllib.request.urlopen(req, data=variant.body, timeout=15, context=self._ssl_context) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
                 body = resp.read()
                 elapsed = (time.perf_counter() - start) * 1000
                 headers = {k.lower(): v for k, v in resp.headers.items()}
@@ -685,9 +684,8 @@ class BehavioralRecon:
 
         # Error handling block.
         try:
-            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
             # URL scheme validated above (http/https only)
-            with urllib.request.urlopen(req, timeout=10, context=self._ssl_context) as resp:
+            with urllib.request.urlopen(req, timeout=10, context=self._ssl_context) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
                 resp.read(256)
         except Exception as exc:
             self.log(f"[behavioral] timing sample error: {exc}")

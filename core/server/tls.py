@@ -79,7 +79,7 @@ class TLSAnalyzer:
             # This avoids nassl dependency
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
+            ctx.verify_mode = ssl.CERT_NONE  # nosec B501 - intentional for TLS testing
             
             loop = asyncio.get_running_loop()
             
@@ -161,7 +161,7 @@ class TLSAnalyzer:
                 try:
                     ctx = ssl.SSLContext(proto)
                     ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
+                    ctx.verify_mode = ssl.CERT_NONE  # nosec B501 - intentional for TLS version testing
                     if name == "TLSv1.3":
                         # Force TLS 1.3 if possible, though SSLContext(PROTOCOL_TLS_CLIENT) auto-negotiates
                         ctx.minimum_version = ssl.TLSVersion.TLSv1_3
@@ -240,7 +240,7 @@ class TLSAnalyzer:
                 try:
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
+                    ctx.verify_mode = ssl.CERT_NONE  # nosec B501 - intentional for cipher testing
                     ctx.set_ciphers(cipher)
                     with socket.create_connection((self.hostname, self.port), timeout=2) as sock:
                         with ctx.wrap_socket(sock, server_hostname=self.hostname) as ssock:

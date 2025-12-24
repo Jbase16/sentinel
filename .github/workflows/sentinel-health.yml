@@ -94,8 +94,9 @@ jobs:
           echo "🚫 Testing policy veto behavior..."
 
           python -c "
-          from core.cortex.arbitration import ArbitrationEngine, DecisionPoint, Judgment
-          from core.cortex.policy import Policy
+          from core.cortex.arbitration import ArbitrationEngine
+          from core.scheduler.decisions import DecisionPoint, DecisionType
+          from core.cortex.policy import Policy, Judgment, Verdict
 
           class AlwaysVetoPolicy(Policy):
               @property
@@ -103,7 +104,7 @@ jobs:
                   return 'always_veto'
 
               def evaluate(self, decision, context):
-                  return Judgment.VETO
+                  return Judgment(verdict=Verdict.VETO, reason='Always veto', policy_name=self.name)
 
           class AlwaysApprovePolicy(Policy):
               @property
@@ -111,23 +112,23 @@ jobs:
                   return 'always_approve'
 
               def evaluate(self, decision, context):
-                  return Judgment.APPROVE
+                  return Judgment(verdict=Verdict.APPROVE, reason='Always approve', policy_name=self.name)
 
           engine = ArbitrationEngine()
           engine.register_policy(AlwaysVetoPolicy())
           engine.register_policy(AlwaysApprovePolicy())
 
-          decision = DecisionPoint(
-              action_type='test',
-              target='example.com',
-              risk_level='medium',
-              rationale='test'
+          decision = DecisionPoint.create(
+              decision_type=DecisionType.TOOL_SELECTION,
+              chosen='test_tool',
+              reason='Testing veto behavior',
+              context={'target': 'example.com'}
           )
 
           result = engine.review(decision, {})
 
           # Veto must win even with an approve policy
-          assert result == Judgment.VETO, f'Expected VETO, got {result}'
+          assert result.verdict == Verdict.VETO, f'Expected VETO, got {result.verdict}'
           print('✅ Veto-wins behavior verified')
           "
 

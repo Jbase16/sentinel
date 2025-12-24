@@ -91,7 +91,7 @@ def _safe_request(url: str, method: str = "GET", data: bytes | None = None, head
     if allow_insecure:
         context = ssl.create_default_context()
         context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
+        context.verify_mode = ssl.CERT_NONE  # nosec B501 - intentional for security shim testing
     else:
         context = ssl.create_default_context()
     # Error handling block.
