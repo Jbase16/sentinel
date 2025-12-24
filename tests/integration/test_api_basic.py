@@ -27,10 +27,10 @@ from core.server.api import serve
 
 class TestCoreAPI(unittest.TestCase):
     @classmethod
-    """Class TestCoreAPI."""
+    @classmethod
     def setUpClass(cls):
-        # Start API in a separate thread
         """Function setUpClass."""
+        # Start API in a separate thread
         cls.port = 8766 # Use a test port
         cls.server_thread = threading.Thread(target=serve, args=(cls.port,), daemon=True)
         cls.server_thread.start()

@@ -16,7 +16,8 @@ from typing import List, Dict
 from core.scheduler.strategos import Strategos, ScanContext
 from core.scheduler.modes import ScanMode
 from core.scheduler.decisions import DecisionLedger, DecisionType
-from core.cortex.events import EventStore, EventBus, GraphEventType
+from core.cortex.events import EventBus, GraphEventType
+from core.cortex.event_store import EventStore
 from core.scheduler.intents import (
     INTENT_PASSIVE_RECON,
     INTENT_ACTIVE_LIVE_CHECK,
