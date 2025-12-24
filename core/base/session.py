@@ -20,7 +20,7 @@
 import uuid
 import time
 from threading import Lock
-from typing import Optional, Dict, List
+from typing import Dict, List
 
 # Import data storage classes (each session gets its own instances)
 from core.data.findings_store import FindingsStore  # Stores security vulnerabilities/discoveries
