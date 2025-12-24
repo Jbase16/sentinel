@@ -43,7 +43,7 @@ class ContentHasher(Fingerprinter):
         # Loop over items.
         for token in tokens:
             # Hash token
-            h = int(hashlib.md5(token.encode('utf-8')).hexdigest(), 16)
+            h = int(hashlib.sha256(token.encode('utf-8')).hexdigest(), 16)
             for i in range(64):
                 bit = (h >> i) & 1
                 if bit:

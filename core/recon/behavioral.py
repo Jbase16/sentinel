@@ -301,6 +301,21 @@ class BehavioralRecon:
         for key, value in variant.headers.items():
             req.add_header(key, value)
 
+        # Security: Validate scheme
+        parsed = urlparse(mutated_url)
+        if parsed.scheme not in ("http", "https"):
+            self.log(f"[behavioral] Blocked unsafe scheme: {mutated_url}")
+            return {
+                "variant": variant.name,
+                "status": None,
+                "length": 0,
+                "elapsed_ms": 0,
+                "headers": {},
+                "body": b"",
+                "hash": "",
+                "error": "Unsafe URL scheme",
+            }
+
         # Error handling block.
         try:
             with urllib.request.urlopen(req, data=variant.body, timeout=15, context=self._ssl_context) as resp:
@@ -662,6 +677,11 @@ class BehavioralRecon:
         """Function _time_single_request."""
         req = urllib.request.Request(url, method="GET")
         start = time.perf_counter()
+        
+        # Security: Validate scheme
+        if urlparse(url).scheme not in ("http", "https"):
+            return None
+
         # Error handling block.
         try:
             with urllib.request.urlopen(req, timeout=10, context=self._ssl_context) as resp:

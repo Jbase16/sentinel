@@ -194,7 +194,7 @@ class TLSAnalyzer:
                         f"https://{self.hostname}:{self.port}",
                         impersonate="chrome110",
                         timeout=10,
-                        verify=False
+                        verify=True
                     )
                     return {
                         "status": r.status_code,
