@@ -29,6 +29,11 @@ class SandboxRunner:
     """
     
     @staticmethod
+    async def execute(script_path: str, timeout: int = 15) -> dict:
+        """Alias for run to maintain backward compatibility."""
+        return await SandboxRunner.run(script_path, timeout)
+
+    @staticmethod
     async def run(script_path: str, timeout: int = 15) -> dict:
         """
         Runs the script and captures output.

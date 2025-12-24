@@ -29,6 +29,23 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
 
+      - name: Start Sentinel Server
+        run: |
+          echo "🚀 Starting Sentinel Server in background..."
+          nohup python3 -m core.server.api > server.log 2>&1 &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+          echo "Waiting 5 seconds for server boot..."
+          sleep 5
+          # Verify it's running
+          if ps -p $SERVER_PID > /dev/null; then
+             echo "✅ Server process is running"
+          else
+             echo "❌ Server process died immediately"
+             cat server.log
+             exit 1
+          fi
+
       - name: Verify agent registration
         run: |
           echo "🤖 Verifying agents register correctly..."
@@ -384,7 +401,7 @@ jobs:
 
               # Should timeout
               start = time.time()
-              result = await runner.execute(str(test_path), timeout=2)
+              result = await runner.run(str(test_path), timeout=2)
               elapsed = time.time() - start
 
               assert elapsed < 3, f'Timeout not enforced (took {elapsed}s)'

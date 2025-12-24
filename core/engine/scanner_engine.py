@@ -21,7 +21,7 @@ import os
 from urllib.parse import urlparse
 from typing import AsyncGenerator, Dict, List
 
-from core.data.findings import findings_store
+from core.data.findings_store import findings_store
 from core.data.evidence_store import EvidenceStore
 from core.cortex.scanner_bridge import ScannerBridge
 from core.toolkit.vuln_rules import apply_rules
