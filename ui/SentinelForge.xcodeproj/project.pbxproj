@@ -1,0 +1,1155 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0D5D3E555E784A70305E042C /* HelixAppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58466552B0906B21951240F1 /* HelixAppState.swift */; };
+		120436A0BDDDBF24C31F8D30 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B28396B11B909875C4B8BB20 /* MainWindowView.swift */; };
+		14F802FA073267C118AFB865 /* SentinelAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */; };
+		23885C7C1426DA781B5E460F /* NeuralGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71DA56ED4F2F3426B9E02034 /* NeuralGraphView.swift */; };
+		250D8E25220B3AB535717493 /* ChatBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBD4BFB76B48DD1736FC1FA /* ChatBubbleView.swift */; };
+		2F3DA20D5D2C21A0200A21C9 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D47C9AABA588CA41003B700 /* SharedModels.swift */; };
+		4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1FB66EC2747EC1973D336E /* DashboardView.swift */; };
+		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
+		65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426219598E6076D786D8DAD8 /* ReportComposerView.swift */; };
+		74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62409FA58DFFE1F4DBADB601 /* TerminalView.swift */; };
+		80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B8394185D36FC0D1095C1111 /* Shaders.metal */; };
+		84565490131B06C520A4801A /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */; };
+		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
+		9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */; };
+		9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C910B6EF70385F75EC7BA /* PTYClient.swift */; };
+		A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */; };
+		A96E61E2762FD4FD4E275E4B /* ActionRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB064037D50A118943B7AB93 /* ActionRequestView.swift */; };
+		AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */; };
+		AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230001B3E6349D392B2FE004 /* AppReducer.swift */; };
+		B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C303CDE894C92523DAC01B0A /* ToolsBankView.swift */; };
+		B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE68CC8F07C4B289363C486 /* CortexStream.swift */; };
+		B4BB52D55A287ED8069CD66A /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 66511897847C968BFC7F8D7A /* index.html */; };
+		BA612DD4500BA86414972F25 /* HelixError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45E68340782F5F007892DD6 /* HelixError.swift */; };
+		BE954D7AE0662CD4A638C666 /* SentinelForgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13132A4BDB652874A328C71B /* SentinelForgeApp.swift */; };
+		C4EAE38493520E1B56033FEE /* GraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 493C6711EF03532E783C01F1 /* GraphModels.swift */; };
+		C4EDBDE9C6812EFA33977B44 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1269D7C35447A70FD8D1D9FB /* ChatView.swift */; };
+		C94EFAA35A0D3B712FC57FB6 /* GenerateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */; };
+		E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1614A34830DE729E55890F6 /* ScanControlView.swift */; };
+		F1D02E19B9E5B252F227CA09 /* GraphRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */; };
+		FD713260357E395BCDCB0682 /* BackendManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		01681F06B931927656095303 /* mutator.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = mutator.py; sourceTree = "<group>"; };
+		04240E1A6936864F44A1656D /* blackbox.cpython-314.pyc */ = {isa = PBXFileReference; path = "blackbox.cpython-314.pyc"; sourceTree = "<group>"; };
+		0601A36E1D3168AC2899A030 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		06708AA3E65515CC76F6A14F /* narrator.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = narrator.py; sourceTree = "<group>"; };
+		0D7E4807BABA653C80207BDB /* lazarus.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = lazarus.py; sourceTree = "<group>"; };
+		0EC2639058478529FA24DDE2 /* chat_engine.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = chat_engine.py; sourceTree = "<group>"; };
+		0EDE6F5BBED24F93FDD549EA /* registry.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = registry.py; sourceTree = "<group>"; };
+		10B1BCD900F15FD658B7A577 /* killchain_store.cpython-314.pyc */ = {isa = PBXFileReference; path = "killchain_store.cpython-314.pyc"; sourceTree = "<group>"; };
+		11F52CD15226935B7563BF4C /* killchain_store.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = killchain_store.py; sourceTree = "<group>"; };
+		1241F1B5459AEDE5F0AC8384 /* tool_callbacks.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = tool_callbacks.py; sourceTree = "<group>"; };
+		1269D7C35447A70FD8D1D9FB /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		12D3B465BA7B5872650F6D69 /* scanner_engine.cpython-314.pyc */ = {isa = PBXFileReference; path = "scanner_engine.cpython-314.pyc"; sourceTree = "<group>"; };
+		13132A4BDB652874A328C71B /* SentinelForgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelForgeApp.swift; sourceTree = "<group>"; };
+		13D70748232389C6C19AEB21 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		1416F0819CEEC90B3D31954F /* correlator.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = correlator.py; sourceTree = "<group>"; };
+		14B120CAA78D958C0F0E8CDE /* observer.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = observer.py; sourceTree = "<group>"; };
+		1518950F1EF9750DA7C416F3 /* config.cpython-314.pyc */ = {isa = PBXFileReference; path = "config.cpython-314.pyc"; sourceTree = "<group>"; };
+		15687D16F698DFDE2B093488 /* async_helpers.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = async_helpers.py; sourceTree = "<group>"; };
+		15E39DF4E7C6A9877B7BC8DB /* chat_engine.cpython-314.pyc */ = {isa = PBXFileReference; path = "chat_engine.cpython-314.pyc"; sourceTree = "<group>"; };
+		1700304875D8168F48FBB66B /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		19E817DAC42FABBB08CE7A1B /* vanguard.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = vanguard.py; sourceTree = "<group>"; };
+		1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanProjection.swift; sourceTree = "<group>"; };
+		1F58C864A60CD744EA72F52F /* tools.cpython-314.pyc */ = {isa = PBXFileReference; path = "tools.cpython-314.pyc"; sourceTree = "<group>"; };
+		1FA36BC9B6636D48D114FC3F /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		200DE119E6F80856EDF0BBF8 /* event_store.cpython-314.pyc */ = {isa = PBXFileReference; path = "event_store.cpython-314.pyc"; sourceTree = "<group>"; };
+		230001B3E6349D392B2FE004 /* AppReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducer.swift; sourceTree = "<group>"; };
+		2401786B3886E0846803AF9E /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		24341BFC06FC18EE38977FFC /* SentinelForge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SentinelForge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2569FD3CDF297078C1886472 /* StatusComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusComponents.swift; sourceTree = "<group>"; };
+		2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateModels.swift; sourceTree = "<group>"; };
+		2651093820CEBB03A2D70FBF /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		27372657BEDA9C93B93634B8 /* installer.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = installer.py; sourceTree = "<group>"; };
+		29B323EF69DE10A80E699513 /* narrative_templates.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = narrative_templates.py; sourceTree = "<group>"; };
+		2BD85ACF1C113B439D6BB498 /* synapse.cpython-314.pyc */ = {isa = PBXFileReference; path = "synapse.cpython-314.pyc"; sourceTree = "<group>"; };
+		2BDAEA68C5068C053F97CE68 /* policy.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = policy.py; sourceTree = "<group>"; };
+		2C53EE765C99959D6BBC5386 /* rules.yaml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = rules.yaml; sourceTree = "<group>"; };
+		2D70FCB826C206B69BA3042B /* pathfinder.cpython-314.pyc */ = {isa = PBXFileReference; path = "pathfinder.cpython-314.pyc"; sourceTree = "<group>"; };
+		2E914C0DB51F64AEBAC25117 /* pathfinder.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = pathfinder.py; sourceTree = "<group>"; };
+		2ED6BEB8A3384D97CCDCB950 /* api.cpython-314.pyc */ = {isa = PBXFileReference; path = "api.cpython-314.pyc"; sourceTree = "<group>"; };
+		322089AECE00DD6F6460DA8F /* session.cpython-314.pyc */ = {isa = PBXFileReference; path = "session.cpython-314.pyc"; sourceTree = "<group>"; };
+		36991865C8C39C13229ECF2E /* sandbox.cpython-314.pyc */ = {isa = PBXFileReference; path = "sandbox.cpython-314.pyc"; sourceTree = "<group>"; };
+		37966184A7F3724F97A88FD4 /* events.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = events.py; sourceTree = "<group>"; };
+		37AF9A22F74299DBB9E08B52 /* strategy.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = strategy.py; sourceTree = "<group>"; };
+		3858E63A09ADC9E394866A49 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		3A7354DAD1FF28FF41CCB18A /* strategos.cpython-314.pyc */ = {isa = PBXFileReference; path = "strategos.cpython-314.pyc"; sourceTree = "<group>"; };
+		3B4E4C74FEFD7268A8D6255B /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		3C9EF9C18D5BDB3CACD03A55 /* scanner_bridge.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = scanner_bridge.py; sourceTree = "<group>"; };
+		3D23612B15D806C4B9280BD5 /* narrator.cpython-314.pyc */ = {isa = PBXFileReference; path = "narrator.cpython-314.pyc"; sourceTree = "<group>"; };
+		3E1B97BF9E151945FBEF4FE5 /* observer.cpython-314.pyc */ = {isa = PBXFileReference; path = "observer.cpython-314.pyc"; sourceTree = "<group>"; };
+		3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphView.swift; sourceTree = "<group>"; };
+		3EFC86CDAE12610A883F7E27 /* module.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = module.py; sourceTree = "<group>"; };
+		3FAA3ECFC6EAD1CC235D3400 /* laws.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = laws.py; sourceTree = "<group>"; };
+		3FE55ACA0EAAE23D91D906EE /* flow.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = flow.py; sourceTree = "<group>"; };
+		426219598E6076D786D8DAD8 /* ReportComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportComposerView.swift; sourceTree = "<group>"; };
+		4327C044639D79985025AE64 /* logic.cpython-314.pyc */ = {isa = PBXFileReference; path = "logic.cpython-314.pyc"; sourceTree = "<group>"; };
+		43A02CF85D025ACFE161712B /* compiler.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = compiler.py; sourceTree = "<group>"; };
+		43CAF299D2C767AC4F54D1E6 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		44AE21637016336898AADE77 /* registry.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = registry.py; sourceTree = "<group>"; };
+		44BD2C816EF187831EE34554 /* task_router.cpython-314.pyc */ = {isa = PBXFileReference; path = "task_router.cpython-314.pyc"; sourceTree = "<group>"; };
+		4791820366489F9C5F781238 /* events.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = events.py; sourceTree = "<group>"; };
+		489FF02A9E8A22F206137FED /* narrative_templates.cpython-314.pyc */ = {isa = PBXFileReference; path = "narrative_templates.cpython-314.pyc"; sourceTree = "<group>"; };
+		493C6711EF03532E783C01F1 /* GraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphModels.swift; sourceTree = "<group>"; };
+		4A482BE2BCA6C41C38D8D265 /* event_store.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = event_store.py; sourceTree = "<group>"; };
+		4ADC6FF13E36BD00FF0E8C76 /* evidence_store.cpython-314.pyc */ = {isa = PBXFileReference; path = "evidence_store.cpython-314.pyc"; sourceTree = "<group>"; };
+		4C537C7027AB162D105EB646 /* action_dispatcher.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = action_dispatcher.py; sourceTree = "<group>"; };
+		4F49DDDB33421F36C54B2478 /* decisions.cpython-314.pyc */ = {isa = PBXFileReference; path = "decisions.cpython-314.pyc"; sourceTree = "<group>"; };
+		500C927FFE792DD3D88685B3 /* session.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = session.py; sourceTree = "<group>"; };
+		51EEB5D87FF5785F9648845D /* evidence.cpython-314.pyc */ = {isa = PBXFileReference; path = "evidence.cpython-314.pyc"; sourceTree = "<group>"; };
+		54F48BE2487BBC3AD88917BF /* async_helpers.cpython-314.pyc */ = {isa = PBXFileReference; path = "async_helpers.cpython-314.pyc"; sourceTree = "<group>"; };
+		58466552B0906B21951240F1 /* HelixAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixAppState.swift; sourceTree = "<group>"; };
+		58791A0E29590BA20785A191 /* decisions.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = decisions.py; sourceTree = "<group>"; };
+		5A70BE118683FB9FFD8EF310 /* module.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = module.py; sourceTree = "<group>"; };
+		5A85970242CA08DC90CBC155 /* raw_classifier.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = raw_classifier.py; sourceTree = "<group>"; };
+		5B085505A5A45A0E0291F524 /* evidence_store.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = evidence_store.py; sourceTree = "<group>"; };
+		5E78F4CD280650614497D804 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		5F7C910B6EF70385F75EC7BA /* PTYClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTYClient.swift; sourceTree = "<group>"; };
+		6114ECFF7A9779D542E69D79 /* scan_orchestrator.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = scan_orchestrator.py; sourceTree = "<group>"; };
+		62409FA58DFFE1F4DBADB601 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		6272797ACB7392A1C134CD56 /* reporting.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = reporting.py; sourceTree = "<group>"; };
+		62746D622CDEFB361DFF5519 /* automator.cpython-314.pyc */ = {isa = PBXFileReference; path = "automator.cpython-314.pyc"; sourceTree = "<group>"; };
+		63B06E878B047E4BC0FA98BE /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		66476C119C64C0040B985DD6 /* pty_manager.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = pty_manager.py; sourceTree = "<group>"; };
+		66511897847C968BFC7F8D7A /* index.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
+		667971D59EAE38200FC4DB2D /* findings.cpython-314.pyc */ = {isa = PBXFileReference; path = "findings.cpython-314.pyc"; sourceTree = "<group>"; };
+		668983FEBD62BEF8A76F128F /* runner.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = runner.py; sourceTree = "<group>"; };
+		677F10FE95A2F0AEE5411BA9 /* proxy.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = proxy.py; sourceTree = "<group>"; };
+		687F4093845F7308043CD909 /* tool_base.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = tool_base.py; sourceTree = "<group>"; };
+		6A0F0487AA1344C34822C8B6 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		6A26C992F7F81303193E0C1F /* nmap.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = nmap.py; sourceTree = "<group>"; };
+		6C19E1F9B392111B230F8116 /* errors.cpython-314.pyc */ = {isa = PBXFileReference; path = "errors.cpython-314.pyc"; sourceTree = "<group>"; };
+		6C2A588395A200645B70D638 /* runner.cpython-314.pyc */ = {isa = PBXFileReference; path = "runner.cpython-314.pyc"; sourceTree = "<group>"; };
+		6DB4BCF1129801BFEDEBF6A1 /* correlator.cpython-314.pyc */ = {isa = PBXFileReference; path = "correlator.cpython-314.pyc"; sourceTree = "<group>"; };
+		6DF5117A40D96EE498AC3469 /* action_dispatcher.cpython-314.pyc */ = {isa = PBXFileReference; path = "action_dispatcher.cpython-314.pyc"; sourceTree = "<group>"; };
+		6E05D5FCE80DD1E839C3E3F2 /* risk.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = risk.py; sourceTree = "<group>"; };
+		6FA7B075EF9A9675D166AB01 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		7001BD066A89CE8DDE42D246 /* synapse.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = synapse.py; sourceTree = "<group>"; };
+		703C8C206CE0E17EE6FCD8AC /* evasion.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = evasion.py; sourceTree = "<group>"; };
+		70E8BE46F1B9E7EC07FAF2F9 /* arbitration.cpython-314.pyc */ = {isa = PBXFileReference; path = "arbitration.cpython-314.pyc"; sourceTree = "<group>"; };
+		71DA56ED4F2F3426B9E02034 /* NeuralGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralGraphView.swift; sourceTree = "<group>"; };
+		7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendManager.swift; sourceTree = "<group>"; };
+		73820E94F4156D09A67693A9 /* ai_engine.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = ai_engine.py; sourceTree = "<group>"; };
+		73AF610567D7FBBDD349D19D /* vuln_rules.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = vuln_rules.py; sourceTree = "<group>"; };
+		73D1E11B0DFE3EBF1D7C4A8C /* reasoning.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = reasoning.py; sourceTree = "<group>"; };
+		73E6423F9E8E48F4ADC434C2 /* memory.cpython-314.pyc */ = {isa = PBXFileReference; path = "memory.cpython-314.pyc"; sourceTree = "<group>"; };
+		76B66B00C1BDA0623967A7AC /* behavioral.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = behavioral.py; sourceTree = "<group>"; };
+		778AD29A68C44D34B64292D0 /* registry.cpython-314.pyc */ = {isa = PBXFileReference; path = "registry.cpython-314.pyc"; sourceTree = "<group>"; };
+		78FA45D609E431F76BB2F68E /* evidence.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = evidence.py; sourceTree = "<group>"; };
+		7AE31291576B1D65B177FC2C /* memory.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = memory.py; sourceTree = "<group>"; };
+		7D47C9AABA588CA41003B700 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
+		7DF72C8B8F4B916530DF309A /* mutator.cpython-314.pyc */ = {isa = PBXFileReference; path = "mutator.cpython-314.pyc"; sourceTree = "<group>"; };
+		7E0311D199B1D404ABE353F7 /* orchestrator.cpython-314.pyc */ = {isa = PBXFileReference; path = "orchestrator.cpython-314.pyc"; sourceTree = "<group>"; };
+		7F810B739E37CAE666D58C1E /* strategos.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = strategos.py; sourceTree = "<group>"; };
+		801140F23C2B7A556247D035 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		8097C02DC9CFF63EDABCC6FB /* findings_store.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = findings_store.py; sourceTree = "<group>"; };
+		81A7C7F6269A34AB3AC98B61 /* modes.cpython-314.pyc */ = {isa = PBXFileReference; path = "modes.cpython-314.pyc"; sourceTree = "<group>"; };
+		81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelAPIClient.swift; sourceTree = "<group>"; };
+		83118F079ADB762892AE9F66 /* httpx.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = httpx.py; sourceTree = "<group>"; };
+		8318D0791A1940E626D7A7ED /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
+		866124867789FE885FCCD9CC /* laws.cpython-314.pyc */ = {isa = PBXFileReference; path = "laws.cpython-314.pyc"; sourceTree = "<group>"; };
+		876B38D7B6911B667D84E327 /* executor.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = executor.py; sourceTree = "<group>"; };
+		8B37AC634D75D518725AB0FF /* events.cpython-314.pyc */ = {isa = PBXFileReference; path = "events.cpython-314.pyc"; sourceTree = "<group>"; };
+		8E76FC2D8777B529B8576939 /* scanner_bridge.cpython-314.pyc */ = {isa = PBXFileReference; path = "scanner_bridge.cpython-314.pyc"; sourceTree = "<group>"; };
+		8F5003141D689A952DAD02EC /* orchestrator.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = orchestrator.py; sourceTree = "<group>"; };
+		8FCE0221EE0DA83B58AC6047 /* normalizer.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = normalizer.py; sourceTree = "<group>"; };
+		911E80EF6C64B873C45C8CB0 /* normalizer.cpython-314.pyc */ = {isa = PBXFileReference; path = "normalizer.cpython-314.pyc"; sourceTree = "<group>"; };
+		91603E64F224A3D03FE03ABE /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		91BF7970424D7528CDAC4B1D /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		91EAC89623D103333DB549AB /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		941C23FEFE6EEEA39508ACD5 /* registry.cpython-314.pyc */ = {isa = PBXFileReference; path = "registry.cpython-314.pyc"; sourceTree = "<group>"; };
+		995C171DE91EBFCBA3EC2CE1 /* errors.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = errors.py; sourceTree = "<group>"; };
+		9AD955A951E44C8D4BCE3E80 /* authority.cpython-314.pyc */ = {isa = PBXFileReference; path = "authority.cpython-314.pyc"; sourceTree = "<group>"; };
+		9BA1F31F23E094D034661328 /* task_router.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = task_router.py; sourceTree = "<group>"; };
+		9C08199AC411DE9994307E3E /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		9DB9D8F805D76FE3767F20D7 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		A0D1DB64AB76F4DED82C6DD3 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
+		A4A9C94FDA0D5DBD93B62291 /* tools.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = tools.py; sourceTree = "<group>"; };
+		AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamClient.swift; sourceTree = "<group>"; };
+		AC7223E38F172FFE16BD331A /* config.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = config.py; sourceTree = "<group>"; };
+		AD945018CD80BA833EAEACB5 /* compiler.cpython-314.pyc */ = {isa = PBXFileReference; path = "compiler.cpython-314.pyc"; sourceTree = "<group>"; };
+		B003056E13148947822CFED3 /* pty_manager.cpython-314.pyc */ = {isa = PBXFileReference; path = "pty_manager.cpython-314.pyc"; sourceTree = "<group>"; };
+		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
+		B28396B11B909875C4B8BB20 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		B3897D1F377866CC934C8E79 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		B4638F0008686C9FD7CF58F6 /* evasion.cpython-314.pyc */ = {isa = PBXFileReference; path = "evasion.cpython-314.pyc"; sourceTree = "<group>"; };
+		B4D6B327DA76A67F334A7C08 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		B6FEA279A384B05F0EC4264B /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		B8394185D36FC0D1095C1111 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		B875305BE3E70576BADE7092 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		B963C62BD25C5629F8542AE3 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		B9A4BBA7507C93B770997148 /* vanguard.cpython-314.pyc */ = {isa = PBXFileReference; path = "vanguard.cpython-314.pyc"; sourceTree = "<group>"; };
+		BB064037D50A118943B7AB93 /* ActionRequestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionRequestView.swift; sourceTree = "<group>"; };
+		BCE68CC8F07C4B289363C486 /* CortexStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexStream.swift; sourceTree = "<group>"; };
+		BDC57F974D2ECE137DE85415 /* subfinder.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = subfinder.py; sourceTree = "<group>"; };
+		BE3AB725A287B817718A0A40 /* sandbox.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = sandbox.py; sourceTree = "<group>"; };
+		BE54BE9391A35CAC0897BE1C /* authority.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = authority.py; sourceTree = "<group>"; };
+		BFB11520E700A5ADFFD36662 /* issues_store.cpython-314.pyc */ = {isa = PBXFileReference; path = "issues_store.cpython-314.pyc"; sourceTree = "<group>"; };
+		C203CF9BCE09CD0ADE7B5200 /* events.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = events.py; sourceTree = "<group>"; };
+		C303CDE894C92523DAC01B0A /* ToolsBankView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBankView.swift; sourceTree = "<group>"; };
+		C352CD6EBF12F96F51A3D13A /* api.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = api.py; sourceTree = "<group>"; };
+		C3CF75FBA6B917DC2558F738 /* tls.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = tls.py; sourceTree = "<group>"; };
+		C4515C74AE1B95825A7ECD9F /* ai_engine.cpython-314.pyc */ = {isa = PBXFileReference; path = "ai_engine.cpython-314.pyc"; sourceTree = "<group>"; };
+		C78C578D73C81617788A2756 /* policy.cpython-314.pyc */ = {isa = PBXFileReference; path = "policy.cpython-314.pyc"; sourceTree = "<group>"; };
+		C78CEF0D4D0A8CC61FFFBAC9 /* logic.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = logic.py; sourceTree = "<group>"; };
+		C8E10EBF5DE072E3B50A51C2 /* vuln_rules.cpython-314.pyc */ = {isa = PBXFileReference; path = "vuln_rules.cpython-314.pyc"; sourceTree = "<group>"; };
+		CA1FB66EC2747EC1973D336E /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		CB2D2D4426AF906F6B67EA1A /* raw_classifier.cpython-314.pyc */ = {isa = PBXFileReference; path = "raw_classifier.cpython-314.pyc"; sourceTree = "<group>"; };
+		CCFA8C2B49A9B6ED732BDD81 /* arbitration.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = arbitration.py; sourceTree = "<group>"; };
+		CDCA511AA067DDC5B60DCB13 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		CE9E99CA379009B87F2B7FD6 /* intents.cpython-314.pyc */ = {isa = PBXFileReference; path = "intents.cpython-314.pyc"; sourceTree = "<group>"; };
+		D249CAD3E55A993A999DBFCC /* findings_store.cpython-314.pyc */ = {isa = PBXFileReference; path = "findings_store.cpython-314.pyc"; sourceTree = "<group>"; };
+		D45E68340782F5F007892DD6 /* HelixError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixError.swift; sourceTree = "<group>"; };
+		D53E1F2E4B1B83A205C77CC3 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		D62E64CE1D0C8421D2023837 /* events.cpython-314.pyc */ = {isa = PBXFileReference; path = "events.cpython-314.pyc"; sourceTree = "<group>"; };
+		D8DFEC11A3D032E7512125F5 /* scanner_engine.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = scanner_engine.py; sourceTree = "<group>"; };
+		DAE4BE4441F9DFC8F214A793 /* db.cpython-314.pyc */ = {isa = PBXFileReference; path = "db.cpython-314.pyc"; sourceTree = "<group>"; };
+		DDCCBA134CDC97FD9293131E /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		DDF76038628B4759BC56910F /* db.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = db.py; sourceTree = "<group>"; };
+		DEC001345CC89ED6EDCE30DF /* reasoning.cpython-314.pyc */ = {isa = PBXFileReference; path = "reasoning.cpython-314.pyc"; sourceTree = "<group>"; };
+		E003B33558143CB62A682C80 /* __init__.cpython-314.pyc */ = {isa = PBXFileReference; path = "__init__.cpython-314.pyc"; sourceTree = "<group>"; };
+		E2FA0D788D05866622EE0AC8 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		E39E54A8E77B70A9C63A279F /* __main__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __main__.py; sourceTree = "<group>"; };
+		E5549490B93ADA5F137BB4EA /* fingerprinters.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = fingerprinters.py; sourceTree = "<group>"; };
+		E6594DDAB903101814E2F3E0 /* events.cpython-314.pyc */ = {isa = PBXFileReference; path = "events.cpython-314.pyc"; sourceTree = "<group>"; };
+		E663EAC7047A7566C3C5CD01 /* findings.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = findings.py; sourceTree = "<group>"; };
+		E6D485FA0552F7C9C143B131 /* headless_runner.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = headless_runner.py; sourceTree = "<group>"; };
+		EEDBC24687CA91BAF00EB599 /* modes.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = modes.py; sourceTree = "<group>"; };
+		F0A74B9821A4D64F18695D80 /* issues_store.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = issues_store.py; sourceTree = "<group>"; };
+		F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
+		F553F113B0D6BACCF2BCD419 /* reporting.cpython-314.pyc */ = {isa = PBXFileReference; path = "reporting.cpython-314.pyc"; sourceTree = "<group>"; };
+		F6B84D50490AF688ED9D0D88 /* blackbox.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = blackbox.py; sourceTree = "<group>"; };
+		F70472C699723AB6495F8C13 /* fingerprinters.cpython-314.pyc */ = {isa = PBXFileReference; path = "fingerprinters.cpython-314.pyc"; sourceTree = "<group>"; };
+		F7F6AAB636DE8DA05797C39F /* intents.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = intents.py; sourceTree = "<group>"; };
+		F8F480BF3C13AE79848D28FB /* behavioral.cpython-314.pyc */ = {isa = PBXFileReference; path = "behavioral.cpython-314.pyc"; sourceTree = "<group>"; };
+		F9FB440C385D723391031835 /* flow.cpython-314.pyc */ = {isa = PBXFileReference; path = "flow.cpython-314.pyc"; sourceTree = "<group>"; };
+		FB6A69187A8CC4F2CF894D49 /* risk.cpython-314.pyc */ = {isa = PBXFileReference; path = "risk.cpython-314.pyc"; sourceTree = "<group>"; };
+		FCB856214B94A6816FD88E4E /* __main__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __main__.py; sourceTree = "<group>"; };
+		FEBD4BFB76B48DD1736FC1FA /* ChatBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBubbleView.swift; sourceTree = "<group>"; };
+		FF202D55DF9F9DE0BC640D0E /* automator.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = automator.py; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		00D139BD55DE3822C0141BC0 /* Graph */ = {
+			isa = PBXGroup;
+			children = (
+				493C6711EF03532E783C01F1 /* GraphModels.swift */,
+				3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */,
+			);
+			path = Graph;
+			sourceTree = "<group>";
+		};
+		01E927E5B08617A4C9223EB6 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				2401786B3886E0846803AF9E /* __init__.cpython-314.pyc */,
+				F70472C699723AB6495F8C13 /* fingerprinters.cpython-314.pyc */,
+				911E80EF6C64B873C45C8CB0 /* normalizer.cpython-314.pyc */,
+				CB2D2D4426AF906F6B67EA1A /* raw_classifier.cpython-314.pyc */,
+				778AD29A68C44D34B64292D0 /* registry.cpython-314.pyc */,
+				1F58C864A60CD744EA72F52F /* tools.cpython-314.pyc */,
+				C8E10EBF5DE072E3B50A51C2 /* vuln_rules.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		09AD6E639C20242D2DD78B01 /* ai */ = {
+			isa = PBXGroup;
+			children = (
+				73820E94F4156D09A67693A9 /* ai_engine.py */,
+				6272797ACB7392A1C134CD56 /* reporting.py */,
+				37AF9A22F74299DBB9E08B52 /* strategy.py */,
+				7E9876A9EDFBD2EECE0AF5FD /* __pycache__ */,
+			);
+			path = ai;
+			sourceTree = "<group>";
+		};
+		1A693498905EC4EDE74A72B0 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				58466552B0906B21951240F1 /* HelixAppState.swift */,
+				7D47C9AABA588CA41003B700 /* SharedModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		23DC7C6AC9A8490DB2FC7C46 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				801140F23C2B7A556247D035 /* __init__.cpython-314.pyc */,
+				2ED6BEB8A3384D97CCDCB950 /* api.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		24F5E9B26CB0D2B64A0F4CDC /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				B963C62BD25C5629F8542AE3 /* __init__.cpython-314.pyc */,
+				04240E1A6936864F44A1656D /* blackbox.cpython-314.pyc */,
+				DAE4BE4441F9DFC8F214A793 /* db.cpython-314.pyc */,
+				4ADC6FF13E36BD00FF0E8C76 /* evidence_store.cpython-314.pyc */,
+				51EEB5D87FF5785F9648845D /* evidence.cpython-314.pyc */,
+				D249CAD3E55A993A999DBFCC /* findings_store.cpython-314.pyc */,
+				667971D59EAE38200FC4DB2D /* findings.cpython-314.pyc */,
+				BFB11520E700A5ADFFD36662 /* issues_store.cpython-314.pyc */,
+				10B1BCD900F15FD658B7A577 /* killchain_store.cpython-314.pyc */,
+				FB6A69187A8CC4F2CF894D49 /* risk.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		2BE62123C101D1A0E78E9AC3 = {
+			isa = PBXGroup;
+			children = (
+				F69478BB4593A2ED44797763 /* Core (Python) */,
+				A39ECB073AF93C27FA90F973 /* Sources */,
+				73F5367697371FAE0E7DD69E /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		2ED22F93AE256AD4D82D65AF /* analyze */ = {
+			isa = PBXGroup;
+			children = (
+				2651093820CEBB03A2D70FBF /* __init__.py */,
+			);
+			path = analyze;
+			sourceTree = "<group>";
+		};
+		30447CD7E185107CBFA92B4A /* toolkit */ = {
+			isa = PBXGroup;
+			children = (
+				1700304875D8168F48FBB66B /* __init__.py */,
+				E5549490B93ADA5F137BB4EA /* fingerprinters.py */,
+				27372657BEDA9C93B93634B8 /* installer.py */,
+				8FCE0221EE0DA83B58AC6047 /* normalizer.py */,
+				5A85970242CA08DC90CBC155 /* raw_classifier.py */,
+				0EDE6F5BBED24F93FDD549EA /* registry.py */,
+				687F4093845F7308043CD909 /* tool_base.py */,
+				1241F1B5459AEDE5F0AC8384 /* tool_callbacks.py */,
+				A4A9C94FDA0D5DBD93B62291 /* tools.py */,
+				73AF610567D7FBBDD349D19D /* vuln_rules.py */,
+				01E927E5B08617A4C9223EB6 /* __pycache__ */,
+				F901F49102F4EFEC9C5183B1 /* shims */,
+			);
+			path = toolkit;
+			sourceTree = "<group>";
+		};
+		394ED0ECAC940195A29FDF1F /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				91EAC89623D103333DB549AB /* __init__.cpython-314.pyc */,
+				62746D622CDEFB361DFF5519 /* automator.cpython-314.pyc */,
+				B4638F0008686C9FD7CF58F6 /* evasion.cpython-314.pyc */,
+				7DF72C8B8F4B916530DF309A /* mutator.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		3D70C96B8EF1CF802B05F1FC /* ghost */ = {
+			isa = PBXGroup;
+			children = (
+				D53E1F2E4B1B83A205C77CC3 /* __init__.py */,
+				3FE55ACA0EAAE23D91D906EE /* flow.py */,
+				0D7E4807BABA653C80207BDB /* lazarus.py */,
+				C78CEF0D4D0A8CC61FFFBAC9 /* logic.py */,
+				677F10FE95A2F0AEE5411BA9 /* proxy.py */,
+				F3D6C9BBFD07BDB0F820DC36 /* __pycache__ */,
+			);
+			path = ghost;
+			sourceTree = "<group>";
+		};
+		47686AF82049D529E08F45D3 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				2569FD3CDF297078C1886472 /* StatusComponents.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		4C560FB94DF3BDB0778909A9 /* base */ = {
+			isa = PBXGroup;
+			children = (
+				43CAF299D2C767AC4F54D1E6 /* __init__.py */,
+				4C537C7027AB162D105EB646 /* action_dispatcher.py */,
+				AC7223E38F172FFE16BD331A /* config.py */,
+				500C927FFE792DD3D88685B3 /* session.py */,
+				9BA1F31F23E094D034661328 /* task_router.py */,
+				E9886E1DECA76053953FFB21 /* __pycache__ */,
+			);
+			path = base;
+			sourceTree = "<group>";
+		};
+		52AD0E7DF7562CEA94A039BB /* scheduler */ = {
+			isa = PBXGroup;
+			children = (
+				58791A0E29590BA20785A191 /* decisions.py */,
+				C203CF9BCE09CD0ADE7B5200 /* events.py */,
+				F7F6AAB636DE8DA05797C39F /* intents.py */,
+				3FAA3ECFC6EAD1CC235D3400 /* laws.py */,
+				EEDBC24687CA91BAF00EB599 /* modes.py */,
+				44AE21637016336898AADE77 /* registry.py */,
+				7F810B739E37CAE666D58C1E /* strategos.py */,
+				8C0AF0556CD1B5FCCE5D71B3 /* __pycache__ */,
+			);
+			path = scheduler;
+			sourceTree = "<group>";
+		};
+		5321FAE8612DFB56299C84FA /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */,
+				BCE68CC8F07C4B289363C486 /* CortexStream.swift */,
+				AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */,
+				2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */,
+				F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */,
+				8318D0791A1940E626D7A7ED /* ModelRouter.swift */,
+				5F7C910B6EF70385F75EC7BA /* PTYClient.swift */,
+				81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		53BE894A7E95B1F3C2C86688 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				91BF7970424D7528CDAC4B1D /* __init__.cpython-314.pyc */,
+				7E0311D199B1D404ABE353F7 /* orchestrator.cpython-314.pyc */,
+				B003056E13148947822CFED3 /* pty_manager.cpython-314.pyc */,
+				6C2A588395A200645B70D638 /* runner.cpython-314.pyc */,
+				12D3B465BA7B5872650F6D69 /* scanner_engine.cpython-314.pyc */,
+				B9A4BBA7507C93B770997148 /* vanguard.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		56A52E9F52C45329C963F3DC /* fuzz */ = {
+			isa = PBXGroup;
+			children = (
+				E2FA0D788D05866622EE0AC8 /* __init__.py */,
+				3EFC86CDAE12610A883F7E27 /* module.py */,
+			);
+			path = fuzz;
+			sourceTree = "<group>";
+		};
+		58867EF83A8C2336B7A246F3 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				CDCA511AA067DDC5B60DCB13 /* __init__.cpython-314.pyc */,
+				6C19E1F9B392111B230F8116 /* errors.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		5F3DA0D8B483B48446528192 /* Scan */ = {
+			isa = PBXGroup;
+			children = (
+				BB064037D50A118943B7AB93 /* ActionRequestView.swift */,
+				B1614A34830DE729E55890F6 /* ScanControlView.swift */,
+			);
+			path = Scan;
+			sourceTree = "<group>";
+		};
+		60440DC14E3C92AFE4989274 /* Graph */ = {
+			isa = PBXGroup;
+			children = (
+				A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */,
+				71DA56ED4F2F3426B9E02034 /* NeuralGraphView.swift */,
+				B8394185D36FC0D1095C1111 /* Shaders.metal */,
+			);
+			path = Graph;
+			sourceTree = "<group>";
+		};
+		6D62B4193A773E1BAD71CACC /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				CDFBB4839094FFE984CC115D /* terminal */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		6DC2E7E523CC6A9FDC7E19BF /* chat */ = {
+			isa = PBXGroup;
+			children = (
+				B6FEA279A384B05F0EC4264B /* __init__.py */,
+				0EC2639058478529FA24DDE2 /* chat_engine.py */,
+				A2011A69F468B87334EBEF6F /* __pycache__ */,
+			);
+			path = chat;
+			sourceTree = "<group>";
+		};
+		6E35FFCCD0ED1AA9C8186290 /* contracts */ = {
+			isa = PBXGroup;
+			children = (
+				B4D6B327DA76A67F334A7C08 /* __init__.py */,
+				4791820366489F9C5F781238 /* events.py */,
+				837721AA4C46C4A216A910A3 /* __pycache__ */,
+			);
+			path = contracts;
+			sourceTree = "<group>";
+		};
+		7115829827195DDEDEEC93F7 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				70E8BE46F1B9E7EC07FAF2F9 /* arbitration.cpython-314.pyc */,
+				9AD955A951E44C8D4BCE3E80 /* authority.cpython-314.pyc */,
+				6DB4BCF1129801BFEDEBF6A1 /* correlator.cpython-314.pyc */,
+				200DE119E6F80856EDF0BBF8 /* event_store.cpython-314.pyc */,
+				8B37AC634D75D518725AB0FF /* events.cpython-314.pyc */,
+				73E6423F9E8E48F4ADC434C2 /* memory.cpython-314.pyc */,
+				489FF02A9E8A22F206137FED /* narrative_templates.cpython-314.pyc */,
+				3D23612B15D806C4B9280BD5 /* narrator.cpython-314.pyc */,
+				2D70FCB826C206B69BA3042B /* pathfinder.cpython-314.pyc */,
+				C78C578D73C81617788A2756 /* policy.cpython-314.pyc */,
+				DEC001345CC89ED6EDCE30DF /* reasoning.cpython-314.pyc */,
+				8E76FC2D8777B529B8576939 /* scanner_bridge.cpython-314.pyc */,
+				2BD85ACF1C113B439D6BB498 /* synapse.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		73F5367697371FAE0E7DD69E /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				24341BFC06FC18EE38977FFC /* SentinelForge.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		7B41ED2CB39FF224E40A0163 /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				CA1FB66EC2747EC1973D336E /* DashboardView.swift */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		7E9876A9EDFBD2EECE0AF5FD /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				C4515C74AE1B95825A7ECD9F /* ai_engine.cpython-314.pyc */,
+				F553F113B0D6BACCF2BCD419 /* reporting.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		837721AA4C46C4A216A910A3 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				9DB9D8F805D76FE3767F20D7 /* __init__.cpython-314.pyc */,
+				E6594DDAB903101814E2F3E0 /* events.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		8C0AF0556CD1B5FCCE5D71B3 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				4F49DDDB33421F36C54B2478 /* decisions.cpython-314.pyc */,
+				D62E64CE1D0C8421D2023837 /* events.cpython-314.pyc */,
+				CE9E99CA379009B87F2B7FD6 /* intents.cpython-314.pyc */,
+				866124867789FE885FCCD9CC /* laws.cpython-314.pyc */,
+				81A7C7F6269A34AB3AC98B61 /* modes.cpython-314.pyc */,
+				941C23FEFE6EEEA39508ACD5 /* registry.cpython-314.pyc */,
+				3A7354DAD1FF28FF41CCB18A /* strategos.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		8E37E1A2F740ACA3AD53F74A /* payloads */ = {
+			isa = PBXGroup;
+			children = (
+				B3897D1F377866CC934C8E79 /* __init__.py */,
+			);
+			path = payloads;
+			sourceTree = "<group>";
+		};
+		90ECDA881C023D824AE9620D /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				E003B33558143CB62A682C80 /* __init__.cpython-314.pyc */,
+				54F48BE2487BBC3AD88917BF /* async_helpers.cpython-314.pyc */,
+				3E1B97BF9E151945FBEF4FE5 /* observer.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		923A388476FFAC772259F690 /* utils */ = {
+			isa = PBXGroup;
+			children = (
+				5E78F4CD280650614497D804 /* __init__.py */,
+				15687D16F698DFDE2B093488 /* async_helpers.py */,
+				14B120CAA78D958C0F0E8CDE /* observer.py */,
+				90ECDA881C023D824AE9620D /* __pycache__ */,
+			);
+			path = utils;
+			sourceTree = "<group>";
+		};
+		96191CF3E18CD775F0AF4487 /* recon */ = {
+			isa = PBXGroup;
+			children = (
+				0601A36E1D3168AC2899A030 /* __init__.py */,
+				76B66B00C1BDA0623967A7AC /* behavioral.py */,
+				5A70BE118683FB9FFD8EF310 /* module.py */,
+				F9BA3511A07DEF520AE8C8C0 /* __pycache__ */,
+			);
+			path = recon;
+			sourceTree = "<group>";
+		};
+		A2011A69F468B87334EBEF6F /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				3858E63A09ADC9E394866A49 /* __init__.cpython-314.pyc */,
+				15E39DF4E7C6A9877B7BC8DB /* chat_engine.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		A39ECB073AF93C27FA90F973 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				13132A4BDB652874A328C71B /* SentinelForgeApp.swift */,
+				DEBA79A26D010D85820EF528 /* Core */,
+				60440DC14E3C92AFE4989274 /* Graph */,
+				1A693498905EC4EDE74A72B0 /* Models */,
+				6D62B4193A773E1BAD71CACC /* Resources */,
+				5321FAE8612DFB56299C84FA /* Services */,
+				D2F5FD7733DE5DF6B1387441 /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		A7E0CE63C0FDBA10A5B3357C /* data */ = {
+			isa = PBXGroup;
+			children = (
+				A0D1DB64AB76F4DED82C6DD3 /* __init__.py */,
+				F6B84D50490AF688ED9D0D88 /* blackbox.py */,
+				DDF76038628B4759BC56910F /* db.py */,
+				5B085505A5A45A0E0291F524 /* evidence_store.py */,
+				78FA45D609E431F76BB2F68E /* evidence.py */,
+				8097C02DC9CFF63EDABCC6FB /* findings_store.py */,
+				E663EAC7047A7566C3C5CD01 /* findings.py */,
+				F0A74B9821A4D64F18695D80 /* issues_store.py */,
+				11F52CD15226935B7563BF4C /* killchain_store.py */,
+				6E05D5FCE80DD1E839C3E3F2 /* risk.py */,
+				24F5E9B26CB0D2B64A0F4CDC /* __pycache__ */,
+			);
+			path = data;
+			sourceTree = "<group>";
+		};
+		AA0052D0AF4EF13CC90D13E4 /* forge */ = {
+			isa = PBXGroup;
+			children = (
+				9C08199AC411DE9994307E3E /* __init__.py */,
+				43A02CF85D025ACFE161712B /* compiler.py */,
+				BE3AB725A287B817718A0A40 /* sandbox.py */,
+				F4652B77BF1AB4A5EB0AA496 /* __pycache__ */,
+			);
+			path = forge;
+			sourceTree = "<group>";
+		};
+		ABF3011118C3208D743C9393 /* Report */ = {
+			isa = PBXGroup;
+			children = (
+				426219598E6076D786D8DAD8 /* ReportComposerView.swift */,
+			);
+			path = Report;
+			sourceTree = "<group>";
+		};
+		CBB201D7DEF1757F9F9AF0CC /* Navigation */ = {
+			isa = PBXGroup;
+			children = (
+				1269D7C35447A70FD8D1D9FB /* ChatView.swift */,
+				62409FA58DFFE1F4DBADB601 /* TerminalView.swift */,
+			);
+			path = Navigation;
+			sourceTree = "<group>";
+		};
+		CDFBB4839094FFE984CC115D /* terminal */ = {
+			isa = PBXGroup;
+			children = (
+				66511897847C968BFC7F8D7A /* index.html */,
+			);
+			path = terminal;
+			sourceTree = "<group>";
+		};
+		D2F5FD7733DE5DF6B1387441 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				FEBD4BFB76B48DD1736FC1FA /* ChatBubbleView.swift */,
+				B28396B11B909875C4B8BB20 /* MainWindowView.swift */,
+				C303CDE894C92523DAC01B0A /* ToolsBankView.swift */,
+				47686AF82049D529E08F45D3 /* Components */,
+				7B41ED2CB39FF224E40A0163 /* Dashboard */,
+				00D139BD55DE3822C0141BC0 /* Graph */,
+				CBB201D7DEF1757F9F9AF0CC /* Navigation */,
+				ABF3011118C3208D743C9393 /* Report */,
+				5F3DA0D8B483B48446528192 /* Scan */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		DDBB4AF5C244A8E6197667E0 /* engine */ = {
+			isa = PBXGroup;
+			children = (
+				6A0F0487AA1344C34822C8B6 /* __init__.py */,
+				876B38D7B6911B667D84E327 /* executor.py */,
+				E6D485FA0552F7C9C143B131 /* headless_runner.py */,
+				8F5003141D689A952DAD02EC /* orchestrator.py */,
+				66476C119C64C0040B985DD6 /* pty_manager.py */,
+				668983FEBD62BEF8A76F128F /* runner.py */,
+				6114ECFF7A9779D542E69D79 /* scan_orchestrator.py */,
+				D8DFEC11A3D032E7512125F5 /* scanner_engine.py */,
+				19E817DAC42FABBB08CE7A1B /* vanguard.py */,
+				53BE894A7E95B1F3C2C86688 /* __pycache__ */,
+			);
+			path = engine;
+			sourceTree = "<group>";
+		};
+		DEBA79A26D010D85820EF528 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				230001B3E6349D392B2FE004 /* AppReducer.swift */,
+				D45E68340782F5F007892DD6 /* HelixError.swift */,
+				1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		E0540929F16B05B46609A327 /* wraith */ = {
+			isa = PBXGroup;
+			children = (
+				13D70748232389C6C19AEB21 /* __init__.py */,
+				FF202D55DF9F9DE0BC640D0E /* automator.py */,
+				703C8C206CE0E17EE6FCD8AC /* evasion.py */,
+				01681F06B931927656095303 /* mutator.py */,
+				394ED0ECAC940195A29FDF1F /* __pycache__ */,
+			);
+			path = wraith;
+			sourceTree = "<group>";
+		};
+		E27DAB7BB1AB29562725396E /* server */ = {
+			isa = PBXGroup;
+			children = (
+				3B4E4C74FEFD7268A8D6255B /* __init__.py */,
+				C352CD6EBF12F96F51A3D13A /* api.py */,
+				C3CF75FBA6B917DC2558F738 /* tls.py */,
+				23DC7C6AC9A8490DB2FC7C46 /* __pycache__ */,
+			);
+			path = server;
+			sourceTree = "<group>";
+		};
+		E9886E1DECA76053953FFB21 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				6FA7B075EF9A9675D166AB01 /* __init__.cpython-314.pyc */,
+				6DF5117A40D96EE498AC3469 /* action_dispatcher.cpython-314.pyc */,
+				1518950F1EF9750DA7C416F3 /* config.cpython-314.pyc */,
+				322089AECE00DD6F6460DA8F /* session.cpython-314.pyc */,
+				44BD2C816EF187831EE34554 /* task_router.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		F1746C7FC4012C5E0B729BC0 /* cortex */ = {
+			isa = PBXGroup;
+			children = (
+				CCFA8C2B49A9B6ED732BDD81 /* arbitration.py */,
+				BE54BE9391A35CAC0897BE1C /* authority.py */,
+				1416F0819CEEC90B3D31954F /* correlator.py */,
+				4A482BE2BCA6C41C38D8D265 /* event_store.py */,
+				37966184A7F3724F97A88FD4 /* events.py */,
+				7AE31291576B1D65B177FC2C /* memory.py */,
+				29B323EF69DE10A80E699513 /* narrative_templates.py */,
+				06708AA3E65515CC76F6A14F /* narrator.py */,
+				2E914C0DB51F64AEBAC25117 /* pathfinder.py */,
+				2BDAEA68C5068C053F97CE68 /* policy.py */,
+				73D1E11B0DFE3EBF1D7C4A8C /* reasoning.py */,
+				2C53EE765C99959D6BBC5386 /* rules.yaml */,
+				3C9EF9C18D5BDB3CACD03A55 /* scanner_bridge.py */,
+				7001BD066A89CE8DDE42D246 /* synapse.py */,
+				7115829827195DDEDEEC93F7 /* __pycache__ */,
+			);
+			path = cortex;
+			sourceTree = "<group>";
+		};
+		F3D6C9BBFD07BDB0F820DC36 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				91603E64F224A3D03FE03ABE /* __init__.cpython-314.pyc */,
+				F9FB440C385D723391031835 /* flow.cpython-314.pyc */,
+				4327C044639D79985025AE64 /* logic.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		F4652B77BF1AB4A5EB0AA496 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				B875305BE3E70576BADE7092 /* __init__.cpython-314.pyc */,
+				AD945018CD80BA833EAEACB5 /* compiler.cpython-314.pyc */,
+				36991865C8C39C13229ECF2E /* sandbox.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+		F48F165A849D0BDA33633939 /* core */ = {
+			isa = PBXGroup;
+			children = (
+				1FA36BC9B6636D48D114FC3F /* __init__.py */,
+				FCB856214B94A6816FD88E4E /* __main__.py */,
+				995C171DE91EBFCBA3EC2CE1 /* errors.py */,
+				58867EF83A8C2336B7A246F3 /* __pycache__ */,
+				09AD6E639C20242D2DD78B01 /* ai */,
+				2ED22F93AE256AD4D82D65AF /* analyze */,
+				4C560FB94DF3BDB0778909A9 /* base */,
+				6DC2E7E523CC6A9FDC7E19BF /* chat */,
+				6E35FFCCD0ED1AA9C8186290 /* contracts */,
+				F1746C7FC4012C5E0B729BC0 /* cortex */,
+				A7E0CE63C0FDBA10A5B3357C /* data */,
+				DDBB4AF5C244A8E6197667E0 /* engine */,
+				AA0052D0AF4EF13CC90D13E4 /* forge */,
+				56A52E9F52C45329C963F3DC /* fuzz */,
+				3D70C96B8EF1CF802B05F1FC /* ghost */,
+				8E37E1A2F740ACA3AD53F74A /* payloads */,
+				96191CF3E18CD775F0AF4487 /* recon */,
+				52AD0E7DF7562CEA94A039BB /* scheduler */,
+				E27DAB7BB1AB29562725396E /* server */,
+				30447CD7E185107CBFA92B4A /* toolkit */,
+				923A388476FFAC772259F690 /* utils */,
+				E0540929F16B05B46609A327 /* wraith */,
+			);
+			name = core;
+			path = ../core;
+			sourceTree = "<group>";
+		};
+		F69478BB4593A2ED44797763 /* Core (Python) */ = {
+			isa = PBXGroup;
+			children = (
+				F48F165A849D0BDA33633939 /* core */,
+			);
+			name = "Core (Python)";
+			sourceTree = "<group>";
+		};
+		F901F49102F4EFEC9C5183B1 /* shims */ = {
+			isa = PBXGroup;
+			children = (
+				DDCCBA134CDC97FD9293131E /* __init__.py */,
+				E39E54A8E77B70A9C63A279F /* __main__.py */,
+				83118F079ADB762892AE9F66 /* httpx.py */,
+				6A26C992F7F81303193E0C1F /* nmap.py */,
+				BDC57F974D2ECE137DE85415 /* subfinder.py */,
+			);
+			path = shims;
+			sourceTree = "<group>";
+		};
+		F9BA3511A07DEF520AE8C8C0 /* __pycache__ */ = {
+			isa = PBXGroup;
+			children = (
+				63B06E878B047E4BC0FA98BE /* __init__.cpython-314.pyc */,
+				F8F480BF3C13AE79848D28FB /* behavioral.cpython-314.pyc */,
+			);
+			path = __pycache__;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		78EB87E2AC973F5EBBEE1BD3 /* SentinelForge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7165F87375CBF309E67E885C /* Build configuration list for PBXNativeTarget "SentinelForge" */;
+			buildPhases = (
+				CB9FFD703B4BAC6EAC174D59 /* Sources */,
+				30A2FDD4CFFCE3811B71471E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SentinelForge;
+			packageProductDependencies = (
+			);
+			productName = SentinelForge;
+			productReference = 24341BFC06FC18EE38977FFC /* SentinelForge.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7625DDA0D8E32C089687270D /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					78EB87E2AC973F5EBBEE1BD3 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = ABB82D16F30F1E2E0B442F89 /* Build configuration list for PBXProject "SentinelForge" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 2BE62123C101D1A0E78E9AC3;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				78EB87E2AC973F5EBBEE1BD3 /* SentinelForge */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		30A2FDD4CFFCE3811B71471E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B4BB52D55A287ED8069CD66A /* index.html in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CB9FFD703B4BAC6EAC174D59 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A96E61E2762FD4FD4E275E4B /* ActionRequestView.swift in Sources */,
+				AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */,
+				FD713260357E395BCDCB0682 /* BackendManager.swift in Sources */,
+				250D8E25220B3AB535717493 /* ChatBubbleView.swift in Sources */,
+				C4EDBDE9C6812EFA33977B44 /* ChatView.swift in Sources */,
+				B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */,
+				4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */,
+				A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */,
+				C94EFAA35A0D3B712FC57FB6 /* GenerateModels.swift in Sources */,
+				C4EAE38493520E1B56033FEE /* GraphModels.swift in Sources */,
+				F1D02E19B9E5B252F227CA09 /* GraphRenderer.swift in Sources */,
+				0D5D3E555E784A70305E042C /* HelixAppState.swift in Sources */,
+				BA612DD4500BA86414972F25 /* HelixError.swift in Sources */,
+				84565490131B06C520A4801A /* LLMService.swift in Sources */,
+				120436A0BDDDBF24C31F8D30 /* MainWindowView.swift in Sources */,
+				5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */,
+				9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */,
+				23885C7C1426DA781B5E460F /* NeuralGraphView.swift in Sources */,
+				9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */,
+				65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */,
+				E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */,
+				AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */,
+				14F802FA073267C118AFB865 /* SentinelAPIClient.swift in Sources */,
+				BE954D7AE0662CD4A638C666 /* SentinelForgeApp.swift in Sources */,
+				80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */,
+				2F3DA20D5D2C21A0200A21C9 /* SharedModels.swift in Sources */,
+				854DB144D784ECD29694882E /* StatusComponents.swift in Sources */,
+				74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */,
+				B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4D54E480A64E462BD66A4709 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sentinel.SentinelForge;
+				PRODUCT_NAME = SentinelForge;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		6703269B016ABDA4D0775DBA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sentinel.SentinelForge;
+				PRODUCT_NAME = SentinelForge;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		DED2496B2FA01707D6E07D6C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		F1A80BD8AD5380574E05B917 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		7165F87375CBF309E67E885C /* Build configuration list for PBXNativeTarget "SentinelForge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6703269B016ABDA4D0775DBA /* Debug */,
+				4D54E480A64E462BD66A4709 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		ABB82D16F30F1E2E0B442F89 /* Build configuration list for PBXProject "SentinelForge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DED2496B2FA01707D6E07D6C /* Debug */,
+				F1A80BD8AD5380574E05B917 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 7625DDA0D8E32C089687270D /* Project object */;
+}
