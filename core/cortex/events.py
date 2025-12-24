@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import List, Dict, Any, Callable, Optional
+from typing import List, Dict, Any, Callable, Optional, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
+
+if TYPE_CHECKING:
+    from core.cortex.event_store import EventStore
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +48,11 @@ class EventBus:
     """
     Synchronous Event Bus for strategic observability.
     """
-    def __init__(self):
+    def __init__(self, event_store: Optional["EventStore"] = None):
         """Function __init__."""
         self._subscribers: List[Callable[[GraphEvent], None]] = []
+        if event_store is not None:
+            self.subscribe(event_store.append)
 
     def subscribe(self, callback: Callable[[GraphEvent], None]):
         """Function subscribe."""

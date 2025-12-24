@@ -216,7 +216,6 @@ async def install_tool(name: str) -> Dict[str, str]:
             chain.append((last_op, current_segment))
 
         # Execute chain
-        strategy_success = False
         chain_output = []
         
         # Track overall success of the chain. 
@@ -296,8 +295,6 @@ async def install_tool(name: str) -> Dict[str, str]:
                 installation_log.append(f"  ⊗ Exe Error: {cmd_pretty} -> {e}")
 
         # Final checks
-        output = "\n".join(chain_output)[-800:]
-        
         # Check if the strategy as a whole 'succeeded'.
         # If the last executed command succeeded, we consider it a success?
         # Or should we be stricter? 

@@ -22,7 +22,6 @@ from core.scheduler.intents import (
     INTENT_PASSIVE_RECON,
     INTENT_ACTIVE_LIVE_CHECK,
     INTENT_SURFACE_ENUMERATION,
-    INTENT_PARAMETER_FUZZING,
     INTENT_VULN_SCANNING,
     INTENT_HEAVY_ARTILLERY
 )
@@ -224,7 +223,7 @@ class ToolRegistry:
         """
         Get tool definition, applying Mode Overlay if present.
         """
-        from core.scheduler.modes import ModeRegistry, ToolOverlay
+        from core.scheduler.modes import ModeRegistry
         
         base = cls.METADATA.get(tool_name, {
             "phase": 99, 

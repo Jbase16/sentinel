@@ -18,7 +18,7 @@ It knows the state of the Knowledge Graph.
 """
 
 import json
-from typing import Dict, List, Any
+from typing import Dict, Any
 from core.ai.ai_engine import AIEngine
 from core.cortex.memory import KnowledgeGraph, NodeType
 from core.data.findings_store import findings_store

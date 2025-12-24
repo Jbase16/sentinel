@@ -8,4 +8,3 @@
 # This is just a convenience re-export. All the real logic is in findings_store.py.
 #
 
-from core.data.findings_store import findings_store

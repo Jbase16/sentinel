@@ -11,7 +11,7 @@
 import asyncio
 import json
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from typing import List, Optional, AsyncIterator, Tuple
 from collections import deque
 import threading
@@ -29,6 +29,16 @@ class StoredEvent:
     """
     sequence: int
     event: GraphEvent
+    
+    @property
+    def type(self):
+        """Expose underlying event type for convenience/testing."""
+        return self.event.type
+
+    @property
+    def payload(self):
+        """Expose underlying event payload for convenience/testing."""
+        return self.event.payload
 
     def to_json(self) -> str:
         """Serialize for SSE transmission. Matches Swift GraphEvent structure."""
@@ -64,9 +74,10 @@ class EventStore:
     2. `get_since(N)` returns exactly events with sequence > N.
     3. Subscriber notification is loop-safe across sync/async boundaries.
     """
-    def __init__(self, max_size: int = 5000):
+    def __init__(self, max_size: int = 5000, max_events: Optional[int] = None):
         """Function __init__."""
-        self._events: deque[StoredEvent] = deque(maxlen=max_size)
+        maxlen = max_events if max_events is not None else max_size
+        self._events: deque[StoredEvent] = deque(maxlen=maxlen)
         self._lock = threading.RLock()
         self._sequence: int = 0
         
@@ -76,6 +87,12 @@ class EventStore:
         
         # Auto-wire: Subscribe to the bus immediately
         get_event_bus().subscribe(self.append)
+
+    def clear(self) -> None:
+        """Reset stored events and sequence counter (primarily for tests)."""
+        with self._lock:
+            self._events.clear()
+            self._sequence = 0
 
     def append(self, event: GraphEvent) -> StoredEvent:
         """
@@ -110,6 +127,13 @@ class EventStore:
             
             # Filter: only events with sequence > since
             return [e for e in self._events if e.sequence > since_sequence], truncated
+
+    def get_latest(self, count: int = 100) -> List[StoredEvent]:
+        """Return the most recent events up to `count`."""
+        with self._lock:
+            if count <= 0:
+                return []
+            return list(self._events)[-count:]
 
     async def subscribe(self) -> AsyncIterator[StoredEvent]:
         """

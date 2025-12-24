@@ -98,6 +98,6 @@ class RiskPolicy(Policy):
         
         # Conditional branch.
         if mode == "passive" and tool_risk in ["high", "critical"]:
-             return Judgment(Verdict.VETO, self.name, f"High risk tool blocked in PASSIVE mode.")
+             return Judgment(Verdict.VETO, self.name, "High risk tool blocked in PASSIVE mode.")
              
         return Judgment(Verdict.APPROVE, self.name, "Risk Level Acceptable")

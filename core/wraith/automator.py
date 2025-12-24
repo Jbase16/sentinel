@@ -21,7 +21,6 @@ import logging
 import asyncio
 from typing import Dict
 from core.base.session import ScanSession
-from core.base.action_dispatcher import ActionDispatcher
 
 logger = logging.getLogger(__name__)
 

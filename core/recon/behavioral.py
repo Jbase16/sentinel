@@ -22,7 +22,6 @@ import os
 import shutil
 import time
 import hashlib
-import socket
 import ssl
 import statistics
 import urllib.request

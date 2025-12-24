@@ -36,8 +36,8 @@ import json
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Callable, Dict, Iterable, List, Tuple
-from core.toolkit.fingerprinters import ContentHasher, FaviconHasher
+from typing import Callable, Dict, List, Tuple
+from core.toolkit.fingerprinters import ContentHasher
 
 ManagementPortMap = {
     22: "SSH",

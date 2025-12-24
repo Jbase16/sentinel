@@ -39,5 +39,5 @@
 # - **SPA (Single Page Application)**: JavaScript-heavy web apps
 #
 
-from .evasion import WraithEngine
-from .mutator import PayloadMutator
+from .evasion import WraithEngine as WraithEngine
+from .mutator import PayloadMutator as PayloadMutator

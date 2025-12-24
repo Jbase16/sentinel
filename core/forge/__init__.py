@@ -31,5 +31,5 @@
 # - **Proof-of-Concept**: Demonstrates vulnerability without causing harm
 #
 
-from .compiler import ExploitCompiler
-from .sandbox import SandboxRunner
+from .compiler import ExploitCompiler as ExploitCompiler
+from .sandbox import SandboxRunner as SandboxRunner

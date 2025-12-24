@@ -107,7 +107,7 @@ def fire_and_forget(coro: Coroutine[Any, Any, Any], name: Optional[str] = None) 
     """
     # Error handling block.
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
         create_safe_task(coro, name=name)
     except RuntimeError:
         # No running event loop - try to run in new loop

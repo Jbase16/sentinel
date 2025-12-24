@@ -16,8 +16,7 @@ except ImportError:
     mmh3 = None
 import codecs
 import hashlib
-import re
-from typing import List, Optional
+from typing import Optional
 
 class Fingerprinter:
     """Base class for all fingerprint sensors."""

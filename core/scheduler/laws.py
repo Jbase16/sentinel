@@ -66,7 +66,6 @@ class Law3_EvidenceGates(Law):
             
         # Context.knowledge is a Dict
         knowledge = getattr(context, "knowledge", {}) or {}
-        mode = knowledge.get("mode", None)
         
         # Build the active tag set from context + knowledge.
         tags: set[str] = set()

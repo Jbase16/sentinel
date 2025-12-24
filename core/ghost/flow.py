@@ -17,7 +17,7 @@ The Session & Flow Tracker.
 "Ghost observes the user to learn the rules before breaking them."
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 import uuid
 import time
 

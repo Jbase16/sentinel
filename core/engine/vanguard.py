@@ -1,13 +1,11 @@
 """Module vanguard: inline documentation for /Users/jason/Developer/sentinelforge/core/engine/vanguard.py."""
 
-import asyncio
 import logging
 import shutil
-import os
 import sys
-from typing import List, Dict, Set
+from typing import List
 
-from core.toolkit.tools import TOOLS, get_tool_command, get_installed_tools
+from core.toolkit.tools import get_installed_tools
 
 logger = logging.getLogger(__name__)
 

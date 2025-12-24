@@ -36,5 +36,5 @@
 # - **Mass Assignment**: Modifying object properties through API
 #
 
-from .flow import FlowMapper, UserFlow
-from .logic import LogicFuzzer
+from .flow import FlowMapper as FlowMapper, UserFlow as UserFlow
+from .logic import LogicFuzzer as LogicFuzzer
