@@ -425,11 +425,19 @@ async def shutdown_event():
 
 def setup_cors():
     """Function setup_cors."""
-    # config = get_config()
-    # Simplified CORS for dev
+    # Localhost origins for local development
+    # Production deployments should configure this via environment
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8080",
+        "tauri://localhost",  # For Tauri apps
+        "https://localhost",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], # For local dev simplicity
+        allow_origins=allowed_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

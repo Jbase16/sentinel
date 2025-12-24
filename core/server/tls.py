@@ -138,11 +138,13 @@ class TLSAnalyzer:
         results = {}
         # Map of versions to test
         # Note: Python's ssl module support depends on OpenSSL version
+        # nosemgrep: python.lang.security.audit.weak-ssl-version.weak-ssl-version
+        # Note: We intentionally test for weak TLS versions to detect vulnerable servers
         versions = [
-            ("TLSv1", ssl.PROTOCOL_TLSv1 if hasattr(ssl, "PROTOCOL_TLSv1") else None),
-            ("TLSv1.1", ssl.PROTOCOL_TLSv1_1 if hasattr(ssl, "PROTOCOL_TLSv1_1") else None),
+            ("TLSv1", ssl.PROTOCOL_TLSv1 if hasattr(ssl, "PROTOCOL_TLSv1") else None),  # nosemgrep
+            ("TLSv1.1", ssl.PROTOCOL_TLSv1_1 if hasattr(ssl, "PROTOCOL_TLSv1_1") else None),  # nosemgrep
             ("TLSv1.2", ssl.PROTOCOL_TLSv1_2),
-            ("TLSv1.3", ssl.PROTOCOL_TLS_CLIENT), # TLS 1.3 is negotiated via TLS_CLIENT/TLS_SERVER usually
+            ("TLSv1.3", ssl.PROTOCOL_TLS_CLIENT),
         ]
 
         loop = asyncio.get_running_loop()

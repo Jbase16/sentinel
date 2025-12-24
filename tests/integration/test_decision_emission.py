@@ -16,7 +16,7 @@ from typing import List, Dict
 from core.scheduler.strategos import Strategos, ScanContext
 from core.scheduler.modes import ScanMode
 from core.scheduler.decisions import DecisionLedger, DecisionType
-from core.cortex.events import EventBus, GraphEventType
+from core.cortex.events import EventBus, GraphEventType, get_event_bus
 from core.cortex.event_store import EventStore
 from core.scheduler.intents import (
     INTENT_PASSIVE_RECON,
@@ -30,15 +30,15 @@ from core.scheduler.intents import (
 @pytest.fixture
 def event_store():
     """Fresh EventStore for each test."""
-    store = EventStore(max_events=1000)
+    store = EventStore(max_size=1000)
     store.clear()
     return store
 
 
 @pytest.fixture
-def event_bus(event_store):
-    """EventBus connected to test EventStore."""
-    return EventBus(event_store)
+def event_bus():
+    """EventBus singleton for tests."""
+    return get_event_bus()
 
 
 @pytest.fixture

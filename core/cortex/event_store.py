@@ -152,6 +152,12 @@ class EventStore:
             except Exception as e:
                 logger.debug(f"[EventStore] Failed to notify subscriber: {e}")
 
+    def clear(self) -> None:
+        """Clear all stored events. Useful for testing."""
+        with self._lock:
+            self._events.clear()
+            self._sequence = 0
+
     def stats(self) -> dict:
         """Function stats."""
         # Context-managed operation.

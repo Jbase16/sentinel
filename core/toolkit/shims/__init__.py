@@ -75,6 +75,12 @@ def _ensure_url(raw: str) -> str:
 
 def _safe_request(url: str, method: str = "GET", data: bytes | None = None, headers: Dict[str, str] | None = None, timeout: int = 15, allow_insecure: bool = True) -> Tuple[int | None, str, Dict[str, str]]:
     """Function _safe_request."""
+    # Security: Only allow http/https schemes to prevent file:// attacks
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        print(f"[shim] rejected unsafe URL scheme: {parsed.scheme}", file=sys.stderr)
+        return None, "", {}
+
     req = urllib.request.Request(url, method=method)
     hdrs = headers or {}
     hdrs.setdefault("User-Agent", "AraUltra-Shim/1.0")
@@ -90,6 +96,8 @@ def _safe_request(url: str, method: str = "GET", data: bytes | None = None, head
         context = ssl.create_default_context()
     # Error handling block.
     try:
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
+        # URL scheme validated above (http/https only)
         with urllib.request.urlopen(req, data=data, timeout=timeout, context=context) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
             out_headers = {k.lower(): v for k, v in resp.headers.items()}
