@@ -112,7 +112,8 @@ class OllamaClient:
                         return
 
                     for line in response.iter_lines():
-                        if not line: continue
+                        if not line:
+                            continue
                         try:
                             chunk = json.loads(line)
                             if "response" in chunk:

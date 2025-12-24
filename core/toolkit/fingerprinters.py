@@ -10,7 +10,10 @@
 # 3. CertSerial: Extracts SSL certificate serial numbers.
 #
 
-import mmh3
+try:
+    import mmh3
+except ImportError:
+    mmh3 = None
 import codecs
 import hashlib
 import re
@@ -77,6 +80,8 @@ class FaviconHasher(Fingerprinter):
         b64 = codecs.encode(content_bytes, "base64")
         # MMH3 hash of the base64 string
         # Note: mmh3.hash() returns 32-bit int
+        if mmh3 is None:
+            return "0" # Fallback or raise error? Returning 0 to avoid crash if dependency missing.
         return str(mmh3.hash(b64))
 
 class CertFingerprinter(Fingerprinter):

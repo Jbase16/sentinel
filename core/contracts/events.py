@@ -94,7 +94,7 @@ class FieldSpec:
         # Type check (allow subclasses)
         if not isinstance(value, self.type):
             # Special case: int is valid for float fields
-            if self.type == float and isinstance(value, (int, float)):
+            if self.type is float and isinstance(value, (int, float)):
                 pass
             else:
                 return False

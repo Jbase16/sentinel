@@ -40,7 +40,7 @@ from core.base.config import get_config, setup_logging
 from core.ai.ai_engine import AIEngine
 from core.base.task_router import TaskRouter
 from core.cortex.reasoning import ReasoningEngine, reasoning_engine
-from core.cortex.events import GraphEventType
+from core.cortex.events import GraphEventType, get_event_bus, GraphEvent
 from core.wraith.evasion import WraithEngine
 from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
@@ -137,7 +137,7 @@ _cancel_requested = threading.Event()
 _active_scan_task: Optional[asyncio.Task] = None
 _scan_lock = asyncio.Lock()
 
-from core.cortex.events import get_event_bus, GraphEventType
+# from core.cortex.events import get_event_bus, GraphEventType  <-- Moved to top
 from core.cortex.event_store import get_event_store
 
 # Initialize Store (which auto-subscribes to Bus)

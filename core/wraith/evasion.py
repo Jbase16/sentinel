@@ -118,7 +118,8 @@ class WraithEngine:
         Detects WAF signatures in response.
         """
         # Conditional branch.
-        if not response: return True
+        if not response:
+            return True
         
         # Status Codes
         if response.status_code in [403, 406, 500]: # 500 can sometimes indicate WAF filter crash or block

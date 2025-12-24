@@ -784,15 +784,20 @@ class Strategos:
     def _get_phase_for_intent(self, intent: str) -> int:
         """Map intent to numeric phase for compatibility with existing phase tracking."""
         # Conditional branch.
-        if intent == INTENT_PASSIVE_RECON: return PHASE_1_PASSIVE
+        if intent == INTENT_PASSIVE_RECON:
+            return PHASE_1_PASSIVE
         # Conditional branch.
-        if intent == INTENT_ACTIVE_LIVE_CHECK: return PHASE_2_LIGHT
+        if intent == INTENT_ACTIVE_LIVE_CHECK:
+            return PHASE_2_LIGHT
         # Conditional branch.
-        if intent == INTENT_SURFACE_ENUMERATION: return PHASE_3_SURFACE
+        if intent == INTENT_SURFACE_ENUMERATION:
+            return PHASE_3_SURFACE
         # Conditional branch.
-        if intent == INTENT_VULN_SCANNING: return PHASE_4_DEEP
+        if intent == INTENT_VULN_SCANNING:
+            return PHASE_4_DEEP
         # Conditional branch.
-        if intent == INTENT_HEAVY_ARTILLERY: return PHASE_5_HEAVY
+        if intent == INTENT_HEAVY_ARTILLERY:
+            return PHASE_5_HEAVY
         return 0
     
     def _get_available_intents(self, current_intent: str, mode: ScanMode) -> List[str]:

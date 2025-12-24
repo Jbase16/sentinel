@@ -502,7 +502,8 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
     # httpx -json output contains rich data including hash, body, techs
     for line in output.splitlines():
         line = line.strip()
-        if not line: continue
+        if not line:
+            continue
         
         try:
             if line.startswith("{"):
@@ -529,8 +530,10 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
                     metadata["simhash"] = ContentHasher.simhash(body)
                 
                 severity = "INFO"
-                if status >= 500: severity = "HIGH"
-                elif status >= 400: severity = "MEDIUM"
+                if status >= 500:
+                    severity = "HIGH"
+                elif status >= 400:
+                    severity = "MEDIUM"
                 
                 findings.append(RawFinding(
                     type="HTTP Endpoint",
@@ -577,7 +580,8 @@ def _handle_httpx(target: str, output: str) -> List[RawFinding]:
             continue
         
         # Double check it wasn't valid JSON that failed to parse (unlikely if startswith http)
-        if clean.startswith("{"): continue 
+        if clean.startswith("{"):
+            continue 
         
         match = pattern.match(clean)
         if not match:
