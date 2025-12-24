@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import threading
 import time
 from collections import defaultdict
@@ -28,7 +27,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -39,8 +38,9 @@ from pydantic import BaseModel, Field, validator
 from core.base.config import get_config, setup_logging
 from core.ai.ai_engine import AIEngine
 from core.base.task_router import TaskRouter
-from core.cortex.reasoning import ReasoningEngine, reasoning_engine
+from core.cortex.reasoning import reasoning_engine
 from core.cortex.events import GraphEventType, get_event_bus, GraphEvent
+from core.cortex.event_store import get_event_store
 from core.wraith.evasion import WraithEngine
 from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
@@ -50,7 +50,7 @@ from core.base.action_dispatcher import ActionDispatcher
 from core.ai.reporting import ReportComposer
 from core.engine.pty_manager import PTYManager
 from core.data.db import Database
-from core.errors import SentinelError, ErrorCode, handle_error
+from core.errors import SentinelError, ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ _active_scan_task: Optional[asyncio.Task] = None
 _scan_lock = asyncio.Lock()
 
 # from core.cortex.events import get_event_bus, GraphEventType  <-- Moved to top
-from core.cortex.event_store import get_event_store
+# from core.cortex.events import get_event_bus, GraphEventType  <-- Moved to top (already done)
+# from core.cortex.event_store import get_event_store <-- moved to top manually
 
 # Initialize Store (which auto-subscribes to Bus)
 _ = get_event_store()
@@ -424,7 +425,7 @@ async def shutdown_event():
 
 def setup_cors():
     """Function setup_cors."""
-    config = get_config()
+    # config = get_config()
     # Simplified CORS for dev
     app.add_middleware(
         CORSMiddleware,

@@ -18,8 +18,7 @@ The Autonomous Evasion Loop.
 """
 
 import logging
-import asyncio
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 from core.wraith.mutator import PayloadMutator
 from core.cortex.synapse import Synapse # Use the brain on standby
 
@@ -110,7 +109,7 @@ class WraithEngine:
             target_url = f"{url}?q={payload}"
             resp = await client.get(target_url) 
             return resp
-        except Exception as e:
+        except Exception:
             return None
 
     def _is_blocked(self, response) -> bool:

@@ -1,6 +1,6 @@
 
 from enum import Enum
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 class NodeType(Enum):
     ASSET = "asset"

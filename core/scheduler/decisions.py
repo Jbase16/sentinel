@@ -49,7 +49,7 @@ import time
 import uuid
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Callable, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from enum import Enum
 from collections import deque
 from contextlib import contextmanager

@@ -17,14 +17,11 @@
 
 import os
 import pty
-import select
-import subprocess
 import struct
 import fcntl
 import termios
-import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

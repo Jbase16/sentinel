@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from core.scheduler.decisions import DecisionPoint
 from core.cortex.policy import Policy, Judgment, Verdict

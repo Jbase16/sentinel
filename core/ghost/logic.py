@@ -18,8 +18,8 @@ The Business Logic Fuzzer.
 """
 
 import logging
-from typing import List, Dict, Any
-from core.ghost.flow import UserFlow, FlowStep
+from typing import List, Dict
+from core.ghost.flow import UserFlow
 
 logger = logging.getLogger(__name__)
 

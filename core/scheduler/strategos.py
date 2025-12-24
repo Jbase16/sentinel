@@ -44,7 +44,7 @@ from core.scheduler.intents import (
     INTENT_VULN_SCANNING,
     INTENT_HEAVY_ARTILLERY
 )
-from core.scheduler.events import ToolStartedEvent, ToolCompletedEvent, MissionTerminatedEvent
+from core.scheduler.events import ToolCompletedEvent, MissionTerminatedEvent
 from core.cortex.events import EventBus
 from core.scheduler.decisions import (
     DecisionContext,
@@ -53,7 +53,6 @@ from core.scheduler.decisions import (
     DecisionPoint,
     create_decision_context
 )
-from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.policy import ScopePolicy, RiskPolicy, Verdict
 
@@ -220,7 +219,7 @@ class Strategos:
                 new_phase = self._get_phase_for_intent(current_intent)
                 if new_phase != self.context.phase_index:
                     # Emit phase transition as specialized decision
-                    phase_decision = self._decision_ctx.choose(
+                    self._decision_ctx.choose(
                         decision_type=DecisionType.PHASE_TRANSITION,
                         chosen=f"PHASE_{new_phase}",
                         reason=f"Intent {current_intent} requires phase {new_phase}",

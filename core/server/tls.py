@@ -18,13 +18,11 @@ import socket
 import asyncio
 import logging
 import datetime
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 
-import httpx
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, ec, dsa
 from curl_cffi import requests as curl_requests
 
 logger = logging.getLogger(__name__)
