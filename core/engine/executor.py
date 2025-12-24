@@ -17,6 +17,7 @@ import threading
 import uuid
 import queue
 import time
+import shlex
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Dict, Any
 
@@ -88,11 +89,14 @@ class ExecutionEngine:
                 continue
 
             try:
+                # Security: Use shell=False and split command string
+                cmd_args = shlex.split(task.command) if isinstance(task.command, str) else task.command
+                
                 proc = subprocess.Popen(
-                    task.command,
+                    cmd_args,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    shell=True,
+                    shell=False,
                     text=True
                 )
                 self.active_tasks[task.task_id] = proc
