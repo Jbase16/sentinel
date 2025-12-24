@@ -158,6 +158,21 @@ class EventStore:
             self._events.clear()
             self._sequence = 0
 
+    def get_latest(self, count: int = 100) -> List[GraphEvent]:
+        """
+        Get the latest N events (unwrapped GraphEvents for test convenience).
+
+        Args:
+            count: Maximum number of events to return
+
+        Returns:
+            List of GraphEvent objects (not StoredEvent wrappers)
+        """
+        with self._lock:
+            # Get the last `count` stored events and unwrap them
+            stored = list(self._events)[-count:] if self._events else []
+            return [s.event for s in stored]
+
     def stats(self) -> dict:
         """Function stats."""
         # Context-managed operation.

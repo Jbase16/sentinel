@@ -96,9 +96,9 @@ def _safe_request(url: str, method: str = "GET", data: bytes | None = None, head
         context = ssl.create_default_context()
     # Error handling block.
     try:
-        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected
-        # URL scheme validated above (http/https only)
-        with urllib.request.urlopen(req, data=data, timeout=timeout, context=context) as resp:
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+        # URL scheme validated above (http/https only) - only http/https allowed
+        with urllib.request.urlopen(req, data=data, timeout=timeout, context=context) as resp:  # nosemgrep
             body = resp.read().decode("utf-8", errors="ignore")
             out_headers = {k.lower(): v for k, v in resp.headers.items()}
             return resp.status, body, out_headers
