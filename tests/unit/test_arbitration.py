@@ -1,6 +1,11 @@
 """Module test_arbitration: inline documentation for /Users/jason/Developer/sentinelforge/tests/unit/test_arbitration.py."""
 import pytest
+import sys
+import os
 from typing import Dict, Any
+
+# Ensure core module is importable
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from core.cortex.policy import Policy, Judgment, Verdict
 from core.cortex.arbitration import ArbitrationEngine

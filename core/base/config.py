@@ -440,3 +440,6 @@ AI_PROVIDER = _cfg.ai.provider  # Extract provider string for old imports
 OLLAMA_URL = _cfg.ai.ollama_url  # Extract URL for old imports
 AI_MODEL = _cfg.ai.model  # Extract model name for old imports
 AI_FALLBACK_ENABLED = _cfg.ai.fallback_enabled  # Extract fallback flag for old imports
+    
+# Compatibility Alias
+AppConfig = SentinelConfig
