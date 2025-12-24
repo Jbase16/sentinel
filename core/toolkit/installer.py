@@ -208,7 +208,7 @@ async def install_tool(name: str) -> Dict[str, str]:
             if part in ("&&", "||"):
                 if current_segment:
                     chain.append((last_op, current_segment))
-                    current_segment = []
+                    current_segment = List[str] = []
                 last_op = part
             else:
                 current_segment.append(part)
@@ -325,12 +325,24 @@ async def install_tool(name: str) -> Dict[str, str]:
                 stderr=asyncio.subprocess.PIPE
             )
             await asyncio.wait_for(verify_proc.communicate(), timeout=5.0)
-        except asyncio.TimeoutError:
-            pass
-        except Exception as verify_err:
-            installation_log.append(f"  ⚠ Verification warning: {verify_err}")
+            if verify_proc.returncode != 0:
+             last_error = f"Verification failed: '{expected_binary} {' '.join(verify_cmd)}' returned {verify_proc.returncode}"
+             installation_log.append(f"  ⊗ Verification failed: {last_error}")
+             continue   # Try next strategy         
         
-        installation_log.append(f"  ✓ Success: '{expected_binary}' installed")
+        
+        except asyncio.TimeoutError:
+            last_error = f"Verification timed out for '{expected_binary}'"
+            installation_log.append(f"  ⊗ {last_error}")
+            continue # Try next strategy
+        
+        except Exception as verify_err:
+            last_error = f"Verification error: {verify_err}"
+            installation_log.append(f"  ⊗ {last_error}")
+            continue # Try next strategy
+        
+        # Only reach here if verification ACTUALLY passed.
+        installation_log.append(f"  ✓ Success: '{expected_binary}' installed and verified")
         
         if TaskRouter:
             try:
@@ -368,11 +380,13 @@ async def uninstall_tool(name: str) -> Dict[str, str]:
     # Error handling block.
     try:
         from core.base.task_router import TaskRouter
+        _task_router_available = True
     except ImportError:
         TaskRouter = None
+        _task_router_available = False
     
     # Conditional branch.
-    if TaskRouter:
+    if _task_router_available:
         try:
             TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "uninstalling"})
         except Exception:
