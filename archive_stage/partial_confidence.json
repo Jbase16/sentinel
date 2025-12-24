@@ -1,0 +1,5356 @@
+[
+  {
+    "path": "requirements.txt",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "requirements.txt",
+      "is_dir": false,
+      "size_bytes": 271,
+      "mtime": 1765594445.0133197,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "Dockerfile",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "Dockerfile",
+      "is_dir": false,
+      "size_bytes": 823,
+      "mtime": 1765521494.0,
+      "git": {
+        "commit": "7a82e217e5346eb53c0769c4dec9a055e3eadde9",
+        "timestamp": 1765529731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "TODO.md",
+    "disposition": "unknown",
+    "confidence": 0.5,
+    "rationale": "doc_requires_review",
+    "questions": [
+      "Is this doc superseded by a newer file in the same area?",
+      "Does this doc still track unfinished items?"
+    ],
+    "evidence": {
+      "path": "TODO.md",
+      "is_dir": false,
+      "size_bytes": 13162,
+      "mtime": 1766153051.5194025,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "README.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "README.md",
+      "is_dir": false,
+      "size_bytes": 5709,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "2ab1b5db5d0886a9621227780559124223068601",
+        "timestamp": 1765146985
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "sentinel.code-workspace",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": "sentinel.code-workspace",
+      "is_dir": false,
+      "size_bytes": 961,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "2ab1b5db5d0886a9621227780559124223068601",
+        "timestamp": 1765146985
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": ".gitignore",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": ".gitignore",
+      "is_dir": false,
+      "size_bytes": 272,
+      "mtime": 1766147726.6717033,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "docker-compose.yml",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docker-compose.yml",
+      "is_dir": false,
+      "size_bytes": 729,
+      "mtime": 1765521394.0,
+      "git": {
+        "commit": "7a82e217e5346eb53c0769c4dec9a055e3eadde9",
+        "timestamp": 1765529731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "AGENTS.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "AGENTS.md",
+      "is_dir": false,
+      "size_bytes": 1779,
+      "mtime": 1765740436.9929361,
+      "git": {
+        "commit": "901139249964d8295c51d276a52a57f2cb36d95c",
+        "timestamp": 1765741643
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/.build",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/.build",
+      "is_dir": true,
+      "size_bytes": 231514629,
+      "mtime": 1765531823.64077,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "ui/.swiftpm",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/.swiftpm",
+      "is_dir": true,
+      "size_bytes": 135,
+      "mtime": 1765517375.0,
+      "git": {
+        "commit": "fb2657e2349d5b3da569dbade7ed632c9e6a4d1c",
+        "timestamp": 1766052251
+      },
+      "git_deleted_previously": true,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "ui/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766439608.5280085,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "ui/project.yml",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/project.yml",
+      "is_dir": false,
+      "size_bytes": 671,
+      "mtime": 1765736557.304284,
+      "git": {
+        "commit": "901139249964d8295c51d276a52a57f2cb36d95c",
+        "timestamp": 1765741643
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "ui/final_build.log",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/final_build.log",
+      "is_dir": false,
+      "size_bytes": 43032,
+      "mtime": 1765945810.8338351,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/Info.plist",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Info.plist",
+      "is_dir": false,
+      "size_bytes": 930,
+      "mtime": 1765532287.6456213,
+      "git": {
+        "commit": "647cb9efc21372c361d85c4275c930ab1657c63e",
+        "timestamp": 1765593338
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/clean_build.log",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/clean_build.log",
+      "is_dir": false,
+      "size_bytes": 70592,
+      "mtime": 1765945756.5103776,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/build.log",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/build.log",
+      "is_dir": false,
+      "size_bytes": 8935,
+      "mtime": 1765945698.817686,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/Tests/.build",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Tests/.build",
+      "is_dir": true,
+      "size_bytes": 517,
+      "mtime": 1766392109.9958518,
+      "git": {
+        "commit": "901139249964d8295c51d276a52a57f2cb36d95c",
+        "timestamp": 1765741643
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "ui/Tests/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Tests/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766439508.7389739,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "ui/Tests/Package.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Tests/Package.swift",
+      "is_dir": false,
+      "size_bytes": 762,
+      "mtime": 1765983966.1550488,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Tests/Sources/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Tests/Sources/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766439503.7047231,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "ui/Tests/Sources/TestRunner/main.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Tests/Sources/TestRunner/main.swift",
+      "is_dir": false,
+      "size_bytes": 1802,
+      "mtime": 1765984328.8278787,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/SentinelForge.xcodeproj/project.pbxproj",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/SentinelForge.xcodeproj/project.pbxproj",
+      "is_dir": false,
+      "size_bytes": 67253,
+      "mtime": 1766389686.438068,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/SentinelForge.xcodeproj/xcuserdata/jason.xcuserdatad/xcschemes/xcschememanagement.plist",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/SentinelForge.xcodeproj/xcuserdata/jason.xcuserdatad/xcschemes/xcschememanagement.plist",
+      "is_dir": false,
+      "size_bytes": 348,
+      "mtime": 1766066625.8959382,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/SentinelForge.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/SentinelForge.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
+      "is_dir": false,
+      "size_bytes": 135,
+      "mtime": 1765532289.6002526,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/SentinelForge.xcodeproj/project.xcworkspace/xcuserdata/jason.xcuserdatad/UserInterfaceState.xcuserstate",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/SentinelForge.xcodeproj/project.xcworkspace/xcuserdata/jason.xcuserdatad/UserInterfaceState.xcuserstate",
+      "is_dir": false,
+      "size_bytes": 171988,
+      "mtime": 1766395189.7619898,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/SentinelForge.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/SentinelForge.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings",
+      "is_dir": false,
+      "size_bytes": 181,
+      "mtime": 1765694508.8708482,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/Sources/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 10244,
+      "mtime": 1766439608.5273864,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "ui/Sources/SentinelForgeApp.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/SentinelForgeApp.swift",
+      "is_dir": false,
+      "size_bytes": 2299,
+      "mtime": 1765983966.155837,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Core/AppReducer.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Core/AppReducer.swift",
+      "is_dir": false,
+      "size_bytes": 10760,
+      "mtime": 1766153487.9990666,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Core/HelixError.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Core/HelixError.swift",
+      "is_dir": false,
+      "size_bytes": 1809,
+      "mtime": 1765984328.8289473,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Core/ScanProjection.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Core/ScanProjection.swift",
+      "is_dir": false,
+      "size_bytes": 7468,
+      "mtime": 1766388685.8544142,
+      "git": {
+        "commit": "53c0f245cc612b5b547ede49392e81bac3aac6f8",
+        "timestamp": 1766390067
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Resources/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Resources/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766439526.996267,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "ui/Sources/Resources/terminal/index.html",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Resources/terminal/index.html",
+      "is_dir": false,
+      "size_bytes": 1672,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "901139249964d8295c51d276a52a57f2cb36d95c",
+        "timestamp": 1765741643
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/Sources/Graph/NeuralGraphView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Graph/NeuralGraphView.swift",
+      "is_dir": false,
+      "size_bytes": 5140,
+      "mtime": 1765984328.829479,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Graph/Shaders.metal",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Graph/Shaders.metal",
+      "is_dir": false,
+      "size_bytes": 2079,
+      "mtime": 1765807787.7951508,
+      "git": {
+        "commit": "ac2a33f1026076ba414bebcc23d49b8afdec9001",
+        "timestamp": 1765808568
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "ui/Sources/Graph/GraphRenderer.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Graph/GraphRenderer.swift",
+      "is_dir": false,
+      "size_bytes": 23969,
+      "mtime": 1765984328.830205,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Models/SharedModels.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Models/SharedModels.swift",
+      "is_dir": false,
+      "size_bytes": 4473,
+      "mtime": 1766389471.0530393,
+      "git": {
+        "commit": "53c0f245cc612b5b547ede49392e81bac3aac6f8",
+        "timestamp": 1766390067
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Models/HelixAppState.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Models/HelixAppState.swift",
+      "is_dir": false,
+      "size_bytes": 21286,
+      "mtime": 1766394516.4070516,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 8196,
+      "mtime": 1766439603.5004115,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/ToolsBankView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/ToolsBankView.swift",
+      "is_dir": false,
+      "size_bytes": 6358,
+      "mtime": 1765984328.8315046,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/MainWindowView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/MainWindowView.swift",
+      "is_dir": false,
+      "size_bytes": 7971,
+      "mtime": 1766389755.3075497,
+      "git": {
+        "commit": "53c0f245cc612b5b547ede49392e81bac3aac6f8",
+        "timestamp": 1766390067
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/ChatBubbleView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/ChatBubbleView.swift",
+      "is_dir": false,
+      "size_bytes": 2207,
+      "mtime": 1765984328.832068,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Graph/GraphModels.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Graph/GraphModels.swift",
+      "is_dir": false,
+      "size_bytes": 8801,
+      "mtime": 1765984328.83251,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Graph/NetworkGraphView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Graph/NetworkGraphView.swift",
+      "is_dir": false,
+      "size_bytes": 3543,
+      "mtime": 1765984328.832763,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Navigation/TerminalView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Navigation/TerminalView.swift",
+      "is_dir": false,
+      "size_bytes": 3265,
+      "mtime": 1765984328.8330274,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Navigation/ChatView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Navigation/ChatView.swift",
+      "is_dir": false,
+      "size_bytes": 5556,
+      "mtime": 1765984328.8332644,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Scan/ScanControlView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Scan/ScanControlView.swift",
+      "is_dir": false,
+      "size_bytes": 13875,
+      "mtime": 1765984328.8338017,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Scan/ActionRequestView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Scan/ActionRequestView.swift",
+      "is_dir": false,
+      "size_bytes": 3672,
+      "mtime": 1765984328.8340006,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Dashboard/DashboardView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Dashboard/DashboardView.swift",
+      "is_dir": false,
+      "size_bytes": 11346,
+      "mtime": 1765984328.834452,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Components/StatusComponents.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Components/StatusComponents.swift",
+      "is_dir": false,
+      "size_bytes": 9931,
+      "mtime": 1765984328.8348408,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Views/Report/ReportComposerView.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Views/Report/ReportComposerView.swift",
+      "is_dir": false,
+      "size_bytes": 9246,
+      "mtime": 1765984328.8351808,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/ModelRouter.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/ModelRouter.swift",
+      "is_dir": false,
+      "size_bytes": 2268,
+      "mtime": 1765984328.8353488,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/SentinelAPIClient.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/SentinelAPIClient.swift",
+      "is_dir": false,
+      "size_bytes": 26715,
+      "mtime": 1766389115.088389,
+      "git": {
+        "commit": "53c0f245cc612b5b547ede49392e81bac3aac6f8",
+        "timestamp": 1766390067
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/CortexStream.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/CortexStream.swift",
+      "is_dir": false,
+      "size_bytes": 5350,
+      "mtime": 1765984328.8361611,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/BackendManager.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/BackendManager.swift",
+      "is_dir": false,
+      "size_bytes": 11606,
+      "mtime": 1765984328.8365521,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/EventStreamClient.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/EventStreamClient.swift",
+      "is_dir": false,
+      "size_bytes": 12913,
+      "mtime": 1766389720.627241,
+      "git": {
+        "commit": "53c0f245cc612b5b547ede49392e81bac3aac6f8",
+        "timestamp": 1766390067
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/LLMService.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/LLMService.swift",
+      "is_dir": false,
+      "size_bytes": 3759,
+      "mtime": 1765984328.837172,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/PTYClient.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/PTYClient.swift",
+      "is_dir": false,
+      "size_bytes": 2428,
+      "mtime": 1765984328.8373156,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "ui/Sources/Services/GenerateModels.swift",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "ui/Sources/Services/GenerateModels.swift",
+      "is_dir": false,
+      "size_bytes": 602,
+      "mtime": 1765983966.1591496,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766442511.076401,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "tools/lint_structure.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/lint_structure.py",
+      "is_dir": false,
+      "size_bytes": 443,
+      "mtime": 1766139572.79791,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/__pycache__",
+      "is_dir": true,
+      "size_bytes": 23056,
+      "mtime": 1766446860.110474,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "tools/ops/start_servers.sh",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/start_servers.sh",
+      "is_dir": false,
+      "size_bytes": 2536,
+      "mtime": 1765738232.8197415,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "tools/ops/test_tools_install.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/test_tools_install.py",
+      "is_dir": false,
+      "size_bytes": 844,
+      "mtime": 1765983966.41226,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tools/ops/verify_strategic_logging.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/verify_strategic_logging.py",
+      "is_dir": false,
+      "size_bytes": 2775,
+      "mtime": 1765984329.2835562,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/manual_scan.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/manual_scan.py",
+      "is_dir": false,
+      "size_bytes": 2353,
+      "mtime": 1765984329.2843518,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/start_sentinel_brain.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/start_sentinel_brain.py",
+      "is_dir": false,
+      "size_bytes": 4672,
+      "mtime": 1765984329.2861056,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/debug_cortex.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/debug_cortex.py",
+      "is_dir": false,
+      "size_bytes": 1330,
+      "mtime": 1765984329.286579,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/cleanup_disposition.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/cleanup_disposition.py",
+      "is_dir": false,
+      "size_bytes": 13611,
+      "mtime": 1766446854.7783937,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/annotate_inline_comments.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/annotate_inline_comments.py",
+      "is_dir": false,
+      "size_bytes": 14594,
+      "mtime": 1765984371.4481416,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/strip_banners.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/strip_banners.py",
+      "is_dir": false,
+      "size_bytes": 3323,
+      "mtime": 1765984329.2986326,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/run_headless_scan_with_narrator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/run_headless_scan_with_narrator.py",
+      "is_dir": false,
+      "size_bytes": 1799,
+      "mtime": 1765984329.299373,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tools/ops/run_real_scan_headless.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tools/ops/run_real_scan_headless.py",
+      "is_dir": false,
+      "size_bytes": 1860,
+      "mtime": 1765984329.3001218,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/__pycache__",
+      "is_dir": true,
+      "size_bytes": 10733,
+      "mtime": 1766144690.8356664,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 10244,
+      "mtime": 1766442548.641052,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "core/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/__init__.py",
+      "is_dir": false,
+      "size_bytes": 670,
+      "mtime": 1765983966.1597059,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/errors.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/errors.py",
+      "is_dir": false,
+      "size_bytes": 9982,
+      "mtime": 1766141720.3391826,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/__main__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/__main__.py",
+      "is_dir": false,
+      "size_bytes": 83,
+      "mtime": 1766139572.7963789,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/__pycache__",
+      "is_dir": true,
+      "size_bytes": 86471,
+      "mtime": 1766153360.8793032,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/cortex/pathfinder.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/pathfinder.py",
+      "is_dir": false,
+      "size_bytes": 3867,
+      "mtime": 1765984328.8392801,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/memory.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/memory.py",
+      "is_dir": false,
+      "size_bytes": 952,
+      "mtime": 1766141440.693788,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": true,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/events.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/events.py",
+      "is_dir": false,
+      "size_bytes": 4841,
+      "mtime": 1766148681.9028404,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/arbitration.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/arbitration.py",
+      "is_dir": false,
+      "size_bytes": 3130,
+      "mtime": 1765984371.0331984,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/policy.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/policy.py",
+      "is_dir": false,
+      "size_bytes": 3429,
+      "mtime": 1765984328.842686,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/correlator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/correlator.py",
+      "is_dir": false,
+      "size_bytes": 2663,
+      "mtime": 1765984371.0347738,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/rules.yaml",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/rules.yaml",
+      "is_dir": false,
+      "size_bytes": 3100,
+      "mtime": 1765943380.4335337,
+      "git": {
+        "commit": "c95c95f22d4ed80322c7896079ee2db91d0b42fe",
+        "timestamp": 1765945536
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/cortex/scanner_bridge.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/scanner_bridge.py",
+      "is_dir": false,
+      "size_bytes": 865,
+      "mtime": 1766141152.272901,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": true,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/event_store.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/event_store.py",
+      "is_dir": false,
+      "size_bytes": 6178,
+      "mtime": 1766149479.6833692,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/authority.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/authority.py",
+      "is_dir": false,
+      "size_bytes": 18787,
+      "mtime": 1766153339.3941514,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/synapse.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/synapse.py",
+      "is_dir": false,
+      "size_bytes": 431,
+      "mtime": 1765983966.1610277,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": true,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/narrative_templates.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/narrative_templates.py",
+      "is_dir": false,
+      "size_bytes": 5058,
+      "mtime": 1765984328.8475919,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/narrator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/narrator.py",
+      "is_dir": false,
+      "size_bytes": 3053,
+      "mtime": 1765984371.0383575,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/cortex/reasoning.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/cortex/reasoning.py",
+      "is_dir": false,
+      "size_bytes": 2347,
+      "mtime": 1765984371.0389895,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": true,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/chat/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/chat/__pycache__",
+      "is_dir": true,
+      "size_bytes": 4601,
+      "mtime": 1766141323.054501,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/chat/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/chat/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1145,
+      "mtime": 1765983966.1615665,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/chat/chat_engine.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/chat/chat_engine.py",
+      "is_dir": false,
+      "size_bytes": 3013,
+      "mtime": 1765984371.0398865,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/contracts/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/contracts/__pycache__",
+      "is_dir": true,
+      "size_bytes": 22528,
+      "mtime": 1766153250.1938202,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/contracts/events.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/contracts/events.py",
+      "is_dir": false,
+      "size_bytes": 19574,
+      "mtime": 1766153227.7882757,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/contracts/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/contracts/__init__.py",
+      "is_dir": false,
+      "size_bytes": 616,
+      "mtime": 1766153229.91165,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/payloads/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/payloads/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1367,
+      "mtime": 1765983966.161847,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/__pycache__",
+      "is_dir": true,
+      "size_bytes": 87623,
+      "mtime": 1766140421.1256382,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/scheduler/strategos.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/strategos.py",
+      "is_dir": false,
+      "size_bytes": 35168,
+      "mtime": 1765984371.0489237,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/intents.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/intents.py",
+      "is_dir": false,
+      "size_bytes": 1610,
+      "mtime": 1765983966.1622667,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/registry.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/registry.py",
+      "is_dir": false,
+      "size_bytes": 8817,
+      "mtime": 1765984328.8629754,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/events.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/events.py",
+      "is_dir": false,
+      "size_bytes": 1128,
+      "mtime": 1765983966.1625094,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/decisions.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/decisions.py",
+      "is_dir": false,
+      "size_bytes": 22618,
+      "mtime": 1765984328.8676107,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/laws.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/laws.py",
+      "is_dir": false,
+      "size_bytes": 5530,
+      "mtime": 1765984371.0571523,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/scheduler/modes.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/scheduler/modes.py",
+      "is_dir": false,
+      "size_bytes": 2908,
+      "mtime": 1765984328.870628,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/server/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/server/__pycache__",
+      "is_dir": true,
+      "size_bytes": 61530,
+      "mtime": 1766148728.4272556,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/server/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/server/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1546,
+      "mtime": 1765983966.163163,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/server/tls.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/server/tls.py",
+      "is_dir": false,
+      "size_bytes": 9566,
+      "mtime": 1765984371.0607839,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/server/api.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/server/api.py",
+      "is_dir": false,
+      "size_bytes": 37669,
+      "mtime": 1766148721.607913,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/utils/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/utils/__pycache__",
+      "is_dir": true,
+      "size_bytes": 8388,
+      "mtime": 1766141110.4770455,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/utils/async_helpers.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/utils/async_helpers.py",
+      "is_dir": false,
+      "size_bytes": 3628,
+      "mtime": 1765984328.887867,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/utils/observer.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/utils/observer.py",
+      "is_dir": false,
+      "size_bytes": 1622,
+      "mtime": 1765984371.0743864,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/utils/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/utils/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1084,
+      "mtime": 1765983966.1638987,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ghost/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ghost/__pycache__",
+      "is_dir": true,
+      "size_bytes": 25600,
+      "mtime": 1766394761.3996599,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/ghost/proxy.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ghost/proxy.py",
+      "is_dir": false,
+      "size_bytes": 6254,
+      "mtime": 1765984371.0779297,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ghost/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ghost/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1762,
+      "mtime": 1765983966.1644397,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ghost/flow.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ghost/flow.py",
+      "is_dir": false,
+      "size_bytes": 2652,
+      "mtime": 1765984371.0789511,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ghost/logic.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ghost/logic.py",
+      "is_dir": false,
+      "size_bytes": 3078,
+      "mtime": 1765984328.8946285,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ghost/lazarus.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ghost/lazarus.py",
+      "is_dir": false,
+      "size_bytes": 5424,
+      "mtime": 1765984371.081076,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/forge/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/forge/__pycache__",
+      "is_dir": true,
+      "size_bytes": 7444,
+      "mtime": 1766141212.5853457,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/forge/compiler.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/forge/compiler.py",
+      "is_dir": false,
+      "size_bytes": 3144,
+      "mtime": 1765984371.082114,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/forge/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/forge/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1414,
+      "mtime": 1765983966.165021,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/forge/sandbox.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/forge/sandbox.py",
+      "is_dir": false,
+      "size_bytes": 1711,
+      "mtime": 1765984328.8986485,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ai/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ai/__pycache__",
+      "is_dir": true,
+      "size_bytes": 48621,
+      "mtime": 1766394761.394319,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/ai/ai_engine.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ai/ai_engine.py",
+      "is_dir": false,
+      "size_bytes": 26376,
+      "mtime": 1765984371.0897274,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ai/strategy.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ai/strategy.py",
+      "is_dir": false,
+      "size_bytes": 6340,
+      "mtime": 1765984371.0913613,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/ai/reporting.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/ai/reporting.py",
+      "is_dir": false,
+      "size_bytes": 7702,
+      "mtime": 1765984371.0933661,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/analyze/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/analyze/__init__.py",
+      "is_dir": false,
+      "size_bytes": 870,
+      "mtime": 1765983966.1659923,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/fuzz/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/fuzz/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1223,
+      "mtime": 1765983966.166184,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/fuzz/module.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/fuzz/module.py",
+      "is_dir": false,
+      "size_bytes": 3383,
+      "mtime": 1765984371.0948386,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/wraith/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/wraith/__pycache__",
+      "is_dir": true,
+      "size_bytes": 16559,
+      "mtime": 1766146174.9356763,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/wraith/evasion.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/wraith/evasion.py",
+      "is_dir": false,
+      "size_bytes": 4523,
+      "mtime": 1765984371.0960615,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/wraith/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/wraith/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1958,
+      "mtime": 1765983966.166573,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/wraith/mutator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/wraith/mutator.py",
+      "is_dir": false,
+      "size_bytes": 4144,
+      "mtime": 1765984328.9147837,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/wraith/automator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/wraith/automator.py",
+      "is_dir": false,
+      "size_bytes": 3815,
+      "mtime": 1765984371.0983787,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/__pycache__",
+      "is_dir": true,
+      "size_bytes": 65615,
+      "mtime": 1766149024.1898131,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/data/findings.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/findings.py",
+      "is_dir": false,
+      "size_bytes": 453,
+      "mtime": 1765983966.1669846,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/db.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/db.py",
+      "is_dir": false,
+      "size_bytes": 15831,
+      "mtime": 1766148997.8745158,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/findings_store.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/findings_store.py",
+      "is_dir": false,
+      "size_bytes": 5933,
+      "mtime": 1766149011.7032788,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/evidence_store.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/evidence_store.py",
+      "is_dir": false,
+      "size_bytes": 5261,
+      "mtime": 1766149017.7606711,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1086,
+      "mtime": 1765983966.1675053,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/issues_store.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/issues_store.py",
+      "is_dir": false,
+      "size_bytes": 3766,
+      "mtime": 1766149015.2809658,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/blackbox.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/blackbox.py",
+      "is_dir": false,
+      "size_bytes": 6095,
+      "mtime": 1765984371.108089,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/risk.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/risk.py",
+      "is_dir": false,
+      "size_bytes": 2498,
+      "mtime": 1765984371.1088977,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/evidence.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/evidence.py",
+      "is_dir": false,
+      "size_bytes": 3537,
+      "mtime": 1765984371.1101816,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/data/killchain_store.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/data/killchain_store.py",
+      "is_dir": false,
+      "size_bytes": 2093,
+      "mtime": 1765984371.1106215,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/__pycache__",
+      "is_dir": true,
+      "size_bytes": 65924,
+      "mtime": 1766148696.1745367,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/engine/vanguard.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/vanguard.py",
+      "is_dir": false,
+      "size_bytes": 3163,
+      "mtime": 1765984328.9296155,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/runner.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/runner.py",
+      "is_dir": false,
+      "size_bytes": 4606,
+      "mtime": 1765984371.1131961,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/scan_orchestrator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/scan_orchestrator.py",
+      "is_dir": false,
+      "size_bytes": 3157,
+      "mtime": 1765983966.1685655,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": true,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/pty_manager.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/pty_manager.py",
+      "is_dir": false,
+      "size_bytes": 3284,
+      "mtime": 1765984371.1149764,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1233,
+      "mtime": 1765983966.168802,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/scanner_engine.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/scanner_engine.py",
+      "is_dir": false,
+      "size_bytes": 32109,
+      "mtime": 1765984328.9436235,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/orchestrator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/orchestrator.py",
+      "is_dir": false,
+      "size_bytes": 7838,
+      "mtime": 1765984371.1274943,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/headless_runner.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/headless_runner.py",
+      "is_dir": false,
+      "size_bytes": 2560,
+      "mtime": 1765984371.1282005,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/engine/executor.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/engine/executor.py",
+      "is_dir": false,
+      "size_bytes": 3431,
+      "mtime": 1765984371.1297235,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/recon/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/recon/__pycache__",
+      "is_dir": true,
+      "size_bytes": 32563,
+      "mtime": 1766141212.573076,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/recon/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/recon/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1738,
+      "mtime": 1765983966.1698108,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/recon/behavioral.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/recon/behavioral.py",
+      "is_dir": false,
+      "size_bytes": 25031,
+      "mtime": 1765984371.1392753,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/recon/module.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/recon/module.py",
+      "is_dir": false,
+      "size_bytes": 1573,
+      "mtime": 1765984371.1399417,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/__pycache__",
+      "is_dir": true,
+      "size_bytes": 139143,
+      "mtime": 1766141212.5705462,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/toolkit/tool_callbacks.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/tool_callbacks.py",
+      "is_dir": false,
+      "size_bytes": 878,
+      "mtime": 1765983966.170274,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/raw_classifier.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/raw_classifier.py",
+      "is_dir": false,
+      "size_bytes": 78811,
+      "mtime": 1765984328.9788604,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/registry.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/registry.py",
+      "is_dir": false,
+      "size_bytes": 6978,
+      "mtime": 1765984328.9813244,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/vuln_rules.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/vuln_rules.py",
+      "is_dir": false,
+      "size_bytes": 64080,
+      "mtime": 1765984328.9979331,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/tools.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/tools.py",
+      "is_dir": false,
+      "size_bytes": 1710,
+      "mtime": 1766141203.1746547,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/__init__.py",
+      "is_dir": false,
+      "size_bytes": 1983,
+      "mtime": 1765983966.1711326,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/fingerprinters.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/fingerprinters.py",
+      "is_dir": false,
+      "size_bytes": 2818,
+      "mtime": 1765984328.9998462,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/installer.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/installer.py",
+      "is_dir": false,
+      "size_bytes": 11589,
+      "mtime": 1765984329.0042226,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/normalizer.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/normalizer.py",
+      "is_dir": false,
+      "size_bytes": 2292,
+      "mtime": 1765984329.0050542,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/tool_base.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/tool_base.py",
+      "is_dir": false,
+      "size_bytes": 1115,
+      "mtime": 1765984371.181278,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/shims/httpx.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/shims/httpx.py",
+      "is_dir": false,
+      "size_bytes": 810,
+      "mtime": 1765984371.1817362,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/shims/subfinder.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/shims/subfinder.py",
+      "is_dir": false,
+      "size_bytes": 834,
+      "mtime": 1765984371.1819859,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/shims/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/shims/__init__.py",
+      "is_dir": false,
+      "size_bytes": 13614,
+      "mtime": 1765984329.0129466,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/shims/nmap.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/shims/nmap.py",
+      "is_dir": false,
+      "size_bytes": 802,
+      "mtime": 1765984371.18844,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/toolkit/shims/__main__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/toolkit/shims/__main__.py",
+      "is_dir": false,
+      "size_bytes": 501,
+      "mtime": 1765983966.1722403,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/base/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/base/__pycache__",
+      "is_dir": true,
+      "size_bytes": 38061,
+      "mtime": 1766146507.571865,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "core/base/config.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/base/config.py",
+      "is_dir": false,
+      "size_bytes": 19558,
+      "mtime": 1766144970.6744747,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/base/session.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/base/session.py",
+      "is_dir": false,
+      "size_bytes": 7857,
+      "mtime": 1765984329.0176349,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/base/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/base/__init__.py",
+      "is_dir": false,
+      "size_bytes": 756,
+      "mtime": 1765983966.1728606,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/base/task_router.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/base/task_router.py",
+      "is_dir": false,
+      "size_bytes": 13136,
+      "mtime": 1765984329.0194643,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "core/base/action_dispatcher.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "core/base/action_dispatcher.py",
+      "is_dir": false,
+      "size_bytes": 7736,
+      "mtime": 1765984329.0206945,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "tests/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766439473.8298836,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/__pycache__",
+      "is_dir": true,
+      "size_bytes": 85441,
+      "mtime": 1766140421.5398812,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "tests/unit/test_arbitration.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_arbitration.py",
+      "is_dir": false,
+      "size_bytes": 2767,
+      "mtime": 1765984329.022031,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_strategos_edge_conditions.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_strategos_edge_conditions.py",
+      "is_dir": false,
+      "size_bytes": 5294,
+      "mtime": 1765984329.0240855,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_fingerprinters.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_fingerprinters.py",
+      "is_dir": false,
+      "size_bytes": 1323,
+      "mtime": 1765983769.9191034,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_correlator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_correlator.py",
+      "is_dir": false,
+      "size_bytes": 1674,
+      "mtime": 1765983769.9195247,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_pathfinder.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_pathfinder.py",
+      "is_dir": false,
+      "size_bytes": 1870,
+      "mtime": 1765983769.920055,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_narrative_templates.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_narrative_templates.py",
+      "is_dir": false,
+      "size_bytes": 2158,
+      "mtime": 1765983949.4675639,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_strategos_decisions.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_strategos_decisions.py",
+      "is_dir": false,
+      "size_bytes": 6139,
+      "mtime": 1765984329.028783,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/unit/test_narrator.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/unit/test_narrator.py",
+      "is_dir": false,
+      "size_bytes": 2866,
+      "mtime": 1765984371.203122,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/integration/__pycache__",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/integration/__pycache__",
+      "is_dir": true,
+      "size_bytes": 49789,
+      "mtime": 1766140421.130927,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "tests/integration/test_scan_flow.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/integration/test_scan_flow.py",
+      "is_dir": false,
+      "size_bytes": 2128,
+      "mtime": 1765984329.0306008,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/integration/test_api_basic.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/integration/test_api_basic.py",
+      "is_dir": false,
+      "size_bytes": 2330,
+      "mtime": 1765983966.1740959,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/integration/test_decision_emission.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/integration/test_decision_emission.py",
+      "is_dir": false,
+      "size_bytes": 15592,
+      "mtime": 1765984329.0363803,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_backend.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_backend.py",
+      "is_dir": false,
+      "size_bytes": 3377,
+      "mtime": 1765984329.037808,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_god_tier.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_god_tier.py",
+      "is_dir": false,
+      "size_bytes": 3127,
+      "mtime": 1765984329.038874,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_neural_loop.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_neural_loop.py",
+      "is_dir": false,
+      "size_bytes": 2802,
+      "mtime": 1765984329.0396836,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_ghost.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_ghost.py",
+      "is_dir": false,
+      "size_bytes": 2240,
+      "mtime": 1765984329.0404673,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_architecture.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_architecture.py",
+      "is_dir": false,
+      "size_bytes": 2735,
+      "mtime": 1765983966.1748135,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/check_tools.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/check_tools.py",
+      "is_dir": false,
+      "size_bytes": 782,
+      "mtime": 1765983966.174893,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_forge.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_forge.py",
+      "is_dir": false,
+      "size_bytes": 1919,
+      "mtime": 1765984329.0424511,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_command_deck.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_command_deck.py",
+      "is_dir": false,
+      "size_bytes": 1993,
+      "mtime": 1765984329.0431592,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/inspect_db.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/inspect_db.py",
+      "is_dir": false,
+      "size_bytes": 1489,
+      "mtime": 1765983966.1751864,
+      "git": {
+        "commit": "08a3276a17cfc83c5df16fce037e81c9f58acd6f",
+        "timestamp": 1765984054
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_assemblage.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_assemblage.py",
+      "is_dir": false,
+      "size_bytes": 2033,
+      "mtime": 1765984329.0447214,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_cortex.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_cortex.py",
+      "is_dir": false,
+      "size_bytes": 2086,
+      "mtime": 1765984329.0455647,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": "tests/verification/verify_killchain.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "tests/verification/verify_killchain.py",
+      "is_dir": false,
+      "size_bytes": 3123,
+      "mtime": 1765984329.0465417,
+      "git": {
+        "commit": "84b664fcfdc0f7b15e48379642417a5f0c9b1a37",
+        "timestamp": 1766026462
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "test"
+    }
+  },
+  {
+    "path": ".claude/settings.local.json",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": ".claude/settings.local.json",
+      "is_dir": false,
+      "size_bytes": 35,
+      "mtime": 1766441253.5931845,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "docs/architecture.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/architecture.md",
+      "is_dir": false,
+      "size_bytes": 3317,
+      "mtime": 1766442006.5126462,
+      "git": {
+        "commit": "749b606c57d20cf780187b6800a7b5c41a55e8e3",
+        "timestamp": 1765259259
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766442091.7592278,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "docs/layer2_decision_emission.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/layer2_decision_emission.md",
+      "is_dir": false,
+      "size_bytes": 16513,
+      "mtime": 1765872534.6988866,
+      "git": {
+        "commit": "26625c1e21581f7e990f3397eef86f5ff1ff21ec",
+        "timestamp": 1765874940
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/classifiers.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/classifiers.md",
+      "is_dir": false,
+      "size_bytes": 4208,
+      "mtime": 1765943018.346835,
+      "git": {
+        "commit": "c95c95f22d4ed80322c7896079ee2db91d0b42fe",
+        "timestamp": 1765945536
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/CLEANUP_SUMMARY.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/CLEANUP_SUMMARY.md",
+      "is_dir": false,
+      "size_bytes": 3998,
+      "mtime": 1766392139.2746701,
+      "git": {
+        "commit": "9b8dbd0cd6b33f7760533a8647c5434aa15ce393",
+        "timestamp": 1766359086
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/modules.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/modules.md",
+      "is_dir": false,
+      "size_bytes": 128,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "2ab1b5db5d0886a9621227780559124223068601",
+        "timestamp": 1765146985
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/layer_3_overview.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/layer_3_overview.md",
+      "is_dir": false,
+      "size_bytes": 2483,
+      "mtime": 1765945061.5839758,
+      "git": {
+        "commit": "c95c95f22d4ed80322c7896079ee2db91d0b42fe",
+        "timestamp": 1765945536
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/roadmap.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/roadmap.md",
+      "is_dir": false,
+      "size_bytes": 117,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "2ab1b5db5d0886a9621227780559124223068601",
+        "timestamp": 1765146985
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/hardening_summary_7_phases.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/hardening_summary_7_phases.md",
+      "is_dir": false,
+      "size_bytes": 3696,
+      "mtime": 1765943970.830201,
+      "git": {
+        "commit": "c95c95f22d4ed80322c7896079ee2db91d0b42fe",
+        "timestamp": 1765945536
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/DEVELOPMENT_GUIDE.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/DEVELOPMENT_GUIDE.md",
+      "is_dir": false,
+      "size_bytes": 501,
+      "mtime": 1766139572.7993155,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/layer_4_summary.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/layer_4_summary.md",
+      "is_dir": false,
+      "size_bytes": 3898,
+      "mtime": 1765943867.5304627,
+      "git": {
+        "commit": "c95c95f22d4ed80322c7896079ee2db91d0b42fe",
+        "timestamp": 1765945536
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/archive/.DS_Store",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/archive/.DS_Store",
+      "is_dir": false,
+      "size_bytes": 6148,
+      "mtime": 1766442086.6317003,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "docs/archive/dev-tools/fix_dataclass_imports.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/archive/dev-tools/fix_dataclass_imports.py",
+      "is_dir": false,
+      "size_bytes": 2875,
+      "mtime": 1766442039.6343567,
+      "git": {
+        "commit": "d5ae181d50b1dbbbd86b17d7a0cf15633663bee8",
+        "timestamp": 1766358979
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/archive/dev-tools/repro_import.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/archive/dev-tools/repro_import.py",
+      "is_dir": false,
+      "size_bytes": 561,
+      "mtime": 1766442034.1633542,
+      "git": {
+        "commit": "d5ae181d50b1dbbbd86b17d7a0cf15633663bee8",
+        "timestamp": 1766358979
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/cal/04-claims-evidence-confidence.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/04-claims-evidence-confidence.md",
+      "is_dir": false,
+      "size_bytes": 1302,
+      "mtime": 1765595115.3310041,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/08-safety-scope-authorization.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/08-safety-scope-authorization.md",
+      "is_dir": false,
+      "size_bytes": 964,
+      "mtime": 1765595115.3313453,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/CAL_INTEGRATION.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/CAL_INTEGRATION.md",
+      "is_dir": false,
+      "size_bytes": 33361,
+      "mtime": 1765738872.7693884,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/12-sentinel-integration.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/12-sentinel-integration.md",
+      "is_dir": false,
+      "size_bytes": 1034,
+      "mtime": 1765595115.3321166,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/07-queries-and-introspection.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/07-queries-and-introspection.md",
+      "is_dir": false,
+      "size_bytes": 743,
+      "mtime": 1765595115.3323863,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/01-getting-started.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/01-getting-started.md",
+      "is_dir": false,
+      "size_bytes": 3194,
+      "mtime": 1765595115.3326447,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/09-debugging-replay.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/09-debugging-replay.md",
+      "is_dir": false,
+      "size_bytes": 893,
+      "mtime": 1765595115.3327785,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/02-language-tour.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/02-language-tour.md",
+      "is_dir": false,
+      "size_bytes": 1413,
+      "mtime": 1765595115.33291,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/README.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/README.md",
+      "is_dir": false,
+      "size_bytes": 867,
+      "mtime": 1765595115.3331509,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/06-missions-and-execution.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/06-missions-and-execution.md",
+      "is_dir": false,
+      "size_bytes": 1022,
+      "mtime": 1765595115.333296,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/CAL_EXAMPLES.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/CAL_EXAMPLES.md",
+      "is_dir": false,
+      "size_bytes": 23911,
+      "mtime": 1765595115.3376915,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/00-introduction.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/00-introduction.md",
+      "is_dir": false,
+      "size_bytes": 1554,
+      "mtime": 1765595115.3335083,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/CAL_LEARNING_GUIDE.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/CAL_LEARNING_GUIDE.md",
+      "is_dir": false,
+      "size_bytes": 18906,
+      "mtime": 1765595115.3389554,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/03-agents-and-bindings.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/03-agents-and-bindings.md",
+      "is_dir": false,
+      "size_bytes": 1349,
+      "mtime": 1765595115.333768,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/10-cookbook.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/10-cookbook.md",
+      "is_dir": false,
+      "size_bytes": 1218,
+      "mtime": 1765595115.334131,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/11-reference.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/11-reference.md",
+      "is_dir": false,
+      "size_bytes": 776,
+      "mtime": 1765595115.3344886,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/05-rules-and-policies.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/05-rules-and-policies.md",
+      "is_dir": false,
+      "size_bytes": 1222,
+      "mtime": 1765595115.3347476,
+      "git": {
+        "commit": "9d250b7f739e34ec1d6e2fb1e76bfe1f7f17a0d2",
+        "timestamp": 1765595153
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/cal/CAL_LANGUAGE_DESIGN.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/cal/CAL_LANGUAGE_DESIGN.md",
+      "is_dir": false,
+      "size_bytes": 50458,
+      "mtime": 1765595115.3385804,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/dev-tools/fix_dataclass_imports_force.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/fix_dataclass_imports_force.py",
+      "is_dir": false,
+      "size_bytes": 2875,
+      "mtime": 1766392139.2764997,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/debug_imports.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/debug_imports.py",
+      "is_dir": false,
+      "size_bytes": 638,
+      "mtime": 1766392139.276251,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/fix_dataclass_imports.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/fix_dataclass_imports.py",
+      "is_dir": false,
+      "size_bytes": 2875,
+      "mtime": 1766392139.2764242,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/cleanup_stage_one.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/cleanup_stage_one.py",
+      "is_dir": false,
+      "size_bytes": 1400,
+      "mtime": 1766392139.2757006,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/audit_top_level_dirs_fixed.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/audit_top_level_dirs_fixed.py",
+      "is_dir": false,
+      "size_bytes": 2069,
+      "mtime": 1766392139.2753327,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/README.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/README.md",
+      "is_dir": false,
+      "size_bytes": 667,
+      "mtime": 1766392139.274791,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "docs/dev-tools/add_all_comments.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/add_all_comments.py",
+      "is_dir": false,
+      "size_bytes": 5738,
+      "mtime": 1766392139.2751374,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/repro_import.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/repro_import.py",
+      "is_dir": false,
+      "size_bytes": 561,
+      "mtime": 1766392139.2767859,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/dev-tools/audit_top_level_dirs_full.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/dev-tools/audit_top_level_dirs_full.py",
+      "is_dir": false,
+      "size_bytes": 1853,
+      "mtime": 1766392139.27552,
+      "git": {
+        "commit": "42e51b2048d838191f2f81f03da4885b90c25297",
+        "timestamp": 1766442208
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "docs/reports/ARCHITECTURAL_AUDIT_REPORT.md",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": "docs/reports/ARCHITECTURAL_AUDIT_REPORT.md",
+      "is_dir": false,
+      "size_bytes": 35650,
+      "mtime": 1766392139.277097,
+      "git": {
+        "commit": "9b8dbd0cd6b33f7760533a8647c5434aa15ce393",
+        "timestamp": 1766359086
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": ".zencoder/chats/1bebb1ac-24ca-4fb9-82dd-17a88d9dc0ab/requirements.md",
+    "disposition": "unknown",
+    "confidence": 0.5,
+    "rationale": "doc_requires_review",
+    "questions": [
+      "Is this doc superseded by a newer file in the same area?",
+      "Does this doc still track unfinished items?"
+    ],
+    "evidence": {
+      "path": ".zencoder/chats/1bebb1ac-24ca-4fb9-82dd-17a88d9dc0ab/requirements.md",
+      "is_dir": false,
+      "size_bytes": 2500,
+      "mtime": 1766444081.5322914,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": ".zencoder/chats/1bebb1ac-24ca-4fb9-82dd-17a88d9dc0ab/plan.md",
+    "disposition": "unknown",
+    "confidence": 0.5,
+    "rationale": "doc_requires_review",
+    "questions": [
+      "Is this doc superseded by a newer file in the same area?",
+      "Does this doc still track unfinished items?"
+    ],
+    "evidence": {
+      "path": ".zencoder/chats/1bebb1ac-24ca-4fb9-82dd-17a88d9dc0ab/plan.md",
+      "is_dir": false,
+      "size_bytes": 5624,
+      "mtime": 1766446173.350578,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": ".zencoder/chats/1bebb1ac-24ca-4fb9-82dd-17a88d9dc0ab/spec.md",
+    "disposition": "unknown",
+    "confidence": 0.5,
+    "rationale": "doc_requires_review",
+    "questions": [
+      "Is this doc superseded by a newer file in the same area?",
+      "Does this doc still track unfinished items?"
+    ],
+    "evidence": {
+      "path": ".zencoder/chats/1bebb1ac-24ca-4fb9-82dd-17a88d9dc0ab/spec.md",
+      "is_dir": false,
+      "size_bytes": 5082,
+      "mtime": 1766444436.3174562,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "doc"
+    }
+  },
+  {
+    "path": "archive_stage/partial_confidence.json",
+    "disposition": "keep",
+    "confidence": 0.5,
+    "rationale": "report_artifact",
+    "questions": [],
+    "evidence": {
+      "path": "archive_stage/partial_confidence.json",
+      "is_dir": false,
+      "size_bytes": 142040,
+      "mtime": 1766446154.539313,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "archive_stage/deletion_list.json",
+    "disposition": "keep",
+    "confidence": 0.5,
+    "rationale": "report_artifact",
+    "questions": [],
+    "evidence": {
+      "path": "archive_stage/deletion_list.json",
+      "is_dir": false,
+      "size_bytes": 3171,
+      "mtime": 1766446154.537988,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "archive_stage/archive_manifest.json",
+    "disposition": "keep",
+    "confidence": 0.5,
+    "rationale": "report_artifact",
+    "questions": [],
+    "evidence": {
+      "path": "archive_stage/archive_manifest.json",
+      "is_dir": false,
+      "size_bytes": 2,
+      "mtime": 1766446154.539497,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": ".github/workflows/ci.yml",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "protected_root",
+    "questions": [],
+    "evidence": {
+      "path": ".github/workflows/ci.yml",
+      "is_dir": false,
+      "size_bytes": 2384,
+      "mtime": 1765783997.8203459,
+      "git": {
+        "commit": "bf2410026167f30306c05cff8807b873ec4fbb9d",
+        "timestamp": 1765784044
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "sentinelforge/cli/__init__.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": "sentinelforge/cli/__init__.py",
+      "is_dir": false,
+      "size_bytes": 53,
+      "mtime": 1766139572.7933652,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": "sentinelforge/cli/sentinel.py",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": "sentinelforge/cli/sentinel.py",
+      "is_dir": false,
+      "size_bytes": 1097,
+      "mtime": 1766146534.5720057,
+      "git": {
+        "commit": "8610a3307319638050839d7a907b0ae2dc6123ea",
+        "timestamp": 1766148731
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "code"
+    }
+  },
+  {
+    "path": ".vscode/settings.json",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": ".vscode/settings.json",
+      "is_dir": false,
+      "size_bytes": 770,
+      "mtime": 1766152393.9034917,
+      "git": {
+        "commit": "b147159728f5bcd6e59b057dbfc4d6238c97839f",
+        "timestamp": 1766153640
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": ".vscode/extensions.json",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": ".vscode/extensions.json",
+      "is_dir": false,
+      "size_bytes": 197,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "2ab1b5db5d0886a9621227780559124223068601",
+        "timestamp": 1765146985
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  },
+  {
+    "path": "assets/wordlists/common.txt",
+    "disposition": "keep",
+    "confidence": 0.3,
+    "rationale": "default_keep",
+    "questions": [],
+    "evidence": {
+      "path": "assets/wordlists/common.txt",
+      "is_dir": false,
+      "size_bytes": 158,
+      "mtime": 1765500534.0,
+      "git": {
+        "commit": "2ab1b5db5d0886a9621227780559124223068601",
+        "timestamp": 1765146985
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "asset"
+    }
+  },
+  {
+    "path": "STRUCTURE_CHECK",
+    "disposition": "keep",
+    "confidence": 0.1,
+    "rationale": "lint_structure_warn:\u26a0\ufe0f  Unexpected item at project root: conflict.log\n\u26a0\ufe0f  Unexpected item at project root: .DS_Store\n\u26a0\ufe0f  Unexpected item at project root: core\n\u26a0\ufe0f  Unexpected item at project root: .pytest_cache\n\u26a0\ufe0f  Unexpected item at project root: ollama.log\n\u26a0\ufe0f  Unexpected item at project root: .zenflow\n\u26a0\ufe0f  Unexpected item at project root: .claude\n\u26a0\ufe0f  Unexpected item at project root: models\n\u26a0\ufe0f  Unexpected item at project root: TODO.md\n\u26a0\ufe0f  Unexpected item at project root: .zencoder\n\u26a0\ufe0f  Unexpected item at project root: sentinel.code-workspace\n\u26a0\ufe0f  Unexpected item at project root: .gitignore\n\u26a0\ufe0f  Unexpected item at project root: archive_stage\n\u26a0\ufe0f  Unexpected item at project root: .venv\n\u26a0\ufe0f  Unexpected item at project root: .github\n\u26a0\ufe0f  Unexpected item at project root: venv\n\u26a0\ufe0f  Unexpected item at project root: AGENTS.md\n\u26a0\ufe0f  Unexpected item at project root: .git\n\u26a0\ufe0f  Unexpected item at project root: .vscode\n\u26a0\ufe0f  Unexpected item at project root: assets\n\u26a0\ufe0f  Unexpected item at project root: server.log",
+    "questions": [
+      "Investigate lint_structure warnings before deletion."
+    ],
+    "evidence": {
+      "path": ".",
+      "is_dir": true,
+      "size_bytes": 0,
+      "mtime": 1766446865.0146492,
+      "git": {
+        "commit": null,
+        "timestamp": null
+      },
+      "git_deleted_previously": false,
+      "references": [],
+      "type": "build"
+    }
+  }
+]

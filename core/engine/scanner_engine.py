@@ -27,7 +27,6 @@ from core.cortex.scanner_bridge import ScannerBridge
 from core.toolkit.vuln_rules import apply_rules
 from core.data.issues_store import issues_store
 from core.data.killchain_store import killchain_store
-from core.engine.runner import PhaseRunner
 from core.toolkit.tools import TOOLS, get_tool_command, get_installed_tools
 from core.base.task_router import TaskRouter
 from core.cortex.correlator import GraphCorrelator

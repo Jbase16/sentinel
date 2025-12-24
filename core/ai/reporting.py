@@ -31,7 +31,7 @@ import os
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from core.data.findings_store import findings_store
 from core.data.issues_store import issues_store

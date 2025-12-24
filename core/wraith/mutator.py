@@ -19,7 +19,7 @@ Breaks payloads into genes and evolves them to bypass WAF filters.
 
 import random
 import urllib.parse
-from typing import List, Callable
+from typing import List
 
 class PayloadMutator:
     """

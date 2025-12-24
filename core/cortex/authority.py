@@ -42,8 +42,8 @@ from __future__ import annotations
 import time
 import threading
 from dataclasses import dataclass, field
-from enum import Enum, auto
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from enum import Enum
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 import logging
 
 if TYPE_CHECKING:
@@ -300,7 +300,7 @@ class ScanAuthority:
         """Record phase transition."""
         with self._lock:
             if self._state != ScanState.RUNNING:
-                logger.warning(f"[Authority] Phase change ignored: not running")
+                logger.warning("[Authority] Phase change ignored: not running")
                 return
             
             self._phase = phase

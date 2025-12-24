@@ -1,7 +1,7 @@
 """Module errors: inline documentation for /Users/jason/Developer/sentinelforge/core/errors.py."""
 #
 from enum import Enum
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 # PURPOSE:
 # Provides a structured error taxonomy for SentinelForge with error codes,
 # typed exceptions, and consistent error handling across the codebase.

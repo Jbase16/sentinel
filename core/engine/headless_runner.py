@@ -18,7 +18,6 @@
 import asyncio
 import logging
 import sys
-from typing import List
 
 from core.ai.reporting import create_report_bundle
 

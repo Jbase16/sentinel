@@ -85,7 +85,7 @@ class LazarusEngine:
             return False
         
         # Check if already processing
-        code_hash = hashlib.md5(content).hexdigest()
+        code_hash = hashlib.sha256(content).hexdigest()
         # Conditional branch.
         if code_hash in self._processing:
             return False
@@ -114,7 +114,7 @@ class LazarusEngine:
             if not original_code:
                 return
             
-            code_hash = hashlib.md5(original_code.encode()).hexdigest()
+            code_hash = hashlib.sha256(original_code.encode()).hexdigest()
             
             # Check cache first (fast path)
             if code_hash in self.cache:

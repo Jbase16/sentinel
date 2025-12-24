@@ -29,7 +29,7 @@
 import json
 import logging
 import asyncio
-from typing import List, Dict, Optional
+from typing import List, Dict
 from dataclasses import dataclass
 
 from core.ai.ai_engine import AIEngine

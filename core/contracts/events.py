@@ -23,10 +23,9 @@ USAGE:
 
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Callable, TypeVar
+from typing import Any, Dict, List, Optional, Set, Callable
 import logging
 
 logger = logging.getLogger(__name__)
@@ -94,7 +93,7 @@ class FieldSpec:
         # Type check (allow subclasses)
         if not isinstance(value, self.type):
             # Special case: int is valid for float fields
-            if self.type == float and isinstance(value, (int, float)):
+            if self.type is float and isinstance(value, (int, float)):
                 pass
             else:
                 return False

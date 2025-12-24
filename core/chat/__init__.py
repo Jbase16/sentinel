@@ -26,3 +26,5 @@
 #
 
 from .chat_engine import GraphAwareChat
+
+__all__ = ["GraphAwareChat"]

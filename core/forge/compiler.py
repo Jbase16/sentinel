@@ -20,9 +20,7 @@ The JIT Exploit Compiler.
 import os
 import uuid
 import logging
-import json
 from core.ai.ai_engine import AIEngine
-from core.base.config import get_config
 
 logger = logging.getLogger(__name__)
 

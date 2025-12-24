@@ -55,7 +55,7 @@ class ParamFuzzer:
         """AsyncFunction fuzz."""
         findings: List[dict] = []
 
-        async with httpx.AsyncClient(follow_redirects=True, verify=False, timeout=self.timeout) as client:
+        async with httpx.AsyncClient(follow_redirects=True, verify=True, timeout=self.timeout) as client:
             for payload in PAYLOADS:
                 params = {param_name: payload}
                 try:

@@ -82,7 +82,12 @@ def _safe_request(url: str, method: str = "GET", data: bytes | None = None, head
     for key, value in hdrs.items():
         req.add_header(key, value)
 
-    context = ssl._create_unverified_context() if allow_insecure else None
+    if allow_insecure:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    else:
+        context = ssl.create_default_context()
     # Error handling block.
     try:
         with urllib.request.urlopen(req, data=data, timeout=timeout, context=context) as resp:

@@ -17,14 +17,11 @@
 
 import os
 import pty
-import select
-import subprocess
 import struct
 import fcntl
 import termios
-import asyncio
 import logging
-from typing import Dict, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +54,8 @@ class PTYSession:
     def read(self) -> bytes:
         """Function read."""
         # Conditional branch.
-        if not self.fd: return b""
+        if not self.fd:
+            return b""
         # Error handling block.
         try:
             data = os.read(self.fd, 1024)
@@ -69,13 +67,15 @@ class PTYSession:
     def write(self, data: str):
         """Function write."""
         # Conditional branch.
-        if not self.fd: return
+        if not self.fd:
+            return
         os.write(self.fd, data.encode())
 
     def resize(self, rows: int, cols: int):
         """Function resize."""
         # Conditional branch.
-        if not self.fd: return
+        if not self.fd:
+            return
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, winsize)
 
@@ -90,7 +90,7 @@ class PTYSession:
             # Kill process group
             try:
                 os.kill(self.pid, 9)
-            except:
+            except Exception:
                 pass
             self.pid = None
 

@@ -185,72 +185,160 @@ async def install_tool(name: str) -> Dict[str, str]:
             last_error = msg
             continue
         
-        # Resolve pip to python -m pip
-        final_cmd_parts = []
+        # Resolve pip to python -m pip and handle others
+        resolved_cmd_parts = []
         for part in strategy_cmd:
             if part == "pip":
-                final_cmd_parts.extend([sys.executable, "-m", "pip"])
+                resolved_cmd_parts.extend([sys.executable, "-m", "pip"])
             elif part == "go" and prerequisite == "go":
                 go_path = shutil.which("go")
-                final_cmd_parts.append(go_path if go_path else "go")
+                resolved_cmd_parts.append(go_path if go_path else "go")
             else:
-                final_cmd_parts.append(part)
+                resolved_cmd_parts.append(part)
+
+        # Parse command chain (handling && and ||)
+        chain = []
+        current_segment = []
+        # Default operator for the first segment is "always run" (represented as None or implied)
+        # We store tuples: (operator_before_this_cmd, cmd_list)
+        # operator can be "&&", "||", or None (start)
         
-        env_vars = "NONINTERACTIVE=1 "
-        cmd_str = env_vars + " ".join(final_cmd_parts)
+        last_op = None
+        for part in resolved_cmd_parts:
+            if part in ("&&", "||"):
+                if current_segment:
+                    chain.append((last_op, current_segment))
+                    current_segment = []
+                last_op = part
+            else:
+                current_segment.append(part)
+        if current_segment:
+            chain.append((last_op, current_segment))
+
+        # Execute chain
+        # strategy_success = False
+        chain_output = []
         
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd_str,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                shell=True,
-                env=dict(os.environ)
-            )
-            out, _ = await proc.communicate()
-            output = out.decode(errors="ignore")[-800:] if out else ""
-            
-            installation_log.append(f"→ Strategy {idx+1}: {' '.join(strategy_cmd[:3])}... (rc={proc.returncode})")
-            
-            if proc.returncode != 0:
-                last_error = f"Command failed with exit code {proc.returncode}"
-                installation_log.append(f"  ⊗ Failed: {last_error}")
-                continue
-            
-            if not shutil.which(expected_binary):
-                last_error = f"Command succeeded but '{expected_binary}' not found in PATH"
-                installation_log.append(f"  ⊗ Failed: {last_error}")
-                continue
-            
-            # Verify binary works
-            verify_cmd = spec.get("verify_cmd", ["--version"])
-            try:
-                verify_proc = await asyncio.create_subprocess_exec(
-                    expected_binary,
-                    *verify_cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                await asyncio.wait_for(verify_proc.communicate(), timeout=5.0)
-            except asyncio.TimeoutError:
+        # Track overall success of the chain. 
+        # For a single command, success = (rc == 0).
+        # For A && B, success = A ok AND B ok.
+        # For A || B, success = A ok OR (A fail AND B ok).
+        
+        # We'll execute sequentially.
+        # skip_next: set to True if the previous result dictates skipping the next command.
+        
+        last_rc = 0
+        run_next = True
+        
+        for i, (op, cmd_parts) in enumerate(chain):
+            if not run_next:
+                # If we are skipping, we still need to check if the NEXT operator resets things?
+                # Standard shell logic:
+                # If A fails in A && B, we skip B.
+                # If we then have ... || C, does C run? Yes. (A && B) || C.
+                # Here we assume a simple left-to-right binding without precedence grouping for now, similar to shell.
+                
+                # Logic:
+                # If op is && and last_rc != 0: skip
+                # If op is || and last_rc == 0: skip
                 pass
-            except Exception as verify_err:
-                installation_log.append(f"  ⚠ Verification warning: {verify_err}")
+
+            # Determine if we should run this segment based on previous result
+            if op == "&&":
+                if last_rc != 0:
+                    run_next = False
+            elif op == "||":
+                if last_rc == 0:
+                    run_next = False
             
-            installation_log.append(f"  ✓ Success: '{expected_binary}' installed")
+            # Re-evaluate run_next for the current step (if it was false, can it become true? no, strictly chaining here)
+            # Actually, standard shell:
+            # false && echo hi -> skip echo
+            # false || echo hi -> run echo
             
-            if TaskRouter:
-                try:
-                    TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "installed"})
-                except Exception:
-                    pass
+            should_run = True
+            if op == "&&" and last_rc != 0:
+                should_run = False
+            elif op == "||" and last_rc == 0:
+                should_run = False
             
-            return {"tool": name, "status": "installed", "message": "\n".join(installation_log)}
+            if not should_run:
+                # If we skip, we preserve the last_rc? Or does the skipped command count as... ?
+                # In shell, the exit code remains that of the last executed command.
+                continue
+
+            # Execute
+            cmd_pretty = " ".join(cmd_parts)
+            try:
+                env_vars = os.environ.copy()
+                env_vars["NONINTERACTIVE"] = "1"
+                
+                program = cmd_parts[0]
+                args = cmd_parts[1:]
+                
+                proc = await asyncio.create_subprocess_exec(
+                    program,
+                    *args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
+                    env=env_vars
+                )
+                out, _ = await proc.communicate()
+                output_chunk = out.decode(errors="ignore") if out else ""
+                chain_output.append(output_chunk)
+                
+                last_rc = proc.returncode
+                installation_log.append(f"→ Exe: {cmd_pretty} (rc={last_rc})")
+            
+            except Exception as e:
+                last_rc = 1 # Treat exception as failure
+                last_error = str(e)
+                installation_log.append(f"  ⊗ Exe Error: {cmd_pretty} -> {e}")
+
+        # Final checks
+        # output = "\n".join(chain_output)[-800:]
         
-        except Exception as e:
-            last_error = str(e)
-            installation_log.append(f"  ⊗ Exception: {last_error}")
+        # Check if the strategy as a whole 'succeeded'.
+        # If the last executed command succeeded, we consider it a success?
+        # Or should we be stricter? 
+        # For "brew tap || brew install", if tap fails (rc!=0), we run install. If install succeeds (rc=0), total=0.
+        # If tap succeeds (rc=0), we skip install, total=0.
+        # So last_rc is a good proxy.
+        
+        if last_rc != 0:
+            last_error = f"Strategy failed with exit code {last_rc}"
+            installation_log.append(f"  ⊗ Failed: {last_error}")
             continue
+        
+        if not shutil.which(expected_binary):
+            last_error = f"Command succeeded but '{expected_binary}' not found in PATH"
+            installation_log.append(f"  ⊗ Failed: {last_error}")
+            continue
+        
+        # Verify binary works
+        verify_cmd = spec.get("verify_cmd", ["--version"])
+        try:
+            verify_proc = await asyncio.create_subprocess_exec(
+                expected_binary,
+                *verify_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await asyncio.wait_for(verify_proc.communicate(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+        except Exception as verify_err:
+            installation_log.append(f"  ⚠ Verification warning: {verify_err}")
+        
+        installation_log.append(f"  ✓ Success: '{expected_binary}' installed")
+        
+        if TaskRouter:
+            try:
+                TaskRouter.instance().emit_ui_event("tool_install_progress", {"tool": name, "status": "installed"})
+            except Exception:
+                pass
+        
+        return {"tool": name, "status": "installed", "message": "\n".join(installation_log)}
     
     # Conditional branch.
     if TaskRouter:
@@ -311,16 +399,16 @@ async def uninstall_tool(name: str) -> Dict[str, str]:
     else:
         return {"tool": name, "status": "error", "message": "Cannot determine uninstaller"}
 
-    cmd_str = "NONINTERACTIVE=1 " + " ".join(uninstall_cmd)
+    cmd_env = os.environ.copy()
+    cmd_env["NONINTERACTIVE"] = "1"
     
     # Error handling block.
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd_str,
+        proc = await asyncio.create_subprocess_exec(
+            *uninstall_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            shell=True,
-            env=dict(os.environ)
+            env=cmd_env
         )
         out, _ = await proc.communicate()
         output = out.decode(errors="ignore")[-500:]

@@ -35,6 +35,8 @@ from __future__ import annotations
 import threading
 import asyncio
 import logging
+import sqlite3
+import aiosqlite
 from core.utils.observer import Observable, Signal
 from core.data.db import Database
 from core.utils.async_helpers import create_safe_task

@@ -8,8 +8,8 @@
 *.log
 *.pyc
 *.tmp
-*.xcodeproj
-*.xcworkspace
+# Keep xcodeproj but ignore user-specific data inside it
+# xcuserdata/ is already ignored below
 *.zip
 .DS_Store
 .swiftpm/

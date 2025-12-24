@@ -17,9 +17,9 @@ Defines Scan Modes and Registry Overlays.
 Allows "Bug Bounty Mode" to re-weight tools without rewriting them.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 from enum import Enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 class ScanMode(Enum):
     """Class ScanMode."""
