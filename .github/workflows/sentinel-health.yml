@@ -401,7 +401,7 @@ jobs:
 
               # Should timeout
               start = time.time()
-              result = await runner.execute(str(test_path), timeout=2)
+              result = await runner.run(str(test_path), timeout=2)
               elapsed = time.time() - start
 
               assert elapsed < 3, f'Timeout not enforced (took {elapsed}s)'
