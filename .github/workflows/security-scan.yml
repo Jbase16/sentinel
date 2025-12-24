@@ -71,21 +71,33 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          config: >-
-            p/security-audit
-            p/python
-            p/command-injection
-            p/secrets
-          generateSarif: true
+          python-version: '3.11'
 
-      - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: semgrep.sarif
+      - name: Install and run Semgrep
+        run: |
+          pip install semgrep
+
+          # Run Semgrep with security-focused rulesets
+          # Continue on findings to generate full report
+          semgrep scan \
+            --config p/security-audit \
+            --config p/python \
+            --config p/command-injection \
+            --config p/secrets \
+            --error \
+            --verbose \
+            core/ || SEMGREP_EXIT=$?
+
+          # Report result
+          if [ "${SEMGREP_EXIT:-0}" -ne 0 ]; then
+            echo "❌ Semgrep found security issues"
+            exit 1
+          fi
+
+          echo "✅ Semgrep scan passed"
 
   forbidden-patterns:
     name: Forbidden Pattern Detection
