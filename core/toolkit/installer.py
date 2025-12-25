@@ -141,6 +141,53 @@ class CommandSegment(NamedTuple):
     cmd: List[str]
     operator_before: Optional[str]  # "&&", "||", or None
 
+
+class CommandValidator:
+    """
+    Validates the structure of command chains to ensure they form a valid execution graph.
+    Enforces contract invariants (token structure, operator placement) rather than
+    checking for shell injection characters, as execution is already tokenized.
+    """
+    OPERATORS = {"&&", "||"}
+
+    @staticmethod
+    def validate_tokens(tokens: List[str]) -> None:
+        if not tokens:
+            raise ValueError("Empty command token list")
+
+        last_was_op = True  # disallow operator as first token
+
+        for i, tok in enumerate(tokens):
+            if tok in CommandValidator.OPERATORS:
+                if last_was_op:
+                    raise ValueError(f"Invalid operator placement near '{tok}' at index {i}")
+                last_was_op = True
+            else:
+                last_was_op = False
+
+        if last_was_op:
+            raise ValueError("Command cannot end with operator")
+
+    @staticmethod
+    def validate_segments(segments: List['CommandSegment'], allow_missing: Optional[set] = None) -> None:
+        allow_missing = allow_missing or set()
+        
+        for seg in segments:
+            if not seg.cmd:
+                raise ValueError("Empty command segment")
+            
+            # Use specific check for the executable of each segment
+            # This fails fast if the required tool (e.g. brew, go) creates a command that is invalid
+            exe = seg.cmd[0]
+            
+            if exe in allow_missing:
+                continue
+                
+            if not shutil.which(exe) and not os.path.exists(exe):
+                # We raise ValueError here to catch it during chain construction/validation
+                raise ValueError(f"Executable not found: {exe}")
+
+
 class CommandChain:
     """
     Robust command chain parser and executor.
@@ -152,6 +199,10 @@ class CommandChain:
     def __init__(self, raw_tokens: List[str]):
         """Function __init__."""
         self.segments: List[CommandSegment] = self._parse(raw_tokens)
+        
+        # Validate post-parsing to ensure the graph is sound
+        CommandValidator.validate_tokens(raw_tokens)
+        CommandValidator.validate_segments(self.segments, allow_missing={"pip"})
         
     def _parse(self, tokens: List[str]) -> List[CommandSegment]:
         """Parse raw token list into CommandSegments."""
