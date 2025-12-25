@@ -202,7 +202,7 @@ class CommandChain:
         
         # Validate post-parsing to ensure the graph is sound
         CommandValidator.validate_tokens(raw_tokens)
-        CommandValidator.validate_segments(self.segments, allow_missing={"pip"})
+        CommandValidator.validate_segments(self.segments, allow_missing={"pip", "pip3", "go", "brew", "git"})
         
     def _parse(self, tokens: List[str]) -> List[CommandSegment]:
         """Parse raw token list into CommandSegments."""
