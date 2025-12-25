@@ -172,6 +172,15 @@ async def install_tool(name: str) -> Dict[str, str]:
     
     last_error = None
     installation_log = []
+
+    # Extract a helper function to emit events.
+    def _emit_ui_event(event_name: str, data: dict) -> None:
+        """Safely emit UI event if TaskRouter is available."""
+        try:
+            from core.base.task_router import TaskRouter
+            TaskRouter.instance().emit_ui_event(event_name, data)
+        except (ImportError, Exception):
+            pass # UI updates are not critical
     
     # Loop over items.
     for idx, strategy in enumerate(strategies):
