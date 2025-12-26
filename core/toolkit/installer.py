@@ -405,7 +405,7 @@ async def install_tool(name: str) -> Dict[str, str]:
     return {
         "tool": name,
         "status": "error",
-        "message": f"All strategies failed.\n\n" + "\n".join(installation_log) + f"\n\nLast error: {last_error}"
+        "message": "All strategies failed.\n\n" + "\n".join(installation_log) + f"\n\nLast error: {last_error}"
     }
 
 
