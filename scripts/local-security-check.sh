@@ -20,9 +20,18 @@ FAILED=0
 # Check 1: shell=True
 echo "📍 Checking for shell=True (command injection)..."
 if grep -r "shell=True" core/ --include="*.py" > /dev/null 2>&1; then
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${RED}❌ BLOCKED: shell=True found${NC}"
-    echo "Locations:"
-    grep -rn "shell=True" core/ --include="*.py"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "VULNERABILITY DETAILS:"
+    echo "This is a command injection vulnerability."
+    echo "Use shell=False with list arguments instead."
+    echo ""
+    echo "LOCATIONS (file:line):"
+    grep -rn "shell=True" core/ --include="*.py" | sed 's/^/  → /'
+    echo ""
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     FAILED=1
 else
     echo -e "${GREEN}✅ No shell=True found${NC}"
