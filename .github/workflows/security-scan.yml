@@ -122,13 +122,23 @@ jobs:
       - name: Check for shell=True
         run: |
           echo "🔍 Searching for dangerous shell=True usage..."
+          echo ""
 
-          # Find all shell=True occurrences
-          if grep -r "shell=True" core/ --include="*.py"; then
+          # Find all shell=True occurrences with line numbers
+          if grep -rn "shell=True" core/ --include="*.py"; then
             echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo "❌ CRITICAL: shell=True found in code"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo ""
+            echo "VULNERABILITY DETAILS:"
             echo "This is a command injection vulnerability."
             echo "Use shell=False with list arguments instead."
+            echo ""
+            echo "LOCATIONS (file:line):"
+            grep -rn "shell=True" core/ --include="*.py" | sed 's/^/  → /'
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             exit 1
           fi
 
