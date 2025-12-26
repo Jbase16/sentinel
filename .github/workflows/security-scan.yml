@@ -124,7 +124,7 @@ jobs:
           echo "🔍 Searching for dangerous shell=True usage..."
 
           # Find all shell=True occurrences
-          if grep -r "shell=True" core/ --include="*.py"; then
+          grep -rn "^[^#]*shell=True" core/ --include="*.py"
             echo ""
             echo "❌ CRITICAL: shell=True found in code"
             echo "This is a command injection vulnerability."
