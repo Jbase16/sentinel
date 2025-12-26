@@ -21,3 +21,6 @@ venv/
 userdata/
 core/aegis/
 tests/test_aegis_phase1.py
+core/thanatos/
+tests/test_thanatos_phase1.py
+tests/test_thanatos_phase2.py
