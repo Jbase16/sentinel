@@ -193,7 +193,6 @@ class CommandChain:
     Robust command chain parser and executor.
     
     Handles sequences of commands joined by && (AND) and || (OR) operators
-    without relying on shell=True, preventing injection vulnerabilities.
     """
     
     def __init__(self, raw_tokens: List[str]):
