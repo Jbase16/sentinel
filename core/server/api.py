@@ -425,24 +425,38 @@ async def shutdown_event():
 
 def setup_cors():
     """Function setup_cors."""
-    # Localhost origins for local development
     # Production deployments should configure this via environment
-    allowed_origins = [
-        "http://localhost:3000",
-        "http://localhost:8080",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8080",
-        "tauri://localhost",  # For Tauri apps
-        "https://localhost",
-    ]
+    # Wildcard CORS with credentials enabled is local-privilege escalation.
+    config = get_config()
+    
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=allowed_origins,
+        allow_origins=list(config.security.allowed_origins),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
+        max_age=600,
     )
 setup_cors()
+
+@app.websocket("/ws/pty")
+async def websocket_pty(websocket: WebSocket):
+    """Secure WebSocket endpoint for PTY."""
+    config = get_config()
+    
+    # Check origin manually because CORSMiddleware doesn't always handle WS upgrades strictly
+    origin = websocket.headers.get("origin")
+    if origin and origin not in config.security.allowed_origins:
+        await websocket.close(code=4003, reason="Origin not allowed")    
+        return
+
+    if not config.security.terminal_enabled:
+        await websocket.close(code=4003, reason="Terminal access disabled")
+        return
+    
+    await websocket.accept()
+    # PTY connection handling would normally follow here
 
 # --- Helpers ---
 
