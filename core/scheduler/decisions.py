@@ -86,16 +86,17 @@ class DecisionType(str, Enum):
 class DecisionPoint:
     """
     Immutable record of a single strategic decision.
-    
+
     A DecisionPoint captures:
     - WHAT was decided (chosen option)
     - WHY it was decided (reason, evidence)
     - WHEN it was decided (timestamp, sequence)
     - WHAT ELSE was considered (alternatives, scores)
-    
+    - WHICH EVENTS triggered it (trigger_event_sequence)
+
     This is a pure data structure - no side effects on creation.
     Side effects (event emission) happen only when executed via DecisionContext.
-    
+
     Fields:
         id: Unique identifier (UUID v4)
         type: Classification of decision (DecisionType)
@@ -105,13 +106,15 @@ class DecisionPoint:
         context: Arbitrary metadata (target, mode, scores, etc.)
         evidence: Supporting data that informed the decision
         parent_id: Optional link to parent decision (for decision trees)
+        trigger_event_sequence: Optional event sequence that triggered this decision
         timestamp: When decision was created (monotonic time)
         sequence: Ledger sequence number (set by DecisionLedger)
-    
+
     Contract:
         - Once created, fields are immutable (frozen dataclass)
         - `sequence` is None until committed to ledger
         - `parent_id` creates causal chains for decision analysis
+        - `trigger_event_sequence` enables event-decision correlation
     """
     id: str
     type: DecisionType
@@ -121,6 +124,7 @@ class DecisionPoint:
     context: Dict[str, Any] = field(default_factory=dict)
     evidence: Dict[str, Any] = field(default_factory=dict)
     parent_id: Optional[str] = None
+    trigger_event_sequence: Optional[int] = None
     timestamp: float = field(default_factory=time.monotonic)
     sequence: Optional[int] = None
     
@@ -133,13 +137,24 @@ class DecisionPoint:
         alternatives: Optional[List[Any]] = None,
         context: Optional[Dict[str, Any]] = None,
         evidence: Optional[Dict[str, Any]] = None,
-        parent_id: Optional[str] = None
+        parent_id: Optional[str] = None,
+        trigger_event_sequence: Optional[int] = None
     ) -> DecisionPoint:
         """
         Factory method for creating decisions.
-        
+
         This is the primary way to create DecisionPoints.
         Validates that all required fields are provided.
+
+        Args:
+            decision_type: Classification of the decision
+            chosen: The selected option
+            reason: Why this option was chosen
+            alternatives: Other options that were considered
+            context: Arbitrary metadata (target, mode, scores, etc.)
+            evidence: Supporting data that informed the decision
+            parent_id: Link to parent decision (for decision trees)
+            trigger_event_sequence: Event sequence that triggered this decision
         """
         return cls(
             id=str(uuid.uuid4()),
@@ -150,6 +165,7 @@ class DecisionPoint:
             context=context or {},
             evidence=evidence or {},
             parent_id=parent_id,
+            trigger_event_sequence=trigger_event_sequence,
             timestamp=time.monotonic()
         )
     
@@ -167,6 +183,7 @@ class DecisionPoint:
             context=self.context,
             evidence=self.evidence,
             parent_id=self.parent_id,
+            trigger_event_sequence=self.trigger_event_sequence,
             timestamp=self.timestamp,
             sequence=sequence
         )
@@ -174,7 +191,7 @@ class DecisionPoint:
     def to_event_payload(self) -> Dict[str, Any]:
         """
         Convert decision to EventBus payload format.
-        
+
         This bridges DecisionPoints to the existing EventBus infrastructure.
         Maps our rich decision structure to the simpler event schema.
         """
@@ -185,19 +202,23 @@ class DecisionPoint:
             "reason": self.reason,
             "context": self.context,
         }
-        
+
         # Include alternatives if decision involved selection
         if self.alternatives:
             payload["alternatives"] = [str(alt) for alt in self.alternatives]
-        
+
         # Include evidence if decision was data-driven
         if self.evidence:
             payload["evidence"] = self.evidence
-        
+
         # Include parent linkage for decision chains
         if self.parent_id:
             payload["parent_decision_id"] = self.parent_id
-        
+
+        # Include event sequence for correlation
+        if self.trigger_event_sequence:
+            payload["trigger_event_sequence"] = self.trigger_event_sequence
+
         return payload
 
 
@@ -403,13 +424,14 @@ class DecisionContext:
         alternatives: Optional[List[Any]] = None,
         context: Optional[Dict[str, Any]] = None,
         evidence: Optional[Dict[str, Any]] = None,
+        trigger_event_sequence: Optional[int] = None,
         defer: bool = False
     ) -> DecisionPoint:
         """
         Make a strategic decision and optionally emit immediately.
-        
+
         This is the primary decision-making API.
-        
+
         Args:
             decision_type: Type of decision being made
             chosen: The selected option
@@ -417,18 +439,19 @@ class DecisionContext:
             alternatives: Other options considered
             context: Arbitrary metadata
             evidence: Supporting data
+            trigger_event_sequence: Event sequence that triggered this decision
             defer: If True, decision is queued (use for batching)
-        
+
         Returns:
             The committed DecisionPoint with sequence assigned
-        
+
         Side Effects (if auto_emit=True and defer=False):
             - Decision committed to ledger
             - Event emitted to EventBus
         """
         # Link to parent if we're in a nested decision
         parent_id = self._parent_stack[-1] if self._parent_stack else None
-        
+
         # Create immutable decision record
         decision = DecisionPoint.create(
             decision_type=decision_type,
@@ -437,14 +460,15 @@ class DecisionContext:
             alternatives=alternatives,
             context=context,
             evidence=evidence,
-            parent_id=parent_id
+            parent_id=parent_id,
+            trigger_event_sequence=trigger_event_sequence
         )
-        
+
         # Defer commit for batching
         if defer:
             self._pending.append(decision)
             return decision
-        
+
         # Immediate commit and emit
         return self._commit_and_emit(decision)
     

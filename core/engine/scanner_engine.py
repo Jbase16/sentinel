@@ -18,8 +18,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from urllib.parse import urlparse
-from typing import AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from core.data.findings_store import findings_store
 from core.data.evidence_store import EvidenceStore
@@ -32,6 +33,90 @@ from core.base.task_router import TaskRouter
 from core.cortex.correlator import GraphCorrelator
 
 logger = logging.getLogger(__name__)
+
+
+class ResourceExhaustedError(Exception):
+    """Raised when resource limits are exceeded."""
+    pass
+
+
+class ResourceGuard:
+    """
+    Prevents resource exhaustion during scans.
+
+    Tracks and enforces limits on:
+    - Total findings count
+    - Disk usage for evidence/output
+    """
+
+    def __init__(self, max_findings: int = 10000, max_disk_mb: int = 1000):
+        """
+        Initialize resource guard.
+
+        Args:
+            max_findings: Maximum number of findings before raising error
+            max_disk_mb: Maximum disk usage in MB before raising error
+        """
+        self.max_findings = max_findings
+        self.max_disk_mb = max_disk_mb
+        self.findings_count = 0
+        self.disk_usage = 0
+        self._lock = threading.Lock()
+
+    def check_findings(self, count: int) -> bool:
+        """
+        Check if adding findings would exceed limit.
+
+        Args:
+            count: Number of findings to add
+
+        Returns:
+            True if within limits
+
+        Raises:
+            ResourceExhaustedError: If limit would be exceeded
+        """
+        with self._lock:
+            if self.findings_count + count > self.max_findings:
+                raise ResourceExhaustedError(
+                    f"Too many findings: {self.findings_count + count} exceeds limit {self.max_findings}"
+                )
+            self.findings_count += count
+            return True
+
+    def check_disk(self, size_bytes: int) -> bool:
+        """
+        Check if adding disk usage would exceed limit.
+
+        Args:
+            size_bytes: Size in bytes to add
+
+        Returns:
+            True if within limits
+
+        Raises:
+            ResourceExhaustedError: If limit would be exceeded
+        """
+        with self._lock:
+            max_bytes = self.max_disk_mb * 1024 * 1024
+            if self.disk_usage + size_bytes > max_bytes:
+                raise ResourceExhaustedError(
+                    f"Too much disk usage: {(self.disk_usage + size_bytes) / 1024 / 1024:.1f}MB exceeds limit {self.max_disk_mb}MB"
+                )
+            self.disk_usage += size_bytes
+            return True
+
+    def get_usage(self) -> Dict[str, object]:
+        """Get current resource usage for monitoring."""
+        with self._lock:
+            return {
+                "findings_count": self.findings_count,
+                "max_findings": self.max_findings,
+                "disk_usage_mb": self.disk_usage / 1024 / 1024,
+                "max_disk_mb": self.max_disk_mb,
+                "findings_percent": (self.findings_count / self.max_findings) * 100 if self.max_findings > 0 else 0,
+                "disk_percent": (self.disk_usage / (self.max_disk_mb * 1024 * 1024)) * 100 if self.max_disk_mb > 0 else 0,
+            }
 
 # Try to import psutil for resource awareness
 try:
@@ -81,6 +166,183 @@ DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS = 60      # 1 minute without output => conside
 DEFAULT_GLOBAL_SCAN_TIMEOUT_SECONDS = 900   # 15 minutes overall cap
 
 
+class ScanTransaction:
+    """
+    Context manager for atomic scan operations.
+
+    Ensures scan results are committed atomically - either all results
+    are saved to the database, or none are (on failure/crash).
+
+    This prevents inconsistent state where some results are persisted
+    but others are lost due to crashes or exceptions.
+
+    Usage:
+        async with ScanTransaction(engine, session_id) as txn:
+            # Run scan, collect results
+            txn.add_finding(finding)
+            txn.add_result(result)
+            # On exit, all results are atomically committed
+            # On exception, all results are rolled back
+
+    Design Pattern: Two-Phase Commit
+    - Phase 1 (active): Accumulate results in memory
+    - Phase 2 (commit): Atomically write to database
+    - On error: Rollback (discard all accumulated results)
+    """
+
+    def __init__(self, engine: "ScannerEngine", session_id: str):
+        """
+        Initialize scan transaction.
+
+        Args:
+            engine: ScannerEngine instance
+            session_id: Session ID for this scan
+        """
+        self._engine = engine
+        self._session_id = session_id
+        self._committed = False
+        self._rolled_back = False
+
+        # Staging area for transactional data
+        self._staged_findings: List[Dict[str, Any]] = []
+        self._staged_issues: List[Dict[str, Any]] = []
+        self._staged_evidence: List[Dict[str, Any]] = []
+
+    async def __aenter__(self) -> "ScanTransaction":
+        """Enter transaction context."""
+        if self._engine._active_transaction:
+            raise RuntimeError("Nested transactions not supported")
+        self._engine._active_transaction = self
+        logger.debug(f"[ScanTransaction] Started transaction for session {self._session_id}")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """
+        Exit transaction context.
+
+        - If no exception: commit all staged data
+        - If exception: rollback (discard all staged data)
+        """
+        if exc_type is None and not self._rolled_back:
+            await self.commit()
+        else:
+            await self.rollback()
+
+        self._engine._active_transaction = None
+        return False  # Don't suppress exceptions
+
+    def add_finding(self, finding: Dict[str, Any]) -> None:
+        """Stage a finding for commit."""
+        if self._committed or self._rolled_back:
+            raise RuntimeError("Transaction already closed")
+        self._staged_findings.append(finding)
+
+    def add_issue(self, issue: Dict[str, Any]) -> None:
+        """Stage an issue for commit."""
+        if self._committed or self._rolled_back:
+            raise RuntimeError("Transaction already closed")
+        self._staged_issues.append(issue)
+
+    def add_evidence(self, evidence: Dict[str, Any]) -> None:
+        """Stage evidence for commit."""
+        if self._committed or self._rolled_back:
+            raise RuntimeError("Transaction already closed")
+        self._staged_evidence.append(evidence)
+
+    async def commit(self) -> None:
+        """
+        Commit all staged data to the database atomically.
+
+        Uses a single database transaction to ensure all data
+        is written together or not at all.
+        """
+        if self._committed or self._rolled_back:
+            return  # Already handled
+
+        try:
+            # Import here to avoid circular dependency
+            from core.data.db import Database
+
+            db = Database.instance()
+
+            # Use database transaction for atomicity
+            async with db._db_lock:
+                conn = db._db_connection
+                if conn is None:
+                    await db.init()
+                    conn = db._db_connection
+
+                # Begin explicit transaction
+                await conn.execute("BEGIN IMMEDIATE")
+
+                try:
+                    # Commit all findings
+                    for finding in self._staged_findings:
+                        await db._save_finding_impl(finding, self._session_id)
+
+                    # Commit all issues
+                    for issue in self._staged_issues:
+                        await db._save_issue_impl(issue, self._session_id)
+
+                    # Commit all evidence
+                    for evidence in self._staged_evidence:
+                        await db._save_evidence_impl(evidence, self._session_id)
+
+                    # Mark transaction complete
+                    await conn.commit()
+
+                    self._committed = True
+                    logger.info(
+                        f"[ScanTransaction] Committed: "
+                        f"{len(self._staged_findings)} findings, "
+                        f"{len(self._staged_issues)} issues, "
+                        f"{len(self._staged_evidence)} evidence"
+                    )
+
+                except Exception as e:
+                    # Rollback on any error
+                    await conn.rollback()
+                    raise RuntimeError(f"Transaction commit failed: {e}") from e
+
+        except Exception as e:
+            logger.error(f"[ScanTransaction] Commit error: {e}")
+            # Mark as rolled back to prevent retry
+            self._rolled_back = True
+            raise
+
+    async def rollback(self) -> None:
+        """
+        Rollback the transaction - discard all staged data.
+
+        This is called automatically on exception or can be called
+        explicitly to cancel the scan.
+        """
+        if self._committed or self._rolled_back:
+            return  # Already handled
+
+        self._rolled_back = True
+        self._staged_findings.clear()
+        self._staged_issues.clear()
+        self._staged_evidence.clear()
+
+        logger.info(
+            f"[ScanTransaction] Rolled back transaction for session {self._session_id}"
+        )
+
+    @property
+    def is_active(self) -> bool:
+        """Check if transaction is currently active."""
+        return not self._committed and not self._rolled_back
+
+    def stats(self) -> Dict[str, int]:
+        """Get statistics about staged data."""
+        return {
+            "findings": len(self._staged_findings),
+            "issues": len(self._staged_issues),
+            "evidence": len(self._staged_evidence),
+        }
+
+
 class ScannerEngine:
     """Runs supported scanning tools on macOS (no unsupported tool errors)."""
 
@@ -95,13 +357,19 @@ class ScannerEngine:
         self._installed_meta: Dict[str, Dict[str, object]] = {}
         self._recon_edges: List[dict] = []
         self._recon_edge_keys: set[tuple] = set()
-        
+
         # Task management state
         self._pending_tasks = []
         self._running_tasks = {}
         self._queue = asyncio.Queue()
         self._results_map = {}
         self._procs = {}
+
+        # Resource guard to prevent exhaustion
+        self.resource_guard = ResourceGuard(max_findings=10000, max_disk_mb=1000)
+
+        # Scan transaction state
+        self._active_transaction: Optional["ScanTransaction"] = None
 
     @staticmethod
     def _get_env_seconds(name: str, default: int) -> int:
@@ -739,6 +1007,16 @@ class ScannerEngine:
         self._procs.pop(tool, None)
 
         output_text = "\n".join(output_lines)
+
+        # Check disk usage before storing evidence
+        output_size = len(output_text.encode('utf-8'))
+        try:
+            self.resource_guard.check_disk(output_size)
+        except ResourceExhaustedError as e:
+            await queue.put(f"[{tool}] Resource limit exceeded: {e}")
+            logger.warning(f"[{tool}] {e}")
+            return []
+
         # Use session-scoped evidence store if available, otherwise global singleton
         evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
         evidence_store.add_evidence(tool, output_text, {
@@ -753,7 +1031,16 @@ class ScannerEngine:
         # Error handling block.
         try:
             findings = ScannerBridge.classify(tool, target, output_text)
-            
+
+            # Check findings count limit
+            try:
+                self.resource_guard.check_findings(len(findings))
+            except ResourceExhaustedError as e:
+                await queue.put(f"[{tool}] {e} - truncating results")
+                logger.warning(f"[{tool}] {e}")
+                # Return empty findings to prevent overflow
+                return []
+
             # Session-scoped scans own their lifecycle via the canonical EventBus path.
             # Avoid global TaskRouter side effects (global stores / non-session DB writes).
             if self.session is None:
@@ -768,7 +1055,7 @@ class ScannerEngine:
                     )
                 except Exception as router_err:
                     logger.warning(f"[{tool}] TaskRouter processing error: {router_err}")
-            
+
             return findings
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"

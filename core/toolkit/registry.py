@@ -1,26 +1,47 @@
 """Module registry: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/registry.py."""
-from typing import Dict, List
+import logging
+from typing import Dict, List, Optional
 from pathlib import Path
 
 from core.toolkit.normalizer import normalize_target
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # Navigate up to core/
-WORDLIST_DIR = BASE_DIR / "assets" / "wordlists"
+logger = logging.getLogger(__name__)
+
+# Navigate to repository root (sentinelforge/)
+# __file__ = core/toolkit/registry.py
+# parents[0] = core/toolkit
+# parents[1] = core
+# parents[2] = sentinelforge/ (repo root)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORDLIST_DIR = REPO_ROOT / "assets" / "wordlists"
 DEFAULT_WORDLIST = WORDLIST_DIR / "common.txt"
 
-
-def get_wordlist_path(name: str = "common.txt") -> str:
-    """Get the path to a wordlist file, with fallback to default."""
-    candidate = WORDLIST_DIR / name
-    # Conditional branch.
-    if candidate.exists():
-        return str(candidate.resolve())
-    # Conditional branch.
-    if DEFAULT_WORDLIST.exists():
-        return str(DEFAULT_WORDLIST.resolve())
-    return str(candidate.resolve())
+# Fallback: use inline wordlist if directory doesn't exist
+if not WORDLIST_DIR.exists():
+    logger.warning(f"Wordlist directory not found: {WORDLIST_DIR}, tools may fail without wordlists")
 
 
+def get_wordlist_path(name: str = "common.txt") -> Optional[str]:
+    """
+    Get the path to a wordlist file, with fallback to default.
+
+    Returns None if neither the requested wordlist nor the default exists.
+    """
+    if WORDLIST_DIR.exists():
+        candidate = WORDLIST_DIR / name
+        if candidate.exists():
+            return str(candidate.resolve())
+
+        # Try default wordlist as fallback
+        if DEFAULT_WORDLIST.exists():
+            return str(DEFAULT_WORDLIST.resolve())
+
+    # No wordlist directory available
+    logger.warning(f"Wordlist not found: {name}, wordlist directory missing")
+    return None
+
+
+# Initialize common wordlist path (may be None if directory doesn't exist)
 COMMON_WORDLIST = get_wordlist_path("common.txt")
 
 
@@ -216,7 +237,7 @@ def get_tool_command(name: str, target: str, override: Dict | None = None) -> tu
     for part in tdef["cmd"]:
         if "{target}" in part:
             cmd.append(part.replace("{target}", normalized))
-        else:
+        elif part is not None:  # Filter out None values (e.g., missing wordlist)
             cmd.append(part)
 
     # If tool uses stdin, the normalized target is piped via stdin

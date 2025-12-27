@@ -12,12 +12,34 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+# Global event sequence counter - thread-safe singleton
+_event_sequence_lock = threading.Lock()
+_event_sequence_counter = 0
+
+
+def _next_event_sequence() -> int:
+    """
+    Get the next global event sequence number.
+
+    This is a monotonically increasing counter that provides:
+    - Total ordering of all events (even with identical timestamps)
+    - Cross-correlation between events and decisions
+    - Debugging capability to reconstruct exact event flow
+
+    Thread-safe via lock to ensure no sequence numbers are skipped/duplicated.
+    """
+    global _event_sequence_counter
+    with _event_sequence_lock:
+        _event_sequence_counter += 1
+        return _event_sequence_counter
 
 class GraphEventType(str, Enum):
     """
@@ -36,10 +58,24 @@ class GraphEventType(str, Enum):
 
 @dataclass
 class GraphEvent:
-    """Class GraphEvent."""
+    """
+    Immutable event record with global sequence number.
+
+    Fields:
+        type: Event classification from GraphEventType enum
+        payload: Event-specific data (findings, decisions, etc.)
+        timestamp: When event occurred (epoch time)
+        event_sequence: Global monotonically increasing sequence number
+
+    The event_sequence enables:
+    - Total ordering of events regardless of clock skew
+    - Cross-correlation: decisions can reference specific events
+    - Debugging: reconstruct exact event flow from logs
+    """
     type: GraphEventType
     payload: Dict[str, Any]
     timestamp: float = field(default_factory=time.time)
+    event_sequence: int = field(default_factory=_next_event_sequence)
 
 class EventBus:
     """
@@ -48,13 +84,22 @@ class EventBus:
     def __init__(self):
         """Function __init__."""
         self._subscribers: List[Callable[[GraphEvent], None]] = []
+        self._last_event_sequence: int = 0  # Track last sequence for diagnostics
 
     def subscribe(self, callback: Callable[[GraphEvent], None]):
         """Function subscribe."""
         self._subscribers.append(callback)
 
+    @property
+    def last_event_sequence(self) -> int:
+        """Get the sequence number of the last emitted event."""
+        return self._last_event_sequence
+
     def emit(self, event: GraphEvent):
         """Broadcast event to all subscribers."""
+        # Track last sequence for diagnostics
+        self._last_event_sequence = event.event_sequence
+
         # Loop over items.
         for callback in self._subscribers:
             try:
@@ -146,6 +191,7 @@ class EventBus:
 
 _event_bus: Optional[EventBus] = None
 
+
 def get_event_bus() -> EventBus:
     """Function get_event_bus."""
     global _event_bus
@@ -153,3 +199,15 @@ def get_event_bus() -> EventBus:
     if _event_bus is None:
         _event_bus = EventBus()
     return _event_bus
+
+
+def reset_event_sequence() -> None:
+    """
+    Reset the global event sequence counter.
+
+    WARNING: This should ONLY be used in tests!
+    In production, the sequence counter should never be reset.
+    """
+    global _event_sequence_counter
+    with _event_sequence_lock:
+        _event_sequence_counter = 0

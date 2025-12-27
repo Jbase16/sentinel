@@ -15,8 +15,17 @@ import shutil
 from typing import Dict, Any
 from core.base.task_router import TaskRouter
 from core.toolkit.registry import TOOLS, get_tool_command
+from core.toolkit.installer import install_tools, uninstall_tools
 
-__all__ = ["TaskRouter", "tool_callback_factory", "TOOLS", "get_tool_command", "get_installed_tools"]
+__all__ = [
+    "TaskRouter",
+    "tool_callback_factory",
+    "TOOLS",
+    "get_tool_command",
+    "get_installed_tools",
+    "install_tools",
+    "uninstall_tools",
+]
 
 
 def tool_callback_factory(tool_name: str):

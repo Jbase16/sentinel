@@ -23,11 +23,11 @@ import logging
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -103,6 +103,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# API Versioning: Create v1 router for all endpoints
+# This allows future API versions to coexist without breaking existing clients
+# All endpoints should be registered on the v1_router, not directly on app
+v1_router = APIRouter(
+    prefix="/v1",
+    tags=["v1"],
+    responses={404: {"description": "Not found"}},
+)
+
 security = HTTPBearer(auto_error=False)
 
 # Exception handler for SentinelError
@@ -160,6 +169,7 @@ _ = get_event_store()
 
 _session_manager: Dict[str, Any] = {}
 _session_manager_lock = asyncio.Lock()
+_session_cleanup_task: Optional[asyncio.Task] = None
 
 async def register_session(session_id: str, session) -> None:
     """Register a session for tracking."""
@@ -176,6 +186,59 @@ async def unregister_session(session_id: str) -> None:
     async with _session_manager_lock:
         if session_id in _session_manager:
             del _session_manager[session_id]
+
+async def cleanup_old_sessions(max_age: timedelta = timedelta(days=1)) -> int:
+    """
+    Remove sessions older than max_age from the session manager.
+
+    Args:
+        max_age: Maximum age of a session before it's cleaned up (default 1 day)
+
+    Returns:
+        Number of sessions removed
+    """
+    now = datetime.now(timezone.utc)
+    to_remove = []
+
+    async with _session_manager_lock:
+        for session_id, session in _session_manager.items():
+            # Check if session has start_time attribute
+            session_start = getattr(session, "start_time", None)
+            if session_start:
+                # Calculate age based on session start time
+                if isinstance(session_start, (int, float)):
+                    # Unix timestamp - convert to datetime
+                    session_time = datetime.fromtimestamp(session_start, tz=timezone.utc)
+                elif isinstance(session_start, datetime):
+                    session_time = session_start
+                else:
+                    # Unknown format, skip this session
+                    continue
+
+                age = now - session_time
+                if age > max_age:
+                    to_remove.append(session_id)
+
+        # Remove old sessions
+        for session_id in to_remove:
+            del _session_manager[session_id]
+
+    return len(to_remove)
+
+async def _session_cleanup_loop():
+    """Background task that periodically cleans up old sessions."""
+    while True:
+        try:
+            # Run cleanup every 24 hours
+            await asyncio.sleep(86400)  # 24 hours in seconds
+            removed = await cleanup_old_sessions()
+            if removed > 0:
+                logger.info(f"Session cleanup: removed {removed} old sessions")
+        except asyncio.CancelledError:
+            logger.info("Session cleanup task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Session cleanup error: {e}")
 
 
 async def _begin_scan(req: ScanRequest) -> str:
@@ -409,7 +472,7 @@ async def check_ai_rate_limit(request: Request) -> None:
 @app.on_event("startup")
 async def startup_event():
     """AsyncFunction startup_event."""
-    global _api_loop
+    global _api_loop, _session_cleanup_task
     config = get_config()
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
@@ -419,18 +482,32 @@ async def startup_event():
         _api_loop = asyncio.get_running_loop()
     except RuntimeError:
         _api_loop = None
-    
+
     # Async DB Init
     db = Database.instance()
     await db.init()  # Ensure DB is ready before requests
 
+    # Start session cleanup task
+    _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
+    logger.info("Session cleanup task started")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """AsyncFunction shutdown_event."""
+    global _session_cleanup_task
     logger.info("SentinelForge API Shutting Down...")
+
+    # Cancel session cleanup task
+    if _session_cleanup_task and not _session_cleanup_task.done():
+        _session_cleanup_task.cancel()
+        try:
+            await _session_cleanup_task
+        except asyncio.CancelledError:
+            pass
+
     from core.data.blackbox import BlackBox
     await BlackBox.instance().shutdown()
-    
+
     # Ideally close DB connection too if we exposed a close method
     db = Database.instance()
     await db.close()
@@ -549,9 +626,13 @@ def _log_sink_sync(msg: str) -> None:
     # Conditional branch.
     if loop is not None:
         try:
-            loop.call_soon_threadsafe(
-                lambda: _log_queue.put_nowait(msg) if not _log_queue.full() else None
-            )
+            def _enqueue_or_warn():
+                if _log_queue.full():
+                    logger.warning(f"Log queue overflow, dropping entry. Queue size: {_log_queue.maxsize}")
+                else:
+                    _log_queue.put_nowait(msg)
+
+            loop.call_soon_threadsafe(_enqueue_or_warn)
         except Exception:
             pass
 
@@ -622,21 +703,32 @@ async def _get_latest_results() -> Dict[str, Any]:
         "scan": _scan_state,
     }
 
-# --- Routes ---
+# ============================================================================
+# API Versioning: v1 Routes
+# ============================================================================
+# All new endpoints should be registered on v1_router with /v1 prefix
+# This allows future API versions to be introduced without breaking existing clients
+#
+# Example:
+#   @v1_router.get("/status")  # -> /v1/status
+#   async def get_status_v1(): ...
+#
+# Legacy routes (without /v1 prefix) are kept for backward compatibility
+# ============================================================================
 
-@app.get("/ping")
-async def ping():
-    """AsyncFunction ping."""
+@v1_router.get("/ping")
+async def ping_v1():
+    """API v1: Health check endpoint."""
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-@app.get("/status")
-async def get_status(_: bool = Depends(verify_token)):
-    """AsyncFunction get_status."""
+@v1_router.get("/status")
+async def get_status_v1(_: bool = Depends(verify_token)):
+    """API v1: Get system status including scan state, AI health, and tool installation."""
     from core.toolkit.tools import get_installed_tools, TOOLS
     installed = get_installed_tools()
     all_tools = list(TOOLS.keys())
     missing = [t for t in all_tools if t not in installed]
-    
+
     return {
         "status": "ok",
         "scan_running": _active_scan_task is not None and not _active_scan_task.done(),
@@ -650,9 +742,9 @@ async def get_status(_: bool = Depends(verify_token)):
         },
     }
 
-@app.get("/tools/status")
-async def tools_status(_: bool = Depends(verify_token)):
-    """AsyncFunction tools_status."""
+@v1_router.get("/tools/status")
+async def tools_status_v1(_: bool = Depends(verify_token)):
+    """API v1: Get installed tools status."""
     from core.toolkit.tools import get_installed_tools, TOOLS
     installed = get_installed_tools()
     all_tools = list(TOOLS.keys())
@@ -670,12 +762,12 @@ async def tools_status(_: bool = Depends(verify_token)):
         pass
     return {"tools": payload}
 
-@app.get("/logs")
-async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
-    """AsyncFunction get_logs."""
+@v1_router.get("/logs")
+async def get_logs_v1(limit: int = 100, _: bool = Depends(verify_token)):
+    """API v1: Get scan logs."""
     lines = []
     session_id = _scan_state.get("session_id")
-    
+
     # First try to get session-specific logs
     if session_id:
         session = await get_session(session_id)
@@ -684,16 +776,82 @@ async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
             lines = session.logs[-limit:] if len(session.logs) > limit else session.logs
             if lines:
                 return {"lines": lines, "session_id": session_id}
-    
+
     # Fallback to global queue for legacy behavior
     while not _log_queue.empty() and len(lines) < limit:
         lines.append(_log_queue.get_nowait())
     return {"lines": lines}
 
+@v1_router.get("/results")
+async def get_results_v1(_: bool = Depends(verify_token)):
+    """API v1: Get scan results including findings, issues, and killchain data."""
+    # If there's an active scan with a session, return session-specific results
+    session_id = _scan_state.get("session_id")
+    if session_id:
+        session = await get_session(session_id)
+        if session:
+            return {
+                "findings": session.findings,
+                "issues": session.issues,
+                "killchain": {"edges": session.killchain},
+                "session_id": session_id,
+            }
+
+    # Fallback to global stores (legacy behavior or no session)
+    return {
+        "findings": findings_store.get_all(),
+        "issues": issues_store.get_all(),
+        "killchain": {"edges": killchain_store.get_all()},
+        "scan": _scan_state,
+    }
+
+
+# ============================================================================
+# Legacy Routes (without /v1 prefix) - Kept for backward compatibility
+# ============================================================================
+# These routes are DEPRECATED and will be removed in a future version.
+# Please migrate to use the /v1 prefixed endpoints.
+# ============================================================================
+
+@app.get("/ping")
+async def ping():
+    """
+    DEPRECATED: Use /v1/ping instead.
+    Health check endpoint.
+    """
+    return await ping_v1()
+
+@app.get("/status")
+async def get_status(_: bool = Depends(verify_token)):
+    """
+    DEPRECATED: Use /v1/status instead.
+    Get system status.
+    """
+    return await get_status_v1(_)
+
+@app.get("/tools/status")
+async def tools_status(_: bool = Depends(verify_token)):
+    """
+    DEPRECATED: Use /v1/tools/status instead.
+    Get tools status.
+    """
+    return await tools_status_v1(_)
+
+@app.get("/logs")
+async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
+    """
+    DEPRECATED: Use /v1/logs instead.
+    Get scan logs.
+    """
+    return await get_logs_v1(limit, _)
+
 @app.get("/results")
 async def get_results(_: bool = Depends(verify_token)):
-    """AsyncFunction get_results."""
-    return await _get_latest_results()
+    """
+    DEPRECATED: Use /v1/results instead.
+    Get scan results.
+    """
+    return await get_results_v1(_)
 
 @app.get("/cortex/graph")
 async def get_cortex_graph(_: bool = Depends(verify_token)):
@@ -1186,6 +1344,13 @@ async def terminal_websocket_pty(websocket: WebSocket):
         pass
     finally:
         reader_task.cancel()
+
+# ============================================================================
+# Register API Versioning Routers
+# ============================================================================
+# This must be done AFTER all route decorators have been applied
+# (i.e., after all @v1_router.get/post/put/delete decorators have run)
+app.include_router(v1_router)
 
 def serve(port: Optional[int] = None, host: Optional[str] = None):
     """Function serve."""

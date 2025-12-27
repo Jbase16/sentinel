@@ -35,6 +35,7 @@ import logging
 import os
 import asyncio
 import sqlite3
+import threading
 from typing import List, Dict, Optional, Any
 
 from core.base.config import get_config
@@ -58,12 +59,14 @@ class Database:
         config = get_config()
         self.db_path = str(config.storage.db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        
+
         self._initialized = False
-        self._init_lock = asyncio.Lock()
+        # Use threading.Lock for __init__ since it may be called from sync context
+        self._init_lock = threading.Lock()
         self._db_connection: Optional[aiosqlite.Connection] = None
+        # asyncio.Lock is fine here since it's only used in async methods
         self._db_lock = asyncio.Lock()
-        
+
         # Persistence Actor
         from core.data.blackbox import BlackBox
         self.blackbox = BlackBox.instance()
@@ -73,26 +76,27 @@ class Database:
         # Conditional branch.
         if self._initialized:
             return
-            
-        async with self._init_lock:
+
+        # Use threading.Lock for initialization safety (works in both sync/async contexts)
+        with self._init_lock:
             if self._initialized:
                 return
-                
+
             try:
                 self._db_connection = await aiosqlite.connect(self.db_path, timeout=5.0)
                 await self._db_connection.execute("PRAGMA journal_mode=WAL;")
                 await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
                 await self._db_connection.execute("PRAGMA busy_timeout=5000;")
                 await self._db_connection.execute("PRAGMA foreign_keys=ON;")
-                
+
                 await self._create_tables()
-                
+
                 await self._db_connection.commit()
                 self._initialized = True
-                
+
                 # Start the BlackBox worker now that we are ready
                 self.blackbox.start()
-                
+
                 logger.info(f"Database initialized at {self.db_path} (WAL mode)")
             except Exception as e:
                 logger.error(f"Database init failed: {e}")

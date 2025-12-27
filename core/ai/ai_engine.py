@@ -24,13 +24,20 @@
 # - Prompt Engineering: Crafting instructions to get good AI responses
 # - JSON Schema Enforcement: Force AI to return structured data, not essays
 #
+# CIRCUIT BREAKER:
+# - Prevents cascading failures when Ollama is unresponsive
+# - Opens after N consecutive failures
+# - Closes after timeout period
+#
 
 from __future__ import annotations
 
 import json
 import logging
 import httpx
-from typing import Dict, List, Optional, Generator
+import time
+import threading
+from typing import Dict, List, Optional, Generator, Callable, Any
 
 from core.data.findings_store import findings_store
 from core.data.killchain_store import killchain_store
@@ -38,6 +45,106 @@ from core.data.evidence_store import EvidenceStore
 from core.base.config import AI_PROVIDER, OLLAMA_URL, AI_MODEL, AI_FALLBACK_ENABLED
 
 logger = logging.getLogger(__name__)
+
+
+class CircuitBreakerOpenError(Exception):
+    """Raised when circuit breaker is open and calls are blocked."""
+    pass
+
+
+class CircuitBreaker:
+    """
+    Circuit breaker pattern to prevent cascading failures.
+
+    Tracks consecutive failures and opens (blocks calls) after threshold.
+    Automatically closes (allows calls) after timeout period.
+    Thread-safe for concurrent access.
+    """
+
+    def __init__(self, failure_threshold: int = 5, timeout: float = 60.0):
+        """
+        Initialize circuit breaker.
+
+        Args:
+            failure_threshold: Number of consecutive failures before opening
+            timeout: Seconds to stay open before attempting recovery
+        """
+        self.failure_threshold = failure_threshold
+        self.timeout = timeout
+        self.failure_count = 0
+        self.open_until = 0.0
+        self._lock = threading.Lock()
+
+    def call(self, func: Callable, *args, **kwargs) -> Any:
+        """
+        Execute function through circuit breaker.
+
+        Args:
+            func: Function to call
+            *args: Positional arguments for func
+            **kwargs: Keyword arguments for func
+
+        Returns:
+            Result of func(*args, **kwargs)
+
+        Raises:
+            CircuitBreakerOpenError: If circuit breaker is open
+            Exception: Any exception from func (counts as failure)
+        """
+        if self.is_open():
+            raise CircuitBreakerOpenError(
+                f"Circuit breaker is open. {self.failure_count} failures recorded. "
+                f"Resets in {max(0, self.open_until - time.time()):.1f}s"
+            )
+
+        try:
+            result = func(*args, **kwargs)
+            self.on_success()
+            return result
+        except Exception as e:
+            self.on_failure()
+            raise
+
+    def is_open(self) -> bool:
+        """Check if circuit breaker is currently open (blocking calls)."""
+        with self._lock:
+            # Check if we should close due to timeout
+            if self.open_until > 0 and time.time() >= self.open_until:
+                # Reset to half-open state (allow one call to test recovery)
+                self.failure_count = self.failure_threshold - 1
+                self.open_until = 0.0
+                logger.info("Circuit breaker reset to half-open state")
+
+            return self.failure_count >= self.failure_threshold
+
+    def on_success(self):
+        """Handle successful call - reset failure count."""
+        with self._lock:
+            if self.failure_count > 0:
+                logger.info(f"Circuit breaker reset after {self.failure_count} failures")
+            self.failure_count = 0
+            self.open_until = 0.0
+
+    def on_failure(self):
+        """Handle failed call - increment failure count, possibly open circuit."""
+        with self._lock:
+            self.failure_count += 1
+            logger.warning(f"Circuit breaker failure count: {self.failure_count}/{self.failure_threshold}")
+
+            if self.failure_count >= self.failure_threshold:
+                self.open_until = time.time() + self.timeout
+                logger.error(f"Circuit breaker OPENED for {self.timeout}s after {self.failure_count} failures")
+
+    def get_state(self) -> Dict[str, Any]:
+        """Get current circuit breaker state for monitoring."""
+        with self._lock:
+            return {
+                "failure_count": self.failure_count,
+                "threshold": self.failure_threshold,
+                "is_open": self.failure_count >= self.failure_threshold and time.time() < self.open_until,
+                "open_until": self.open_until if self.open_until > 0 else None,
+                "time_remaining": max(0, self.open_until - time.time()) if self.open_until > 0 else 0,
+            }
 
 class OllamaClient:
     """
@@ -156,6 +263,9 @@ class AIEngine:
     def __init__(self):
         """Function __init__."""
         self.client = None
+        # Circuit breaker to prevent cascading failures from unresponsive AI
+        self.circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60.0)
+
         # Conditional branch.
         if AI_PROVIDER == "ollama":
             self.client = OllamaClient(OLLAMA_URL, AI_MODEL)
@@ -170,7 +280,7 @@ class AIEngine:
         # Conditional branch.
         if not self.client:
             return ""
-            
+
         system_prompt = (
             "You are a Reverse Engineering Expert. "
             "Your task is to de-obfuscate JavaScript code. "
@@ -179,10 +289,17 @@ class AIEngine:
             "3. Format the code with proper indentation. "
             "Return ONLY the clean code. No markdown blocks, no preamble."
         )
-        
+
         user_prompt = f"Code:\n{code_snippet}"
-        
-        return self.client.generate_text(user_prompt, system_prompt) or ""
+
+        try:
+            result = self.circuit_breaker.call(
+                self.client.generate_text, user_prompt, system_prompt
+            )
+            return result or ""
+        except CircuitBreakerOpenError:
+            logger.warning("Circuit breaker open - deobfuscation unavailable")
+            return "[AI unavailable - circuit breaker open]"
 
     # ---------------------------------------------------------
     # Status helpers for UI/IPC
@@ -195,6 +312,7 @@ class AIEngine:
             "model": getattr(self.client, "model", AI_MODEL),
             "connected": connected,
             "fallback_enabled": AI_FALLBACK_ENABLED,
+            "circuit_breaker": self.circuit_breaker.get_state(),
             "available_models": [],
         }
         # Conditional branch.
