@@ -121,10 +121,11 @@ TOOLS: Dict[str, Dict] = {
     },
     "hakrawler": {
         "label": "hakrawler (endpoint crawler)",
-        "cmd": ["bash", "-lc", "printf '%s\\n' {target} | hakrawler -subs -u"],
+        "cmd": ["hakrawler", "-subs", "-u"],
         "aggressive": False,
         "target_type": "url",
         "binary": "hakrawler",
+        "stdin": True,
     },
     "naabu": {
         "label": "naabu (fast port scan)",
@@ -134,10 +135,11 @@ TOOLS: Dict[str, Dict] = {
     },
     "dnsx": {
         "label": "dnsx (DNS resolver)",
-        "cmd": ["bash", "-lc", "printf '%s\\n' {target} | dnsx -silent -resp -a -aaaa"],
+        "cmd": ["dnsx", "-silent", "-resp", "-a", "-aaaa"],
         "aggressive": False,
         "target_type": "domain",
         "binary": "dnsx",
+        "stdin": True,
     },
     "masscan": {
         "label": "masscan (very fast port scan)",
@@ -171,10 +173,11 @@ TOOLS: Dict[str, Dict] = {
     },
     "httprobe": {
         "label": "httprobe (HTTP availability)",
-        "cmd": ["bash", "-lc", "printf '%s\\n' {target} | httprobe"],
+        "cmd": ["httprobe"],
         "aggressive": False,
         "target_type": "host",
         "binary": "httprobe",
+        "stdin": True,
     },
     "pshtt": {
         "label": "pshtt (HTTPS observatory)",
@@ -191,21 +194,23 @@ TOOLS: Dict[str, Dict] = {
 }
 
 
-def get_tool_command(name: str, target: str, override: Dict | None = None) -> List[str]:
+def get_tool_command(name: str, target: str, override: Dict | None = None) -> tuple[List[str], str | None]:
     """
     Generate the full command-line arguments for a tool.
-    
+
     Args:
         name: Tool name
         target: User-provided target (URL, domain, IP, etc.)
         override: Optional tool definition override (for testing)
-    
+
     Returns:
-        List of command-line arguments ready for execution
+        Tuple of (command_list, stdin_input).
+        - command_list: List of command-line arguments ready for execution
+        - stdin_input: String to pipe to stdin, or None if tool doesn't use stdin
     """
     tdef = override or TOOLS[name]
     normalized = normalize_target(target, tdef.get("target_type", "url"))
-    
+
     cmd: List[str] = []
     # Loop over items.
     for part in tdef["cmd"]:
@@ -213,5 +218,8 @@ def get_tool_command(name: str, target: str, override: Dict | None = None) -> Li
             cmd.append(part.replace("{target}", normalized))
         else:
             cmd.append(part)
-    
-    return cmd
+
+    # If tool uses stdin, the normalized target is piped via stdin
+    stdin_input = normalized if tdef.get("stdin") else None
+
+    return cmd, stdin_input

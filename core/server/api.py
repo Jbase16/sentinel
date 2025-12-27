@@ -62,7 +62,7 @@ class ScanRequest(BaseModel):
     modules: Optional[List[str]] = None
     force: bool = False
     mode: str = "standard"  # Strategos mode: standard, bug_bounty, stealth
-    
+
     @validator("target")
     def validate_target(cls, v: str) -> str:
         """Function validate_target."""
@@ -75,6 +75,18 @@ class ScanRequest(BaseModel):
         for pattern in dangerous_patterns:
             if pattern in v:
                 raise ValueError(f"Invalid character in target: {pattern}")
+        return v
+
+    @validator("modules")
+    def validate_modules(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        """Function validate_modules."""
+        if v is None:
+            return v
+        from core.toolkit.tools import TOOLS
+        valid_tools = set(TOOLS.keys())
+        invalid = [tool for tool in v if tool not in valid_tools]
+        if invalid:
+            raise ValueError(f"Invalid tool names: {', '.join(invalid)}. Valid tools: {', '.join(sorted(valid_tools))}")
         return v
 
 
@@ -327,12 +339,12 @@ async def _begin_scan(req: ScanRequest) -> str:
                 _scan_state["summary"] = session.to_dict()
                 logger.error(f"Scan error: {e}", exc_info=True)
 
+                # Emit SCAN_FAILED event to notify UI and DecisionLedger
                 try:
-                    event_bus._store.append(
-                        GraphEventType.SCAN_ERROR,
-                        {"error": str(e), "target": req.target},
-                        source="orchestrator",
-                    )
+                    event_bus.emit(GraphEvent(
+                        type=GraphEventType.SCAN_FAILED,
+                        payload={"error": str(e), "target": req.target}
+                    ))
                 except Exception:
                     pass
 
@@ -423,21 +435,86 @@ async def shutdown_event():
     db = Database.instance()
     await db.close()
 
+def is_origin_allowed(origin: str, allowed_patterns: tuple) -> bool:
+    """
+    Check if an origin matches any of the allowed patterns.
+
+    Patterns support:
+    - Exact matches: "https://example.com"
+    - Wildcard ports: "http://localhost:*" matches any port on localhost
+    """
+    from urllib.parse import urlparse
+
+    if not origin:
+        return False
+
+    parsed = urlparse(origin)
+    origin_netloc = parsed.netloc
+
+    for pattern in allowed_patterns:
+        parsed_pattern = urlparse(pattern)
+
+        # Scheme must match exactly
+        if parsed.scheme != parsed_pattern.scheme:
+            continue
+
+        # Check if pattern has wildcard port
+        pattern_netloc = parsed_pattern.netloc
+        if pattern_netloc.endswith(":*"):
+            # Match hostname, ignore port
+            pattern_host = pattern_netloc[:-2]
+            if origin_netloc == pattern_host or origin_netloc.startswith(f"{pattern_host}:"):
+                return True
+        elif pattern_netloc == "localhost" and parsed.hostname == "localhost":
+            # Special case for tauri://localhost pattern
+            return True
+        elif origin_netloc == pattern_netloc:
+            # Exact match
+            return True
+
+    return False
+
+
 def setup_cors():
-    """Function setup_cors."""
-    # Production deployments should configure this via environment
-    # Wildcard CORS with credentials enabled is local-privilege escalation.
+    """
+    Setup CORS with dynamic origin validation.
+
+    When credentials are enabled, CORS spec requires exact origin matches
+    (no wildcards). We use a custom middleware to validate patterns like
+    "http://localhost:*" and return the exact origin in responses.
+    """
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import Response
+
     config = get_config()
-    
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(config.security.allowed_origins),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-        max_age=600,
-    )
+    allowed_patterns = config.security.allowed_origins
+
+    class DynamicCORSMiddleware(BaseHTTPMiddleware):
+        """CORS middleware that supports wildcard patterns with credentials."""
+
+        async def dispatch(self, request, call_next):
+            origin = request.headers.get("origin")
+
+            if origin and is_origin_allowed(origin, allowed_patterns):
+                # Return the exact origin (required by CORS spec when credentials enabled)
+                response = await call_next(request)
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "*"
+                response.headers["Access-Control-Allow-Headers"] = "*"
+                response.headers["Access-Control-Expose-Headers"] = "*"
+                response.headers["Access-Control-Max-Age"] = "600"
+
+                # Handle preflight requests
+                if request.method == "OPTIONS":
+                    return Response(status=200)
+
+                return response
+            else:
+                # Origin not allowed or no origin header
+                return await call_next(request)
+
+    app.add_middleware(DynamicCORSMiddleware)
 setup_cors()
 
 @app.websocket("/ws/pty")
@@ -723,6 +800,16 @@ async def forge_execute(
 class InstallRequest(BaseModel):
     """Class InstallRequest."""
     tools: List[str]
+
+    @validator("tools")
+    def validate_tools(cls, v: List[str]) -> List[str]:
+        """Function validate_tools."""
+        from core.toolkit.tools import TOOLS
+        valid_tools = set(TOOLS.keys())
+        invalid = [tool for tool in v if tool not in valid_tools]
+        if invalid:
+            raise ValueError(f"Invalid tool names: {', '.join(invalid)}. Valid tools: {', '.join(sorted(valid_tools))}")
+        return v
 
 @app.post("/tools/install")
 async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):

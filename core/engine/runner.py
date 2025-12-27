@@ -28,13 +28,14 @@ OutputCallback = Callable[[str], None]
 
 def run_tool(name: str, target: str, on_output: OutputCallback) -> Tuple[int, str]:
     """Function run_tool."""
-    cmd = get_tool_command(name, target)
+    cmd, stdin_input = get_tool_command(name, target)
     on_output(f"[{name}] Executing: {' '.join(cmd)}")
 
     # Error handling block.
     try:
         proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE if stdin_input else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -45,6 +46,11 @@ def run_tool(name: str, target: str, on_output: OutputCallback) -> Tuple[int, st
         msg = f"[{name}] NOT INSTALLED or not in PATH."
         on_output(msg)
         return 127, msg
+
+    # Write to stdin if the tool requires it
+    if stdin_input:
+        proc.stdin.write(stdin_input + "\n")
+        proc.stdin.close()
 
     combined = []
 

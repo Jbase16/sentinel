@@ -640,19 +640,26 @@ class ScannerEngine:
             cmd = [tool] + custom_args
             # Replace {target} placeholder if present in custom args
             cmd = [arg.replace("{target}", target) for arg in cmd]
+            stdin_input = None
         else:
-            cmd = get_tool_command(tool, target, meta_override)
+            cmd, stdin_input = get_tool_command(tool, target, meta_override)
             
         await queue.put(f"--- Running {tool} ---")
         # Error handling block.
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.PIPE if stdin_input else None,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
             # Track proc so cancellation can terminate it.
             self._procs[tool] = proc
+
+            # Write to stdin if the tool requires it
+            if stdin_input and proc.stdin:
+                proc.stdin.write((stdin_input + "\n").encode("utf-8"))
+                proc.stdin.close()
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
             # Use session-scoped evidence store if available, otherwise global singleton
