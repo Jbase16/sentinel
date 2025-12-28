@@ -69,6 +69,51 @@ class EventType(str, Enum):
     NODE_REMOVED = "node_removed"
     EDGE_ADDED = "edge_added"
 
+    # CRONUS - Temporal Mining
+    CRONUS_QUERY_STARTED = "cronus_query_started"
+    CRONUS_QUERY_COMPLETED = "cronus_query_completed"
+    CRONUS_QUERY_FAILED = "cronus_query_failed"
+    CRONUS_SNAPSHOT_FOUND = "cronus_snapshot_found"
+    CRONUS_DIFF_STARTED = "cronus_diff_started"
+    CRONUS_DIFF_COMPLETED = "cronus_diff_completed"
+    CRONUS_HUNT_STARTED = "cronus_hunt_started"
+    CRONUS_HUNT_COMPLETED = "cronus_hunt_completed"
+    CRONUS_ZOMBIE_CONFIRMED = "cronus_zombie_confirmed"
+    CRONUS_ZOMBIE_DENIED = "cronus_zombie_denied"
+
+    # MIMIC - Source Reconstruction
+    MIMIC_DOWNLOAD_STARTED = "mimic_download_started"
+    MIMIC_DOWNLOAD_COMPLETED = "mimic_download_completed"
+    MIMIC_DOWNLOAD_FAILED = "mimic_download_failed"
+    MIMIC_ASSET_DOWNLOADED = "mimic_asset_downloaded"
+    MIMIC_PARSE_STARTED = "mimic_parse_started"
+    MIMIC_PARSE_COMPLETED = "mimic_parse_completed"
+    MIMIC_ROUTE_FOUND = "mimic_route_found"
+    MIMIC_SECRET_FOUND = "mimic_secret_found"
+    MIMIC_ANALYSIS_STARTED = "mimic_analysis_started"
+    MIMIC_ANALYSIS_COMPLETED = "mimic_analysis_completed"
+    MIMIC_HIDDEN_ROUTE_FOUND = "mimic_hidden_route_found"
+
+    # NEXUS - Logic Chaining
+    NEXUS_COLLECT_STARTED = "nexus_collect_started"
+    NEXUS_COLLECT_COMPLETED = "nexus_collect_completed"
+    NEXUS_PRIMITIVE_FOUND = "nexus_primitive_found"
+    NEXUS_SOLVE_STARTED = "nexus_solve_started"
+    NEXUS_SOLVE_COMPLETED = "nexus_solve_completed"
+    NEXUS_CHAIN_FOUND = "nexus_chain_found"
+    NEXUS_NO_PATH = "nexus_no_path"
+    NEXUS_CHAIN_STARTED = "nexus_chain_started"
+    NEXUS_CHAIN_COMPLETED = "nexus_chain_completed"
+    NEXUS_CHAIN_ABORTED = "nexus_chain_aborted"
+    NEXUS_STEP_STARTED = "nexus_step_started"
+    NEXUS_STEP_COMPLETED = "nexus_step_completed"
+
+    # OMEGA - Integration
+    OMEGA_RUN_STARTED = "omega_run_started"
+    OMEGA_RUN_COMPLETED = "omega_run_completed"
+    OMEGA_PHASE_STARTED = "omega_phase_started"
+    OMEGA_PHASE_COMPLETED = "omega_phase_completed"
+
 
 # ============================================================================
 # Field Specification
