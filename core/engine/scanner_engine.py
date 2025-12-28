@@ -61,7 +61,6 @@ class ResourceGuard:
         self.max_disk_mb = max_disk_mb
         self.findings_count = 0
         self.disk_usage = 0
-        self.disk_usage = 0
         self._lock = threading.Lock()
 
     def reset(self):
@@ -184,7 +183,7 @@ class ScanTransaction:
     but others are lost due to crashes or exceptions.
 
     Usage:
-        async with ScanTransaction(engine, session_id) as txn:
+        async with ScanTransaction(engine, session_id, target) as txn:
             # Run scan, collect results
             txn.add_finding(finding)
             txn.add_result(result)
@@ -195,20 +194,31 @@ class ScanTransaction:
     - Phase 1 (active): Accumulate results in memory
     - Phase 2 (commit): Atomically write to database
     - On error: Rollback (discard all accumulated results)
+
+    Audit Trail:
+    - Creates a scan record on entry for auditability
+    - Updates status to 'committed' or 'rolled_back' on exit
+    - Enables post-mortem analysis and resume capability
     """
 
-    def __init__(self, engine: "ScannerEngine", session_id: str):
+    def __init__(self, engine: "ScannerEngine", session_id: str, target: str = "unknown"):
         """
         Initialize scan transaction.
 
         Args:
             engine: ScannerEngine instance
             session_id: Session ID for this scan
+            target: Target being scanned (for audit trail)
         """
         self._engine = engine
         self._session_id = session_id
+        self._target = target
         self._committed = False
         self._rolled_back = False
+
+        # Generate unique scan ID for this transaction
+        import uuid
+        self._scan_id = str(uuid.uuid4())
 
         # Staging area for transactional data
         self._staged_findings: List[Dict[str, Any]] = []
@@ -216,11 +226,20 @@ class ScanTransaction:
         self._staged_evidence: List[Dict[str, Any]] = []
 
     async def __aenter__(self) -> "ScanTransaction":
-        """Enter transaction context."""
+        """Enter transaction context and create scan record."""
         if self._engine._active_transaction:
             raise RuntimeError("Nested transactions not supported")
         self._engine._active_transaction = self
-        logger.debug(f"[ScanTransaction] Started transaction for session {self._session_id}")
+
+        # Create scan record for audit trail
+        from core.data.db import Database
+        db = Database.instance()
+        try:
+            await db.create_scan_record(self._scan_id, self._session_id, self._target)
+        except Exception as e:
+            logger.warning(f"[ScanTransaction] Failed to create scan record: {e}")
+
+        logger.debug(f"[ScanTransaction] Started transaction {self._scan_id} for session {self._session_id}")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -233,7 +252,8 @@ class ScanTransaction:
         if exc_type is None and not self._rolled_back:
             await self.commit()
         else:
-            await self.rollback()
+            error_msg = str(exc_val) if exc_val else "canceled"
+            await self.rollback(error_message=error_msg)
 
         self._engine._active_transaction = None
         return False  # Don't suppress exceptions
@@ -260,47 +280,56 @@ class ScanTransaction:
         """
         Commit all staged data to the database atomically.
 
-        Uses a single database transaction to ensure all data
-        is written together or not at all.
+        Commit order: findings → evidence → issues
+        (Evidence may reference findings, issues may reference findings)
+
+        After DB commit, updates in-memory stores to ensure UI sees
+        committed data only.
+
+        CRITICAL: Uses transaction-aware DB methods that do NOT acquire
+        locks or commit internally, avoiding deadlock and preserving atomicity.
         """
         if self._committed or self._rolled_back:
             return  # Already handled
 
-        try:
-            # Import here to avoid circular dependency
-            from core.data.db import Database
+        from core.data.db import Database
+        db = None  # Initialize for exception handler scope
 
+        try:
             db = Database.instance()
 
-            # Use database transaction for atomicity
+            # Ensure database is initialized
+            if not db._initialized:
+                await db.init()
+
+            # Use database lock for the entire transaction
             async with db._db_lock:
                 conn = db._db_connection
                 if conn is None:
-                    await db.init()
-                    conn = db._db_connection
+                    raise RuntimeError("Database connection is not available")
 
                 # Begin explicit transaction
                 await conn.execute("BEGIN IMMEDIATE")
 
                 try:
-                    # Commit all findings
+                    # Phase 1: Commit findings first (other entities may reference them)
                     for finding in self._staged_findings:
-                        await db._save_finding_impl(finding, self._session_id)
+                        await db.save_finding_txn(finding, self._session_id, conn)
 
-                    # Commit all issues
-                    for issue in self._staged_issues:
-                        await db._save_issue_impl(issue, self._session_id)
-
-                    # Commit all evidence
+                    # Phase 2: Commit evidence (may reference findings)
                     for evidence in self._staged_evidence:
-                        await db._save_evidence_impl(evidence, self._session_id)
+                        await db.save_evidence_txn(evidence, self._session_id, conn)
 
-                    # Mark transaction complete
+                    # Phase 3: Commit issues last (may reference findings)
+                    for issue in self._staged_issues:
+                        await db.save_issue_txn(issue, self._session_id, conn)
+
+                    # Mark transaction complete - SINGLE commit point
                     await conn.commit()
 
                     self._committed = True
                     logger.info(
-                        f"[ScanTransaction] Committed: "
+                        f"[ScanTransaction] Committed {self._scan_id}: "
                         f"{len(self._staged_findings)} findings, "
                         f"{len(self._staged_issues)} issues, "
                         f"{len(self._staged_evidence)} evidence"
@@ -311,32 +340,104 @@ class ScanTransaction:
                     try:
                         await conn.rollback()
                     except Exception:
-                        pass # Connection might be closed already
+                        pass  # Connection might be closed already
                     raise RuntimeError(f"Transaction commit failed: {e}") from e
+
+            # Phase 4: After DB commit, update in-memory stores for UI
+            # This ensures UI only sees committed data
+            self._update_stores_after_commit()
+
+            # Phase 5: Update scan record to 'committed' (outside transaction lock)
+            if db is not None:
+                try:
+                    await db.update_scan_status(
+                        self._scan_id,
+                        'committed',
+                        findings_count=len(self._staged_findings),
+                        issues_count=len(self._staged_issues),
+                        evidence_count=len(self._staged_evidence)
+                    )
+                except Exception as e:
+                    logger.warning(f"[ScanTransaction] Failed to update scan record: {e}")
 
         except Exception as e:
             logger.error(f"[ScanTransaction] Commit error: {e}")
-            # Mark as rolled back to prevent retry
+            # Mark as rolled back and update scan record
             self._rolled_back = True
+            if db is not None:
+                try:
+                    await db.update_scan_status(self._scan_id, 'failed', error_message=str(e))
+                except Exception:
+                    pass
             raise
 
-    async def rollback(self) -> None:
+    def _update_stores_after_commit(self) -> None:
+        """
+        Update in-memory stores after successful commit.
+
+        This is called AFTER database commit to ensure UI only sees
+        data that was successfully persisted.
+        """
+        # Update findings store
+        if self._staged_findings:
+            if self._engine.session:
+                self._engine.session.findings.bulk_add(self._staged_findings, persist=True)
+            else:
+                findings_store.bulk_add(self._staged_findings, persist=True)
+
+        # Update evidence store
+        if self._staged_evidence:
+            from core.data.evidence_store import EvidenceStore
+            evidence_store = self._engine.session.evidence if self._engine.session else EvidenceStore.instance()
+            for ev in self._staged_evidence:
+                tool = ev.get("tool", "unknown")
+                raw_output = ev.get("raw_output", "")
+                metadata = ev.get("metadata", {})
+                evidence_store.add_evidence(tool, raw_output, metadata, persist=True)
+
+        # Update issues store (now that findings are committed)
+        if self._staged_issues:
+            if self._engine.session:
+                self._engine.session.issues.replace_all(self._staged_issues, persist=True)
+            else:
+                issues_store.replace_all(self._staged_issues, persist=True)
+
+        # Update killchain (after commit, run enrichment)
+        if self._engine.session and hasattr(self._engine.session, 'killchain'):
+            # Trigger enrichment now that we're committed
+            enriched_count, edge_count = self._engine._refresh_enrichment()
+            logger.info(f"[ScanTransaction] Post-commit enrichment: {enriched_count} issues, {edge_count} edges")
+
+    async def rollback(self, error_message: Optional[str] = None) -> None:
         """
         Rollback the transaction - discard all staged data.
 
-        This is called automatically on exception or can be called
-        explicitly to cancel the scan.
+        Clears staged data and does NOT update in-memory stores,
+        ensuring UI doesn't see rolled-back data.
+
+        Args:
+            error_message: Optional error message for audit trail
         """
         if self._committed or self._rolled_back:
             return  # Already handled
 
         self._rolled_back = True
+
+        # Clear staged data
         self._staged_findings.clear()
         self._staged_issues.clear()
         self._staged_evidence.clear()
 
+        # Update scan record to 'rolled_back'
+        from core.data.db import Database
+        db = Database.instance()
+        try:
+            await db.update_scan_status(self._scan_id, 'rolled_back', error_message=error_message)
+        except Exception as e:
+            logger.warning(f"[ScanTransaction] Failed to update scan record on rollback: {e}")
+
         logger.info(
-            f"[ScanTransaction] Rolled back transaction for session {self._session_id}"
+            f"[ScanTransaction] Rolled back transaction {self._scan_id} for session {self._session_id}"
         )
 
     @property
@@ -511,9 +612,7 @@ class ScannerEngine:
             return
         else:
             yield f"Installed tools: {', '.join(tools_to_run)}"
-            
-            yield f"Installed tools: {', '.join(tools_to_run)}"
-            
+
             # Use session ID or temp ID
             sess_id = self.session.session_id if self.session else "global_scan"
 
@@ -523,18 +622,17 @@ class ScannerEngine:
 
             # WRAPPER: All tool execution and findings should be atomic
             # FIX: The entire queue processing loop MUST be inside the transaction context
-            async with ScanTransaction(self, sess_id) as txn:
+            async with ScanTransaction(self, sess_id, target) as txn:
                 try:
                     queue: asyncio.Queue[str] = asyncio.Queue()
                     running: Dict[str, asyncio.Task[List[dict]]] = {}
                     pending = list(tools_to_run)
-                    results_map: Dict[str, List[dict] | Exception] = {}
 
-                    # Expose queue for dynamic additions
+                    # Expose state for dynamic additions and watchdog
                     self._pending_tasks = pending
                     self._running_tasks = running
                     self._queue = queue
-                    self._results_map = results_map
+                    self._results_map = {}  # Initialize results map
 
                     # Cancellation and global timeout setup
                     local_cancel = cancel_flag or asyncio.Event()
@@ -620,10 +718,12 @@ class ScannerEngine:
                     
                     while not self._queue.empty():
                         yield self._queue.get_nowait()
-                    
-                    # If canceled, explicitly rollback and abort (do not commit partials)
+
+                    # If canceled, explicitly rollback, cleanup, and abort (do not commit partials)
                     if local_cancel.is_set():
                         await txn.rollback()
+                        # CRITICAL: Call shutdown to cleanup any running tasks/processes
+                        await self.shutdown(reason="canceled")
                         yield "[scanner] Scan canceled - Transaction Rolled Back."
                         return
 
@@ -636,37 +736,51 @@ class ScannerEngine:
                     # Normalize and deduplicate findings
                     normalized = self._normalize_findings(all_findings)
                     self._last_results = normalized
-                    
-                    # CRITICAL: Populate findings store (Session-Scoped or Global)
-                    # If transaction is active, stage findings there and update Store in memory-only mode
-                    # Since we are INSIDE the txn block now, txn.is_active is true unless we rolled back.
+
+                    # CRITICAL: When transactional, stage findings ONLY
+                    # Do NOT update UI stores until after commit (prevents UI pollution on rollback)
                     if txn.is_active:
                         for f in normalized:
                             txn.add_finding(f)
-                        
-                        if self.session:
-                            self.session.findings.bulk_add(normalized, persist=False)
-                        else:
-                            findings_store.bulk_add(normalized, persist=False)
+
+                        # Build recon edges for later enrichment
+                        recon_edges = self._build_recon_edges(normalized)
+                        self._record_recon_edges(recon_edges)
+
+                        # Note: We deliberately do NOT update the in-memory stores here
+                        # They will be updated after commit (see ScanTransaction.commit())
+                        # Enrichment and issue generation will also happen after commit
                     else:
-                        # Should not happen if logic is correct, but safe fallback
-                         if self.session:
+                        # Non-transactional path: update stores directly and run enrichment
+                        if self.session:
                             self.session.findings.bulk_add(normalized)
-                         else:
+                        else:
                             findings_store.bulk_add(normalized)
-                    
-                    # Build recon edges and update stores
-                    recon_edges = self._build_recon_edges(normalized)
-                    self._record_recon_edges(recon_edges)
-                    enriched_count, edge_count = self._refresh_enrichment()
-                    
-                    yield f"[scanner] Processed {len(normalized)} findings, {enriched_count} issues, {edge_count} killchain edges"
+
+                        # Build recon edges
+                        recon_edges = self._build_recon_edges(normalized)
+                        self._record_recon_edges(recon_edges)
+
+                        # Run enrichment (non-transactional path)
+                        enriched_count, edge_count = self._refresh_enrichment()
+
+                        yield f"[scanner] Processed {len(normalized)} findings, {enriched_count} issues, {edge_count} killchain edges"
 
                 except Exception as e:
                     # On unhandled exception, ensuring rollback
                     await txn.rollback()
                     logger.error(f"[ScannerEngine] Critical error, rolling back: {e}")
                     raise e
+
+            # Transactional path: yield summary after commit
+            # The transaction has committed here, and _update_stores_after_commit() has run
+            # Note: txn.is_active is False here because the context manager has exited
+            # We check _committed instead
+            if hasattr(txn, '_committed') and txn._committed:
+                # Enrichment was run in _update_stores_after_commit()
+                # Get counts from the transaction stats
+                stats = txn.stats()
+                yield f"[scanner] Processed {stats['findings']} findings, committed transaction"
 
     async def shutdown(self, reason: str = "shutdown") -> None:
         """
@@ -766,8 +880,22 @@ class ScannerEngine:
     def queue_task(self, tool: str, args: List[str] = None):
         """
         Dynamically add a task to the running scan.
+
+        Args:
+            tool: Tool name (must be in TOOLS allowlist)
+            args: Optional arguments for the tool
+
+        Raises:
+            ValueError: If tool is not in the TOOLS allowlist
         """
-        # Conditional branch.
+        # SECURITY: Validate tool against allowlist to prevent RCE
+        if tool not in TOOLS:
+            raise ValueError(f"Unknown tool '{tool}'. Must be one of: {', '.join(TOOLS)}")
+
+        # Optional: Validate tool is installed
+        if hasattr(self, "_installed_meta") and tool not in self._installed_meta:
+            logger.warning(f"[queue_task] Tool '{tool}' is not installed, adding anyway (will fail during execution)")
+
         if hasattr(self, "_pending_tasks"):
             self._pending_tasks.append({"tool": tool, "args": args})
 
@@ -869,77 +997,88 @@ class ScannerEngine:
         )
 
     def _refresh_enrichment(self) -> tuple[int, int]:
-        """Function _refresh_enrichment."""
-        # Conditional branch.
+        """
+        Enrich findings with issues and killchain analysis.
+
+        Transactional Behavior:
+        - When in transactional mode: Stage data only, do NOT update stores/UI
+        - When NOT in transactional mode: Update stores and run correlator
+
+        This prevents:
+        - Double commit (staging + replace_all)
+        - UI pollution from rolled-back scans
+        - Correlator side effects during transactions
+        """
+        is_transactional = self._active_transaction and self._active_transaction.is_active
+
+        # Step 1: Generate issues from findings
         if self._last_results:
             enriched, _, killchain_edges = apply_rules(self._last_results)
         else:
-            enriched, killchain_edges = [], []
+            enriched, _, killchain_edges = [], [], []
 
-        # Conditional branch.
-        # Conditional branch.
-        is_transactional = self._active_transaction and self._active_transaction.is_active
-        
-        if self.session:
-            self.session.issues.replace_all(enriched, persist=not is_transactional)
-            combined_edges = list(killchain_edges) + list(self._recon_edges)
-            self.session.killchain.replace_all(combined_edges, persist=not is_transactional)
-        else:
-            issues_store.replace_all(enriched, persist=not is_transactional)
-            combined_edges = list(killchain_edges) + list(self._recon_edges)
-            killchain_store.replace_all(combined_edges, persist=not is_transactional)
-        
-        # Transactional Staging for Issues
+        # Step 2: Build combined killchain edges
+        combined_edges = list(killchain_edges) + list(self._recon_edges)
+
+        # Step 3: Handle issues
         if is_transactional:
+            # Transactional: Stage only, do NOT update stores
             for issue in enriched:
                 self._active_transaction.add_issue(issue)
-        
-        # ---------------------------------------------------------------------
-        # Cartographer: Graph Intelligence (Layer 5)
-        # ---------------------------------------------------------------------
-        # 1. Gather all data points
-        source_findings = self.session.findings.get_all() if self.session else findings_store.get_all()
-        
-        # 2. Transform to Nodes for Correlator
-        # Correlator expects: {"id": "asset_name", "attributes": {...}}
-        nodes = []
-        # Loop over items.
-        for f in source_findings:
-            # Only fingerprint "Asset" type findings or those with clear metadata signals
-            # Ideally each Asset has one canonical node. This simplification treats every finding as a potential source of traits.
-            # A better approach (future): Aggregate findings per asset first.
-            asset = f.get("asset") or f.get("target") or "unknown"
-            if asset == "unknown":
-                continue
-                
-            attributes = {}
-            # Extract potential fingerprints from metadata
-            meta = f.get("metadata", {})
-            for key in ["simhash", "favicon_hash", "ssl_serial", "ga_id"]:
-                if val := meta.get(key):
-                    attributes[key] = val
-            
-            if attributes:
-                nodes.append({"id": asset, "attributes": attributes})
-                
-        # 3. Analyze
-        if nodes:
-            correlator = GraphCorrelator()
-            implied_edges = correlator.process(nodes)
-            
-            # 4. Integrate
-            if implied_edges:
-                # Merge with existing edges
-                # Note: This simplistic merge might duplicate if run repeatedly without deduplication logic
-                # But _refresh_enrichment replaces ALL edges usually.
-                # Here we are appending to the set we just built.
-                combined_edges.extend(implied_edges)
-                
-                # Re-save
-                if self.session:
-                    self.session.killchain.replace_all(combined_edges)
-                else:
-                    killchain_store.replace_all(combined_edges)
+        else:
+            # Non-transactional: Update stores directly
+            if self.session:
+                self.session.issues.replace_all(enriched, persist=True)
+            else:
+                issues_store.replace_all(enriched, persist=True)
+
+        # Step 4: Handle killchain edges
+        if is_transactional:
+            # Transactional: Do NOT update stores (no DB persistence for killchain currently)
+            # Just skip entirely - correlator will run after commit if needed
+            pass
+        else:
+            # Non-transactional: Update stores and run correlator
+            if self.session:
+                self.session.killchain.replace_all(combined_edges, persist=True)
+            else:
+                killchain_store.replace_all(combined_edges, persist=True)
+
+            # -----------------------------------------------------------------
+            # Cartographer: Graph Intelligence (Layer 5) - NON-TRANSACTIONAL ONLY
+            # -----------------------------------------------------------------
+            # Skip correlator during transaction to prevent side effects
+            source_findings = self.session.findings.get_all() if self.session else findings_store.get_all()
+
+            # Transform to Nodes for Correlator
+            nodes = []
+            for f in source_findings:
+                asset = f.get("asset") or f.get("target") or "unknown"
+                if asset == "unknown":
+                    continue
+
+                attributes = {}
+                meta = f.get("metadata", {})
+                for key in ["simhash", "favicon_hash", "ssl_serial", "ga_id"]:
+                    if val := meta.get(key):
+                        attributes[key] = val
+
+                if attributes:
+                    nodes.append({"id": asset, "attributes": attributes})
+
+            # Run correlator and update killchain
+            if nodes:
+                correlator = GraphCorrelator()
+                implied_edges = correlator.process(nodes)
+
+                if implied_edges:
+                    combined_edges.extend(implied_edges)
+
+                    # Re-save with correlator results
+                    if self.session:
+                        self.session.killchain.replace_all(combined_edges, persist=True)
+                    else:
+                        killchain_store.replace_all(combined_edges, persist=True)
 
         return len(enriched), len(combined_edges)
 
@@ -985,33 +1124,32 @@ class ScannerEngine:
                 proc.stdin.close()
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
-            # Use session-scoped evidence store if available, otherwise global singleton
-            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-            
+
+            # Transactional: stage evidence only, do NOT update stores
             if self._active_transaction and self._active_transaction.is_active:
                 self._active_transaction.add_evidence({
                     "tool": tool, "raw_output": msg, "metadata": {"target": target, "error": "not_found"}
                 })
-                evidence_store.add_evidence(tool, msg, {"target": target, "error": "not_found"}, persist=False)
             else:
+                # Non-transactional: update stores directly
+                evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
                 evidence_store.add_evidence(tool, msg, {"target": target, "error": "not_found"})
-            
+
             await queue.put(msg)
             return []
         except Exception as exc:
             msg = f"[{tool}] failed to start: {exc}"
-            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-            
-            # Transactional Evidence
+
+            # Transactional: stage evidence only, do NOT update stores
             if self._active_transaction and self._active_transaction.is_active:
                 self._active_transaction.add_evidence({
                     "tool": tool, "raw_output": msg, "metadata": {"target": target, "error": str(exc)}
                 })
-                # Update memory only
-                evidence_store.add_evidence(tool, msg, {"target": target, "error": str(exc)}, persist=False)
             else:
+                # Non-transactional: update stores directly
+                evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
                 evidence_store.add_evidence(tool, msg, {"target": target, "error": str(exc)})
-            
+
             await queue.put(msg)
             return []
 
@@ -1101,14 +1239,16 @@ class ScannerEngine:
             "timeout_reason": timed_out_reason,
             "canceled": bool(cancel_flag and getattr(cancel_flag, 'is_set', lambda: False)())
         }
-        
+
+        # Transactional: stage evidence only, do NOT update stores
         if self._active_transaction and self._active_transaction.is_active:
-             self._active_transaction.add_evidence({
-                 "tool": tool, "raw_output": output_text, "metadata": ev_meta
-             })
-             evidence_store.add_evidence(tool, output_text, ev_meta, persist=False)
+            self._active_transaction.add_evidence({
+                "tool": tool, "raw_output": output_text, "metadata": ev_meta
+            })
         else:
-             evidence_store.add_evidence(tool, output_text, ev_meta)
+            # Non-transactional: update stores directly
+            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
+            evidence_store.add_evidence(tool, output_text, ev_meta)
 
         # Error handling block.
         try:
@@ -1141,13 +1281,15 @@ class ScannerEngine:
             return findings
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"
-            evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
+
+            # Transactional: stage evidence only, do NOT update stores
             if self._active_transaction and self._active_transaction.is_active:
                 self._active_transaction.add_evidence({
                     "tool": f"{tool}_classifier_error", "raw_output": err, "metadata": {"target": target}
                 })
-                evidence_store.add_evidence(f"{tool}_classifier_error", err, {"target": target}, persist=False)
             else:
+                # Non-transactional: update stores directly
+                evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
                 evidence_store.add_evidence(f"{tool}_classifier_error", err, {"target": target})
             await queue.put(err)
             return []

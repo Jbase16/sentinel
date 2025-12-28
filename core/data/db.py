@@ -61,11 +61,11 @@ class Database:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
 
         self._initialized = False
-        # Use threading.Lock for __init__ since it may be called from sync context
-        self._init_lock = threading.Lock()
+        # asyncio.Lock for async initialization - created lazily in init()
+        self._init_lock: Optional[asyncio.Lock] = None
         self._db_connection: Optional[aiosqlite.Connection] = None
-        # asyncio.Lock is fine here since it's only used in async methods
-        self._db_lock = asyncio.Lock()
+        # asyncio.Lock for database operations
+        self._db_lock: Optional[asyncio.Lock] = None
 
         # Persistence Actor
         from core.data.blackbox import BlackBox
@@ -73,12 +73,18 @@ class Database:
 
     async def init(self):
         """AsyncFunction init."""
-        # Conditional branch.
+        # Fast path: already initialized
         if self._initialized:
             return
 
-        # Use threading.Lock for initialization safety (works in both sync/async contexts)
-        with self._init_lock:
+        # Lazy-create locks on first call (asyncio.Lock must be created in async context)
+        if self._init_lock is None:
+            self._init_lock = asyncio.Lock()
+        if self._db_lock is None:
+            self._db_lock = asyncio.Lock()
+
+        # Double-checked locking pattern with asyncio.Lock
+        async with self._init_lock:
             if self._initialized:
                 return
 
@@ -114,59 +120,119 @@ class Database:
                 logger.error(f"[Database] Error closing connection: {e}")
 
     async def _create_tables(self):
-        """AsyncFunction _create_tables."""
+        """
+        Create all database tables with production-grade constraints.
+
+        Schema decisions:
+        - Timestamps: TEXT (ISO8601 format via datetime('now'))
+        - Foreign keys: ON DELETE CASCADE for clean cleanup
+        - JSON: CHECK(json_valid) to enforce valid JSON
+        - Indexes: session_id for query performance
+        """
+        # Sessions table - scan session metadata
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
                 target TEXT,
                 status TEXT,
-                start_time REAL,
-                end_time REAL,
+                start_time TEXT NOT NULL DEFAULT (datetime('now')),
+                end_time TEXT,
                 logs TEXT
             )
         """)
+
+        # Findings table - security findings with proper constraints
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS findings (
                 id TEXT PRIMARY KEY,
-                session_id TEXT,
-                tool TEXT,
+                session_id TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                tool_version TEXT,
                 type TEXT,
                 severity TEXT,
                 target TEXT,
-                data JSON,
-                timestamp TEXT,
-                FOREIGN KEY(session_id) REFERENCES sessions(id)
+                data JSON NOT NULL CHECK(json_valid(data)),
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
         """)
+
+        # Issues table - confirmed vulnerabilities with deterministic IDs
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS issues (
                 id TEXT PRIMARY KEY,
-                session_id TEXT,
-                title TEXT,
+                session_id TEXT NOT NULL,
+                title TEXT NOT NULL,
                 severity TEXT,
                 target TEXT,
-                data JSON,
-                timestamp TEXT,
-                FOREIGN KEY(session_id) REFERENCES sessions(id)
+                data JSON NOT NULL CHECK(json_valid(data)),
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
         """)
+
+        # Evidence table - raw tool outputs
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS evidence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT,
-                tool TEXT,
+                session_id TEXT NOT NULL,
+                tool TEXT NOT NULL,
+                tool_version TEXT,
                 raw_output TEXT,
-                metadata JSON,
-                timestamp TEXT,
-                FOREIGN KEY(session_id) REFERENCES sessions(id)
+                metadata JSON CHECK(json_valid(metadata)),
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
         """)
+
+        # Scans table - audit trail for scan transactions
+        await self._db_connection.execute("""
+            CREATE TABLE IF NOT EXISTS scans (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                target TEXT NOT NULL,
+                status TEXT NOT NULL,
+                findings_count INTEGER DEFAULT 0,
+                issues_count INTEGER DEFAULT 0,
+                evidence_count INTEGER DEFAULT 0,
+                start_time TEXT NOT NULL DEFAULT (datetime('now')),
+                end_time TEXT,
+                last_completed_tool TEXT,
+                error_message TEXT,
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+        """)
+
+        # System state table - for sequence counters and other global state
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS system_state (
                 key TEXT PRIMARY KEY,
                 value INTEGER NOT NULL,
                 updated_at TEXT DEFAULT (datetime('now'))
             )
+        """)
+
+        # Create indexes for query performance
+        # These are critical for UI performance when filtering by session
+        await self._db_connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_findings_session ON findings(session_id)
+        """)
+        await self._db_connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_issues_session ON issues(session_id)
+        """)
+        await self._db_connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_evidence_session ON evidence(session_id)
+        """)
+        await self._db_connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scans_session ON scans(session_id)
+        """)
+
+        # Optional: Timestamp indexes for time-based queries
+        await self._db_connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_findings_timestamp ON findings(timestamp DESC)
+        """)
+        await self._db_connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_issues_timestamp ON issues(timestamp DESC)
         """)
 
     async def _execute_internal(self, query: str, params: tuple = ()):
@@ -364,6 +430,92 @@ class Database:
         except Exception:
             pass
 
+    # -------- Transactional Save Methods --------
+
+    async def save_finding_txn(self, finding: Dict[str, Any], session_id: Optional[str] = None, conn=None) -> None:
+        """
+        Save a finding within an existing transaction.
+
+        This is for use inside ScanTransaction where we already hold the lock
+        and have an explicit transaction. Does NOT acquire locks or commit.
+
+        Args:
+            finding: Finding data to save
+            session_id: Optional session ID
+            conn: Database connection (must be provided, in transaction)
+        """
+        import hashlib
+        blob = json.dumps(finding, sort_keys=True)
+        fid = hashlib.sha256(blob.encode()).hexdigest()
+
+        await conn.execute("""
+            INSERT OR REPLACE INTO findings (id, session_id, tool, tool_version, type, severity, target, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (
+            fid,
+            session_id,
+            finding.get("tool", "unknown"),
+            finding.get("tool_version"),  # Optional tool version
+            finding.get("type", "unknown"),
+            finding.get("severity", "INFO"),
+            finding.get("target", "unknown"),
+            blob
+        ))
+
+    async def save_issue_txn(self, issue: Dict[str, Any], session_id: Optional[str] = None, conn=None) -> None:
+        """
+        Save an issue within an existing transaction.
+
+        This is for use inside ScanTransaction where we already hold the lock
+        and have an explicit transaction. Does NOT acquire locks or commit.
+
+        Uses deterministic hashing for ID (same strategy as findings).
+
+        Args:
+            issue: Issue data to save
+            session_id: Optional session ID
+            conn: Database connection (must be provided, in transaction)
+        """
+        import hashlib
+        # Use deterministic hash for stable ID (like findings)
+        blob = json.dumps(issue, sort_keys=True)
+        iid = hashlib.sha256(blob.encode()).hexdigest()
+
+        await conn.execute("""
+            INSERT OR REPLACE INTO issues (id, session_id, title, severity, target, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        """, (
+            iid,
+            session_id,
+            issue.get("title", "unknown"),
+            issue.get("severity", "INFO"),
+            issue.get("target", "unknown"),
+            blob
+        ))
+
+    async def save_evidence_txn(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, conn=None) -> None:
+        """
+        Save evidence within an existing transaction.
+
+        This is for use inside ScanTransaction where we already hold the lock
+        and have an explicit transaction. Does NOT acquire locks or commit.
+
+        Args:
+            evidence_data: Evidence data to save
+            session_id: Optional session ID
+            conn: Database connection (must be provided, in transaction)
+        """
+        await conn.execute("""
+            INSERT INTO evidence (session_id, tool, tool_version, raw_output, metadata, timestamp)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+        """, (
+            session_id,
+            evidence_data.get("tool", "unknown"),
+            evidence_data.get("tool_version"),  # Optional tool version
+            evidence_data.get("raw_output", ""),
+            json.dumps(evidence_data.get("metadata", {}))
+        ))
+
     # -------- Read Methods (Safe to run directly) --------
 
     async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
@@ -473,3 +625,103 @@ class Database:
             INSERT OR REPLACE INTO system_state (key, value, updated_at)
             VALUES (?, ?, datetime('now'))
         """, ("event_sequence", sequence))
+
+    # -------- Scan Record Methods --------
+
+    async def create_scan_record(self, scan_id: str, session_id: str, target: str) -> None:
+        """
+        Create a new scan record with status 'running'.
+
+        Args:
+            scan_id: Unique identifier for this scan
+            session_id: Session ID this scan belongs to
+            target: Target being scanned
+        """
+        await self.execute("""
+            INSERT INTO scans (id, session_id, target, status, findings_count, issues_count, evidence_count, start_time)
+            VALUES (?, ?, ?, 'running', 0, 0, 0, datetime('now'))
+        """, (scan_id, session_id, target))
+
+    async def update_scan_status(
+        self,
+        scan_id: str,
+        status: str,
+        findings_count: int = 0,
+        issues_count: int = 0,
+        evidence_count: int = 0,
+        error_message: Optional[str] = None
+    ) -> None:
+        """
+        Update scan record status and counts.
+
+        Args:
+            scan_id: Scan ID to update
+            status: New status ('running', 'committed', 'rolled_back', 'failed')
+            findings_count: Number of findings
+            issues_count: Number of issues
+            evidence_count: Number of evidence records
+            error_message: Error message if status is 'failed'
+        """
+        if status in ('committed', 'rolled_back', 'failed'):
+            await self.execute("""
+                UPDATE scans
+                SET status = ?, findings_count = ?, issues_count = ?, evidence_count = ?, end_time = datetime('now'), error_message = ?
+                WHERE id = ?
+            """, (status, findings_count, issues_count, evidence_count, error_message, scan_id))
+        else:
+            await self.execute("""
+                UPDATE scans
+                SET status = ?, findings_count = ?, issues_count = ?, evidence_count = ?
+                WHERE id = ?
+            """, (status, findings_count, issues_count, evidence_count, scan_id))
+
+    async def get_scan_record(self, scan_id: str) -> Optional[Dict]:
+        """
+        Get a scan record by ID.
+
+        Returns:
+            Scan record dict or None if not found
+        """
+        rows = await self.fetch_all(
+            "SELECT id, session_id, target, status, findings_count, issues_count, evidence_count, start_time, end_time, error_message FROM scans WHERE id = ?",
+            (scan_id,)
+        )
+        if rows:
+            row = rows[0]
+            return {
+                "id": row[0],
+                "session_id": row[1],
+                "target": row[2],
+                "status": row[3],
+                "findings_count": row[4],
+                "issues_count": row[5],
+                "evidence_count": row[6],
+                "start_time": row[7],
+                "end_time": row[8],
+                "error_message": row[9],
+            }
+        return None
+
+    async def get_scans_by_session(self, session_id: str) -> List[Dict]:
+        """
+        Get all scan records for a session.
+
+        Returns:
+            List of scan record dicts
+        """
+        rows = await self.fetch_all(
+            "SELECT id, session_id, target, status, findings_count, issues_count, evidence_count, start_time, end_time, error_message FROM scans WHERE session_id = ? ORDER BY start_time DESC",
+            (session_id,)
+        )
+        return [{
+            "id": row[0],
+            "session_id": row[1],
+            "target": row[2],
+            "status": row[3],
+            "findings_count": row[4],
+            "issues_count": row[5],
+            "evidence_count": row[6],
+            "start_time": row[7],
+            "end_time": row[8],
+            "error_message": row[9],
+        } for row in rows]

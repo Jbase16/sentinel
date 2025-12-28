@@ -34,8 +34,13 @@ class KillchainStore(Observable):
     Tracks the MITRE Kill Chain phases triggered by discovered findings.
     Simple and extensible store used by TaskRouter and the UI.
     Can be instantiated for session-specific use or accessed as global singleton.
+
+    Transactional Behavior:
+    - When persist=False (transactional mode): only updates in-memory state
+    - When persist=True (non-transactional): updates state and emits signals to UI
+    - This prevents UI pollution during rolled-back scans
     """
-    
+
     edges_changed = Signal()
 
     def __init__(self, session_id: str = None):
@@ -45,18 +50,46 @@ class KillchainStore(Observable):
         self.session_id = session_id
 
     def replace_all(self, edges: list, persist: bool = True):
-        """Function replace_all."""
+        """
+        Replace all edges with new set.
+
+        Args:
+            edges: New list of killchain edges
+            persist: If False, only update memory (transactional mode)
+                     If True, update memory and notify UI subscribers
+        """
         self._edges = edges
-        self.edges_changed.emit()
+        if persist:
+            self.edges_changed.emit()
 
     def get_all(self):
         """Function get_all."""
         return list(self._edges)
-    
+
     def add_phase(self, phase: dict, persist: bool = True):
-        """Add a phase edge to the killchain."""
+        """
+        Add a phase edge to the killchain.
+
+        Args:
+            phase: Killchain phase edge dict
+            persist: If False, only update memory (transactional mode)
+                     If True, update memory and notify UI subscribers
+        """
         self._edges.append(phase)
-        self.edges_changed.emit()
+        if persist:
+            self.edges_changed.emit()
+
+    def clear(self, persist: bool = True):
+        """
+        Clear all edges (useful for rollback).
+
+        Args:
+            persist: If False, only update memory (transactional mode)
+                     If True, update memory and notify UI subscribers
+        """
+        self._edges.clear()
+        if persist:
+            self.edges_changed.emit()
 
 # Singleton
 killchain_store = KillchainStore()
