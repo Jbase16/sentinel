@@ -145,7 +145,7 @@ class Database:
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
-                target TEXT,
+                target TEXT NOT NULL,
                 status TEXT,
                 start_time TEXT NOT NULL DEFAULT (datetime('now')),
                 end_time TEXT,

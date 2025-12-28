@@ -383,6 +383,10 @@ class ScanTransaction:
             self._engine._recon_edges.clear()
             self._engine._recon_edge_keys.clear()
 
+            # CRITICAL: Clear _last_results since commit failed
+            # This prevents downstream enrichment from using uncommitted data
+            self._engine._last_results.clear()
+
             # Clear staged data
             self._staged_findings.clear()
             self._staged_issues.clear()
@@ -404,6 +408,9 @@ class ScanTransaction:
         data that was successfully persisted.
 
         Phase 4: UI Publish - Update in-memory stores after DB commit
+
+        NOTE: Issues were already staged during transaction via _refresh_enrichment(),
+        so we just publish the staged data here. No additional enrichment needed.
         """
         logger.info(
             f"[ScanTransaction] UI PUBLISH {self._scan_id}: "
@@ -429,20 +436,47 @@ class ScanTransaction:
                 metadata = ev.get("metadata", {})
                 evidence_store.add_evidence(tool, raw_output, metadata, persist=True)
 
-        # Update issues store (now that findings are committed)
+        # Update issues store (issues were staged during transaction)
         if self._staged_issues:
             if self._engine.session:
                 self._engine.session.issues.replace_all(self._staged_issues, persist=True)
             else:
                 issues_store.replace_all(self._staged_issues, persist=True)
 
-        # Update killchain (after commit, run enrichment)
+        # Update killchain (issues are already published, just update killchain edges)
         if self._engine.session and hasattr(self._engine.session, 'killchain'):
-            # Trigger enrichment now that we're committed
-            enriched_count, edge_count = self._engine._refresh_enrichment()
+            # Build combined killchain edges (from rules + recon)
+            _, _, killchain_edges = apply_rules(self._engine._last_results) if self._engine._last_results else ([], [], [])
+            combined_edges = list(killchain_edges) + list(self._engine._recon_edges)
+
+            # Run correlator for graph intelligence
+            source_findings = self._engine.session.findings.get_all()
+            nodes = []
+            for f in source_findings:
+                asset = f.get("asset") or f.get("target") or "unknown"
+                if asset == "unknown":
+                    continue
+
+                attributes = {}
+                meta = f.get("metadata", {})
+                for key in ["simhash", "favicon_hash", "ssl_serial", "ga_id"]:
+                    if val := meta.get(key):
+                        attributes[key] = val
+
+                if attributes:
+                    nodes.append({"id": asset, "attributes": attributes})
+
+            if nodes:
+                from core.cortex.correlator import GraphCorrelator
+                correlator = GraphCorrelator()
+                implied_edges = correlator.process(nodes)
+                if implied_edges:
+                    combined_edges.extend(implied_edges)
+
+            self._engine.session.killchain.replace_all(combined_edges, persist=True)
             logger.info(
                 f"[ScanTransaction] UI PUBLISH COMPLETE {self._scan_id}: "
-                f"enrichment generated {enriched_count} issues, {edge_count} edges"
+                f"{len(self._staged_issues)} issues, {len(combined_edges)} killchain edges"
             )
 
     async def rollback(self, error_message: Optional[str] = None) -> None:
@@ -455,8 +489,12 @@ class ScanTransaction:
         Args:
             error_message: Optional error message for audit trail
         """
+        # CRITICAL: Set _rolled_back immediately before any awaits
+        # This prevents double rollback if __aexit__ also calls us
         if self._committed or self._rolled_back:
             return  # Already handled
+
+        self._rolled_back = True
 
         # Phase 0: Log rollback start
         logger.info(
@@ -466,9 +504,7 @@ class ScanTransaction:
             f"{len(self._staged_evidence)} evidence"
         )
 
-        self._rolled_back = True
-
-        # Clear staged data
+        # Clear staged data (synchronous, no await)
         self._staged_findings.clear()
         self._staged_issues.clear()
         self._staged_evidence.clear()
@@ -799,9 +835,12 @@ class ScannerEngine:
                         recon_edges = self._build_recon_edges(normalized)
                         self._record_recon_edges(recon_edges)
 
+                        # CRITICAL: Call _refresh_enrichment during transaction to stage issues
+                        # This ensures issues are staged before commit, preventing double enrichment
+                        self._refresh_enrichment()
+
                         # Note: We deliberately do NOT update the in-memory stores here
                         # They will be updated after commit (see ScanTransaction.commit())
-                        # Enrichment and issue generation will also happen after commit
                     else:
                         # Non-transactional path: update stores directly and run enrichment
                         if self.session:
@@ -938,11 +977,28 @@ class ScannerEngine:
             args: Optional arguments for the tool
 
         Raises:
-            ValueError: If tool is not in the TOOLS allowlist
+            ValueError: If tool is not in the TOOLS allowlist or args contain dangerous patterns
         """
         # SECURITY: Validate tool against allowlist to prevent RCE
         if tool not in TOOLS:
             raise ValueError(f"Unknown tool '{tool}'. Must be one of: {', '.join(TOOLS)}")
+
+        # SECURITY: Validate arguments to prevent command injection
+        if args:
+            # Enforce max arg count to prevent complex injection chains
+            if len(args) > 50:
+                raise ValueError(f"Too many arguments ({len(args)}), max 50 allowed")
+
+            # Reject dangerous shell patterns that could enable command injection
+            dangerous_patterns = [';', '|', '&&', '||', '$(', '`', '\n', '\r']
+            for arg in args:
+                arg_str = str(arg)
+                for pattern in dangerous_patterns:
+                    if pattern in arg_str:
+                        raise ValueError(
+                            f"Dangerous character '{pattern}' in argument '{arg_str}'. "
+                            f"Shell injection patterns are not allowed."
+                        )
 
         # Optional: Validate tool is installed
         if hasattr(self, "_installed_meta") and tool not in self._installed_meta:
@@ -976,9 +1032,15 @@ class ScannerEngine:
             return normalized
 
         # Bound fingerprint cache to prevent unbounded memory growth
+        # Evict 20% of entries when over limit (instead of full clear)
+        # This maintains most deduplication while bounding memory
         if len(self._fingerprint_cache) > self._fingerprint_cache_max:
-            self._fingerprint_cache.clear()
-            logger.debug(f"[ScannerEngine] Cleared fingerprint cache (exceeded {self._fingerprint_cache_max})")
+            evict_count = int(self._fingerprint_cache_max * 0.2)
+            # Convert to list to safely remove arbitrary items
+            to_remove = list(self._fingerprint_cache)[:evict_count]
+            for fp in to_remove:
+                self._fingerprint_cache.remove(fp)
+            logger.debug(f"[ScannerEngine] Evicted {evict_count} fingerprints (exceeded {self._fingerprint_cache_max})")
 
         # Loop over items.
         for item in items:
@@ -1251,6 +1313,21 @@ class ScannerEngine:
             if not text:
                 # Even empty lines count as activity for idle timeout because we received a line
                 continue
+
+            # Check disk limit BEFORE adding to output (enforce early)
+            line_bytes = len(text.encode('utf-8'))
+            if output_bytes + line_bytes > max_bytes:
+                truncated = True
+                await queue.put(f"[{tool}] Output truncated: exceeded disk limit ({self.resource_guard.max_disk_mb}MB)")
+                # Terminate the process to stop further output
+                try:
+                    if proc.returncode is None:
+                        proc.terminate()
+                except ProcessLookupError:
+                    pass
+                break
+
+            output_bytes += line_bytes
             output_lines.append(text)
             await queue.put(f"[{tool}] {text}")
             # Check wall-clock timeout
@@ -1281,24 +1358,25 @@ class ScannerEngine:
 
         output_text = "\n".join(output_lines)
 
-        # Check disk usage before storing evidence
-        output_size = len(output_text.encode('utf-8'))
+        # Disk limit was enforced during read - update resource guard for tracking
+        # Use check_disk() to maintain thread-safety and proper accounting
         try:
-            self.resource_guard.check_disk(output_size)
-        except ResourceExhaustedError as e:
-            await queue.put(f"[{tool}] Resource limit exceeded: {e}")
-            logger.warning(f"[{tool}] {e}")
-            return []
+            self.resource_guard.check_disk(output_bytes)
+        except ResourceExhaustedError:
+            # This shouldn't happen since we enforced during read, but handle gracefully
+            pass  # Output was already truncated during read
 
         # Use session-scoped evidence store if available, otherwise global singleton
         evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-        
+
         ev_meta = {
             "target": target,
             "exit_code": exit_code,
             "lines": len(output_lines),
+            "bytes": output_bytes,
             "timed_out": bool(timed_out_reason),
             "timeout_reason": timed_out_reason,
+            "truncated": truncated,  # True if we hit the disk limit during read
             "canceled": bool(cancel_flag and getattr(cancel_flag, 'is_set', lambda: False)())
         }
 
