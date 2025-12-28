@@ -90,11 +90,23 @@ def get_next_sequence() -> int:
     Returns:
         The next sequence number
 
+    Raises:
+        RuntimeError: If initialize_event_sequence_from_db() was not called first
+
     Side effects:
         - Persists the new sequence number to the database (fire-and-forget)
         - This is async but non-blocking; if persistence fails, we still return the sequence
     """
-    global _event_sequence_counter
+    global _event_sequence_counter, _event_sequence_initialized
+
+    # Enforce initialization to prevent silent corruption
+    # If events are emitted before startup completes, we want to fail loudly
+    # rather than produce duplicate IDs after restart
+    if not _event_sequence_initialized:
+        raise RuntimeError(
+            "Event sequence not initialized. "
+            "Call initialize_event_sequence_from_db() during startup."
+        )
 
     with _event_sequence_lock:
         _event_sequence_counter += 1

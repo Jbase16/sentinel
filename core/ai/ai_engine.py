@@ -243,7 +243,67 @@ class OllamaClient:
         except Exception:
             return False
 
+class ProtectedOllamaClient:
+    """
+    Proxy wrapper for OllamaClient that enforces CircuitBreaker logic.
 
+    Interferes in all calls to 'generate' and 'stream_generate' to ensure
+    cascading failures are stopped, even if the client is accessed directly.
+    """
+    def __init__(self, client: OllamaClient, breaker: CircuitBreaker):
+        self._client = client
+        self._breaker = breaker
+
+    def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
+        """Wrapper for generate with circuit breaker."""
+        if self._breaker.is_open():
+            logger.warning("[AI] Circuit breaker open - blocking generate()")
+            return None
+        
+        try:
+            # We don't use breaker.call() here because OllamaClient swallows exceptions
+            # and returns None on error. We need to manually check that return value.
+            result = self._client.generate(prompt, system, force_json)
+            if result is None:
+                self._breaker.on_failure()
+            else:
+                self._breaker.on_success()
+            return result
+        except Exception:
+            self._breaker.on_failure()
+            # OllamaClient usually swallows exceptions, but if it leaks, we catch it.
+            return None
+
+    def generate_text(self, prompt: str, system: str = "") -> Optional[str]:
+        """Wrapper for generate_text."""
+        return self.generate(prompt, system, force_json=False)
+
+    def stream_generate(self, prompt: str, system: str = "") -> Generator[str, None, None]:
+        """wrapper for stream_generate with circuit breaker."""
+        if self._breaker.is_open():
+            yield "[AI unavailable - circuit breaker open]"
+            return
+
+        # We assume connection creation is the main failure point
+        try:
+            # Note: The generator itself is lazy. The real work happens during iteration.
+            # Ideally we'd wrap the iterator, but simple wrapping catches connection errors.
+            stream = self._client.stream_generate(prompt, system)
+            for chunk in stream:
+                # Basic heuristic: if chunk looks like our hardcoded error, count as fail
+                if isinstance(chunk, str) and chunk.startswith("[Error:"):
+                     self._breaker.on_failure()
+                else:
+                    self._breaker.on_success() # Reset on *any* successful chunk? Or just once?
+                    # Let's reset on success to allow recovery.
+                yield chunk
+        except Exception:
+            self._breaker.on_failure()
+            yield "[AI unavailable - stream error]"
+
+    def __getattr__(self, name):
+        """Delegate other attributes (like 'model', 'base_url') to the underlying client."""
+        return getattr(self._client, name)
 class AIEngine:
     """
     Central analysis engine.
@@ -268,10 +328,13 @@ class AIEngine:
 
         # Conditional branch.
         if AI_PROVIDER == "ollama":
-            self.client = OllamaClient(OLLAMA_URL, AI_MODEL)
-            if not self.client.check_connection():
+            raw_client = OllamaClient(OLLAMA_URL, AI_MODEL)
+            if not raw_client.check_connection():
                 logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
                 self.client = None
+            else:
+                # Wrap the client in the circuit breaker proxy
+                self.client = ProtectedOllamaClient(raw_client, self.circuit_breaker)
 
     def deobfuscate_code(self, code_snippet: str) -> str:
         """
