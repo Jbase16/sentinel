@@ -995,12 +995,14 @@ async def get_results(_: bool = Depends(verify_token)):
     """
     return await get_results_v1(_)
 
+@v1_router.get("/cortex/graph")
 @app.get("/cortex/graph")
 async def get_cortex_graph(_: bool = Depends(verify_token)):
     """AsyncFunction get_cortex_graph."""
     from core.cortex.memory import KnowledgeGraph
     return KnowledgeGraph.instance().export_json()
 
+@v1_router.get("/cortex/reasoning")
 @app.get("/cortex/reasoning")
 async def get_cortex_reasoning(_: bool = Depends(verify_token)):
     """AsyncFunction get_cortex_reasoning."""
@@ -1008,6 +1010,7 @@ async def get_cortex_reasoning(_: bool = Depends(verify_token)):
 
 # --- God-Tier Endpoints ---
 
+@v1_router.post("/wraith/evade")
 @app.post("/wraith/evade")
 async def wraith_evade(
     target: str, 
@@ -1021,6 +1024,7 @@ async def wraith_evade(
     async with httpx.AsyncClient() as client:
         return await WraithEngine.instance().stealth_send(client, target, "GET", payload)
 
+@v1_router.post("/ghost/record/{flow_name}")
 @app.post("/ghost/record/{flow_name}")
 async def ghost_record(flow_name: str, _: bool = Depends(verify_token)):
     """
@@ -1031,6 +1035,7 @@ async def ghost_record(flow_name: str, _: bool = Depends(verify_token)):
 
 # --- Ghost Protocol Control ---
 
+@v1_router.post("/ghost/start")
 @app.post("/ghost/start")
 async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
     """Start the passive interception proxy (Lazarus Engine enabled)."""
@@ -1058,6 +1063,7 @@ async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
     else:
         return {"status": "already_running", "port": app.state.ghost.port}
 
+@v1_router.post("/ghost/stop")
 @app.post("/ghost/stop")
 async def ghost_stop(_: bool = Depends(verify_token)):
     """Stop the passive interception proxy."""
@@ -1068,6 +1074,7 @@ async def ghost_stop(_: bool = Depends(verify_token)):
         return {"status": "stopped"}
     return {"status": "not_running"}
 
+@v1_router.post("/forge/compile")
 @app.post("/forge/compile")
 async def forge_compile(
     target: str,
@@ -1084,6 +1091,7 @@ async def forge_compile(
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+@v1_router.post("/forge/execute")
 @app.post("/forge/execute")
 async def forge_execute(
     script_path: str,
@@ -1111,6 +1119,7 @@ class InstallRequest(BaseModel):
             raise ValueError(f"Invalid tool names: {', '.join(invalid)}. Valid tools: {', '.join(sorted(valid_tools))}")
         return v
 
+@v1_router.post("/tools/install")
 @app.post("/tools/install")
 async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
     """
@@ -1146,6 +1155,7 @@ async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
 
     return {"results": results, "tools": status_payload}
 
+@v1_router.post("/tools/uninstall")
 @app.post("/tools/uninstall")
 async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_token)):
     """
@@ -1174,6 +1184,7 @@ async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_token)):
 
     return {"results": results, "tools": status_payload}
 
+@v1_router.post("/chat/query")
 @app.post("/chat/query")
 async def chat_query(
     question: str,
@@ -1185,6 +1196,7 @@ async def chat_query(
     answer = GraphAwareChat.instance().query(question)
     return {"response": answer}
 
+@v1_router.post("/mission/start")
 @app.post("/mission/start")
 async def mission_start(
     target: str,
@@ -1269,6 +1281,7 @@ async def ws_terminal_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
 
+@v1_router.post("/scan")
 @app.post("/scan")
 async def start_scan(
     req: ScanRequest,
@@ -1282,6 +1295,7 @@ async def start_scan(
         status_code=202,
     )
 
+@v1_router.post("/cancel")
 @app.post("/cancel")
 async def cancel_scan(_: bool = Depends(verify_token)):
     """AsyncFunction cancel_scan."""
@@ -1296,6 +1310,7 @@ async def cancel_scan(_: bool = Depends(verify_token)):
         details={}
     )
 
+@v1_router.post("/chat")
 @app.post("/chat")
 async def chat(
     req: ChatRequest,
@@ -1342,6 +1357,7 @@ async def chat(
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
+@v1_router.get("/events")
 @app.get("/events")
 async def events(request: Request, _: bool = Depends(verify_token)):
     """
@@ -1356,6 +1372,7 @@ async def events(request: Request, _: bool = Depends(verify_token)):
 # Event-Sourced Reactive Graph Stream (ESRG)
 # ============================================================================
 
+@v1_router.get("/events/stream")
 @app.get("/events/stream")
 async def events_stream(
     request: Request,
@@ -1418,11 +1435,13 @@ async def events_stream(
     )
 
 
+@v1_router.get("/events/stats")
 @app.get("/events/stats")
 async def events_stats(_: bool = Depends(verify_token)):
     """Return diagnostic stats about the event store."""
     return get_event_store().stats()
 
+@v1_router.get("/report/generate")
 @app.get("/report/generate")
 async def generate_report(
     request: Request,
@@ -1450,11 +1469,13 @@ async def generate_report(
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
+@v1_router.get("/clipboard")
 @app.get("/clipboard")
 async def get_clipboard(_: bool = Depends(verify_token)):
     """AsyncFunction get_clipboard."""
     return {"content": "Clipboard unavailable in container environment"}
 
+@v1_router.post("/actions/{action_id}/{verb}")
 @app.post("/actions/{action_id}/{verb}")
 async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_token)):
     """AsyncFunction handle_action."""

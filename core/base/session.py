@@ -20,9 +20,15 @@
 import uuid
 import time
 from threading import Lock
-from typing import Dict, List
+from threading import Lock
+from typing import Dict, List, Deque
+from collections import deque
+import logging
 
-# Import data storage classes (each session gets its own instances)
+logger = logging.getLogger(__name__)
+
+# Max logs to keep in memory per session
+MAX_SESSION_LOGS = 5000
 from core.data.findings_store import FindingsStore  # Stores security vulnerabilities/discoveries
 from core.data.issues_store import IssuesStore  # Stores confirmed issues/exploits
 from core.data.killchain_store import KillchainStore  # Tracks attack progression
@@ -77,7 +83,9 @@ class ScanSession:
         
         # Session-specific logs (messages describing what's happening in this scan)
         # Separate from global app logs - only logs related to THIS scan
-        self.logs: List[str] = []
+        # Capped to avoid memory exhaustion on long-running scans
+        self.logs: Deque[str] = deque(maxlen=MAX_SESSION_LOGS)
+        self._log_overflow_warned = False
         
         # Thread lock to prevent concurrent access corruption
         # Multiple threads might try to write logs at the same time, lock prevents conflicts
@@ -145,7 +153,11 @@ class ScanSession:
         entry = f"[{timestamp}] {message}"
         
         # Use a lock to prevent race conditions when multiple threads log at once
+        # Use a lock to prevent race conditions when multiple threads log at once
         with self._logs_lock:
+            if len(self.logs) >= MAX_SESSION_LOGS and not self._log_overflow_warned:
+                self.logs.append(f"[{timestamp}] WARNING: Log limit ({MAX_SESSION_LOGS}) reached. Older logs will be dropped.")
+                self._log_overflow_warned = True
             self.logs.append(entry)
             
         # If UI is subscribed, send the log there too (real-time streaming)

@@ -19,6 +19,7 @@ import asyncio
 import logging
 import os
 import threading
+from collections import deque
 from urllib.parse import urlparse
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -295,6 +296,14 @@ class ScanTransaction:
         from core.data.db import Database
         db = None  # Initialize for exception handler scope
 
+        # Phase 0: Log transaction start
+        logger.info(
+            f"[ScanTransaction] START COMMIT {self._scan_id}: "
+            f"staged={len(self._staged_findings)} findings, "
+            f"{len(self._staged_issues)} issues, "
+            f"{len(self._staged_evidence)} evidence"
+        )
+
         try:
             db = Database.instance()
 
@@ -302,13 +311,18 @@ class ScanTransaction:
             if not db._initialized:
                 await db.init()
 
+            # Fail fast if DB unavailable
+            if db._db_connection is None:
+                raise RuntimeError("Database not available - cannot commit")
+
             # Use database lock for the entire transaction
             async with db._db_lock:
                 conn = db._db_connection
                 if conn is None:
                     raise RuntimeError("Database connection is not available")
 
-                # Begin explicit transaction
+                # BEGIN IMMEDIATE: Acquires reserved lock on DB file
+                # Prevents other writers until we commit/rollback
                 await conn.execute("BEGIN IMMEDIATE")
 
                 try:
@@ -329,7 +343,7 @@ class ScanTransaction:
 
                     self._committed = True
                     logger.info(
-                        f"[ScanTransaction] Committed {self._scan_id}: "
+                        f"[ScanTransaction] DB COMMIT COMPLETE {self._scan_id}: "
                         f"{len(self._staged_findings)} findings, "
                         f"{len(self._staged_issues)} issues, "
                         f"{len(self._staged_evidence)} evidence"
@@ -362,8 +376,19 @@ class ScanTransaction:
 
         except Exception as e:
             logger.error(f"[ScanTransaction] Commit error: {e}")
-            # Mark as rolled back and update scan record
+            # Mark as rolled back
             self._rolled_back = True
+
+            # CRITICAL: Clear recon state to prevent stale data from affecting next scan
+            self._engine._recon_edges.clear()
+            self._engine._recon_edge_keys.clear()
+
+            # Clear staged data
+            self._staged_findings.clear()
+            self._staged_issues.clear()
+            self._staged_evidence.clear()
+
+            # Update scan record to 'failed' - rollback() will NOT be called since we set _rolled_back
             if db is not None:
                 try:
                     await db.update_scan_status(self._scan_id, 'failed', error_message=str(e))
@@ -377,7 +402,16 @@ class ScanTransaction:
 
         This is called AFTER database commit to ensure UI only sees
         data that was successfully persisted.
+
+        Phase 4: UI Publish - Update in-memory stores after DB commit
         """
+        logger.info(
+            f"[ScanTransaction] UI PUBLISH {self._scan_id}: "
+            f"updating stores with {len(self._staged_findings)} findings, "
+            f"{len(self._staged_issues)} issues, "
+            f"{len(self._staged_evidence)} evidence"
+        )
+
         # Update findings store
         if self._staged_findings:
             if self._engine.session:
@@ -406,7 +440,10 @@ class ScanTransaction:
         if self._engine.session and hasattr(self._engine.session, 'killchain'):
             # Trigger enrichment now that we're committed
             enriched_count, edge_count = self._engine._refresh_enrichment()
-            logger.info(f"[ScanTransaction] Post-commit enrichment: {enriched_count} issues, {edge_count} edges")
+            logger.info(
+                f"[ScanTransaction] UI PUBLISH COMPLETE {self._scan_id}: "
+                f"enrichment generated {enriched_count} issues, {edge_count} edges"
+            )
 
     async def rollback(self, error_message: Optional[str] = None) -> None:
         """
@@ -421,12 +458,24 @@ class ScanTransaction:
         if self._committed or self._rolled_back:
             return  # Already handled
 
+        # Phase 0: Log rollback start
+        logger.info(
+            f"[ScanTransaction] START ROLLBACK {self._scan_id}: "
+            f"discarding {len(self._staged_findings)} findings, "
+            f"{len(self._staged_issues)} issues, "
+            f"{len(self._staged_evidence)} evidence"
+        )
+
         self._rolled_back = True
 
         # Clear staged data
         self._staged_findings.clear()
         self._staged_issues.clear()
         self._staged_evidence.clear()
+
+        # CRITICAL: Clear recon state to prevent stale data from affecting next scan
+        self._engine._recon_edges.clear()
+        self._engine._recon_edge_keys.clear()
 
         # Update scan record to 'rolled_back'
         from core.data.db import Database
@@ -437,7 +486,9 @@ class ScanTransaction:
             logger.warning(f"[ScanTransaction] Failed to update scan record on rollback: {e}")
 
         logger.info(
-            f"[ScanTransaction] Rolled back transaction {self._scan_id} for session {self._session_id}"
+            f"[ScanTransaction] ROLLBACK COMPLETE {self._scan_id}: "
+            f"discarded for session {self._session_id}"
+            + (f" - reason: {error_message}" if error_message else "")
         )
 
     @property
@@ -465,6 +516,7 @@ class ScannerEngine:
         self.session = session
         self._last_results: List[dict] = []
         self._fingerprint_cache: set[str] = set()
+        self._fingerprint_cache_max = 10000  # Bound memory growth
         self._installed_meta: Dict[str, Dict[str, object]] = {}
         self._recon_edges: List[dict] = []
         self._recon_edge_keys: set[tuple] = set()
@@ -923,6 +975,11 @@ class ScannerEngine:
         if not items:
             return normalized
 
+        # Bound fingerprint cache to prevent unbounded memory growth
+        if len(self._fingerprint_cache) > self._fingerprint_cache_max:
+            self._fingerprint_cache.clear()
+            logger.debug(f"[ScannerEngine] Cleared fingerprint cache (exceeded {self._fingerprint_cache_max})")
+
         # Loop over items.
         for item in items:
             entry = dict(item)
@@ -1155,9 +1212,14 @@ class ScannerEngine:
 
         start_time = asyncio.get_running_loop().time()
         timed_out_reason = None
+        truncated = False
+        output_bytes = 0
 
         output_lines: List[str] = []
         assert proc.stdout is not None
+
+        # Get disk limit to enforce during read (not after)
+        max_bytes = self.resource_guard.max_disk_mb * 1024 * 1024
         # While loop.
         while True:
             # Cooperative cancellation: terminate and break

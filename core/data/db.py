@@ -83,6 +83,9 @@ class Database:
         if self._db_lock is None:
             self._db_lock = asyncio.Lock()
 
+        # Store the event loop for later validation (event loop safety)
+        self._loop = asyncio.get_running_loop()
+
         # Double-checked locking pattern with asyncio.Lock
         async with self._init_lock:
             if self._initialized:
@@ -99,6 +102,15 @@ class Database:
 
                 await self._db_connection.commit()
                 self._initialized = True
+
+                # CRITICAL: Initialize event sequence from DB before any events are emitted
+                # This ensures continuity across restarts - no duplicate event IDs
+                try:
+                    from core.cortex.events import initialize_event_sequence_from_db
+                    seq = await initialize_event_sequence_from_db()
+                    logger.info(f"[Database] Event sequence initialized from DB: {seq}")
+                except Exception as e:
+                    logger.warning(f"[Database] Failed to initialize event sequence: {e}")
 
                 # Start the BlackBox worker now that we are ready
                 self.blackbox.start()
@@ -236,14 +248,30 @@ class Database:
         """)
 
     async def _execute_internal(self, query: str, params: tuple = ()):
-        """Internal low-level execute used by BlackBox worker."""
+        """
+        Internal low-level execute used by BlackBox worker.
+
+        EVENT LOOP SAFETY: Validates that we're running on the same event loop
+        that was used during Database.init(). This prevents deadlocks and corruption
+        when mixing aiosqlite (loop-bound) with threading.
+        """
+        # Validate event loop ownership
+        current_loop = asyncio.get_running_loop()
+        if hasattr(self, '_loop') and current_loop is not self._loop:
+            raise RuntimeError(
+                f"Database access from wrong event loop. "
+                f"Database initialized on loop {self._loop}, "
+                f"but called from loop {current_loop}. "
+                f"This indicates a threading/asyncio mixing bug."
+            )
+
         # Conditional branch.
         if not self._initialized:
              try:
                  await self.init()
              except Exception:
                  return # Init failed/cancelled during shutdown
-        
+
         # Simple retry loop for robustness against external lockers
         max_retries = 5
         # Loop over items.
@@ -314,8 +342,13 @@ class Database:
 
     # -------- Session Methods --------
 
-    async def save_session(self, session_data: Dict[str, Any]):
-        """Fire-and-forget save."""
+    def save_session(self, session_data: Dict[str, Any]) -> None:
+        """
+        Save session data (fire-and-forget).
+
+        This is a synchronous method that delegates to the BlackBox worker.
+        Returns immediately; actual persistence happens asynchronously.
+        """
         self.blackbox.fire_and_forget(self._save_session_impl, session_data)
 
     async def _save_session_impl(self, session_data: Dict[str, Any]):
@@ -333,8 +366,13 @@ class Database:
 
     # -------- Findings Methods --------
 
-    async def save_finding(self, finding: Dict[str, Any], session_id: Optional[str] = None):
-        """AsyncFunction save_finding."""
+    def save_finding(self, finding: Dict[str, Any], session_id: Optional[str] = None) -> None:
+        """
+        Save finding data (fire-and-forget).
+
+        This is a synchronous method that delegates to the BlackBox worker.
+        Returns immediately; actual persistence happens asynchronously.
+        """
         self.blackbox.fire_and_forget(self._save_finding_impl, finding, session_id)
 
     async def _save_finding_impl(self, finding: Dict[str, Any], session_id: Optional[str] = None):
@@ -358,15 +396,22 @@ class Database:
 
     # -------- Issues Methods --------
 
-    async def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None):
-        """AsyncFunction save_issue."""
+    def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None) -> None:
+        """
+        Save issue data (fire-and-forget).
+
+        This is a synchronous method that delegates to the BlackBox worker.
+        Returns immediately; actual persistence happens asynchronously.
+        """
         self.blackbox.fire_and_forget(self._save_issue_impl, issue, session_id)
 
     async def _save_issue_impl(self, issue: Dict[str, Any], session_id: Optional[str] = None):
         """AsyncFunction _save_issue_impl."""
-        iid = issue.get("id") or issue.get("title", "unknown")
-        blob = json.dumps(issue)
-        
+        import hashlib
+        # Use deterministic hash for stable ID (same strategy as findings and transactional save)
+        blob = json.dumps(issue, sort_keys=True)
+        iid = hashlib.sha256(blob.encode()).hexdigest()
+
         await self._execute_internal("""
             INSERT OR REPLACE INTO issues (id, session_id, title, severity, target, data, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
@@ -381,8 +426,13 @@ class Database:
 
     # -------- Evidence Methods --------
 
-    async def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
-        """AsyncFunction save_evidence."""
+    def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None) -> None:
+        """
+        Save evidence data (fire-and-forget).
+
+        This is a synchronous method that delegates to the BlackBox worker.
+        Returns immediately; actual persistence happens asynchronously.
+        """
         self.blackbox.fire_and_forget(self._save_evidence_impl, evidence_data, session_id)
 
     async def _save_evidence_impl(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None):
@@ -397,38 +447,44 @@ class Database:
             json.dumps(evidence_data.get("metadata", {}))
         ))
 
-    async def update_evidence(self, evidence_id: int, summary: Optional[str] = None, 
-                              findings: Optional[List] = None, session_id: Optional[str] = None):
-         """AsyncFunction update_evidence."""
-         self.blackbox.fire_and_forget(self._update_evidence_impl, evidence_id, summary, findings, session_id)
+    def update_evidence(self, evidence_id: int, summary: Optional[str] = None,
+                        findings: Optional[List] = None, session_id: Optional[str] = None) -> None:
+        """
+        Update evidence metadata (fire-and-forget).
 
-    async def _update_evidence_impl(self, evidence_id: int, summary: Optional[str] = None, 
+        This is a synchronous method that delegates to the BlackBox worker.
+        Returns immediately; actual persistence happens asynchronously.
+        """
+        self.blackbox.fire_and_forget(self._update_evidence_impl, evidence_id, summary, findings, session_id)
+
+    async def _update_evidence_impl(self, evidence_id: int, summary: Optional[str] = None,
                                     findings: Optional[List] = None, session_id: Optional[str] = None):
-        """AsyncFunction _update_evidence_impl."""
+        """
+        Async implementation for updating evidence metadata.
+
+        Uses COALESCE to handle NULL metadata gracefully.
+        """
         updates = []
         params = []
-        
-        # Note: json_set is preferred but simple update works too
+
+        # Use COALESCE to handle NULL metadata - prevents JSON mutation on NULL
         if summary is not None:
-            updates.append("metadata = json_set(metadata, '$.summary', ?)")
+            updates.append("metadata = json_set(COALESCE(metadata, '{}'), '$.summary', ?)")
             params.append(summary)
-        # Conditional branch.
         if findings is not None:
-            updates.append("metadata = json_set(metadata, '$.findings', ?)")
+            updates.append("metadata = json_set(COALESCE(metadata, '{}'), '$.findings', ?)")
             params.append(json.dumps(findings))
-        
-        # Conditional branch.
+
         if not updates:
             return
-        
+
         params.append(evidence_id)
         query = f"UPDATE evidence SET {', '.join(updates)} WHERE id = ?"
-        
-        # Error handling block.
+
         try:
             await self._execute_internal(query, tuple(params))
         except Exception:
-            pass
+            pass  # Evidence might have been deleted
 
     # -------- Transactional Save Methods --------
 
