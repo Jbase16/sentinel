@@ -226,6 +226,196 @@ class GhostConfig:
 
 
 # ============================================================================
+# NEXUS/OMEGA Module Configuration
+# ============================================================================
+# Controls the advanced security analysis modules for threat discovery.
+
+@dataclass(frozen=True)
+class CronusConfig:
+    """Temporal mining configuration (CRONUS - The Archaeologist).
+
+    CRONUS discovers "zombie endpoints" - deprecated routes that are still
+    active on the backend but no longer documented. This configuration controls
+    how aggressively we probe historical archives and verify endpoints.
+
+    Safety:
+    - All CRONUS operations require safe_mode=False to execute
+    - Rate limiting prevents overwhelming target servers
+    - Probe requests are designed to be non-disruptive
+    """
+    # Safety flag: When True, blocks all historical queries and endpoint probing
+    # True = safe mode (no network requests to archives or targets)
+    # False = operational mode (enabled for authorized testing)
+    safe_mode: bool = True
+
+    # Maximum number of snapshots to retrieve per archive source
+    # Prevents overwhelming the archive APIs with massive result sets
+    max_snapshots_per_source: int = 100
+
+    # Maximum number of endpoints to probe concurrently
+    # Higher = faster verification but more server load
+    # Lower = slower but gentler on target infrastructure
+    max_concurrent_probes: int = 5
+
+    # Rate limit for zombie endpoint probing (requests per second)
+    # 5 = conservative, prevents triggering rate limits or WAF alerts
+    # Archive APIs (Wayback, CommonCrawl) may have their own limits
+    probe_rate_limit: int = 5
+
+    # Which archive sources to query (reduces API load if disabled)
+    enable_wayback_machine: bool = True
+    enable_commoncrawl: bool = True
+    enable_alienvault: bool = True
+
+    # Timeout for individual probe requests (seconds)
+    probe_timeout: int = 10
+
+    # Whether to cache query results locally
+    cache_enabled: bool = True
+
+
+@dataclass(frozen=True)
+class MimicConfig:
+    """Source reconstruction configuration (MIMIC - The Source Reconstructor).
+
+    MIMIC downloads and analyzes frontend JavaScript bundles to discover
+    hidden routes and hardcoded secrets. This configuration controls asset
+    downloading behavior and analysis limits.
+
+    Safety:
+    - All MIMIC operations require safe_mode=False to execute
+    - Asset size limits prevent downloading massive files
+    - Secrets are automatically redacted in logs and reports
+    """
+    # Safety flag: When True, blocks all asset downloads and parsing
+    # True = safe mode (no network requests to download assets)
+    # False = operational mode (enabled for authorized testing)
+    safe_mode: bool = True
+
+    # Maximum size of a single asset file to download (megabytes)
+    # 50 MB = reasonable limit (most bundles are < 10 MB)
+    # Larger files are skipped to prevent filling disk storage
+    max_asset_size_mb: int = 50
+
+    # Maximum number of assets to download concurrently
+    # 10 = balanced (fast but doesn't overwhelm network)
+    max_download_concurrent: int = 10
+
+    # Rate limit for asset downloads (requests per second)
+    # 20 = generous for static asset retrieval
+    download_rate_limit: int = 20
+
+    # Whether to respect robots.txt when discovering assets
+    respect_robots_txt: bool = True
+
+    # Whether to download source maps (.map files) for better analysis
+    # Source maps can be large but provide much better code comprehension
+    fetch_source_maps: bool = True
+
+    # Maximum cache age before re-downloading assets (hours)
+    cache_ttl_hours: int = 24
+
+    # Which asset types to download
+    download_javascript: bool = True
+    download_css: bool = True
+    download_images: bool = False  # Images are rarely useful for analysis
+
+
+@dataclass(frozen=True)
+class NexusConfig:
+    """Logic chaining configuration (NEXUS - The Chain Reactor).
+
+    NEXUS chains low-severity findings into high-impact exploit paths.
+    This configuration controls the pathfinding algorithm and execution
+    safety limits.
+
+    Safety:
+    - Chain execution is ALWAYS blocked unless explicitly enabled
+    - Chain calculation is safe (just planning, no exploitation)
+    - Chains require approval tokens before execution
+    """
+    # Safety flag: When True, blocks all chain planning and execution
+    # True = safe mode (no chain calculation or execution)
+    # False = operational mode (chain planning allowed)
+    safe_mode: bool = True
+
+    # Maximum depth of an exploit chain (number of steps)
+    # 5 = reasonable limit (deeper chains are less reliable)
+    # Longer chains have exponentially lower success probability
+    max_chain_depth: int = 5
+
+    # Maximum number of chains to calculate per goal state
+    # 10 = provides options without overwhelming the user
+    max_chains_per_goal: int = 10
+
+    # Whether chain execution is allowed (EXTREMELY DANGEROUS)
+    # False = planning only (chains calculated but not executed)
+    # True = execution enabled (requires approval_token per chain)
+    # This should NEVER be True in automated environments
+    enable_chain_execution: bool = False
+
+    # Minimum reliability score for a primitive to be used in chains
+    # 0.0 = allow all primitives (more false positives)
+    # 1.0 = only certain primitives (may miss valid chains)
+    min_primitive_reliability: float = 0.5
+
+    # Whether to use the KnowledgeGraph for primitive correlation
+    use_knowledge_graph: bool = True
+
+    # Maximum execution time for a single chain step (seconds)
+    step_timeout_seconds: int = 60
+
+    # Chain goals to prioritize (empty = all goals)
+    priority_goals: tuple = ()
+
+
+@dataclass(frozen=True)
+class OmegaConfig:
+    """Integration manager configuration (OMEGA - The Orchestrator).
+
+    OMEGA coordinates all three pillars (CRONUS, MIMIC, NEXUS) for
+    comprehensive security analysis. This configuration controls which
+    modules are enabled and how results are aggregated.
+
+    Safety:
+    - Individual module safe_modes are respected
+    - OMEGA itself requires safe_mode=False to run
+    - Results are aggregated without executing exploit chains
+    """
+    # Safety flag: When True, blocks all OMEGA orchestration
+    # True = safe mode (no module coordination)
+    # False = operational mode (coordinates enabled modules)
+    safe_mode: bool = True
+
+    # Which pillars to enable (can run subsets independently)
+    enable_cronus: bool = True
+    enable_mimic: bool = True
+    enable_nexus: bool = True
+
+    # Maximum duration for a complete OMEGA analysis (seconds)
+    # 3600 = 1 hour (comprehensive analysis can take time)
+    max_duration_seconds: int = 3600
+
+    # Whether to generate a unified risk score across all pillars
+    calculate_combined_risk: bool = True
+
+    # Minimum confidence threshold for including findings in results
+    min_confidence_threshold: float = 0.3
+
+    # Whether to persist intermediate results for analysis
+    persist_intermediate_results: bool = True
+
+    # Maximum number of zombie endpoints to investigate (CRONUS)
+    max_zombie_endpoints: int = 50
+
+    # Maximum number of hidden routes to investigate (MIMIC)
+    max_hidden_routes: int = 50
+
+    # Maximum number of exploit chains to calculate (NEXUS)
+    max_exploit_chains: int = 10
+
+
+# ============================================================================
 # Master Configuration Container
 # ============================================================================
 # Combines all configuration sections into one cohesive structure.
@@ -250,7 +440,19 @@ class SentinelConfig:
     
     # Ghost module settings (Lazarus JS de-obfuscation, proxy)
     ghost: GhostConfig = field(default_factory=GhostConfig)
-    
+
+    # CRONUS module settings (temporal mining for zombie endpoints)
+    cronus: CronusConfig = field(default_factory=CronusConfig)
+
+    # MIMIC module settings (source reconstruction for hidden routes)
+    mimic: MimicConfig = field(default_factory=MimicConfig)
+
+    # NEXUS module settings (logic chaining for exploit paths)
+    nexus: NexusConfig = field(default_factory=NexusConfig)
+
+    # OMEGA module settings (orchestration of all three pillars)
+    omega: OmegaConfig = field(default_factory=OmegaConfig)
+
     # Debug mode: enables extra logging and development features
     # False = production mode (clean output, fast)
     # True = debug mode (verbose logging, extra checks)
@@ -334,13 +536,74 @@ class SentinelConfig:
         log = LogConfig(
             level=os.getenv("SENTINEL_LOG_LEVEL", "INFO"),
         )
-        
+
+        # Ghost config (minimal configuration needed)
+        ghost = GhostConfig()  # Use defaults
+
+        # CRONUS config (temporal mining)
+        cronus = CronusConfig(
+            safe_mode=os.getenv("SENTINEL_CRONUS_SAFE_MODE", "true").lower() == "true",
+            max_snapshots_per_source=int(os.getenv("SENTINEL_CRONUS_MAX_SNAPSHOTS", "100")),
+            max_concurrent_probes=int(os.getenv("SENTINEL_CRONUS_MAX_PROBES", "5")),
+            probe_rate_limit=int(os.getenv("SENTINEL_CRONUS_RATE_LIMIT", "5")),
+            enable_wayback_machine=os.getenv("SENTINEL_CRONUS_WAYBACK", "true").lower() == "true",
+            enable_commoncrawl=os.getenv("SENTINEL_CRONUS_COMMONCRAWL", "true").lower() == "true",
+            enable_alienvault=os.getenv("SENTINEL_CRONUS_ALIENVAULT", "true").lower() == "true",
+            probe_timeout=int(os.getenv("SENTINEL_CRONUS_TIMEOUT", "10")),
+            cache_enabled=os.getenv("SENTINEL_CRONUS_CACHE", "true").lower() == "true",
+        )
+
+        # MIMIC config (source reconstruction)
+        mimic = MimicConfig(
+            safe_mode=os.getenv("SENTINEL_MIMIC_SAFE_MODE", "true").lower() == "true",
+            max_asset_size_mb=int(os.getenv("SENTINEL_MIMIC_MAX_ASSET_SIZE", "50")),
+            max_download_concurrent=int(os.getenv("SENTINEL_MIMIC_MAX_CONCURRENT", "10")),
+            download_rate_limit=int(os.getenv("SENTINEL_MIMIC_RATE_LIMIT", "20")),
+            respect_robots_txt=os.getenv("SENTINEL_MIMIC_ROBOTS_TXT", "true").lower() == "true",
+            fetch_source_maps=os.getenv("SENTINEL_MIMIC_SOURCE_MAPS", "true").lower() == "true",
+            cache_ttl_hours=int(os.getenv("SENTINEL_MIMIC_CACHE_TTL", "24")),
+            download_javascript=os.getenv("SENTINEL_MIMIC_DOWNLOAD_JS", "true").lower() == "true",
+            download_css=os.getenv("SENTINEL_MIMIC_DOWNLOAD_CSS", "true").lower() == "true",
+            download_images=os.getenv("SENTINEL_MIMIC_DOWNLOAD_IMAGES", "false").lower() == "true",
+        )
+
+        # NEXUS config (logic chaining)
+        nexus = NexusConfig(
+            safe_mode=os.getenv("SENTINEL_NEXUS_SAFE_MODE", "true").lower() == "true",
+            max_chain_depth=int(os.getenv("SENTINEL_NEXUS_MAX_DEPTH", "5")),
+            max_chains_per_goal=int(os.getenv("SENTINEL_NEXUS_MAX_CHAINS", "10")),
+            enable_chain_execution=os.getenv("SENTINEL_NEXUS_ENABLE_EXECUTION", "false").lower() == "true",
+            min_primitive_reliability=float(os.getenv("SENTINEL_NEXUS_MIN_RELIABILITY", "0.5")),
+            use_knowledge_graph=os.getenv("SENTINEL_NEXUS_USE_KG", "true").lower() == "true",
+            step_timeout_seconds=int(os.getenv("SENTINEL_NEXUS_STEP_TIMEOUT", "60")),
+        )
+
+        # OMEGA config (integration manager)
+        omega = OmegaConfig(
+            safe_mode=os.getenv("SENTINEL_OMEGA_SAFE_MODE", "true").lower() == "true",
+            enable_cronus=os.getenv("SENTINEL_OMEGA_ENABLE_CRONUS", "true").lower() == "true",
+            enable_mimic=os.getenv("SENTINEL_OMEGA_ENABLE_MIMIC", "true").lower() == "true",
+            enable_nexus=os.getenv("SENTINEL_OMEGA_ENABLE_NEXUS", "true").lower() == "true",
+            max_duration_seconds=int(os.getenv("SENTINEL_OMEGA_MAX_DURATION", "3600")),
+            calculate_combined_risk=os.getenv("SENTINEL_OMEGA_COMBINED_RISK", "true").lower() == "true",
+            min_confidence_threshold=float(os.getenv("SENTINEL_OMEGA_MIN_CONFIDENCE", "0.3")),
+            persist_intermediate_results=os.getenv("SENTINEL_OMEGA_PERSIST_RESULTS", "true").lower() == "true",
+            max_zombie_endpoints=int(os.getenv("SENTINEL_OMEGA_MAX_ZOMBIES", "50")),
+            max_hidden_routes=int(os.getenv("SENTINEL_OMEGA_MAX_ROUTES", "50")),
+            max_exploit_chains=int(os.getenv("SENTINEL_OMEGA_MAX_CHAINS", "10")),
+        )
+
         return cls(
             ai=ai,
             security=security,
             storage=storage,
             scan=scan,
             log=log,
+            ghost=ghost,
+            cronus=cronus,
+            mimic=mimic,
+            nexus=nexus,
+            omega=omega,
             debug=os.getenv("SENTINEL_DEBUG", "false").lower() == "true",
             api_host=os.getenv("SENTINEL_API_HOST", "127.0.0.1"),
             api_port=int(os.getenv("SENTINEL_API_PORT", "8765")),
