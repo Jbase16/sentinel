@@ -44,7 +44,7 @@ class KillchainStore(Observable):
         self._edges = []
         self.session_id = session_id
 
-    def replace_all(self, edges: list):
+    def replace_all(self, edges: list, persist: bool = True):
         """Function replace_all."""
         self._edges = edges
         self.edges_changed.emit()
@@ -53,7 +53,7 @@ class KillchainStore(Observable):
         """Function get_all."""
         return list(self._edges)
     
-    def add_phase(self, phase: dict):
+    def add_phase(self, phase: dict, persist: bool = True):
         """Add a phase edge to the killchain."""
         self._edges.append(phase)
         self.edges_changed.emit()

@@ -129,9 +129,9 @@ class FindingsStore(Observable):
                 logger.warning("[FindingsStore] No event loop for async save")
         self.findings_changed.emit()
 
-    def add(self, finding: dict):
+    def add(self, finding: dict, persist: bool = True):
         """Alias for add_finding to maintain compatibility."""
-        self.add_finding(finding)
+        self.add_finding(finding, persist=persist)
 
     def bulk_add(self, items: list[dict], persist: bool = True):
         """Add multiple findings at once."""

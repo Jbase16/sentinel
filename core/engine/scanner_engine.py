@@ -61,7 +61,14 @@ class ResourceGuard:
         self.max_disk_mb = max_disk_mb
         self.findings_count = 0
         self.disk_usage = 0
+        self.disk_usage = 0
         self._lock = threading.Lock()
+
+    def reset(self):
+        """Reset counters for a new scan."""
+        with self._lock:
+            self.findings_count = 0
+            self.disk_usage = 0
 
     def check_findings(self, count: int) -> bool:
         """
@@ -301,7 +308,10 @@ class ScanTransaction:
 
                 except Exception as e:
                     # Rollback on any error
-                    await conn.rollback()
+                    try:
+                        await conn.rollback()
+                    except Exception:
+                        pass # Connection might be closed already
                     raise RuntimeError(f"Transaction commit failed: {e}") from e
 
         except Exception as e:
@@ -502,140 +512,161 @@ class ScannerEngine:
         else:
             yield f"Installed tools: {', '.join(tools_to_run)}"
             
+            yield f"Installed tools: {', '.join(tools_to_run)}"
+            
             # Use session ID or temp ID
             sess_id = self.session.session_id if self.session else "global_scan"
 
+            # RESET STATE for this new scan
+            self._fingerprint_cache.clear()
+            self.resource_guard.reset()
+
             # WRAPPER: All tool execution and findings should be atomic
+            # FIX: The entire queue processing loop MUST be inside the transaction context
             async with ScanTransaction(self, sess_id) as txn:
-                queue: asyncio.Queue[str] = asyncio.Queue()
-                running: Dict[str, asyncio.Task[List[dict]]] = {}
-                pending = list(tools_to_run)
-            results_map: Dict[str, List[dict] | Exception] = {}
-
-            # Expose queue for dynamic additions
-            self._pending_tasks = pending
-            self._running_tasks = running
-            self._queue = queue
-            self._results_map = results_map
-
-            # Cancellation and global timeout setup
-            local_cancel = cancel_flag or asyncio.Event()
-            watchdog_task = None
-            global_timeout = self._global_scan_timeout_seconds()
-            if global_timeout and global_timeout > 0:
-                watchdog_task = asyncio.create_task(self._global_timeout_runner(global_timeout, local_cancel, self._queue))
-
-            # FIXED: Wait for ALL tasks to complete, not just until slots fill
-            while self._pending_tasks or self._running_tasks:
-                # Fill available slots
-                # Check for cancellation before launching new tasks
-                if local_cancel.is_set():
-                    await self._queue.put("[scanner] cancellation requested; stopping new tasks")
-                    self._pending_tasks.clear()
-                    break
-
-                while self._pending_tasks and len(self._running_tasks) < MAX_CONCURRENT_TOOLS:
-                    task_def = self._pending_tasks.pop(0)
-                    # Handle both simple strings (legacy) and dicts (dynamic args)
-                    if isinstance(task_def, str):
-                         tool = task_def
-                         args = None
-                    else:
-                         tool = task_def["tool"]
-                         args = task_def.get("args")
-
-                    self._running_tasks[tool] = asyncio.create_task(
-                        self._run_tool_task(tool, target, self._queue, args, local_cancel)
-                    )
-                    await self._queue.put(f"[scanner] Started {tool} (dynamic launch)")
-
-                if not self._running_tasks:
-                     break
-
-                done, _ = await asyncio.wait(list(self._running_tasks.values()), timeout=0.2)
-                while not self._queue.empty():
-                    yield self._queue.get_nowait()
-
-                for finished in done:
-                    tool_name = next((name for name, t in self._running_tasks.items() if t is finished), None)
-                    if tool_name:
-                        try:
-                            self._results_map[tool_name] = finished.result()
-                        except Exception as exc: # pragma: no cover
-                            self._results_map[tool_name] = exc
-                            await self._queue.put(f"[{tool_name}] task error: {exc}")
-                        del self._running_tasks[tool_name]
-                
-                if not done:
-                    # If cancellation was requested mid-run, try to wait for running tasks to finish.
-                    if local_cancel.is_set():
-                        # Best-effort: terminate running subprocesses and wait for tasks to notice.
-                        await self._queue.put("[scanner]Cancellation detected - terminating running tools...")
-                        for name, proc in list(self._procs.items()):
-                            if proc.returncode is None:
-                                try:
-                                    proc.terminate()
-                                    await self._queue.put(f"[{name}] terminated due to cancellation")
-                                except ProcessLookupError:
-                                    pass
-                        
-                        # Give subprocesses a moment to terminate
-                        await asyncio.sleep(0.2)
-                        
-                        # Force kill any stubborn processes
-                        for name, proc in list(self._procs.items()):
-                            if proc.returncode is None:
-                                try:
-                                    proc.kill()
-                                    await self._queue.put(f"[{name}] force-killed after termination timeout")
-                                except ProcessLookupError:
-                                    pass
-                        
-                        await self._queue.put("[scanner] All tools terminated due to cancellation")
-            
-            # Stop global watchdog if running
-            if 'watchdog_task' in locals() and watchdog_task is not None:
                 try:
-                    watchdog_task.cancel()
-                except Exception:
-                    pass
-            
-            while not self._queue.empty():
-                yield self._queue.get_nowait()
-            
-            # CRITICAL FIX: Aggregate all findings from tool results
-            all_findings: List[dict] = []
-            for tool_name, result in self._results_map.items():
-                if isinstance(result, list):
-                    all_findings.extend(result)
-            
-            # Normalize and deduplicate findings
-            normalized = self._normalize_findings(all_findings)
-            self._last_results = normalized
-            
-            # CRITICAL: Populate findings store (Session-Scoped or Global)
-            # If transaction is active, stage findings there and update Store in memory-only mode
-            if self._active_transaction and self._active_transaction.is_active:
-                for f in normalized:
-                    self._active_transaction.add_finding(f)
-                
-                if self.session:
-                    self.session.findings.bulk_add(normalized, persist=False)
-                else:
-                    findings_store.bulk_add(normalized, persist=False)
-            else:
-                # Legacy / Non-transactional fallback
-                if self.session:
-                    self.session.findings.bulk_add(normalized)
-                else:
-                    findings_store.bulk_add(normalized)
-            
-            # Build recon edges and update stores
-            recon_edges = self._build_recon_edges(normalized)
-            self._record_recon_edges(recon_edges)
-            enriched_count, edge_count = self._refresh_enrichment()
-            
-            yield f"[scanner] Processed {len(normalized)} findings, {enriched_count} issues, {edge_count} killchain edges"
+                    queue: asyncio.Queue[str] = asyncio.Queue()
+                    running: Dict[str, asyncio.Task[List[dict]]] = {}
+                    pending = list(tools_to_run)
+                    results_map: Dict[str, List[dict] | Exception] = {}
+
+                    # Expose queue for dynamic additions
+                    self._pending_tasks = pending
+                    self._running_tasks = running
+                    self._queue = queue
+                    self._results_map = results_map
+
+                    # Cancellation and global timeout setup
+                    local_cancel = cancel_flag or asyncio.Event()
+                    watchdog_task = None
+                    global_timeout = self._global_scan_timeout_seconds()
+                    if global_timeout and global_timeout > 0:
+                        watchdog_task = asyncio.create_task(self._global_timeout_runner(global_timeout, local_cancel, self._queue))
+
+                    # FIXED: Wait for ALL tasks to complete, not just until slots fill
+                    while self._pending_tasks or self._running_tasks:
+                        # Fill available slots
+                        # Check for cancellation before launching new tasks
+                        if local_cancel.is_set():
+                            await self._queue.put("[scanner] cancellation requested; stopping new tasks")
+                            self._pending_tasks.clear()
+                            break
+
+                        while self._pending_tasks and len(self._running_tasks) < MAX_CONCURRENT_TOOLS:
+                            task_def = self._pending_tasks.pop(0)
+                            # Handle both simple strings (legacy) and dicts (dynamic args)
+                            if isinstance(task_def, str):
+                                tool = task_def
+                                args = None
+                            else:
+                                tool = task_def["tool"]
+                                args = task_def.get("args")
+
+                            self._running_tasks[tool] = asyncio.create_task(
+                                self._run_tool_task(tool, target, self._queue, args, local_cancel)
+                            )
+                            await self._queue.put(f"[scanner] Started {tool} (dynamic launch)")
+
+                        if not self._running_tasks:
+                            break
+
+                        done, _ = await asyncio.wait(list(self._running_tasks.values()), timeout=0.2)
+                        while not self._queue.empty():
+                            yield self._queue.get_nowait()
+
+                        for finished in done:
+                            tool_name = next((name for name, t in self._running_tasks.items() if t is finished), None)
+                            if tool_name:
+                                try:
+                                    self._results_map[tool_name] = finished.result()
+                                except Exception as exc: # pragma: no cover
+                                    self._results_map[tool_name] = exc
+                                    await self._queue.put(f"[{tool_name}] task error: {exc}")
+                                del self._running_tasks[tool_name]
+                        
+                        if not done:
+                            # If cancellation was requested mid-run, try to wait for running tasks to finish.
+                            if local_cancel.is_set():
+                                # Best-effort: terminate running subprocesses and wait for tasks to notice.
+                                await self._queue.put("[scanner]Cancellation detected - terminating running tools...")
+                                for name, proc in list(self._procs.items()):
+                                    if proc.returncode is None:
+                                        try:
+                                            proc.terminate()
+                                            await self._queue.put(f"[{name}] terminated due to cancellation")
+                                        except ProcessLookupError:
+                                            pass
+                                
+                                # Give subprocesses a moment to terminate
+                                await asyncio.sleep(0.2)
+                                
+                                # Force kill any stubborn processes
+                                for name, proc in list(self._procs.items()):
+                                    if proc.returncode is None:
+                                        try:
+                                            proc.kill()
+                                            await self._queue.put(f"[{name}] force-killed after termination timeout")
+                                        except ProcessLookupError:
+                                            pass
+                                
+                                await self._queue.put("[scanner] All tools terminated due to cancellation")
+                    
+                    # Stop global watchdog if running
+                    if 'watchdog_task' in locals() and watchdog_task is not None:
+                        try:
+                            watchdog_task.cancel()
+                        except Exception:
+                            pass
+                    
+                    while not self._queue.empty():
+                        yield self._queue.get_nowait()
+                    
+                    # If canceled, explicitly rollback and abort (do not commit partials)
+                    if local_cancel.is_set():
+                        await txn.rollback()
+                        yield "[scanner] Scan canceled - Transaction Rolled Back."
+                        return
+
+                    # CRITICAL FIX: Aggregate all findings from tool results
+                    all_findings: List[dict] = []
+                    for tool_name, result in self._results_map.items():
+                        if isinstance(result, list):
+                            all_findings.extend(result)
+                    
+                    # Normalize and deduplicate findings
+                    normalized = self._normalize_findings(all_findings)
+                    self._last_results = normalized
+                    
+                    # CRITICAL: Populate findings store (Session-Scoped or Global)
+                    # If transaction is active, stage findings there and update Store in memory-only mode
+                    # Since we are INSIDE the txn block now, txn.is_active is true unless we rolled back.
+                    if txn.is_active:
+                        for f in normalized:
+                            txn.add_finding(f)
+                        
+                        if self.session:
+                            self.session.findings.bulk_add(normalized, persist=False)
+                        else:
+                            findings_store.bulk_add(normalized, persist=False)
+                    else:
+                        # Should not happen if logic is correct, but safe fallback
+                         if self.session:
+                            self.session.findings.bulk_add(normalized)
+                         else:
+                            findings_store.bulk_add(normalized)
+                    
+                    # Build recon edges and update stores
+                    recon_edges = self._build_recon_edges(normalized)
+                    self._record_recon_edges(recon_edges)
+                    enriched_count, edge_count = self._refresh_enrichment()
+                    
+                    yield f"[scanner] Processed {len(normalized)} findings, {enriched_count} issues, {edge_count} killchain edges"
+
+                except Exception as e:
+                    # On unhandled exception, ensuring rollback
+                    await txn.rollback()
+                    logger.error(f"[ScannerEngine] Critical error, rolling back: {e}")
+                    raise e
 
     async def shutdown(self, reason: str = "shutdown") -> None:
         """
@@ -846,14 +877,22 @@ class ScannerEngine:
             enriched, killchain_edges = [], []
 
         # Conditional branch.
+        # Conditional branch.
+        is_transactional = self._active_transaction and self._active_transaction.is_active
+        
         if self.session:
-            self.session.issues.replace_all(enriched)
+            self.session.issues.replace_all(enriched, persist=not is_transactional)
             combined_edges = list(killchain_edges) + list(self._recon_edges)
-            self.session.killchain.replace_all(combined_edges)
+            self.session.killchain.replace_all(combined_edges, persist=not is_transactional)
         else:
-            issues_store.replace_all(enriched)
+            issues_store.replace_all(enriched, persist=not is_transactional)
             combined_edges = list(killchain_edges) + list(self._recon_edges)
-            killchain_store.replace_all(combined_edges)
+            killchain_store.replace_all(combined_edges, persist=not is_transactional)
+        
+        # Transactional Staging for Issues
+        if is_transactional:
+            for issue in enriched:
+                self._active_transaction.add_issue(issue)
         
         # ---------------------------------------------------------------------
         # Cartographer: Graph Intelligence (Layer 5)
@@ -948,7 +987,15 @@ class ScannerEngine:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
             # Use session-scoped evidence store if available, otherwise global singleton
             evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-            evidence_store.add_evidence(tool, msg, {"target": target, "error": "not_found"})
+            
+            if self._active_transaction and self._active_transaction.is_active:
+                self._active_transaction.add_evidence({
+                    "tool": tool, "raw_output": msg, "metadata": {"target": target, "error": "not_found"}
+                })
+                evidence_store.add_evidence(tool, msg, {"target": target, "error": "not_found"}, persist=False)
+            else:
+                evidence_store.add_evidence(tool, msg, {"target": target, "error": "not_found"})
+            
             await queue.put(msg)
             return []
         except Exception as exc:
