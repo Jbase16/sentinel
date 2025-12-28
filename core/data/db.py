@@ -158,6 +158,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS findings (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
+                scan_sequence INTEGER NOT NULL,
                 tool TEXT NOT NULL,
                 tool_version TEXT,
                 type TEXT,
@@ -174,6 +175,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS issues (
                 id TEXT PRIMARY KEY,
                 session_id TEXT NOT NULL,
+                scan_sequence INTEGER NOT NULL,
                 title TEXT NOT NULL,
                 severity TEXT,
                 target TEXT,
@@ -188,6 +190,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS evidence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
+                scan_sequence INTEGER NOT NULL,
                 tool TEXT NOT NULL,
                 tool_version TEXT,
                 raw_output TEXT,
@@ -201,6 +204,7 @@ class Database:
         await self._db_connection.execute("""
             CREATE TABLE IF NOT EXISTS scans (
                 id TEXT PRIMARY KEY,
+                scan_sequence INTEGER NOT NULL,
                 session_id TEXT NOT NULL,
                 target TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -211,6 +215,8 @@ class Database:
                 end_time TEXT,
                 last_completed_tool TEXT,
                 error_message TEXT,
+                failure_phase TEXT,
+                exception_type TEXT,
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             )
         """)
@@ -488,7 +494,7 @@ class Database:
 
     # -------- Transactional Save Methods --------
 
-    async def save_finding_txn(self, finding: Dict[str, Any], session_id: Optional[str] = None, conn=None) -> None:
+    async def save_finding_txn(self, finding: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None) -> None:
         """
         Save a finding within an existing transaction.
 
@@ -498,6 +504,7 @@ class Database:
         Args:
             finding: Finding data to save
             session_id: Optional session ID
+            scan_sequence: Scan sequence number for ordering
             conn: Database connection (must be provided, in transaction)
         """
         import hashlib
@@ -505,11 +512,12 @@ class Database:
         fid = hashlib.sha256(blob.encode()).hexdigest()
 
         await conn.execute("""
-            INSERT OR REPLACE INTO findings (id, session_id, tool, tool_version, type, severity, target, data, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            INSERT OR REPLACE INTO findings (id, session_id, scan_sequence, tool, tool_version, type, severity, target, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, (
             fid,
             session_id,
+            scan_sequence,
             finding.get("tool", "unknown"),
             finding.get("tool_version"),  # Optional tool version
             finding.get("type", "unknown"),
@@ -518,7 +526,7 @@ class Database:
             blob
         ))
 
-    async def save_issue_txn(self, issue: Dict[str, Any], session_id: Optional[str] = None, conn=None) -> None:
+    async def save_issue_txn(self, issue: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None) -> None:
         """
         Save an issue within an existing transaction.
 
@@ -530,6 +538,7 @@ class Database:
         Args:
             issue: Issue data to save
             session_id: Optional session ID
+            scan_sequence: Scan sequence number for ordering
             conn: Database connection (must be provided, in transaction)
         """
         import hashlib
@@ -538,18 +547,19 @@ class Database:
         iid = hashlib.sha256(blob.encode()).hexdigest()
 
         await conn.execute("""
-            INSERT OR REPLACE INTO issues (id, session_id, title, severity, target, data, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+            INSERT OR REPLACE INTO issues (id, session_id, scan_sequence, title, severity, target, data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
         """, (
             iid,
             session_id,
+            scan_sequence,
             issue.get("title", "unknown"),
             issue.get("severity", "INFO"),
             issue.get("target", "unknown"),
             blob
         ))
 
-    async def save_evidence_txn(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, conn=None) -> None:
+    async def save_evidence_txn(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None) -> None:
         """
         Save evidence within an existing transaction.
 
@@ -559,13 +569,15 @@ class Database:
         Args:
             evidence_data: Evidence data to save
             session_id: Optional session ID
+            scan_sequence: Scan sequence number for ordering
             conn: Database connection (must be provided, in transaction)
         """
         await conn.execute("""
-            INSERT INTO evidence (session_id, tool, tool_version, raw_output, metadata, timestamp)
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            INSERT INTO evidence (session_id, scan_sequence, tool, tool_version, raw_output, metadata, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         """, (
             session_id,
+            scan_sequence,
             evidence_data.get("tool", "unknown"),
             evidence_data.get("tool_version"),  # Optional tool version
             evidence_data.get("raw_output", ""),
@@ -682,21 +694,66 @@ class Database:
             VALUES (?, ?, datetime('now'))
         """, ("event_sequence", sequence))
 
+    # -------- Scan Sequence Methods --------
+
+    async def next_scan_sequence(self) -> int:
+        """
+        Get and increment the next scan sequence number.
+
+        This provides a monotonically increasing integer that uniquely
+        identifies each scan transaction, ordered by commit time.
+
+        Returns:
+            The next scan sequence number
+
+        Raises:
+            RuntimeError: If database is not available
+        """
+        if not self._initialized:
+            await self.init()
+
+        try:
+            async with self._db_lock:
+                if self._db_connection is None:
+                    raise RuntimeError("Database not available")
+
+                # Get current value (default to 0 if not exists)
+                cursor = await self._db_connection.execute(
+                    "SELECT value FROM system_state WHERE key = ?",
+                    ("scan_sequence",)
+                )
+                row = await cursor.fetchone()
+                current = row[0] if row else 0
+
+                # Increment and persist
+                next_val = current + 1
+                await self._db_connection.execute("""
+                    INSERT OR REPLACE INTO system_state (key, value, updated_at)
+                    VALUES (?, ?, datetime('now'))
+                """, ("scan_sequence", next_val))
+                await self._db_connection.commit()
+
+                return next_val
+        except Exception as e:
+            logger.error(f"[Database] Failed to get scan_sequence: {e}")
+            raise RuntimeError(f"Failed to get scan_sequence: {e}") from e
+
     # -------- Scan Record Methods --------
 
-    async def create_scan_record(self, scan_id: str, session_id: str, target: str) -> None:
+    async def create_scan_record(self, scan_id: str, scan_sequence: int, session_id: str, target: str) -> None:
         """
         Create a new scan record with status 'running'.
 
         Args:
             scan_id: Unique identifier for this scan
+            scan_sequence: Monotonic scan sequence number
             session_id: Session ID this scan belongs to
             target: Target being scanned
         """
         await self.execute("""
-            INSERT INTO scans (id, session_id, target, status, findings_count, issues_count, evidence_count, start_time)
-            VALUES (?, ?, ?, 'running', 0, 0, 0, datetime('now'))
-        """, (scan_id, session_id, target))
+            INSERT INTO scans (id, scan_sequence, session_id, target, status, findings_count, issues_count, evidence_count, start_time)
+            VALUES (?, ?, ?, ?, 'running', 0, 0, 0, datetime('now'))
+        """, (scan_id, scan_sequence, session_id, target))
 
     async def update_scan_status(
         self,
@@ -705,7 +762,9 @@ class Database:
         findings_count: int = 0,
         issues_count: int = 0,
         evidence_count: int = 0,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        failure_phase: Optional[str] = None,
+        exception_type: Optional[str] = None
     ) -> None:
         """
         Update scan record status and counts.
@@ -717,13 +776,16 @@ class Database:
             issues_count: Number of issues
             evidence_count: Number of evidence records
             error_message: Error message if status is 'failed'
+            failure_phase: Phase where failure occurred (tool, commit, enrichment)
+            exception_type: Type of exception that caused failure
         """
         if status in ('committed', 'rolled_back', 'failed'):
             await self.execute("""
                 UPDATE scans
-                SET status = ?, findings_count = ?, issues_count = ?, evidence_count = ?, end_time = datetime('now'), error_message = ?
+                SET status = ?, findings_count = ?, issues_count = ?, evidence_count = ?,
+                    end_time = datetime('now'), error_message = ?, failure_phase = ?, exception_type = ?
                 WHERE id = ?
-            """, (status, findings_count, issues_count, evidence_count, error_message, scan_id))
+            """, (status, findings_count, issues_count, evidence_count, error_message, failure_phase, exception_type, scan_id))
         else:
             await self.execute("""
                 UPDATE scans
