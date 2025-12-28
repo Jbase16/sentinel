@@ -572,8 +572,28 @@ def setup_cors():
         async def dispatch(self, request, call_next):
             origin = request.headers.get("origin")
 
+            # Early return for preflight requests (more efficient)
+            if request.method == "OPTIONS":
+                if origin and is_origin_allowed(origin, allowed_patterns):
+                    # Return preflight response immediately without calling downstream
+                    return Response(
+                        status=200,
+                        headers={
+                            "Access-Control-Allow-Origin": origin,
+                            "Access-Control-Allow-Credentials": "true",
+                            "Access-Control-Allow-Methods": "*",
+                            "Access-Control-Allow-Headers": "*",
+                            "Access-Control-Expose-Headers": "*",
+                            "Access-Control-Max-Age": "600",
+                        }
+                    )
+                else:
+                    # Origin not allowed for preflight - return 403 explicitly
+                    return Response(status=403)
+
+            # For non-OPTIONS requests with valid origin
             if origin and is_origin_allowed(origin, allowed_patterns):
-                # Return the exact origin (required by CORS spec when credentials enabled)
+                # Call downstream handler, then add CORS headers
                 response = await call_next(request)
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers["Access-Control-Allow-Credentials"] = "true"
@@ -581,36 +601,16 @@ def setup_cors():
                 response.headers["Access-Control-Allow-Headers"] = "*"
                 response.headers["Access-Control-Expose-Headers"] = "*"
                 response.headers["Access-Control-Max-Age"] = "600"
-
-                # Handle preflight requests
-                if request.method == "OPTIONS":
-                    return Response(status=200)
-
                 return response
             else:
-                # Origin not allowed or no origin header
+                # Origin not allowed or no origin header - pass through
                 return await call_next(request)
 
     app.add_middleware(DynamicCORSMiddleware)
 setup_cors()
 
-@app.websocket("/ws/pty")
-async def websocket_pty(websocket: WebSocket):
-    """Secure WebSocket endpoint for PTY."""
-    config = get_config()
-    
-    # Check origin manually because CORSMiddleware doesn't always handle WS upgrades strictly
-    origin = websocket.headers.get("origin")
-    if origin and origin not in config.security.allowed_origins:
-        await websocket.close(code=4003, reason="Origin not allowed")    
-        return
-
-    if not config.security.terminal_enabled:
-        await websocket.close(code=4003, reason="Terminal access disabled")
-        return
-    
-    await websocket.accept()
-    # PTY connection handling would normally follow here
+# NOTE: /ws/pty endpoint is defined below (line ~1318) with full PTY implementation
+# including resize support and bidirectional communication.
 
 # --- Helpers ---
 
@@ -1065,7 +1065,31 @@ async def mission_start(
 
 @app.websocket("/ws/graph")
 async def ws_graph_endpoint(websocket: WebSocket):
-    """AsyncFunction ws_graph_endpoint."""
+    """
+    WebSocket endpoint for real-time graph state streaming.
+
+    SECURITY: Validates origin before accepting connection to prevent
+    unauthorized sites from accessing internal state via WebSocket.
+    """
+    config = get_config()
+
+    # Security: Validate Origin using wildcard-aware matcher
+    # WebSockets bypass CORS, so we must check origin manually
+    origin = websocket.headers.get("origin")
+    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
+        logger.warning(f"[WebSocket] /ws/graph denied origin: {origin}")
+        await websocket.close(code=4003, reason="Origin not allowed")
+        return
+
+    # Optionally require auth token for additional security
+    # Token can be passed via query param: ws://localhost:8765/ws/graph?token=xxx
+    if config.security.require_auth:
+        token = websocket.query_params.get("token")
+        if not token or token != config.security.api_token:
+            logger.warning(f"[WebSocket] /ws/graph denied: invalid or missing token")
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
     await websocket.accept()
     from core.cortex.memory import KnowledgeGraph
     # Error handling block.
@@ -1080,10 +1104,39 @@ async def ws_graph_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/terminal")
 async def ws_terminal_endpoint(websocket: WebSocket):
-    """AsyncFunction ws_terminal_endpoint."""
+    """
+    WebSocket endpoint for terminal output streaming.
+
+    SECURITY: Validates origin before accepting connection.
+    For local dev, origin + config check is acceptable.
+    For production, consider requiring auth token via query param.
+    """
+    config = get_config()
+
+    # Security: Validate Origin using wildcard-aware matcher
+    # WebSockets bypass CORS, so we must check origin manually
+    origin = websocket.headers.get("origin")
+    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
+        logger.warning(f"[WebSocket] /ws/terminal denied origin: {origin}")
+        await websocket.close(code=4003, reason="Origin not allowed")
+        return
+
+    # Optionally require auth token for additional security
+    # Token can be passed via query param: ws://localhost:8765/ws/terminal?token=xxx
+    if config.security.terminal_require_auth:
+        token = websocket.query_params.get("token")
+        if not token or token != config.security.api_token:
+            logger.warning(f"[WebSocket] /ws/terminal denied: invalid or missing token")
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
+    if not config.security.terminal_enabled:
+        await websocket.close(code=4003, reason="Terminal access disabled")
+        return
+
     await websocket.accept()
     session = PTYManager.instance().get_session()
-    
+
     # Simple loop to pipe PTY output to WS
     try:
         while True:
@@ -1303,16 +1356,41 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
 # Terminal WebSocket endpoint with config check
 @app.websocket("/ws/pty")
 async def terminal_websocket_pty(websocket: WebSocket):
-    """Alternative terminal endpoint at /ws/pty for PTY access."""
+    """
+    WebSocket endpoint for bidirectional PTY access.
+
+    SECURITY: Validates origin and optionally requires auth token.
+    This endpoint provides full terminal access, so security is critical.
+
+    For production use, enable terminal_require_auth in config.
+    """
     config = get_config()
+
+    # Security: Validate Origin using wildcard-aware matcher
+    # WebSockets bypass CORS, so we must check origin manually
+    origin = websocket.headers.get("origin")
+    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
+        logger.warning(f"[WebSocket] /ws/pty denied origin: {origin}")
+        await websocket.close(code=4003, reason="Origin not allowed")
+        return
+
+    # Optionally require auth token for additional security
+    # Token can be passed via query param: ws://localhost:8765/ws/pty?token=xxx
+    if config.security.terminal_require_auth:
+        token = websocket.query_params.get("token")
+        if not token or token != config.security.api_token:
+            logger.warning(f"[WebSocket] /ws/pty denied: invalid or missing token")
+            await websocket.close(code=4001, reason="Unauthorized")
+            return
+
     # Conditional branch.
     if not config.security.terminal_enabled:
-        await websocket.close(code=4003)
+        await websocket.close(code=4003, reason="Terminal access disabled")
         return
 
     await websocket.accept()
     pty_session = PTYManager.instance().get_session()
-    
+
     async def read_pty():
         """AsyncFunction read_pty."""
         # Error handling block.
@@ -1325,7 +1403,7 @@ async def terminal_websocket_pty(websocket: WebSocket):
                     await asyncio.sleep(0.01)
         except Exception:
             pass
-    
+
     reader_task = asyncio.create_task(read_pty())
     # Error handling block.
     try:
