@@ -96,7 +96,7 @@ class EvidenceStore(Observable):
         except Exception as e:
             logger.error(f"[EvidenceStore] Failed to load evidence: {e}")
 
-    def add_evidence(self, tool: str, raw_output: str, metadata: dict):
+    def add_evidence(self, tool: str, raw_output: str, metadata: dict, persist: bool = True):
         """Function add_evidence."""
         self._counter += 1
         eid = self._counter
@@ -113,19 +113,20 @@ class EvidenceStore(Observable):
         self._evidence[eid] = evidence_data
 
         # Persist to database asynchronously
-        try:
-            asyncio.get_running_loop()
-            create_safe_task(
-                self.db.save_evidence(evidence_data, self.session_id),
-                name="save_evidence"
-            )
-        except RuntimeError:
-            logger.warning("[EvidenceStore] No event loop for async save")
+        if persist:
+            try:
+                asyncio.get_running_loop()
+                create_safe_task(
+                    self.db.save_evidence(evidence_data, self.session_id),
+                    name="save_evidence"
+                )
+            except RuntimeError:
+                logger.warning("[EvidenceStore] No event loop for async save")
 
         self.evidence_changed.emit()
         return eid
 
-    def update_evidence(self, evidence_id: int, summary=None, findings=None):
+    def update_evidence(self, evidence_id: int, summary=None, findings=None, persist: bool = True):
         """Function update_evidence."""
         # Conditional branch.
         if evidence_id not in self._evidence:
@@ -139,14 +140,15 @@ class EvidenceStore(Observable):
             self._evidence[evidence_id]["findings"] = findings
 
         # Persist update to database
-        try:
-            asyncio.get_running_loop()
-            create_safe_task(
-                self.db.update_evidence(evidence_id, summary, findings, self.session_id),
-                name="update_evidence"
-            )
-        except RuntimeError:
-            logger.warning("[EvidenceStore] No event loop for async update")
+        if persist:
+            try:
+                asyncio.get_running_loop()
+                create_safe_task(
+                    self.db.update_evidence(evidence_id, summary, findings, self.session_id),
+                    name="update_evidence"
+                )
+            except RuntimeError:
+                logger.warning("[EvidenceStore] No event loop for async update")
 
         self.evidence_changed.emit()
 

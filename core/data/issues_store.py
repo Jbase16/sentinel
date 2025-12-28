@@ -74,18 +74,19 @@ class IssuesStore(Observable):
         except Exception as e:
             logger.error(f"[IssuesStore] Failed to load issues: {e}")
 
-    def add_issue(self, issue: dict):
+    def add_issue(self, issue: dict, persist: bool = True):
         """Function add_issue."""
         self._issues.append(issue)
         # Error handling block.
-        try:
-            asyncio.get_running_loop()
-            create_safe_task(
-                self.db.save_issue(issue, self.session_id),
-                name="save_issue"
-            )
-        except RuntimeError:
-            logger.warning("[IssuesStore] No event loop for async save")
+        if persist:
+            try:
+                asyncio.get_running_loop()
+                create_safe_task(
+                    self.db.save_issue(issue, self.session_id),
+                    name="save_issue"
+                )
+            except RuntimeError:
+                logger.warning("[IssuesStore] No event loop for async save")
         self.issues_changed.emit()
 
     def get_all(self):
@@ -98,19 +99,20 @@ class IssuesStore(Observable):
         self._issues = []
         self.issues_changed.emit()
     
-    def replace_all(self, issues: list):
+    def replace_all(self, issues: list, persist: bool = True):
         """Replace all issues with a new list"""
         self._issues = list(issues)
         # Error handling block.
-        try:
-            asyncio.get_running_loop()
-            for issue in issues:
-                create_safe_task(
-                    self.db.save_issue(issue, self.session_id),
-                    name="replace_save_issue"
-                )
-        except RuntimeError:
-            logger.warning("[IssuesStore] No event loop for async replace_all")
+        if persist:
+            try:
+                asyncio.get_running_loop()
+                for issue in issues:
+                    create_safe_task(
+                        self.db.save_issue(issue, self.session_id),
+                        name="replace_save_issue"
+                    )
+            except RuntimeError:
+                logger.warning("[IssuesStore] No event loop for async replace_all")
         self.issues_changed.emit()
 
 

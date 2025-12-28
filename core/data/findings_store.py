@@ -111,43 +111,45 @@ class FindingsStore(Observable):
         with self._lock:
             self._findings = loaded
 
-    def add_finding(self, finding: dict):
+    def add_finding(self, finding: dict, persist: bool = True):
         """Function add_finding."""
         # Context-managed operation.
         with self._lock:
             self._findings.append(finding)
         
         # Persist asynchronously with session ID (with error logging)
-        try:
-            asyncio.get_running_loop()
-            create_safe_task(
-                self.db.save_finding(finding, self.session_id),
-                name="save_finding"
-            )
-        except RuntimeError:
-            logger.warning("[FindingsStore] No event loop for async save")
+        if persist:
+            try:
+                asyncio.get_running_loop()
+                create_safe_task(
+                    self.db.save_finding(finding, self.session_id),
+                    name="save_finding"
+                )
+            except RuntimeError:
+                logger.warning("[FindingsStore] No event loop for async save")
         self.findings_changed.emit()
 
     def add(self, finding: dict):
         """Alias for add_finding to maintain compatibility."""
         self.add_finding(finding)
 
-    def bulk_add(self, items: list[dict]):
+    def bulk_add(self, items: list[dict], persist: bool = True):
         """Add multiple findings at once."""
         # Context-managed operation.
         with self._lock:
             self._findings.extend(items)
         
         # Error handling block.
-        try:
-            asyncio.get_running_loop()
-            for item in items:
-                create_safe_task(
-                    self.db.save_finding(item, self.session_id),
-                    name="bulk_save_finding"
-                )
-        except RuntimeError:
-            logger.warning("[FindingsStore] No event loop for async bulk save")
+        if persist:
+            try:
+                asyncio.get_running_loop()
+                for item in items:
+                    create_safe_task(
+                        self.db.save_finding(item, self.session_id),
+                        name="bulk_save_finding"
+                    )
+            except RuntimeError:
+                logger.warning("[FindingsStore] No event loop for async bulk save")
             
         self.findings_changed.emit()
 

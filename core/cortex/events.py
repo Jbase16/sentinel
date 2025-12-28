@@ -15,12 +15,18 @@
 # - Swift client deduplication via lastSequence works correctly
 # - Causal ordering is preserved as "one continuous logical brain"
 #
+# RUN_ID (FORENSICS):
+# Each process startup generates a unique run_id (UUID v4) for debugging.
+# This is NOT used for event identity (sequence serves that purpose).
+# It helps answer "Which runtime generated this event?" during post-mortem analysis.
+#
 
 from __future__ import annotations
 
 import logging
 import threading
 import time
+import uuid
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass, field
 from enum import Enum
@@ -31,6 +37,45 @@ logger = logging.getLogger(__name__)
 _event_sequence_lock = threading.Lock()
 _event_sequence_counter = 0
 _event_sequence_initialized = False  # Track if we've loaded from DB
+
+# Global run_id for forensics - identifies which runtime generated events
+# Generated once per process startup, persisted for debugging
+_run_id: Optional[str] = None
+
+
+def get_run_id() -> str:
+    """
+    Get the unique run_id for this process instance.
+
+    The run_id is a UUID v4 generated on first call, uniquely identifying
+    this specific runtime/process. This is useful for forensics to answer
+    "Which runtime generated this event?" during post-mortem analysis.
+
+    NOTE: This is NOT used for event identity (sequence serves that purpose).
+    It is purely a debugging/observability aid.
+
+    Returns:
+        The UUID v4 run_id string for this process instance
+
+    Side effects:
+        - Generates a new UUID on first call
+    """
+    global _run_id
+    if _run_id is None:
+        _run_id = str(uuid.uuid4())
+        logger.info(f"[EventBus] Generated new run_id: {_run_id}")
+    return _run_id
+
+
+def reset_run_id() -> None:
+    """
+    Reset the run_id.
+
+    WARNING: This should ONLY be used in tests!
+    In production, the run_id should never be reset.
+    """
+    global _run_id
+    _run_id = None
 
 
 async def initialize_event_sequence_from_db() -> int:
@@ -148,16 +193,23 @@ class GraphEvent:
         payload: Event-specific data (findings, decisions, etc.)
         timestamp: When event occurred (epoch time)
         event_sequence: Global monotonically increasing sequence number
+        run_id: UUID v4 identifying the runtime/process that generated this event
 
     The event_sequence enables:
     - Total ordering of events regardless of clock skew
     - Cross-correlation: decisions can reference specific events
     - Debugging: reconstruct exact event flow from logs
+
+    The run_id enables:
+    - Forensics: identify which runtime generated a specific event
+    - Post-mortem analysis: correlate events across restarts
+    - Debugging: distinguish between events from different process lifetimes
     """
     type: GraphEventType
     payload: Dict[str, Any]
     timestamp: float = field(default_factory=time.time)
     event_sequence: int = field(default_factory=get_next_sequence)
+    run_id: str = field(default_factory=get_run_id)
 
 class EventBus:
     """
@@ -290,6 +342,7 @@ def reset_event_sequence() -> None:
     WARNING: This should ONLY be used in tests!
     In production, the sequence counter should never be reset.
     """
-    global _event_sequence_counter
+    global _event_sequence_counter, _event_sequence_initialized
     with _event_sequence_lock:
         _event_sequence_counter = 0
+        _event_sequence_initialized = False

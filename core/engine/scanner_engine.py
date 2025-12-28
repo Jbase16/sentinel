@@ -501,9 +501,15 @@ class ScannerEngine:
             return
         else:
             yield f"Installed tools: {', '.join(tools_to_run)}"
-            queue: asyncio.Queue[str] = asyncio.Queue()
-            running: Dict[str, asyncio.Task[List[dict]]] = {}
-            pending = list(tools_to_run)
+            
+            # Use session ID or temp ID
+            sess_id = self.session.session_id if self.session else "global_scan"
+
+            # WRAPPER: All tool execution and findings should be atomic
+            async with ScanTransaction(self, sess_id) as txn:
+                queue: asyncio.Queue[str] = asyncio.Queue()
+                running: Dict[str, asyncio.Task[List[dict]]] = {}
+                pending = list(tools_to_run)
             results_map: Dict[str, List[dict] | Exception] = {}
 
             # Expose queue for dynamic additions
@@ -608,11 +614,21 @@ class ScannerEngine:
             self._last_results = normalized
             
             # CRITICAL: Populate findings store (Session-Scoped or Global)
-            if self.session:
-                self.session.findings.bulk_add(normalized)
+            # If transaction is active, stage findings there and update Store in memory-only mode
+            if self._active_transaction and self._active_transaction.is_active:
+                for f in normalized:
+                    self._active_transaction.add_finding(f)
+                
+                if self.session:
+                    self.session.findings.bulk_add(normalized, persist=False)
+                else:
+                    findings_store.bulk_add(normalized, persist=False)
             else:
-                # Fallback for legacy calls
-                findings_store.bulk_add(normalized)
+                # Legacy / Non-transactional fallback
+                if self.session:
+                    self.session.findings.bulk_add(normalized)
+                else:
+                    findings_store.bulk_add(normalized)
             
             # Build recon edges and update stores
             recon_edges = self._build_recon_edges(normalized)
@@ -938,7 +954,17 @@ class ScannerEngine:
         except Exception as exc:
             msg = f"[{tool}] failed to start: {exc}"
             evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-            evidence_store.add_evidence(tool, msg, {"target": target, "error": str(exc)})
+            
+            # Transactional Evidence
+            if self._active_transaction and self._active_transaction.is_active:
+                self._active_transaction.add_evidence({
+                    "tool": tool, "raw_output": msg, "metadata": {"target": target, "error": str(exc)}
+                })
+                # Update memory only
+                evidence_store.add_evidence(tool, msg, {"target": target, "error": str(exc)}, persist=False)
+            else:
+                evidence_store.add_evidence(tool, msg, {"target": target, "error": str(exc)})
+            
             await queue.put(msg)
             return []
 
@@ -1019,14 +1045,23 @@ class ScannerEngine:
 
         # Use session-scoped evidence store if available, otherwise global singleton
         evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-        evidence_store.add_evidence(tool, output_text, {
+        
+        ev_meta = {
             "target": target,
             "exit_code": exit_code,
             "lines": len(output_lines),
             "timed_out": bool(timed_out_reason),
             "timeout_reason": timed_out_reason,
             "canceled": bool(cancel_flag and getattr(cancel_flag, 'is_set', lambda: False)())
-        })
+        }
+        
+        if self._active_transaction and self._active_transaction.is_active:
+             self._active_transaction.add_evidence({
+                 "tool": tool, "raw_output": output_text, "metadata": ev_meta
+             })
+             evidence_store.add_evidence(tool, output_text, ev_meta, persist=False)
+        else:
+             evidence_store.add_evidence(tool, output_text, ev_meta)
 
         # Error handling block.
         try:
@@ -1060,7 +1095,13 @@ class ScannerEngine:
         except Exception as exc:
             err = f"[{tool}] classifier error: {exc}"
             evidence_store = self.session.evidence if self.session else EvidenceStore.instance()
-            evidence_store.add_evidence(f"{tool}_classifier_error", err, {"target": target})
+            if self._active_transaction and self._active_transaction.is_active:
+                self._active_transaction.add_evidence({
+                    "tool": f"{tool}_classifier_error", "raw_output": err, "metadata": {"target": target}
+                })
+                evidence_store.add_evidence(f"{tool}_classifier_error", err, {"target": target}, persist=False)
+            else:
+                evidence_store.add_evidence(f"{tool}_classifier_error", err, {"target": target})
             await queue.put(err)
             return []
 

@@ -25,6 +25,7 @@ from core.cortex.events import (
     initialize_event_sequence_from_db,
     get_next_sequence,
     reset_event_sequence,
+    reset_run_id,
     GraphEvent,
     GraphEventType,
 )
@@ -48,6 +49,7 @@ def test_event_sequence_never_decreases_across_restarts():
             # --- Phase 1: First "boot" ---
             # Reset global state for clean test
             reset_event_sequence()
+            reset_run_id()
 
             # Configure database to use temp file
             from core.base.config import get_config, SentinelConfig, StorageConfig, SecurityConfig
@@ -90,6 +92,7 @@ def test_event_sequence_never_decreases_across_restarts():
                 # Reset the in-memory singleton state
                 Database._instance = None
                 reset_event_sequence()
+                reset_run_id()  # New process = new run_id
 
                 # Reopen database (simulating process restart)
                 db2 = Database.instance()
@@ -135,6 +138,7 @@ def test_event_sequence_raises_if_not_initialized():
     """
     # Reset global state
     reset_event_sequence()
+    reset_run_id()
 
     # Attempt to get sequence without initialization should raise
     try:
