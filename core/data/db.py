@@ -161,6 +161,13 @@ class Database:
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             )
         """)
+        await self._db_connection.execute("""
+            CREATE TABLE IF NOT EXISTS system_state (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL,
+                updated_at TEXT DEFAULT (datetime('now'))
+            )
+        """)
 
     async def _execute_internal(self, query: str, params: tuple = ()):
         """Internal low-level execute used by BlackBox worker."""
@@ -417,3 +424,52 @@ class Database:
     async def get_all_evidence(self) -> List[Dict]:
         """AsyncFunction get_all_evidence."""
         return await self.get_evidence(None)
+
+    # -------- Event Sequence Counter Methods --------
+
+    async def get_event_sequence(self) -> int:
+        """
+        Get the current global event sequence counter from the database.
+
+        Returns:
+            The last persisted sequence number, or 0 if not yet set.
+        """
+        if not self._initialized:
+            await self.init()
+
+        try:
+            async with self._db_lock:
+                if self._db_connection is None:
+                    return 0
+                cursor = await self._db_connection.execute(
+                    "SELECT value FROM system_state WHERE key = ?",
+                    ("event_sequence",)
+                )
+                row = await cursor.fetchone()
+                return row[0] if row else 0
+        except Exception as e:
+            logger.error(f"[Database] Failed to get event_sequence: {e}")
+            return 0
+
+    def save_event_sequence(self, sequence: int) -> None:
+        """
+        Persist the event sequence counter to the database (fire-and-forget).
+
+        This is called synchronously but delegates to the async BlackBox worker,
+        ensuring the counter is persisted without blocking the caller.
+
+        Args:
+            sequence: The current sequence number to persist
+        """
+        self.blackbox.fire_and_forget(self._save_event_sequence_impl, sequence)
+
+    async def _save_event_sequence_impl(self, sequence: int) -> None:
+        """
+        Async implementation of event sequence persistence.
+
+        Uses INSERT OR REPLACE to upsert the counter value.
+        """
+        await self._execute_internal("""
+            INSERT OR REPLACE INTO system_state (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+        """, ("event_sequence", sequence))

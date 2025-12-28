@@ -8,6 +8,13 @@
 # - EventBus: Singleton-like observable.
 # - emit_*: Helper methods for structured event emission.
 #
+# EVENT SEQUENCE PERSISTENCE:
+# The global event sequence counter is persisted to the database to maintain
+# continuity across process restarts. This ensures:
+# - Event IDs (derived from sequence) remain unique across restarts
+# - Swift client deduplication via lastSequence works correctly
+# - Causal ordering is preserved as "one continuous logical brain"
+#
 
 from __future__ import annotations
 
@@ -20,12 +27,55 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# Global event sequence counter - thread-safe singleton
+# Global event sequence counter - thread-safe singleton with persistence
 _event_sequence_lock = threading.Lock()
 _event_sequence_counter = 0
+_event_sequence_initialized = False  # Track if we've loaded from DB
 
 
-def _next_event_sequence() -> int:
+async def initialize_event_sequence_from_db() -> int:
+    """
+    Initialize the global event sequence counter from the database.
+
+    This MUST be called during application startup (before any events are emitted)
+    to ensure the counter starts from the last persisted value, maintaining
+    continuity across restarts.
+
+    Returns:
+        The loaded sequence number (0 if no persisted value exists)
+
+    Side effects:
+        - Sets the global _event_sequence_counter from the database
+        - Marks the counter as initialized
+    """
+    global _event_sequence_counter, _event_sequence_initialized
+
+    with _event_sequence_lock:
+        if _event_sequence_initialized:
+            return _event_sequence_counter
+
+        try:
+            from core.data.db import Database
+            db = Database.instance()
+            # The database needs to be initialized first
+            persisted = await db.get_event_sequence()
+            _event_sequence_counter = persisted
+            _event_sequence_initialized = True
+
+            if persisted > 0:
+                logger.info(f"[EventBus] Loaded event sequence from database: {persisted}")
+            else:
+                logger.debug("[EventBus] No persisted event sequence found, starting from 0")
+
+            return _event_sequence_counter
+        except Exception as e:
+            logger.warning(f"[EventBus] Failed to load event sequence from DB: {e}, starting from 0")
+            _event_sequence_counter = 0
+            _event_sequence_initialized = True
+            return 0
+
+
+def get_next_sequence() -> int:
     """
     Get the next global event sequence number.
 
@@ -33,13 +83,33 @@ def _next_event_sequence() -> int:
     - Total ordering of all events (even with identical timestamps)
     - Cross-correlation between events and decisions
     - Debugging capability to reconstruct exact event flow
+    - Continuity across process restarts (via persistence)
 
     Thread-safe via lock to ensure no sequence numbers are skipped/duplicated.
+
+    Returns:
+        The next sequence number
+
+    Side effects:
+        - Persists the new sequence number to the database (fire-and-forget)
+        - This is async but non-blocking; if persistence fails, we still return the sequence
     """
     global _event_sequence_counter
+
     with _event_sequence_lock:
         _event_sequence_counter += 1
-        return _event_sequence_counter
+        sequence = _event_sequence_counter
+
+    # Persist asynchronously (fire-and-forget to avoid blocking event emission)
+    # If this fails, we still have the correct in-memory value
+    try:
+        from core.data.db import Database
+        Database.instance().save_event_sequence(sequence)
+    except Exception as e:
+        # Log but don't fail - the in-memory counter is still correct
+        logger.debug(f"[EventBus] Failed to persist sequence {sequence}: {e}")
+
+    return sequence
 
 class GraphEventType(str, Enum):
     """
@@ -75,7 +145,7 @@ class GraphEvent:
     type: GraphEventType
     payload: Dict[str, Any]
     timestamp: float = field(default_factory=time.time)
-    event_sequence: int = field(default_factory=_next_event_sequence)
+    event_sequence: int = field(default_factory=get_next_sequence)
 
 class EventBus:
     """

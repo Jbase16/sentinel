@@ -24,7 +24,7 @@ import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
@@ -487,6 +487,11 @@ async def startup_event():
     db = Database.instance()
     await db.init()  # Ensure DB is ready before requests
 
+    # Initialize global event sequence counter from database
+    # This ensures event IDs remain unique across restarts (one continuous logical brain)
+    from core.cortex.events import initialize_event_sequence_from_db
+    await initialize_event_sequence_from_db()
+
     # Start session cleanup task
     _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
     logger.info("Session cleanup task started")
@@ -512,13 +517,20 @@ async def shutdown_event():
     db = Database.instance()
     await db.close()
 
-def is_origin_allowed(origin: str, allowed_patterns: tuple) -> bool:
+def is_origin_allowed(origin: str, allowed_patterns: Iterable[str]) -> bool:
     """
     Check if an origin matches any of the allowed patterns.
 
     Patterns support:
     - Exact matches: "https://example.com"
     - Wildcard ports: "http://localhost:*" matches any port on localhost
+
+    Args:
+        origin: The Origin header value to validate
+        allowed_patterns: Iterable of allowed origin patterns (tuple, list, etc.)
+
+    Returns:
+        True if origin matches any pattern, False otherwise
     """
     from urllib.parse import urlparse
 
@@ -609,7 +621,125 @@ def setup_cors():
     app.add_middleware(DynamicCORSMiddleware)
 setup_cors()
 
-# NOTE: /ws/pty endpoint is defined below (line ~1318) with full PTY implementation
+
+# ============================================================================
+# WebSocket Security Layer
+# ============================================================================
+#
+# THREAT MODEL FOR WEBSOCKET ENDPOINTS
+# -------------------------------------
+#
+# What We Protect Against:
+#   - CSRF-style attacks from malicious websites embedding our WS URLs
+#   - Unauthorized remote access to sensitive operations (terminal, graph state)
+#   - Information disclosure via WebSocket protocol confusion
+#
+# What We DON'T Protect Against (by design):
+#   - Compromised local machine (attacker has code execution locally)
+#   - Malicious local process with access to localhost
+#   - Browser extension attacks (same-origin JS is our trust boundary)
+#
+# SentinelForge's Deployment Context:
+#   - Local-first: Typically runs on localhost or trusted desktop (Tauri)
+#   - Operator-driven: Authenticated user is also the system operator
+#   - Not a multi-tenant SaaS: No untrusted third-party users
+#   - Developer tools: Target audience understands security tradeoffs
+#
+# Security Strategy:
+#   1. Origin validation: Prevent CSRF from external websites
+#      - Uses wildcard-aware matcher (http://localhost:*, tauri://localhost)
+#      - Origin is a CSRF control, NOT authentication
+#
+#   2. Optional token-based auth: For production/remote deployments
+#      - Token passed via query param: ws://host/ws/endpoint?token=xxx
+#      - Controlled by require_auth and terminal_require_auth config flags
+#      - Note: Query params may leak in logs; acceptable for local tools
+#
+#   3. Per-endpoint authorization:
+#      - /ws/graph: Read-only graph state (token if require_auth)
+#      - /ws/terminal: Read-only terminal output (token if terminal_require_auth)
+#      - /ws/pty: Full bidirectional PTY access (token if terminal_require_auth)
+#
+# Why This Level of Security is Sufficient:
+#   - Origin checks prevent drive-by attacks from malicious websites
+#   - Optional tokens enable hardening for remote/prod deployments
+#   - Local dev workflows remain frictionless
+#   - No "security theater" - controls match actual threat landscape
+#
+# Future Hardening Options (if deployment model changes):
+#   - WebSocket subprotocol-based auth (more complex, no logging leakage)
+#   - Signed JWT tokens instead of shared secret
+#   - Per-connection rate limiting (typically done at reverse proxy)
+#   - Connection IP allowlisting
+#
+# ============================================================================
+
+
+async def validate_websocket_connection(
+    websocket: WebSocket,
+    endpoint_name: str,
+    *,
+    require_token: bool = False,
+) -> bool:
+    """
+    Validate WebSocket connection security before accepting.
+
+    This is the SINGLE authoritative security check for all WebSocket endpoints.
+    All endpoints MUST use this helper to ensure consistent security posture.
+
+    Args:
+        websocket: The WebSocket connection to validate
+        endpoint_name: Friendly name for logging (e.g., "/ws/pty")
+        require_token: Whether to require auth token (defaults to False)
+
+    Returns:
+        True if connection should be accepted, False if rejected
+
+    Side effects:
+        - Logs security denials with context
+        - Closes WebSocket with appropriate close code on rejection:
+            * 4003: Origin not allowed (CSRF protection)
+            * 4001: Unauthorized (invalid/missing token)
+
+    Usage example:
+        ```python
+        @app.websocket("/ws/example")
+        async def ws_example(websocket: WebSocket):
+            if not await validate_websocket_connection(websocket, "/ws/example"):
+                return  # Connection was closed by validator
+            await websocket.accept()
+            # ... handle connection
+        ```
+    """
+    config = get_config()
+
+    # Step 1: Validate Origin (CSRF protection)
+    # WebSockets bypass CORS, so we must check manually
+    origin = websocket.headers.get("origin")
+    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
+        logger.warning(
+            f"[WebSocket] {endpoint_name} denied origin: {origin} "
+            f"(allowed: {config.security.allowed_origins})"
+        )
+        await websocket.close(code=4003, reason="Origin not allowed")
+        return False
+
+    # Step 2: Optional token validation
+    if require_token:
+        token = websocket.query_params.get("token")
+        if not token or token != config.security.api_token:
+            logger.warning(
+                f"[WebSocket] {endpoint_name} denied: invalid or missing token "
+                f"(require_auth={config.security.require_auth}, "
+                f"terminal_require_auth={config.security.terminal_require_auth})"
+            )
+            await websocket.close(code=4001, reason="Unauthorized")
+            return False
+
+    return True
+
+
+# NOTE: /ws/pty endpoint is defined below (line ~1357) with full PTY implementation
 # including resize support and bidirectional communication.
 
 # --- Helpers ---
@@ -1068,27 +1198,16 @@ async def ws_graph_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for real-time graph state streaming.
 
-    SECURITY: Validates origin before accepting connection to prevent
-    unauthorized sites from accessing internal state via WebSocket.
+    Uses validate_websocket_connection() for consistent security.
+    Requires token if require_auth is enabled in config.
     """
-    config = get_config()
-
-    # Security: Validate Origin using wildcard-aware matcher
-    # WebSockets bypass CORS, so we must check origin manually
-    origin = websocket.headers.get("origin")
-    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
-        logger.warning(f"[WebSocket] /ws/graph denied origin: {origin}")
-        await websocket.close(code=4003, reason="Origin not allowed")
-        return
-
-    # Optionally require auth token for additional security
-    # Token can be passed via query param: ws://localhost:8765/ws/graph?token=xxx
-    if config.security.require_auth:
-        token = websocket.query_params.get("token")
-        if not token or token != config.security.api_token:
-            logger.warning(f"[WebSocket] /ws/graph denied: invalid or missing token")
-            await websocket.close(code=4001, reason="Unauthorized")
-            return
+    # Validate connection using the centralized security helper
+    if not await validate_websocket_connection(
+        websocket,
+        "/ws/graph",
+        require_token=get_config().security.require_auth,
+    ):
+        return  # Connection was closed by validator
 
     await websocket.accept()
     from core.cortex.memory import KnowledgeGraph
@@ -1107,29 +1226,20 @@ async def ws_terminal_endpoint(websocket: WebSocket):
     """
     WebSocket endpoint for terminal output streaming.
 
-    SECURITY: Validates origin before accepting connection.
-    For local dev, origin + config check is acceptable.
-    For production, consider requiring auth token via query param.
+    Uses validate_websocket_connection() for consistent security.
+    Requires token if terminal_require_auth is enabled in config.
     """
     config = get_config()
 
-    # Security: Validate Origin using wildcard-aware matcher
-    # WebSockets bypass CORS, so we must check origin manually
-    origin = websocket.headers.get("origin")
-    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
-        logger.warning(f"[WebSocket] /ws/terminal denied origin: {origin}")
-        await websocket.close(code=4003, reason="Origin not allowed")
-        return
+    # Validate connection using the centralized security helper
+    if not await validate_websocket_connection(
+        websocket,
+        "/ws/terminal",
+        require_token=config.security.terminal_require_auth,
+    ):
+        return  # Connection was closed by validator
 
-    # Optionally require auth token for additional security
-    # Token can be passed via query param: ws://localhost:8765/ws/terminal?token=xxx
-    if config.security.terminal_require_auth:
-        token = websocket.query_params.get("token")
-        if not token or token != config.security.api_token:
-            logger.warning(f"[WebSocket] /ws/terminal denied: invalid or missing token")
-            await websocket.close(code=4001, reason="Unauthorized")
-            return
-
+    # Additional endpoint-specific check: terminal_enabled
     if not config.security.terminal_enabled:
         await websocket.close(code=4003, reason="Terminal access disabled")
         return
@@ -1359,31 +1469,20 @@ async def terminal_websocket_pty(websocket: WebSocket):
     """
     WebSocket endpoint for bidirectional PTY access.
 
-    SECURITY: Validates origin and optionally requires auth token.
-    This endpoint provides full terminal access, so security is critical.
-
-    For production use, enable terminal_require_auth in config.
+    Uses validate_websocket_connection() for consistent security.
+    Requires token if terminal_require_auth is enabled in config.
     """
     config = get_config()
 
-    # Security: Validate Origin using wildcard-aware matcher
-    # WebSockets bypass CORS, so we must check origin manually
-    origin = websocket.headers.get("origin")
-    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
-        logger.warning(f"[WebSocket] /ws/pty denied origin: {origin}")
-        await websocket.close(code=4003, reason="Origin not allowed")
-        return
+    # Validate connection using the centralized security helper
+    if not await validate_websocket_connection(
+        websocket,
+        "/ws/pty",
+        require_token=config.security.terminal_require_auth,
+    ):
+        return  # Connection was closed by validator
 
-    # Optionally require auth token for additional security
-    # Token can be passed via query param: ws://localhost:8765/ws/pty?token=xxx
-    if config.security.terminal_require_auth:
-        token = websocket.query_params.get("token")
-        if not token or token != config.security.api_token:
-            logger.warning(f"[WebSocket] /ws/pty denied: invalid or missing token")
-            await websocket.close(code=4001, reason="Unauthorized")
-            return
-
-    # Conditional branch.
+    # Additional endpoint-specific check: terminal_enabled
     if not config.security.terminal_enabled:
         await websocket.close(code=4003, reason="Terminal access disabled")
         return

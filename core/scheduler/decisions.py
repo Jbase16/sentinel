@@ -256,8 +256,8 @@ class DecisionLedger:
             max_decisions: Circular buffer size (older decisions evicted)
         """
         self._decisions: deque[DecisionPoint] = deque(maxlen=max_decisions)
-        self._sequence: int = 0
         self._lock = threading.RLock()
+        # Removed internal _sequence; we now use global get_next_sequence
         
         # Index for O(1) parent lookup (decision tree queries)
         self._by_parent: Dict[str, List[DecisionPoint]] = {}
@@ -277,10 +277,13 @@ class DecisionLedger:
         Thread-safety:
             Uses RLock to ensure atomic sequence allocation
         """
+        from core.cortex.events import get_next_sequence
+        
         # Context-managed operation.
         with self._lock:
-            self._sequence += 1
-            sequenced_decision = decision.with_sequence(self._sequence)
+            # Use global sequence generator to ensure alignment with events
+            global_seq = get_next_sequence()
+            sequenced_decision = decision.with_sequence(global_seq)
             self._decisions.append(sequenced_decision)
             
             # Update parent index for tree queries
@@ -331,8 +334,8 @@ class DecisionLedger:
         # Context-managed operation.
         with self._lock:
             self._decisions.clear()
-            self._sequence = 0
             self._by_parent.clear()
+            # Note: We do not reset the global event counter here.
     
     def stats(self) -> Dict[str, Any]:
         """Return diagnostic statistics."""
@@ -344,7 +347,7 @@ class DecisionLedger:
             
             return {
                 "total_decisions": len(self._decisions),
-                "current_sequence": self._sequence,
+                "last_sequence": self._decisions[-1].sequence if self._decisions else 0,
                 "max_capacity": self._decisions.maxlen,
                 "decisions_by_type": type_counts,
                 "decision_chains": len(self._by_parent)

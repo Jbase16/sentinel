@@ -16,33 +16,88 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORDLIST_DIR = REPO_ROOT / "assets" / "wordlists"
 DEFAULT_WORDLIST = WORDLIST_DIR / "common.txt"
 
-# Fallback: use inline wordlist if directory doesn't exist
-if not WORDLIST_DIR.exists():
-    logger.warning(f"Wordlist directory not found: {WORDLIST_DIR}, tools may fail without wordlists")
-
-
-def get_wordlist_path(name: str = "common.txt") -> Optional[str]:
+class WordlistManager:
     """
-    Get the path to a wordlist file, with fallback to default.
-
-    Returns None if neither the requested wordlist nor the default exists.
+    Ensures a valid wordlist is always available.
+    Strategy:
+    1. Check Repo Asset (assets/wordlists/common.txt)
+    2. Check System Paths (Kali/Linux standards, Homebrew)
+    3. Emergency Synthesis (Write minimal list to disk)
     """
-    if WORDLIST_DIR.exists():
-        candidate = WORDLIST_DIR / name
-        if candidate.exists():
-            return str(candidate.resolve())
+    
+    # Common system locations (Kali, Ubuntu, macOS/Homebrew)
+    SYSTEM_PATHS = [
+        "/usr/share/wordlists/dirb/common.txt",
+        "/usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt", 
+        "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+        "/usr/share/wordlists/wfuzz/general/common.txt",
+        "/opt/homebrew/share/wordlists/dirb/common.txt",
+        "/usr/local/share/wordlists/dirb/common.txt",
+    ]
 
-        # Try default wordlist as fallback
-        if DEFAULT_WORDLIST.exists():
-            return str(DEFAULT_WORDLIST.resolve())
+    # Minimal emergency list (Top 100 high-impact paths)
+    # This ensures tools ran by the agent never fail due to missing files.
+    EMERGENCY_CONTENT = "\n".join([
+        ".env", ".git/config", ".git/HEAD", ".vscode/sftp.json", "sftp-config.json",
+        "wp-admin", "wp-config.php", "config.php", "config.json", "config.yml",
+        "admin", "administrator", "login", "dashboard", "panel",
+        "backup", "backup.sql", "database.sql", "dump.sql",
+        "id_rsa", "id_dsa", ".ssh/id_rsa", ".ssh/config",
+        "server-status", "nginx.conf", "httpd.conf",
+        "api", "api/v1", "v1", "swagger.json", "graphql",
+        "robots.txt", "sitemap.xml",
+    ])
 
-    # No wordlist directory available
-    logger.warning(f"Wordlist not found: {name}, wordlist directory missing")
-    return None
+    @classmethod
+    def get_path(cls, name: str = "common.txt") -> str:
+        """
+        Get a guaranteed path to a wordlist.
+        Never returns None. If nothing exists, it creates one.
+        """
+        # 1. Repo Asset (Priority 1)
+        if WORDLIST_DIR.exists():
+            candidate = WORDLIST_DIR / name
+            if candidate.exists():
+                return str(candidate.resolve())
+            
+            # Try default repo path if named one missing
+            if DEFAULT_WORDLIST.exists():
+                return str(DEFAULT_WORDLIST.resolve())
 
+        # 2. System Paths (Priority 2)
+        for path_str in cls.SYSTEM_PATHS:
+            p = Path(path_str)
+            if p.exists():
+                logger.info(f"Using system wordlist: {p}")
+                return str(p.resolve())
+        
+        # 3. Emergency Synthesis (Defcon 1)
+        return cls._synthesize(name)
 
-# Initialize common wordlist path (may be None if directory doesn't exist)
-COMMON_WORDLIST = get_wordlist_path("common.txt")
+    @classmethod
+    def _synthesize(cls, name: str) -> str:
+        """Write emergency wordlist to disk."""
+        target_dir = WORDLIST_DIR
+        target_file = target_dir / "emergency.txt"
+        
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            if not target_file.exists():
+                logger.warning(f"Synthesis: Creating emergency wordlist at {target_file}")
+                target_file.write_text(cls.EMERGENCY_CONTENT, encoding="utf-8")
+            return str(target_file.resolve())
+        except Exception as e:
+            logger.error(f"Failed to synthesize wordlist: {e}")
+            # Absolute fallback: return /dev/null-like behavior or a temp file
+            # Ideally we shouldn't reach here unless FS is RO.
+            import tempfile
+            fd, path = tempfile.mkstemp(prefix="sentinel_emergency_", text=True)
+            with os.fdopen(fd, 'w') as f:
+                f.write(cls.EMERGENCY_CONTENT)
+            return path
+
+# Initialize common wordlist path (Guaranteed to be a string path now)
+COMMON_WORDLIST = WordlistManager.get_path("common.txt")
 
 
 # Each tool is defined as a dictionary with:

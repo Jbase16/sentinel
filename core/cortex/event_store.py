@@ -68,7 +68,7 @@ class EventStore:
         """Function __init__."""
         self._events: deque[StoredEvent] = deque(maxlen=max_size)
         self._lock = threading.RLock()
-        self._sequence: int = 0
+        # Removed internal _sequence; we now use event.event_sequence
         
         # Subscribers: (queue, loop) tuples for loop-safe delivery
         self._subscribers: List[Tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = []
@@ -84,8 +84,8 @@ class EventStore:
         """
         # Context-managed operation.
         with self._lock:
-            self._sequence += 1
-            stored = StoredEvent(sequence=self._sequence, event=event)
+            # Use the canonical sequence from the event itself
+            stored = StoredEvent(sequence=event.event_sequence, event=event)
             self._events.append(stored)
         
         # Notify live subscribers (outside lock to avoid deadlock)
@@ -156,7 +156,7 @@ class EventStore:
         """Clear all stored events. Useful for testing."""
         with self._lock:
             self._events.clear()
-            self._sequence = 0
+            # Note: We do not reset the global event counter here as it's shared singleton.
 
     def get_latest(self, count: int = 100) -> List[GraphEvent]:
         """
@@ -179,7 +179,7 @@ class EventStore:
         with self._lock:
             return {
                 "events_stored": len(self._events),
-                "current_sequence": self._sequence,
+                "last_sequence": self._events[-1].sequence if self._events else 0,
                 "active_subscribers": len(self._subscribers),
                 "max_size": self._events.maxlen
             }
