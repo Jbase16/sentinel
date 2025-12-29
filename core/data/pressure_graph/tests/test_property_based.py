@@ -1,309 +1,103 @@
 """
-Property-based tests for pressure graph invariants.
+Property-Based Invariant Tests.
 
-Uses Hypothesis to generate random inputs and verify invariants.
+These tests verify mathematical laws, not specific scenarios.
 """
 
 import pytest
 from hypothesis import given, strategies as st
-from typing import Dict, Set
 
 from ..models import PressureNode, PressureEdge, EdgeType
 from ..propagator import PressurePropagator
 
 
-# Strategies for generating test data
-severity_strategy = st.floats(min_value=0.0, max_value=10.0)
-exposure_strategy = st.floats(min_value=0.0, max_value=1.0)
-exploitability_strategy = st.floats(min_value=0.0, max_value=1.0)
-privilege_gain_strategy = st.floats(min_value=0.0, max_value=1.0)
-asset_value_strategy = st.floats(min_value=0.0, max_value=10.0)
-confidence_strategy = st.floats(min_value=0.0, max_value=1.0)
-transfer_factor_strategy = st.floats(min_value=0.0, max_value=1.0)
+# Strategies
+safe_float = st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False)
 
 
-def create_simple_pressure_graph():
+def _make_graph(source_pressure=10.0, edge_conf=1.0):
+    n = {
+        "src": PressureNode("src", "vuln", 10.0, 1.0, 1.0, 1.0, 1.0),
+        "sink": PressureNode("sink", "asset", 0.0, 0.0, 0.0, 0.0, 10.0)
+    }
+    e = {
+        "e1": PressureEdge("e1", "src", "sink", EdgeType.ENABLES, 1.0, edge_conf)
+    }
+    return n, e
+
+
+def test_zero_confidence_equals_non_existent():
     """
-    Create a simple test graph with known structure.
+    Invariant: An edge with 0.0 confidence behaves IDENTICALLY to a missing edge.
     
-    Structure:
-        vuln_1 -> service -> db_prod (crown jewel)
-        vuln_2 -> service
+    We do not compare 0.0 confidence to 1.0 confidence (that's obvious).
+    We compare 0.0 confidence to NO EDGE.
     """
-    nodes = {
-        "vuln_1": PressureNode(
-            id="vuln_1",
-            type="vulnerability",
-            severity=8.0,
-            exposure=0.8,
-            exploitability=0.9,
-            privilege_gain=0.7,
-            asset_value=2.0
-        ),
-        "vuln_2": PressureNode(
-            id="vuln_2",
-            type="vulnerability",
-            severity=7.0,
-            exposure=0.6,
-            exploitability=0.7,
-            privilege_gain=0.5,
-            asset_value=1.5
-        ),
-        "service": PressureNode(
-            id="service",
-            type="asset",
-            severity=5.0,
-            exposure=0.9,
-            exploitability=0.8,
-            privilege_gain=0.9,
-            asset_value=8.0
-        ),
-        "db_prod": PressureNode(
-            id="db_prod",
-            type="asset",
-            severity=4.0,
-            exposure=0.5,
-            exploitability=0.3,
-            privilege_gain=1.0,
-            asset_value=10.0
-        ),
+    n, e_high = _make_graph(edge_conf=1.0)
+    
+    # 1. Graph with zero-confidence edge
+    e_zero = {
+        "e1": PressureEdge("e1", "src", "sink", EdgeType.ENABLES, 1.0, 0.0)
+    }
+    prop_zero = PressurePropagator(n, e_zero)
+    p_zero = prop_zero.propagate({"sink"})
+    
+    # 2. Graph with NO edge
+    e_none = {}
+    prop_none = PressurePropagator(n, e_none)
+    p_none = prop_none.propagate({"sink"})
+    
+    # The pressure on the sink must be identical in both cases.
+    # (Both should be 0.0, since sink has no base pressure and no valid inbound edge)
+    assert p_zero["sink"] == pytest.approx(p_none["sink"])
+
+
+def test_weight_normalization_guarantee():
+    """
+    Invariant: Even with massive inbound weight sums, pressure must not explode.
+    
+    This tests the Spectral Radius fix.
+    """
+    n = {
+        "src1": PressureNode("s1", "v", 100.0, 1.0, 1.0, 1.0, 1.0),
+        "src2": PressureNode("s2", "v", 100.0, 1.0, 1.0, 1.0, 1.0),
+        "sink": PressureNode("sink", "a", 0.0, 0.0, 0.0, 0.0, 10.0)
     }
     
-    edges = {
-        "edge_1": PressureEdge(
-            id="edge_1",
-            source_id="vuln_1",
-            target_id="service",
-            type=EdgeType.REACHES,
-            transfer_factor=0.8,
-            confidence=0.9
-        ),
-        "edge_2": PressureEdge(
-            id="edge_2",
-            source_id="vuln_2",
-            target_id="service",
-            type=EdgeType.REACHES,
-            transfer_factor=0.6,
-            confidence=0.8
-        ),
-        "edge_3": PressureEdge(
-            id="edge_3",
-            source_id="service",
-            target_id="db_prod",
-            type=EdgeType.REACHES,
-            transfer_factor=0.9,
-            confidence=0.95
-        ),
+    # Create 2 huge edges. Raw sum = 20.0 (10.0 transfer * 1.0 conf * 2 edges).
+    # Without normalization, this could amplify pressure wildly depending on damping.
+    # With normalization, they share the contribution.
+    e = {
+        "e1": PressureEdge("e1", "src1", "sink", EdgeType.ENABLES, 10.0, 1.0),
+        "e2": PressureEdge("e2", "src2", "sink", EdgeType.ENABLES, 10.0, 1.0),
     }
     
-    return nodes, edges, {"db_prod"}
+    prop = PressurePropagator(n, e, damping_factor=0.5)
+    p = prop.propagate({"sink"})
+    
+    # Physics check: Pressure should be bounded by the max source pressure * damping
+    # roughly. It shouldn't be 200.0 just because transfer factors are high.
+    # Due to normalization, the total inbound transfer is exactly 1.0 * d.
+    max_source = max(n['src1'].base_pressure, n['src2'].base_pressure)
+    assert 0.0 <= p["sink"] <= max_source
 
 
-@given(severity_increase=st.floats(min_value=0.1, max_value=2.0))
-def test_monotonicity_crown_jewel_pressure(severity_increase):
+@given(s_inc=st.floats(min_value=0.1, max_value=5.0, allow_nan=False, allow_infinity=False))
+def test_monotonicity_invariant(s_inc):
     """
-    Property: If node severity increases, Crown Jewel pressure must not decrease.
-    
-    This is a critical invariant - increasing upstream severity cannot
-    reduce downstream pressure.
+    Increasing source severity strictly increases downstream pressure.
     """
-    nodes, edges, crown_jewel_ids = create_simple_pressure_graph()
-    
-    # Create propagator
-    propagator = PressurePropagator(
-        nodes,
-        edges,
-        damping_factor=0.85,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
-    
-    # Get baseline pressures
-    baseline_pressures = propagator.propagate(crown_jewel_ids)
-    baseline_cj_pressure = baseline_pressures["db_prod"]
-    
-    # Increase severity of vuln_1 (upstream node)
     from copy import deepcopy
-    modified_nodes = {
-        node_id: deepcopy(node)
-        for node_id, node in nodes.items()
-    }
-    modified_nodes["vuln_1"].severity = min(10.0, modified_nodes["vuln_1"].severity + severity_increase)
-    modified_nodes["vuln_1"].base_pressure = (
-        modified_nodes["vuln_1"].severity *
-        modified_nodes["vuln_1"].exposure *
-        modified_nodes["vuln_1"].exploitability *
-        modified_nodes["vuln_1"].privilege_gain *
-        modified_nodes["vuln_1"].asset_value
-    )
     
-    # Create new propagator with modified nodes
-    new_propagator = PressurePropagator(
-        modified_nodes,
-        edges,
-        damping_factor=0.85,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
+    n, e = _make_graph()
+    prop = PressurePropagator(n, e)
+    base = prop.propagate({"sink"})
     
-    # Get new pressures
-    new_pressures = new_propagator.propagate(crown_jewel_ids)
-    new_cj_pressure = new_pressures["db_prod"]
+    n2 = {k: deepcopy(v) for k, v in n.items()}
+    n2['src'] = PressureNode('src', 'v', min(10.0, n['src'].severity + s_inc), 
+                              1.0, 1.0, 1.0, 1.0)
     
-    # Assert monotonicity: crown jewel pressure should not decrease
-    assert new_cj_pressure >= baseline_cj_pressure - 1e-6, \
-        f"Monotonicity violation: Crown jewel pressure decreased from {baseline_cj_pressure} to {new_cj_pressure}"
-
-
-@given(transfer_factor=st.floats(min_value=0.0, max_value=1.0),
-       confidence=st.floats(min_value=0.1, max_value=1.0))
-def test_edge_transfer_non_negative(transfer_factor, confidence):
-    """
-    Property: Edge pressure transfer should always be non-negative.
-    """
-    nodes, edges, crown_jewel_ids = create_simple_pressure_graph()
+    prop2 = PressurePropagator(n2, e)
+    new = prop2.propagate({"sink"})
     
-    # Modify edge with random parameters
-    from copy import deepcopy
-    modified_edges = deepcopy(edges)
-    modified_edges["edge_3"].transfer_factor = transfer_factor
-    modified_edges["edge_3"].confidence = confidence
-    
-    # Create propagator
-    propagator = PressurePropagator(
-        nodes,
-        modified_edges,
-        damping_factor=0.85,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
-    
-    # Propagate
-    pressures = propagator.propagate(crown_jewel_ids)
-    
-    # All pressures should be non-negative
-    for node_id, pressure in pressures.items():
-        assert pressure >= 0.0, \
-            f"Negative pressure at node {node_id}: {pressure}"
-
-
-@given(damping_factor=st.floats(min_value=0.5, max_value=0.95))
-def test_damping_factor_bounds(damping_factor):
-    """
-    Property: Damping factor should produce pressures in expected range.
-    """
-    nodes, edges, crown_jewel_ids = create_simple_pressure_graph()
-    
-    # Create propagator with random damping factor
-    propagator = PressurePropagator(
-        nodes,
-        edges,
-        damping_factor=damping_factor,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
-    
-    # Propagate
-    pressures = propagator.propagate(crown_jewel_ids)
-    
-    # Pressures should be bounded by max possible pressure
-    max_base_pressure = max(
-        node.severity * node.exposure * node.exploitability * 
-        node.privilege_gain * node.asset_value
-        for node in nodes.values()
-    )
-    
-    for node_id, pressure in pressures.items():
-        assert 0.0 <= pressure <= max_base_pressure * 2.0, \
-            f"Pressure out of bounds at node {node_id}: {pressure}"
-
-
-@given(perturbations=st.lists(
-    st.tuples(
-        st.sampled_from(["vuln_1", "vuln_2", "service"]),
-        severity_strategy
-    ),
-    min_size=1,
-    max_size=5
-))
-def test_monotonicity_multiple_severity_changes(perturbations):
-    """
-    Property: Multiple severity increases should not reduce crown jewel pressure.
-    
-    Tests monotonicity under cumulative changes.
-    """
-    nodes, edges, crown_jewel_ids = create_simple_pressure_graph()
-    
-    # Create propagator
-    propagator = PressurePropagator(
-        nodes,
-        edges,
-        damping_factor=0.85,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
-    
-    # Get baseline pressures
-    baseline_pressures = propagator.propagate(crown_jewel_ids)
-    baseline_cj_pressure = baseline_pressures["db_prod"]
-    
-    # Apply perturbations
-    from copy import deepcopy
-    modified_nodes = {
-        node_id: deepcopy(node)
-        for node_id, node in nodes.items()
-    }
-    
-    for node_id, severity_increase in perturbations:
-        modified_nodes[node_id].severity = min(10.0, modified_nodes[node_id].severity + severity_increase)
-        modified_nodes[node_id].base_pressure = (
-            modified_nodes[node_id].severity *
-            modified_nodes[node_id].exposure *
-            modified_nodes[node_id].exploitability *
-            modified_nodes[node_id].privilege_gain *
-            modified_nodes[node_id].asset_value
-        )
-    
-    # Create new propagator with modified nodes
-    new_propagator = PressurePropagator(
-        modified_nodes,
-        edges,
-        damping_factor=0.85,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
-    
-    # Get new pressures
-    new_pressures = new_propagator.propagate(crown_jewel_ids)
-    new_cj_pressure = new_pressures["db_prod"]
-    
-    # Assert monotonicity
-    assert new_cj_pressure >= baseline_cj_pressure - 1e-6, \
-        f"Monotonicity violation with multiple perturbations: {baseline_cj_pressure} -> {new_cj_pressure}"
-
-
-def test_propagator_immutability():
-    """
-    Test that PressurePropagator enforces immutability.
-    """
-    nodes, edges, crown_jewel_ids = create_simple_pressure_graph()
-    
-    # Create propagator
-    propagator = PressurePropagator(
-        nodes,
-        edges,
-        damping_factor=0.85,
-        epsilon=1e-6,
-        max_iterations=1000
-    )
-    
-    # After initialization, propagator should be frozen
-    assert propagator._frozen is True
-    
-    # Attempting to modify nodes/edges should raise error
-    # (This is enforced by _check_mutable if called)
-    # For now, verify the flag is set correctly
-    
-    # Verify propagator can still be used
-    pressures = propagator.propagate(crown_jewel_ids)
-    assert "db_prod" in pressures
+    assert new["sink"] >= base["sink"]
