@@ -67,7 +67,7 @@ class CounterfactualEngine:
         Uses dirty subgraph optimization:
         1. Identify affected nodes (removed nodes + downstream reachable)
         2. Create shadow copies of modified nodes/edges
-        3. Propagate only through dirty subgraph
+        3. Propagate using shadow propagator with dirty subgraph
         4. Merge with baseline pressures
         
         Args:
@@ -82,19 +82,35 @@ class CounterfactualEngine:
         # Step 2: Create shadow copies for dirty subgraph
         shadow_nodes, shadow_edges = self._create_shadow_graph(remediation, dirty_nodes)
         
-        # Step 3: Propagate through dirty subgraph
-        # Start from baseline pressures for non-dirty nodes
+        # Step 3: Create shadow propagator with modified graph
+        # This ensures remediations are actually applied to the graph
+        shadow_propagator = PressurePropagator(
+            shadow_nodes,
+            shadow_edges,
+            damping_factor=self.propagator.damping_factor,
+            epsilon=self.propagator.epsilon,
+            max_iterations=self.propagator.max_iterations
+        )
+        
+        # Step 4: Propagate through shadow graph
+        # Start from baseline pressures for all nodes
         initial_pressures = dict(self._baseline_pressures)
         
-        # Set dirty nodes to 0 (will be recomputed)
+        # Set dirty nodes to 0 (will be recomputed by shadow propagator)
         for node_id in dirty_nodes:
-            initial_pressures[node_id] = 0.0
+            if node_id in shadow_nodes:
+                initial_pressures[node_id] = 0.0
         
-        # Propagate only dirty subgraph
-        new_pressures = self.propagator.propagate(
+        # Propagate with shadow propagator (has modified nodes/edges)
+        new_pressures = shadow_propagator.propagate(
             self._crown_jewel_ids,
             initial_pressures
         )
+        
+        # For nodes not in shadow graph (unchanged), use baseline
+        for node_id, baseline_pressure in self._baseline_pressures.items():
+            if node_id not in new_pressures:
+                new_pressures[node_id] = baseline_pressure
         
         return new_pressures
     
