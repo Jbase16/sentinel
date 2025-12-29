@@ -1498,62 +1498,154 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
 
 # Terminal WebSocket endpoint with config check
 @app.websocket("/ws/pty")
-async def terminal_websocket_pty(websocket: WebSocket):
+async def terminal_websocket_pty(websocket: WebSocket, session_id: Optional[str] = Query(None)):
     """
-    WebSocket endpoint for bidirectional PTY access.
-
-    Uses validate_websocket_connection() for consistent security.
-    Requires token if terminal_require_auth is enabled in config.
+    WebSocket endpoint for Bidirectional PTY access (Terminal Virtual Session).
+    
+    This endpoint powers the "Terminal VS" feature.
+    
+    FEATURES:
+    - Virtual Sessions: Connect to a specific persistent shell instance via ?session_id=UUID.
+    - Multiplexing: Multiple clients can view/control the same session simultaneously without data loss.
+    - Threaded I/O: Uses PTYManager's non-blocking architecture.
+    
+    ARGS:
+    - websocket: The active connection.
+    - session_id: (Optional) UUID of an existing session to join. If None, creates a new one.
     """
     config = get_config()
 
-    # Validate connection using the centralized security helper
+    # -------------------------------------------------------------------------
+    # 1. Security & Configuration Validation
+    # -------------------------------------------------------------------------
+    
+    # Use the centralized validator to enforce auth policies (tokens, etc.)
     if not await validate_websocket_connection(
         websocket,
         "/ws/pty",
         require_token=config.security.terminal_require_auth,
     ):
-        return  # Connection was closed by validator
+        return  # Connection closed by validator if failed
 
-    # Additional endpoint-specific check: terminal_enabled
+    # Global kill-switch check
     if not config.security.terminal_enabled:
-        await websocket.close(code=4003, reason="Terminal access disabled")
+        await websocket.close(code=4003, reason="Terminal access disabled by configuration")
         return
 
     await websocket.accept()
-    pty_session = PTYManager.instance().get_session()
 
-    async def read_pty():
-        """AsyncFunction read_pty."""
-        # Error handling block.
+    # -------------------------------------------------------------------------
+    # 2. Session Binding (The "Virtual" Layer)
+    # -------------------------------------------------------------------------
+    
+    manager = PTYManager.instance()
+    
+    # If the client requested a specific session, try to find it.
+    # Otherwise, spin up a fresh shell environment.
+    if session_id:
+        pty_session = manager.get_or_create_session(session_id)
+    else:
+        pty_session = manager.create_session()
+    
+    # Tell the client which session they are connected to.
+    # The frontend should use this ID to reconnect if the socket drops.
+    try:
+        await websocket.send_json({
+            "type": "session_info", 
+            "session_id": pty_session.session_id,
+            "pid": pty_session.pid
+        })
+    except Exception as e:
+        logger.error(f"Failed to send session info: {e}")
+        return
+
+    # -------------------------------------------------------------------------
+    # 3. Multiplexing Reader Loop (Server -> Client)
+    # -------------------------------------------------------------------------
+    
+    async def read_pty_loop():
+        """
+        Continuously skims the PTY's history buffer for new data.
+        Maintains a local 'cursor' to ensure this specific client gets
+        exactly the data it hasn't seen yet (Multiplexing).
+        """
+        cursor = 0
         try:
             while True:
-                data = await asyncio.to_thread(pty_session.read)
-                if data:
-                    await websocket.send_text(data.decode(errors="ignore"))
+                # Fetch new data since our last read position.
+                # This is non-blocking and thread-safe.
+                text, new_cursor = pty_session.read_from_offset(cursor)
+                
+                if new_cursor > cursor:
+                    # We found new data! Push it to the client.
+                    await websocket.send_text(text)
+                    cursor = new_cursor
                 else:
-                    await asyncio.sleep(0.01)
-        except Exception:
-            pass
+                    # No new data yet. Sleep briefly to yield the event loop.
+                    # 50ms is low enough latency for typing but high enough to save CPU.
+                    await asyncio.sleep(0.05)
+                    
+        except Exception as e:
+            # Only log if it's not a normal disconnect
+            if not isinstance(e, (RuntimeError, asyncio.CancelledError)):
+                logger.error(f"PTY Reader Error (Session {pty_session.session_id}): {e}")
 
-    reader_task = asyncio.create_task(read_pty())
-    # Error handling block.
+    # Launch the reader as a background task
+    reader_task = asyncio.create_task(read_pty_loop())
+
+    # -------------------------------------------------------------------------
+    # 4. Writer Loop (Client -> Server)
+    # -------------------------------------------------------------------------
     try:
         while True:
+            # Wait for input from the browser
             msg = await websocket.receive_text()
+            
+            # Check for control messages (JSON) vs Raw Input
+            # We assume anything starting with '{' is a control sequence.
             if msg.startswith("{"):
                 try:
                     cmd = json.loads(msg)
-                    if cmd.get("type") == "resize":
-                        pty_session.resize(cmd.get("rows", 24), cmd.get("cols", 80))
+                    msg_type = cmd.get("type")
+                    
+                    if msg_type == "resize":
+                        # Handle window resize events
+                        rows = cmd.get("rows", 24)
+                        cols = cmd.get("cols", 80)
+                        pty_session.resize(rows, cols)
                         continue
+                        
+                    elif msg_type == "ping":
+                        # Keep-alive
+                        await websocket.send_json({"type": "pong"})
+                        continue
+                        
                 except json.JSONDecodeError:
+                    # Not valid JSON? Treat as raw input bytes.
                     pass
+            
+            # Forward the keystrokes to the actual PTY master fd
             pty_session.write(msg)
+            
     except WebSocketDisconnect:
-        pass
+        # Normal closure (user closed tab)
+        logger.debug(f"Client disconnected from PTY session {pty_session.session_id}")
+        
+    except Exception as e:
+        logger.error(f"WebSocket Error in PTY handler: {e}")
+        
     finally:
+        # ---------------------------------------------------------------------
+        # 5. Cleanup
+        # ---------------------------------------------------------------------
+        # Kill the reader task so it doesn't run forever
         reader_task.cancel()
+        
+        # NOTE: We do NOT close the pty_session here.
+        # This is intentional. We want the shell to persist so the user can
+        # reload the page and resume their work (persistence).
+        # The session will effectively "time out" or be cleaned up by a 
+        # separate housekeeper if we implement one, or when the server restarts.
 
 # ============================================================================
 # Register API Versioning Routers

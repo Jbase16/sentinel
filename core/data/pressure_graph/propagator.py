@@ -92,7 +92,12 @@ class PressurePropagator:
                 
                 for edge in inbound_edges:
                     source_pressure = pressures.get(edge.source_id, 0.0)
-                    inbound_pressure += source_pressure * edge.transfer_factor
+                    # Multiply by edge confidence for evidence-traceable propagation
+                    inbound_pressure += (
+                        source_pressure *
+                        edge.transfer_factor *
+                        edge.confidence
+                    )
                 
                 # Apply damping formula
                 new_pressure = (
