@@ -50,21 +50,7 @@ public class PressureGraphSystem: System {
                 // Use Transform component directly
                 var transform = entity.transform
                 // Subtle vibration based on pressure
-                let vibration =
-                    simd_float3(
-                        sin(t * 50.0 + transform.translation.y),
-                        cos(t * 45.0 + transform.translation.x),
-                        sin(t * 60.0 + transform.translation.z)
-                    ) * 0.005 * state.pressure
-
-                // We need a stable base position to vibrate around to avoid drift.
-                // For MVP, we assume the current position *is* the base + vibration from last frame.
-                // To fix drift properly we'd need a BasePositionComponent.
-                // For now, we dampen it: only apply if we reset previous frame?
-                // Easier: Just don't mutate position for vibration in this simplified system,
-                // relying on the shader for the high-freq stuff.
-                // We will just scale it to show pressure.
-
+                // Subtle vibration logic left to shader to prevent position drift.
                 let pulse = 1.0 + (sin(t * 4.0) * 0.1 * state.pressure)
                 transform.scale = simd_float3(pulse, pulse, pulse)
                 entity.transform = transform

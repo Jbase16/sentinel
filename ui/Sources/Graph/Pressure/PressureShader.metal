@@ -2,14 +2,14 @@
 using namespace metal;
 
 // Vertex Shader Input
-struct VertexIn {
+struct PressureVertexIn {
     float4 position [[attribute(0)]];
     float3 normal [[attribute(1)]];
     float2 uv [[attribute(2)]];
 };
 
 // Vertex Shader Output
-struct VertexOut {
+struct PressureVertexOut {
     float4 position [[position]];
     float3 worldPosition;
     float3 normal;
@@ -17,7 +17,7 @@ struct VertexOut {
     float edgeFactor;
 };
 
-struct Uniforms {
+struct PressureUniforms {
     float4x4 viewProjectionMatrix;
     float4x4 modelMatrix;
     float3 worldPosition;
@@ -31,8 +31,8 @@ float noise(float3 p) {
     return sin(p.x * 10.0 + sin(p.y * 5.0) * 2.0) * cos(p.z * 5.0 + cos(p.x * 2.0));
 }
 
-vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &u [[buffer(0)]]) {
-    VertexOut out;
+vertex PressureVertexOut pressure_vertex(PressureVertexIn in [[stage_in]], constant PressureUniforms &u [[buffer(0)]]) {
+    PressureVertexOut out;
     
     // 1. Calculate Base World Position
     float4 worldPos = u.modelMatrix * in.position;
@@ -60,7 +60,7 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]], constant Uniforms &u [[bu
     return out;
 }
 
-fragment float4 fragment_main(VertexOut in [[stage_in]], constant Uniforms &u [[buffer(0)]]) {
+fragment float4 pressure_fragment(PressureVertexOut in [[stage_in]], constant PressureUniforms &u [[buffer(0)]]) {
     // Color Interpolation: Cool Blue (Stable) -> Violent Red (Critical)
     float3 stableColor = float3(0.1, 0.3, 0.4); // Cyberpunk Teal
     float3 warnColor = float3(0.8, 0.5, 0.0);   // Amber

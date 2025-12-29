@@ -257,9 +257,14 @@ class GlobalSequenceAuthority:
         Initialize with a specific starting value for testing.
 
         WARNING: This should ONLY be used in tests!
+        Bypasses database initialization for fast, isolated tests.
         """
+        # First, create instance without holding the lock (to avoid deadlock)
+        # since __new__ also acquires the lock
+        instance = cls()
+
+        # Now update the instance state under the lock
         with cls._lock:
-            instance = cls()
             instance._counter = count(start=start)
             instance._last_issued = start - 1
             cls._initialized = True

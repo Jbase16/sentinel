@@ -24,6 +24,7 @@ targets:
       base:
         PRODUCT_NAME: SentinelForge
         INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: SentinelForge.entitlements
         ENABLE_PREVIEWS: YES
         SWIFT_VERSION: 5.0
         MACOSX_DEPLOYMENT_TARGET: "14.0"
