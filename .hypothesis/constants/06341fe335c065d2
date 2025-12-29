@@ -1,0 +1,4 @@
+# file: /Users/jason/Developer/sentinelforge/core/base/config.py
+# hypothesis_version: 6.148.8
+
+[0.3, 0.5, 300.0, 100, 300, 500, 600, 1000, 1024, 2000, 3600, 8765, 100000, ',', '.sentinelforge', '0.3', '0.5', '10', '100', '127.0.0.1', '2', '20', '24', '300', '3600', '5', '50', '60', '600', '8765', 'INFO', 'SENTINEL_AI_FALLBACK', 'SENTINEL_AI_MODEL', 'SENTINEL_AI_PROVIDER', 'SENTINEL_AI_TIMEOUT', 'SENTINEL_API_HOST', 'SENTINEL_API_PORT', 'SENTINEL_API_TOKEN', 'SENTINEL_DATA_DIR', 'SENTINEL_DEBUG', 'SENTINEL_LOG_LEVEL', 'SENTINEL_OLLAMA_URL', 'SENTINEL_RATE_LIMIT', 'SentinelConfig', 'brew', 'dnsx', 'evidence', 'false', 'feroxbuster', 'gobuster', 'http://127.0.0.1:*', 'http://localhost:*', 'httpx', 'masscan', 'nikto', 'nmap', 'nuclei', 'ollama', 'pip', 'reports', 'sentinel-9b-god-tier', 'sentinel.db', 'sentinel.log', 'sqlmap', 'subfinder', 'tauri://localhost', 'true', 'whois']

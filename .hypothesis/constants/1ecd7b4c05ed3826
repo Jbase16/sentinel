@@ -1,0 +1,4 @@
+# file: /Users/jason/Developer/sentinelforge/core/data/issues_store.py
+# hypothesis_version: 6.148.8
+
+['closed', 'issues_init_load', 'replace_save_issue', 'save_issue']

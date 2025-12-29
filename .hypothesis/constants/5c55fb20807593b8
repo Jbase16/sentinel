@@ -1,0 +1,4 @@
+# file: /Users/jason/Developer/sentinelforge/core/data/db.py
+# hypothesis_version: 6.148.8
+
+[0.1, 5.0, 'INFO', 'closed', 'committed', 'database is locked', 'end_time', 'error_message', 'event_sequence', 'evidence_count', 'failed', 'findings', 'findings_count', 'id', 'issues_count', 'last_completed_tool', 'logs', 'metadata', 'raw_output', 'rolled_back', 'scan_sequence', 'session_id', 'severity', 'start_time', 'status', 'summary', 'target', 'timestamp', 'title', 'tool', 'tool_version', 'type', 'unknown']
