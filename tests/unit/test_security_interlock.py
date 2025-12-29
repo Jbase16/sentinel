@@ -22,7 +22,7 @@ def _make_config(
         require_auth=require_auth,
         allowed_origins=allowed_origins
         if allowed_origins is not None
-        else ("http://127.0.0.1:*", "http://localhost:*", "tauri://localhost"),
+        else ("http://127.0.0.1:8000", "http://localhost:8000", "tauri://localhost"),
     )
     storage = StorageConfig(base_dir=tmp_path)
     return SentinelConfig(security=security, storage=storage, api_host=api_host, debug=debug)

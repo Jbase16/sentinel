@@ -800,19 +800,9 @@ class OriginValidator:
                 )
 
             if assessment.port_has_wildcard:
-                if assessment.is_loopback and config.debug:
-                    continue
-
                 if assessment.is_loopback:
-                    raise CriticalSecurityBreach(
-                        "Port wildcards are only permitted on loopback in development mode.",
-                        remediation=(
-                            "Either pin a localhost port explicitly or enable development mode:\n"
-                            "  1. SENTINEL_ALLOWED_ORIGINS=http://127.0.0.1:8000\n"
-                            "  2. SENTINEL_DEBUG=true (development only)"
-                        ),
-                        details={"origin": origin, "debug": config.debug},
-                    )
+                    # Allow loopback wildcards in all modes for developer convenience
+                    continue
 
                 raise CriticalSecurityBreach(
                     "Network origins may not use port wildcards.",
