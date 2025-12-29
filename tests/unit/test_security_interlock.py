@@ -10,7 +10,14 @@ from core.base.config import SecurityInterlock, SentinelConfig, SecurityConfig, 
 from core.errors import CriticalSecurityBreach
 
 
-def _make_config(tmp_path, *, api_host="127.0.0.1", require_auth=False, allowed_origins=None):
+def _make_config(
+    tmp_path,
+    *,
+    api_host="127.0.0.1",
+    require_auth=False,
+    allowed_origins=None,
+    debug=False,
+):
     security = SecurityConfig(
         require_auth=require_auth,
         allowed_origins=allowed_origins
@@ -18,7 +25,7 @@ def _make_config(tmp_path, *, api_host="127.0.0.1", require_auth=False, allowed_
         else ("http://127.0.0.1:*", "http://localhost:*", "tauri://localhost"),
     )
     storage = StorageConfig(base_dir=tmp_path)
-    return SentinelConfig(security=security, storage=storage, api_host=api_host)
+    return SentinelConfig(security=security, storage=storage, api_host=api_host, debug=debug)
 
 
 def test_interlock_blocks_exposed_without_auth(tmp_path):
@@ -32,17 +39,30 @@ def test_interlock_allows_exposed_with_auth(tmp_path):
     SecurityInterlock.verify_safe_boot(config)
 
 
-def test_interlock_blocks_wildcard_origin_without_auth(tmp_path):
-    config = _make_config(tmp_path, allowed_origins=("*",), require_auth=False)
+def test_interlock_blocks_literal_wildcard_origin(tmp_path):
+    config = _make_config(tmp_path, allowed_origins=("*",), require_auth=True)
     with pytest.raises(CriticalSecurityBreach):
         SecurityInterlock.verify_safe_boot(config)
 
 
-def test_interlock_allows_wildcard_origin_with_auth(tmp_path):
-    config = _make_config(tmp_path, allowed_origins=("http://*",), require_auth=True)
-    SecurityInterlock.verify_safe_boot(config)
+def test_interlock_blocks_wildcard_host_origin(tmp_path):
+    config = _make_config(tmp_path, allowed_origins=("http://*.example.com",), require_auth=True)
+    with pytest.raises(CriticalSecurityBreach):
+        SecurityInterlock.verify_safe_boot(config)
 
 
-def test_interlock_allows_port_wildcard_on_localhost_without_auth(tmp_path):
-    config = _make_config(tmp_path, allowed_origins=("http://localhost:*",), require_auth=False)
+def test_interlock_blocks_port_wildcard_on_network_origin(tmp_path):
+    config = _make_config(tmp_path, allowed_origins=("https://example.com:*",), require_auth=True)
+    with pytest.raises(CriticalSecurityBreach):
+        SecurityInterlock.verify_safe_boot(config)
+
+
+def test_interlock_blocks_port_wildcard_on_localhost_without_debug(tmp_path):
+    config = _make_config(tmp_path, allowed_origins=("http://localhost:*",), require_auth=False, debug=False)
+    with pytest.raises(CriticalSecurityBreach):
+        SecurityInterlock.verify_safe_boot(config)
+
+
+def test_interlock_allows_port_wildcard_on_localhost_with_debug(tmp_path):
+    config = _make_config(tmp_path, allowed_origins=("http://localhost:*",), require_auth=False, debug=True)
     SecurityInterlock.verify_safe_boot(config)

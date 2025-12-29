@@ -21,6 +21,7 @@
 import os
 import secrets
 import logging
+import re
 from pathlib import Path
 from typing import Optional, List
 from dataclasses import dataclass, field
@@ -633,6 +634,203 @@ def is_network_exposed(api_host: str) -> bool:
     return api_host.lower() not in LOOPBACK_ADDRESSES
 
 
+@dataclass(frozen=True)
+class OriginAssessment:
+    """Structured assessment of a CORS origin pattern."""
+    raw: str
+    scheme: Optional[str]
+    host: Optional[str]
+    port: Optional[str]
+    path: str
+    parse_ok: bool
+    has_wildcard: bool
+    literal_wildcard: bool
+    host_has_wildcard: bool
+    port_has_wildcard: bool
+    path_has_wildcard: bool
+    is_loopback: bool
+
+
+class OriginValidator:
+    """
+    Strict origin pinning validator.
+
+    Port wildcards are only allowed for loopback hosts in development mode.
+    """
+
+    _ORIGIN_PATTERN = re.compile(
+        r"^(?P<scheme>[a-zA-Z][a-zA-Z0-9+.-]*)://(?P<authority>[^/]+)(?P<path>/.*)?$"
+    )
+    _AUTHORITY_PATTERN = re.compile(r"^(?P<host>\[[^\]]+\]|[^:]+)(?::(?P<port>\*|\d+))?$")
+
+    @staticmethod
+    def assess(origin: str) -> OriginAssessment:
+        candidate = origin.strip()
+        has_wildcard = "*" in candidate
+        literal_wildcard = candidate == "*"
+
+        if literal_wildcard:
+            return OriginAssessment(
+                raw=origin,
+                scheme=None,
+                host=None,
+                port=None,
+                path="",
+                parse_ok=False,
+                has_wildcard=True,
+                literal_wildcard=True,
+                host_has_wildcard=False,
+                port_has_wildcard=False,
+                path_has_wildcard=False,
+                is_loopback=False,
+            )
+
+        match = OriginValidator._ORIGIN_PATTERN.match(candidate)
+        if not match:
+            return OriginAssessment(
+                raw=origin,
+                scheme=None,
+                host=None,
+                port=None,
+                path="",
+                parse_ok=False,
+                has_wildcard=has_wildcard,
+                literal_wildcard=False,
+                host_has_wildcard=False,
+                port_has_wildcard=False,
+                path_has_wildcard=False,
+                is_loopback=False,
+            )
+
+        scheme = match.group("scheme")
+        authority = match.group("authority")
+        path = match.group("path") or ""
+
+        auth_match = OriginValidator._AUTHORITY_PATTERN.match(authority)
+        if not auth_match:
+            return OriginAssessment(
+                raw=origin,
+                scheme=scheme,
+                host=None,
+                port=None,
+                path=path,
+                parse_ok=False,
+                has_wildcard=has_wildcard,
+                literal_wildcard=False,
+                host_has_wildcard=False,
+                port_has_wildcard=False,
+                path_has_wildcard="*" in path,
+                is_loopback=False,
+            )
+
+        host = auth_match.group("host") or ""
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]
+        port = auth_match.group("port")
+
+        host_has_wildcard = "*" in host
+        port_has_wildcard = port == "*"
+        path_has_wildcard = "*" in path
+        is_loopback = host.lower() in LOOPBACK_ADDRESSES
+
+        return OriginAssessment(
+            raw=origin,
+            scheme=scheme,
+            host=host,
+            port=port,
+            path=path,
+            parse_ok=True,
+            has_wildcard=has_wildcard,
+            literal_wildcard=False,
+            host_has_wildcard=host_has_wildcard,
+            port_has_wildcard=port_has_wildcard,
+            path_has_wildcard=path_has_wildcard,
+            is_loopback=is_loopback,
+        )
+
+    @staticmethod
+    def enforce_config_guard(config: "SentinelConfig") -> None:
+        from core.errors import CriticalSecurityBreach
+
+        for origin in config.security.allowed_origins:
+            assessment = OriginValidator.assess(origin)
+            if not assessment.has_wildcard:
+                continue
+
+            if assessment.literal_wildcard:
+                raise CriticalSecurityBreach(
+                    "Wildcard CORS origin '*' is forbidden under strict origin pinning.",
+                    remediation=(
+                        "Pin explicit origins:\n"
+                        "  1. Example: SENTINEL_ALLOWED_ORIGINS=http://127.0.0.1:8000\n"
+                        "  2. Use comma-separated origins for multiple entries"
+                    ),
+                    details={"origin": origin},
+                )
+
+            if not assessment.parse_ok:
+                raise CriticalSecurityBreach(
+                    "Unparseable CORS origin contains a wildcard.",
+                    remediation=(
+                        "Ensure origins match scheme://host[:port] (no wildcards), "
+                        "or use a localhost port wildcard only in development mode."
+                    ),
+                    details={"origin": origin},
+                )
+
+            if assessment.host_has_wildcard:
+                raise CriticalSecurityBreach(
+                    "Wildcard hostnames are forbidden under strict origin pinning.",
+                    remediation=(
+                        "Pin explicit hostnames:\n"
+                        "  1. Example: SENTINEL_ALLOWED_ORIGINS=https://app.example.com:443\n"
+                        "  2. Avoid '*' in the host component"
+                    ),
+                    details={"origin": origin},
+                )
+
+            if assessment.path_has_wildcard:
+                raise CriticalSecurityBreach(
+                    "Wildcard paths are forbidden in CORS origins.",
+                    remediation=(
+                        "Remove path wildcards and pin the exact origin "
+                        "(scheme + host + port)."
+                    ),
+                    details={"origin": origin},
+                )
+
+            if assessment.port_has_wildcard:
+                if assessment.is_loopback and config.debug:
+                    continue
+
+                if assessment.is_loopback:
+                    raise CriticalSecurityBreach(
+                        "Port wildcards are only permitted on loopback in development mode.",
+                        remediation=(
+                            "Either pin a localhost port explicitly or enable development mode:\n"
+                            "  1. SENTINEL_ALLOWED_ORIGINS=http://127.0.0.1:8000\n"
+                            "  2. SENTINEL_DEBUG=true (development only)"
+                        ),
+                        details={"origin": origin, "debug": config.debug},
+                    )
+
+                raise CriticalSecurityBreach(
+                    "Network origins may not use port wildcards.",
+                    remediation=(
+                        "Pin explicit ports for network origins:\n"
+                        "  1. Example: https://app.example.com:443\n"
+                        "  2. Remove :* from allowed origins"
+                    ),
+                    details={"origin": origin},
+                )
+
+            raise CriticalSecurityBreach(
+                "Wildcard CORS origin pattern detected.",
+                remediation="Remove wildcards from allowed origins.",
+                details={"origin": origin},
+            )
+
+
 class SecurityInterlock:
     """
     Fail-closed security interlock for startup invariants.
@@ -672,63 +870,7 @@ class SecurityInterlock:
 
     @staticmethod
     def _enforce_cors_interlock(config: "SentinelConfig") -> None:
-        from core.errors import CriticalSecurityBreach
-
-        wildcard_origins = SecurityInterlock._find_wildcard_origins(config.security.allowed_origins)
-        if not wildcard_origins:
-            return
-
-        if config.security.require_auth:
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                "High-risk CORS configuration: wildcard origins enabled with authentication. "
-                "allowed_origins=%s",
-                wildcard_origins,
-            )
-            return
-
-        raise CriticalSecurityBreach(
-            "Wildcard CORS origins are not allowed when authentication is disabled.",
-            remediation=(
-                "Set explicit origins (no host wildcards) or enable authentication:\n"
-                "  1. Restrict origins: SENTINEL_ALLOWED_ORIGINS=http://127.0.0.1:8000\n"
-                "  2. Enable authentication: SENTINEL_REQUIRE_AUTH=true"
-            ),
-            details={
-                "allowed_origins": config.security.allowed_origins,
-                "require_auth": config.security.require_auth,
-            },
-        )
-
-    @staticmethod
-    def _find_wildcard_origins(allowed_origins: tuple) -> tuple:
-        return tuple(origin for origin in allowed_origins if SecurityInterlock._has_wildcard_host(origin))
-
-    @staticmethod
-    def _has_wildcard_host(origin: str) -> bool:
-        if not origin:
-            return False
-
-        candidate = origin.strip()
-        if candidate == "*":
-            return True
-
-        from urllib.parse import urlparse
-
-        parsed = urlparse(candidate)
-        netloc = parsed.netloc
-
-        if not netloc:
-            if "://" in candidate:
-                netloc = candidate.split("://", 1)[1]
-            else:
-                netloc = candidate
-
-        netloc = netloc.split("/")[0]
-        netloc = netloc.split("@")[-1]
-        host = netloc.split(":")[0] if ":" in netloc else netloc
-
-        return "*" in host
+        OriginValidator.enforce_config_guard(config)
 
 
 def validate_security_posture(config: "SentinelConfig") -> None:

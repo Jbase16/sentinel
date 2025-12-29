@@ -65,6 +65,7 @@ class Database:
 
     async def init(self):
         if self._initialized:
+            logger.info("[Database] Already initialized, skipping.")
             return
 
         if self._init_lock is None:
@@ -74,23 +75,31 @@ class Database:
 
         self._loop = asyncio.get_running_loop()
 
+        logger.info(f"[Database] Acquiring init lock... (Id: {id(self)})")
         async with self._init_lock:
             if self._initialized:
+                logger.info("[Database] Initialized by another task, skipping.")
                 return
 
             try:
+                logger.info(f"[Database] Connecting to {self.db_path}...")
                 self._db_connection = await aiosqlite.connect(self.db_path, timeout=5.0)
+                logger.info("[Database] Connected. Setting PRAGMAs...")
                 await self._db_connection.execute("PRAGMA journal_mode=WAL;")
                 await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
                 await self._db_connection.execute("PRAGMA busy_timeout=5000;")
                 await self._db_connection.execute("PRAGMA foreign_keys=ON;")
 
+                logger.info("[Database] Creating tables...")
                 await self._create_tables()
+                logger.info("[Database] Committing schema changes...")
                 await self._db_connection.commit()
                 self._initialized = True
+                logger.info("[Database] Initialization flag set.")
 
                 # Initialize event sequence continuity (best effort)
                 try:
+                    logger.info("[Database] Initializing event sequence from DB...")
                     from core.cortex.events import initialize_event_sequence_from_db
 
                     seq = await initialize_event_sequence_from_db()
@@ -99,6 +108,7 @@ class Database:
                     logger.warning(f"[Database] Failed to initialize event sequence: {e}")
 
                 # Start BlackBox worker
+                logger.info("[Database] Starting BlackBox worker...")
                 self.blackbox.start()
 
                 logger.info(f"Database initialized at {self.db_path} (WAL mode)")

@@ -557,10 +557,7 @@ async def startup_event():
     db = Database.instance()
     await db.init()  # Ensure DB is ready before requests
 
-    # Initialize global event sequence counter from database
-    # This ensures event IDs remain unique across restarts (one continuous logical brain)
-    from core.cortex.events import initialize_event_sequence_from_db
-    await initialize_event_sequence_from_db()
+
 
     # Start session cleanup task
     _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
