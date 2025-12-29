@@ -95,6 +95,10 @@ class ErrorCode(Enum):
     SYSTEM_RESOURCE_EXHAUSTED = "SYSTEM_002"
     SYSTEM_NOT_IMPLEMENTED = "SYSTEM_003"
 
+    # Security Errors (Critical - may halt system startup)
+    SECURITY_EXPOSED_WITHOUT_AUTH = "SECURITY_001"
+    SECURITY_SENSITIVE_ENDPOINT_UNPROTECTED = "SECURITY_002"
+
 
 class SentinelError(Exception):
     """
@@ -178,6 +182,10 @@ class SentinelError(Exception):
         ErrorCode.SYSTEM_INTERNAL_ERROR: 500,
         ErrorCode.SYSTEM_RESOURCE_EXHAUSTED: 503,
         ErrorCode.SYSTEM_NOT_IMPLEMENTED: 501, # Not Implemented
+
+        # Security errors (critical)
+        ErrorCode.SECURITY_EXPOSED_WITHOUT_AUTH: 503,  # Service Unavailable (won't start)
+        ErrorCode.SECURITY_SENSITIVE_ENDPOINT_UNPROTECTED: 403,  # Forbidden
     }
     
     def __init__(
@@ -247,6 +255,72 @@ class SentinelError(Exception):
 
 
 # ============================================================================
+# Critical Security Exceptions (Halt System Startup)
+# ============================================================================
+
+class CriticalSecurityBreach(Exception):
+    """
+    A fatal security configuration error that prevents system startup.
+
+    This exception is fundamentally different from SentinelError:
+    - SentinelError: Recoverable errors that return HTTP responses
+    - CriticalSecurityBreach: Fatal errors that HALT the entire system
+
+    The "Host-Aware Boot Interlock" pattern:
+    When the system detects it is configured to listen on a non-loopback
+    interface (0.0.0.0) but require_auth is False, we refuse to start.
+    This prevents accidental exposure of an unauthenticated security tool.
+
+    Example Trigger:
+        - api_host = "0.0.0.0" (exposed to network)
+        - require_auth = False (no authentication)
+        = CRITICAL: Anyone on the network can run security scans!
+
+    Usage:
+        if is_exposed and not require_auth:
+            raise CriticalSecurityBreach(
+                "SentinelForge cannot be exposed to the network without authentication.",
+                remediation="Set SENTINEL_REQUIRE_AUTH=true or SENTINEL_API_HOST=127.0.0.1"
+            )
+    """
+
+    def __init__(self, message: str, *, remediation: Optional[str] = None, details: Optional[Dict[str, Any]] = None):
+        """
+        Initialize a CriticalSecurityBreach.
+
+        Args:
+            message: Human-readable description of the security issue
+            remediation: How to fix the issue (displayed to the operator)
+            details: Additional context for debugging
+        """
+        self.message = message
+        self.remediation = remediation
+        self.details = details or {}
+        self.code = ErrorCode.SECURITY_EXPOSED_WITHOUT_AUTH
+
+        # Build a comprehensive error message
+        full_message = f"\n{'='*70}\n"
+        full_message += "🛑 CRITICAL SECURITY BREACH - STARTUP BLOCKED\n"
+        full_message += f"{'='*70}\n\n"
+        full_message += f"ERROR: {message}\n\n"
+
+        if remediation:
+            full_message += f"REMEDIATION:\n  {remediation}\n\n"
+
+        if details:
+            full_message += "DETAILS:\n"
+            for key, value in details.items():
+                full_message += f"  {key}: {value}\n"
+            full_message += "\n"
+
+        full_message += f"{'='*70}\n"
+        full_message += "SentinelForge will NOT start in an insecure configuration.\n"
+        full_message += f"{'='*70}\n"
+
+        super().__init__(full_message)
+
+
+# ============================================================================
 # Convenience Functions
 # ============================================================================
 
@@ -296,5 +370,5 @@ def handle_error(error: Exception, context: Optional[str] = None) -> SentinelErr
 # Module-Level Exports
 # ============================================================================
 
-__all__ = ["ErrorCode", "SentinelError", "handle_error"]
+__all__ = ["ErrorCode", "SentinelError", "CriticalSecurityBreach", "handle_error"]
 

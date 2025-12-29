@@ -611,6 +611,95 @@ class SentinelConfig:
 
 
 # ============================================================================
+# Security Validation Helpers
+# ============================================================================
+# These functions validate configuration for security issues BEFORE startup.
+
+
+# Addresses that are considered "safe" (loopback-only, not exposed to network)
+LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def is_network_exposed(api_host: str) -> bool:
+    """
+    Check if the API host is exposed to the network (non-loopback).
+
+    Args:
+        api_host: The configured API host address
+
+    Returns:
+        True if the host is exposed to network (e.g., 0.0.0.0), False if loopback-only
+    """
+    return api_host.lower() not in LOOPBACK_ADDRESSES
+
+
+def validate_security_posture(config: "SentinelConfig") -> None:
+    """
+    Validate that the configuration doesn't create a security vulnerability.
+
+    This is the "Host-Aware Boot Interlock" - we refuse to allow a configuration
+    where the API is exposed to the network but authentication is disabled.
+
+    Args:
+        config: The SentinelConfig to validate
+
+    Raises:
+        CriticalSecurityBreach: If the configuration is insecure
+
+    Security Matrix:
+        | api_host      | require_auth | Result        |
+        |---------------|--------------|---------------|
+        | 127.0.0.1     | False        | ✅ OK (local) |
+        | 127.0.0.1     | True         | ✅ OK         |
+        | 0.0.0.0       | True         | ✅ OK (auth)  |
+        | 0.0.0.0       | False        | ❌ BLOCKED    |
+    """
+    from core.errors import CriticalSecurityBreach
+
+    is_exposed = is_network_exposed(config.api_host)
+    is_naked = not config.security.require_auth
+
+    if is_exposed and is_naked:
+        raise CriticalSecurityBreach(
+            "SentinelForge cannot be exposed to the network without an Auth Shield.",
+            remediation=(
+                "Choose one of these options:\n"
+                "  1. Enable authentication: SENTINEL_REQUIRE_AUTH=true\n"
+                "  2. Restrict to localhost: SENTINEL_API_HOST=127.0.0.1\n"
+                "  3. Both (recommended for production)"
+            ),
+            details={
+                "api_host": config.api_host,
+                "require_auth": config.security.require_auth,
+                "terminal_enabled": config.security.terminal_enabled,
+                "terminal_require_auth": config.security.terminal_require_auth,
+            }
+        )
+
+
+def get_sensitive_endpoints() -> tuple:
+    """
+    Return the list of endpoints that should ALWAYS require authentication
+    when the system is exposed to the network, regardless of require_auth setting.
+
+    These endpoints provide dangerous capabilities:
+    - /ws/pty: Full terminal access (command execution)
+    - /forge/*: Exploit compilation and execution
+    - /tools/install: Can install arbitrary packages
+    - /tools/uninstall: Can remove security tools
+    - /mission/start: Can launch security scans against targets
+    """
+    return (
+        "/ws/pty",
+        "/forge/compile",
+        "/forge/execute",
+        "/tools/install",
+        "/tools/uninstall",
+        "/mission/start",
+    )
+
+
+# ============================================================================
 # Global Configuration Singleton
 # ============================================================================
 # These functions provide access to the one shared configuration instance.

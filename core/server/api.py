@@ -428,19 +428,76 @@ async def verify_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> bool:
-    """AsyncFunction verify_token."""
+    """
+    Standard token verification for regular API endpoints.
+
+    Behavior:
+    - If require_auth=False: Allow all requests (no token needed)
+    - If require_auth=True: Require valid Bearer token
+    """
     config = get_config()
-    # Conditional branch.
     if not config.security.require_auth:
         return True
-    # Conditional branch.
     if credentials is None:
         raise SentinelError(
             ErrorCode.AUTH_TOKEN_MISSING,
             "Authentication token required",
             details={"endpoint": str(request.url.path)}
         )
-    # Conditional branch.
+    if credentials.credentials != config.security.api_token:
+        raise SentinelError(
+            ErrorCode.AUTH_TOKEN_INVALID,
+            "Invalid authentication token",
+            details={"endpoint": str(request.url.path)}
+        )
+    return True
+
+
+async def verify_sensitive_token(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> bool:
+    """
+    STRICT token verification for sensitive/dangerous endpoints.
+
+    These endpoints can execute arbitrary commands, compile exploits, or install
+    software. They MUST require authentication when the API is network-exposed,
+    regardless of the global require_auth setting.
+
+    Endpoints protected by this dependency:
+    - /ws/pty: Full terminal access
+    - /forge/compile, /forge/execute: Exploit compilation
+    - /tools/install, /tools/uninstall: Package management
+    - /mission/start: Launch security scans
+
+    Behavior:
+    - If localhost (127.0.0.1): Respect require_auth setting (backward compatible)
+    - If network-exposed: ALWAYS require valid Bearer token
+
+    This is defense-in-depth - the boot interlock should prevent exposed+unauthenticated
+    configurations, but this provides an additional safety layer.
+    """
+    from core.base.config import is_network_exposed
+
+    config = get_config()
+    is_exposed = is_network_exposed(config.api_host)
+
+    # If exposed to network, ALWAYS require token (defense-in-depth)
+    # If localhost, respect the require_auth setting for backward compatibility
+    require_token = is_exposed or config.security.require_auth
+
+    if not require_token:
+        return True
+
+    if credentials is None:
+        raise SentinelError(
+            ErrorCode.AUTH_TOKEN_MISSING,
+            "Authentication token required for sensitive endpoint",
+            details={
+                "endpoint": str(request.url.path),
+                "reason": "network_exposed" if is_exposed else "require_auth_enabled"
+            }
+        )
     if credentials.credentials != config.security.api_token:
         raise SentinelError(
             ErrorCode.AUTH_TOKEN_INVALID,
@@ -471,9 +528,31 @@ async def check_ai_rate_limit(request: Request) -> None:
 
 @app.on_event("startup")
 async def startup_event():
-    """AsyncFunction startup_event."""
+    """
+    FastAPI startup event handler.
+
+    This is the first code that runs when the server starts. We use it to:
+    1. SECURITY INTERLOCK: Refuse to start if exposed without auth
+    2. Initialize logging
+    3. Initialize database
+    4. Start background tasks
+    """
     global _api_loop, _session_cleanup_task
     config = get_config()
+
+    # =========================================================================
+    # SECURITY INTERLOCK: Host-Aware Boot Guard
+    # =========================================================================
+    # This MUST be the first check before any other initialization.
+    # If the API is exposed to the network (0.0.0.0) without authentication,
+    # we refuse to start. This prevents accidental exposure of an unauthenticated
+    # security platform to the network.
+    #
+    # The interlock raises CriticalSecurityBreach which halts the entire process.
+    # =========================================================================
+    from core.base.config import validate_security_posture
+    validate_security_posture(config)
+
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
 
@@ -1079,10 +1158,13 @@ async def ghost_stop(_: bool = Depends(verify_token)):
 async def forge_compile(
     target: str,
     anomaly: str,
-    _: bool = Depends(verify_token)
+    _: bool = Depends(verify_sensitive_token)  # SENSITIVE: Always requires auth when exposed
 ):
     """
     Trigger the JIT Exploit Compiler.
+
+    SECURITY: This endpoint compiles exploit code and is protected by
+    verify_sensitive_token which ALWAYS requires auth when network-exposed.
     """
     # Error handling block.
     try:
@@ -1095,10 +1177,13 @@ async def forge_compile(
 @app.post("/forge/execute")
 async def forge_execute(
     script_path: str,
-    _: bool = Depends(verify_token)
+    _: bool = Depends(verify_sensitive_token)  # SENSITIVE: Always requires auth when exposed
 ):
     """
     Execute a compiled exploit in the sandbox.
+
+    SECURITY: This endpoint executes exploit code and is protected by
+    verify_sensitive_token which ALWAYS requires auth when network-exposed.
     """
     result = await SandboxRunner.run(script_path)
     return result
@@ -1121,10 +1206,13 @@ class InstallRequest(BaseModel):
 
 @v1_router.post("/tools/install")
 @app.post("/tools/install")
-async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
+async def tools_install(req: InstallRequest, _: bool = Depends(verify_sensitive_token)):
     """
     Install selected tools using Homebrew or pip (best-effort).
     Returns per-tool status. The process output tail is included for diagnostics.
+
+    SECURITY: This endpoint installs system packages and is protected by
+    verify_sensitive_token which ALWAYS requires auth when network-exposed.
     """
     from core.toolkit.tools import install_tools, get_installed_tools, TOOLS
     # Notify UI: installation started
@@ -1157,9 +1245,12 @@ async def tools_install(req: InstallRequest, _: bool = Depends(verify_token)):
 
 @v1_router.post("/tools/uninstall")
 @app.post("/tools/uninstall")
-async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_token)):
+async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_sensitive_token)):
     """
     Uninstall selected tools using Homebrew or pip (best-effort).
+
+    SECURITY: This endpoint removes system packages and is protected by
+    verify_sensitive_token which ALWAYS requires auth when network-exposed.
     """
     from core.toolkit.tools import uninstall_tools, get_installed_tools, TOOLS
     
@@ -1202,11 +1293,15 @@ async def mission_start(
     target: str,
     mode: str = "standard",
     force: bool = True,
-    _: bool = Depends(verify_token),
+    _: bool = Depends(verify_sensitive_token),  # SENSITIVE: Always requires auth when exposed
     __: None = Depends(check_rate_limit),
 ):
     """
     The ONE-CLICK Button. Starts the full autonomous loop.
+
+    SECURITY: This endpoint launches security scans against targets and is
+    protected by verify_sensitive_token which ALWAYS requires auth when
+    network-exposed. Prevents unauthorized reconnaissance operations.
     """
     req = ScanRequest(target=target, modules=None, force=force, mode=mode)
     session_id = await _begin_scan(req)
@@ -1518,12 +1613,23 @@ async def terminal_websocket_pty(websocket: WebSocket, session_id: Optional[str]
     # -------------------------------------------------------------------------
     # 1. Security & Configuration Validation
     # -------------------------------------------------------------------------
-    
-    # Use the centralized validator to enforce auth policies (tokens, etc.)
+    #
+    # /ws/pty provides FULL TERMINAL ACCESS - this is the most dangerous
+    # endpoint in the entire API. We apply strict security:
+    #
+    # - If network-exposed: ALWAYS require token (defense-in-depth)
+    # - If localhost: Respect terminal_require_auth setting
+    # -------------------------------------------------------------------------
+    from core.base.config import is_network_exposed
+
+    is_exposed = is_network_exposed(config.api_host)
+    # SENSITIVE: Always require auth when exposed, regardless of terminal_require_auth
+    require_token_for_pty = is_exposed or config.security.terminal_require_auth
+
     if not await validate_websocket_connection(
         websocket,
         "/ws/pty",
-        require_token=config.security.terminal_require_auth,
+        require_token=require_token_for_pty,
     ):
         return  # Connection closed by validator if failed
 

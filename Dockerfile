@@ -38,5 +38,31 @@ RUN mkdir -p /app/artifacts/exploits
 # Expose API Port
 EXPOSE 8000
 
+# ============================================================================
+# SECURITY NOTICE: Host Binding Configuration
+# ============================================================================
+# By default, the container binds to 127.0.0.1 (localhost only).
+# This is a SAFE DEFAULT - the API is not exposed to the network.
+#
+# To expose the API to the network, you MUST:
+# 1. Set SENTINEL_API_HOST=0.0.0.0
+# 2. Set SENTINEL_REQUIRE_AUTH=true
+# 3. Set SENTINEL_API_TOKEN=<your-secure-token>
+#
+# The server will REFUSE to start if exposed without authentication.
+# This is enforced by the Host-Aware Boot Interlock security feature.
+#
+# Example docker run command for network exposure:
+#   docker run -e SENTINEL_API_HOST=0.0.0.0 \
+#              -e SENTINEL_REQUIRE_AUTH=true \
+#              -e SENTINEL_API_TOKEN=my-secret-token \
+#              -p 8000:8000 sentinelforge
+# ============================================================================
+
+# Environment defaults (safe by default)
+ENV SENTINEL_API_HOST=127.0.0.1
+ENV SENTINEL_API_PORT=8000
+
 # Start the Command Deck
-CMD ["uvicorn", "core.api:app", "--host", "0.0.0.0", "--port", "8000"]
+# NOTE: We use shell form to enable environment variable substitution
+CMD uvicorn core.server.api:app --host ${SENTINEL_API_HOST} --port ${SENTINEL_API_PORT}

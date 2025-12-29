@@ -219,6 +219,26 @@ class Database:
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_findings_timestamp ON findings(timestamp DESC)")
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_issues_timestamp ON issues(timestamp DESC)")
 
+        await self._db_connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS decisions (
+                id TEXT PRIMARY KEY,
+                event_sequence INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                chosen TEXT,
+                reason TEXT,
+                alternatives JSON,
+                context JSON,
+                evidence JSON,
+                parent_id TEXT,
+                trigger_event_sequence INTEGER,
+                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """
+        )
+        await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_decisions_sequence ON decisions(event_sequence)")
+        await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_decisions_parent ON decisions(parent_id)")
+
     # ----------------------------
     # Low-level internal execution
     # ----------------------------
@@ -778,3 +798,4 @@ class Database:
             }
             for row in rows
         ]
+
