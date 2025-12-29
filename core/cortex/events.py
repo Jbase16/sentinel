@@ -33,10 +33,18 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# Global event sequence counter - thread-safe singleton with persistence
-_event_sequence_lock = threading.Lock()
-_event_sequence_counter = 0
-_event_sequence_initialized = False  # Track if we've loaded from DB
+# ============================================================================
+# SEQUENCE AUTHORITY DELEGATION
+# ============================================================================
+# The event sequence counter has been centralized into GlobalSequenceAuthority
+# (core/base/sequence.py). This ensures a single, unified timeline across:
+# - GraphEvents (this module)
+# - DecisionPoints (core/scheduler/decisions.py)
+# - Any future temporal data types
+#
+# The old module-level counter (_event_sequence_counter) has been removed.
+# All sequence operations now delegate to GlobalSequenceAuthority.
+# ============================================================================
 
 # Global run_id for forensics - identifies which runtime generated events
 # Generated once per process startup, persisted for debugging
@@ -86,38 +94,19 @@ async def initialize_event_sequence_from_db() -> int:
     to ensure the counter starts from the last persisted value, maintaining
     continuity across restarts.
 
+    IMPLEMENTATION NOTE:
+    This function now delegates to GlobalSequenceAuthority, which provides
+    a unified timeline shared by both EventStore and DecisionLedger.
+
     Returns:
         The loaded sequence number (0 if no persisted value exists)
 
     Side effects:
-        - Sets the global _event_sequence_counter from the database
-        - Marks the counter as initialized
+        - Initializes GlobalSequenceAuthority from database
+        - Future calls to get_next_sequence() will work
     """
-    global _event_sequence_counter, _event_sequence_initialized
-
-    with _event_sequence_lock:
-        if _event_sequence_initialized:
-            return _event_sequence_counter
-
-        try:
-            from core.data.db import Database
-            db = Database.instance()
-            # The database needs to be initialized first
-            persisted = await db.get_event_sequence()
-            _event_sequence_counter = persisted
-            _event_sequence_initialized = True
-
-            if persisted > 0:
-                logger.info(f"[EventBus] Loaded event sequence from database: {persisted}")
-            else:
-                logger.debug("[EventBus] No persisted event sequence found, starting from 0")
-
-            return _event_sequence_counter
-        except Exception as e:
-            logger.warning(f"[EventBus] Failed to load event sequence from DB: {e}, starting from 0")
-            _event_sequence_counter = 0
-            _event_sequence_initialized = True
-            return 0
+    from core.base.sequence import GlobalSequenceAuthority
+    return await GlobalSequenceAuthority.initialize_from_db()
 
 
 def get_next_sequence() -> int:
@@ -130,7 +119,10 @@ def get_next_sequence() -> int:
     - Debugging capability to reconstruct exact event flow
     - Continuity across process restarts (via persistence)
 
-    Thread-safe via lock to ensure no sequence numbers are skipped/duplicated.
+    IMPLEMENTATION NOTE:
+    This function now delegates to GlobalSequenceAuthority, which provides
+    a unified timeline shared by both EventStore and DecisionLedger.
+    The authority uses itertools.count() for atomic, lock-free increments.
 
     Returns:
         The next sequence number
@@ -140,33 +132,9 @@ def get_next_sequence() -> int:
 
     Side effects:
         - Persists the new sequence number to the database (fire-and-forget)
-        - This is async but non-blocking; if persistence fails, we still return the sequence
     """
-    global _event_sequence_counter, _event_sequence_initialized
-
-    # Enforce initialization to prevent silent corruption
-    # If events are emitted before startup completes, we want to fail loudly
-    # rather than produce duplicate IDs after restart
-    if not _event_sequence_initialized:
-        raise RuntimeError(
-            "Event sequence not initialized. "
-            "Call initialize_event_sequence_from_db() during startup."
-        )
-
-    with _event_sequence_lock:
-        _event_sequence_counter += 1
-        sequence = _event_sequence_counter
-
-    # Persist asynchronously (fire-and-forget to avoid blocking event emission)
-    # If this fails, we still have the correct in-memory value
-    try:
-        from core.data.db import Database
-        Database.instance().save_event_sequence(sequence)
-    except Exception as e:
-        # Log but don't fail - the in-memory counter is still correct
-        logger.debug(f"[EventBus] Failed to persist sequence {sequence}: {e}")
-
-    return sequence
+    from core.base.sequence import GlobalSequenceAuthority
+    return GlobalSequenceAuthority.instance().next_id()
 
 class GraphEventType(str, Enum):
     """
@@ -341,8 +309,9 @@ def reset_event_sequence() -> None:
 
     WARNING: This should ONLY be used in tests!
     In production, the sequence counter should never be reset.
+
+    IMPLEMENTATION NOTE:
+    Delegates to GlobalSequenceAuthority.reset_for_testing().
     """
-    global _event_sequence_counter, _event_sequence_initialized
-    with _event_sequence_lock:
-        _event_sequence_counter = 0
-        _event_sequence_initialized = False
+    from core.base.sequence import GlobalSequenceAuthority
+    GlobalSequenceAuthority.reset_for_testing()

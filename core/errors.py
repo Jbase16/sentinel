@@ -421,4 +421,4 @@ def handle_error(error: Exception, context: Optional[str] = None) -> SentinelErr
 # Module-Level Exports
 # ============================================================================
 
-__all__ = ["ErrorCode", "SentinelError", "CriticalSecurityBreach", "handle_error"]
+__all__ = ["ErrorCode", "SentinelError", "SentinelSecurityError", "CriticalSecurityBreach", "handle_error"]
