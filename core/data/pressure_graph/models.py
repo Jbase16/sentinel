@@ -1,154 +1,107 @@
 """
-Core data models for pressure graph.
+Core data models.
 
-All models are deterministic and traceable to evidence.
+Architectural Note: These dataclasses are frozen.
+This enforces functional purity. To mutate state, create a new instance.
 """
 
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Set, Dict, List, Optional
 
+# Type aliases for clarity and stricter checking
+NodeId = str
+EdgeId = str
+
 
 class EdgeType(Enum):
-    """Types of causal relationships between pressure nodes."""
-    ENABLES = "enables"      # A creates opportunity for B
-    REACHES = "reaches"      # A can communicate with B
-    REQUIRES = "requires"    # A depends on B
-    AMPLIFIES = "amplifies"  # A increases impact of B
+    """Types of causal relationships."""
+    ENABLES = "enables"
+    REACHES = "reaches"
+    REQUIRES = "requires"
+    AMPLIFIES = "amplifies"
 
 
-@dataclass
+@dataclass(frozen=True)
 class PressureNode:
     """
-    Represents a security entity in the pressure graph.
+    Immutable security entity.
     
-    Pressure is deterministic: severity × exposure × exploitability × privilege_gain × asset_value.
+    Invariant: base_pressure is deterministic and constant for the lifetime 
+    of the instance.
     """
-    id: str
-    type: str  # "asset", "vulnerability", "exposure", "identity_issue", "trust"
+    id: NodeId
+    type: str
     
-    # Input factors (all traceable to evidence)
-    severity: float  # 0-10, from CVSS or tool output
-    exposure: float  # 0-1, how accessible is this?
-    exploitability: float  # 0-1, how easily can it be exploited?
-    privilege_gain: float  # 0-1, what access does this provide?
-    asset_value: float  # 0-10, business criticality
+    # Factors
+    severity: float
+    exposure: float
+    exploitability: float
+    privilege_gain: float
+    asset_value: float
     
-    # Evidence traceability
-    tool_reliability: float = 1.0  # 0-1, reliability of source tool
-    evidence_quality: float = 1.0  # 0-1, quality of evidence
-    corroboration_count: int = 0  # Number of corroborating findings
+    # Evidence
+    tool_reliability: float = 1.0
+    evidence_quality: float = 1.0
+    corroboration_count: int = 0
     
-    # Computed values
+    # Computed Field (set once in __post_init__)
     base_pressure: float = field(init=False)
-    confidence: float = field(init=False)
-    inbound_pressure: float = 0.0  # Pressure flowing from upstream nodes
     
     def __post_init__(self):
-        """Compute deterministic values after initialization."""
-        # Base pressure: deterministic product
-        self.base_pressure = (
-            self.severity *
-            self.exposure *
-            self.exploitability *
-            self.privilege_gain *
-            self.asset_value
-        )
-        
-        # Confidence: deterministic calculation based on evidence
-        # Formula: tool_reliability * (0.5 + 0.5 * evidence_quality) * (1.0 - 0.1^(corroboration_count + 1))
-        self.confidence = (
-            self.tool_reliability *
-            (0.5 + 0.5 * self.evidence_quality) *
-            (1.0 - 0.1 ** (self.corroboration_count + 1))
+        # Using object.__setattr__ because the class is frozen=True
+        object.__setattr__(
+            self, 
+            'base_pressure',
+            self.severity * self.exposure * self.exploitability * 
+            self.privilege_gain * self.asset_value
         )
 
 
-@dataclass
+@dataclass(frozen=True)
 class PressureEdge:
     """
-    Represents a causal relationship between pressure nodes.
-    
-    Pressure propagates from source to target based on transfer_factor.
+    Immutable causal relationship.
     """
-    id: str
-    source_id: str
-    target_id: str
+    id: EdgeId
+    source_id: NodeId
+    target_id: NodeId
     type: EdgeType
     
-    # How much pressure propagates (0-1)
     transfer_factor: float
-    
-    # How certain we are this edge exists (0-1)
     confidence: float
     
-    # Evidence traceability
-    evidence_sources: List[str] = field(default_factory=list)  # Which tools/findings created this edge
-    created_at: float = 0.0  # When was this edge discovered
+    evidence_sources: List[str] = field(default_factory=list)
     
-    # For optimization
-    cached_pressure_delta: float = 0.0  # Δ pressure at target if this edge is removed
+    # Internal state for optimization (mutable for perf, logically immutable)
+    # We allow _cached_... fields to be mutable to support post-init normalization
+    _normalized_transfer_factor: Optional[float] = field(default=None, init=False, compare=False)
+    
+    @property
+    def effective_transfer(self) -> float:
+        """
+        Returns the transfer factor adjusted for confidence.
+        
+        Optimization: If normalization has occurred, returns the pre-computed value.
+        """
+        if self._normalized_transfer_factor is not None:
+            return self._normalized_transfer_factor
+        
+        return self.transfer_factor * self.confidence
 
 
-@dataclass
+@dataclass(frozen=True)
 class Remediation:
     """
-    Represents a security fix or mitigation.
-    
-    Remediations can be:
-    - Remove node (e.g., patch vulnerability)
-    - Remove edge (e.g., block network path)
-    - Reduce node pressure (e.g., add WAF)
-    - Reduce edge transfer factor (e.g., add MFA)
+    A description of a state transition.
     """
     id: str
     name: str
     
-    # What this remediation does
-    nodes_to_remove: Set[str] = field(default_factory=set)
-    edges_to_remove: Set[str] = field(default_factory=set)
-    node_pressure_reductions: Dict[str, float] = field(default_factory=dict)
-    edge_transfer_reductions: Dict[str, float] = field(default_factory=dict)
+    nodes_to_remove: Set[NodeId] = field(default_factory=set)
+    edges_to_remove: Set[EdgeId] = field(default_factory=set)
+    node_pressure_reductions: Dict[NodeId, float] = field(default_factory=dict)
+    edge_transfer_reductions: Dict[EdgeId, float] = field(default_factory=dict)
     
-    # Cost/effort metrics
-    effort: float = 0.5  # 0-1, how hard is this to implement?
-    cost: float = 1.0  # Monetary or effort cost
-    
-    # Evidence
-    evidence_sources: List[str] = field(default_factory=list)
-    
-    def apply_to_node(self, node: 'PressureNode') -> Optional['PressureNode']:
-        """
-        Apply this remediation to a node.
-        Returns modified node or None if node is removed.
-        """
-        if node.id in self.nodes_to_remove:
-            return None  # Node is removed
-        
-        if node.id in self.node_pressure_reductions:
-            # Create new node with reduced base pressure
-            from copy import deepcopy
-            new_node = deepcopy(node)
-            reduction = self.node_pressure_reductions[node.id]
-            new_node.base_pressure = max(0.0, node.base_pressure - reduction)
-            return new_node
-        
-        return node  # No change
-    
-    def apply_to_edge(self, edge: 'PressureEdge') -> Optional['PressureEdge']:
-        """
-        Apply this remediation to an edge.
-        Returns modified edge or None if edge is removed.
-        """
-        if edge.id in self.edges_to_remove:
-            return None  # Edge is removed
-        
-        if edge.id in self.edge_transfer_reductions:
-            # Create new edge with reduced transfer factor
-            from copy import deepcopy
-            new_edge = deepcopy(edge)
-            reduction = self.edge_transfer_reductions[edge.id]
-            new_edge.transfer_factor = max(0.0, edge.transfer_factor - reduction)
-            return new_edge
-        
-        return edge  # No change
+    effort: float = 0.5
+    cost: float = 1.0
