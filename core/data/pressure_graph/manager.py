@@ -12,11 +12,14 @@ from .models import (
     PressureNode,
     PressureEdge,
     Remediation,
-    EdgeType
+    EdgeType,
+    PressureSource,
+    RemediationState
 )
 from .propagator import PressurePropagator
 from .counterfactual import CounterfactualEngine
 from .min_fix_set import MinimalFixSetEngine
+from .explanation import CausalExplainer
 
 # Import Sentinel stores (will be available at runtime)
 try:
@@ -56,6 +59,7 @@ class PressureGraphManager(Observable):
         self.propagator: Optional[PressurePropagator] = None
         self.counterfactual: Optional[CounterfactualEngine] = None
         self.min_fix_set: Optional[MinimalFixSetEngine] = None
+        self.explainer: Optional[CausalExplainer] = None
         
         # State
         self.crown_jewel_ids: Set[str] = set()
@@ -94,8 +98,21 @@ class PressureGraphManager(Observable):
             self.edges,
             self.propagator
         )
+        self.explainer = CausalExplainer(
+            self.nodes,
+            # We need to build the reverse adjacency list for explainer
+            # Optimization: pass edges list, let explainer build index
+            self._build_reverse_edges()
+        )
         
         self._engines_initialized = True
+        
+    def _build_reverse_edges(self) -> Dict[str, list]:
+        """Build target -> [incoming edges] map."""
+        reverse = {}
+        for edge in self.edges.values():
+            reverse.setdefault(edge.target_id, []).append(edge)
+        return reverse
     
     def _on_issues_changed(self):
         """
@@ -235,7 +252,10 @@ class PressureGraphManager(Observable):
             asset_value=asset_value,
             tool_reliability=tool_reliability,
             evidence_quality=evidence_quality,
-            corroboration_count=corroboration_count
+            corroboration_count=corroboration_count,
+            pressure_source=PressureSource.ENGINE, 
+            remediation_state=RemediationState.NONE,
+            revision=1
         )
     
     def _killchain_to_pressure_edge(self, edge: dict) -> PressureEdge:

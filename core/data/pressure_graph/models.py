@@ -22,6 +22,22 @@ class EdgeType(Enum):
     AMPLIFIES = "amplifies"
 
 
+class PressureSource(Enum):
+    """Origin of the pressure value."""
+    ENGINE = "engine"         # Calculated by our Propagator
+    INTERPOLATED = "interpolated" # Smooth transition state (frontend only usually, but allowed here)
+    DECAYING = "decaying"     # Post-remediation cooling
+
+
+class RemediationState(Enum):
+    """Lifecycle of a fix."""
+    NONE = "none"
+    PROPOSED = "proposed"     # Simulated relief
+    APPLIED = "applied"       # User clicked "Fix"
+    VERIFIED = "verified"     # Scanner confirmed fix
+    REVERTED = "reverted"     # Fix failed or undone
+
+
 @dataclass(frozen=True)
 class PressureNode:
     """
@@ -44,6 +60,11 @@ class PressureNode:
     tool_reliability: float = 1.0
     evidence_quality: float = 1.0
     corroboration_count: int = 0
+    
+    # V2: State & Audit
+    pressure_source: PressureSource = PressureSource.ENGINE
+    remediation_state: RemediationState = RemediationState.NONE
+    revision: int = 1
     
     # Computed Field (set once in __post_init__)
     base_pressure: float = field(init=False)
@@ -97,6 +118,7 @@ class Remediation:
     """
     id: str
     name: str
+    state: RemediationState = RemediationState.PROPOSED
     
     nodes_to_remove: Set[NodeId] = field(default_factory=set)
     edges_to_remove: Set[EdgeId] = field(default_factory=set)
@@ -105,3 +127,54 @@ class Remediation:
     
     effort: float = 0.5
     cost: float = 1.0
+
+    def apply_to_node(self, node: PressureNode) -> Optional[PressureNode]:
+        """Returns modified node or None if removed."""
+        if self.state == RemediationState.REVERTED:
+            return node
+            
+        if node.id in self.nodes_to_remove:
+            return None
+            
+        if node.id in self.node_pressure_reductions:
+            reduction = self.node_pressure_reductions[node.id]
+            # Create new derived node with reduced severity
+            new_severity = node.severity * (1.0 - reduction)
+            return PressureNode(
+                id=node.id,
+                type=node.type,
+                severity=new_severity, # Reduced
+                exposure=node.exposure,
+                exploitability=node.exploitability,
+                privilege_gain=node.privilege_gain,
+                asset_value=node.asset_value,
+                tool_reliability=node.tool_reliability,
+                evidence_quality=node.evidence_quality,
+                corroboration_count=node.corroboration_count,
+                pressure_source=node.pressure_source,
+                remediation_state=self.state,
+                revision=node.revision + 1
+            )
+        return node
+
+    def apply_to_edge(self, edge: PressureEdge) -> Optional[PressureEdge]:
+        """Returns modified edge or None if removed."""
+        if self.state == RemediationState.REVERTED:
+            return edge
+            
+        if edge.id in self.edges_to_remove:
+            return None
+            
+        if edge.id in self.edge_transfer_reductions:
+            reduction = self.edge_transfer_reductions[edge.id]
+            new_transfer = edge.transfer_factor * (1.0 - reduction)
+            return PressureEdge(
+                id=edge.id,
+                source_id=edge.source_id,
+                target_id=edge.target_id,
+                type=edge.type,
+                transfer_factor=new_transfer,
+                confidence=edge.confidence,
+                evidence_sources=edge.evidence_sources
+            )
+        return edge

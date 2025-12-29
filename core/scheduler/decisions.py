@@ -248,6 +248,7 @@ class DecisionLedger:
     - Supports concurrent readers (no writer starvation)
     """
     
+    
     def __init__(self, max_decisions: int = 5000):
         """
         Initialize the decision ledger.
@@ -257,27 +258,22 @@ class DecisionLedger:
         """
         self._decisions: deque[DecisionPoint] = deque(maxlen=max_decisions)
         self._lock = threading.RLock()
-        # Removed internal _sequence; we now use global get_next_sequence
         
-        # Index for O(1) parent lookup (decision tree queries)
-        self._by_parent: Dict[str, List[DecisionPoint]] = {}
-    
     def commit(self, decision: DecisionPoint) -> DecisionPoint:
         """
         Append a decision to the ledger and assign sequence number.
         
         This is the ONLY way to add decisions, ensuring sequence integrity.
+        Persists to database asynchronously.
         
         Args:
             decision: The decision to commit (without sequence)
         
         Returns:
             The decision with sequence number assigned
-        
-        Thread-safety:
-            Uses RLock to ensure atomic sequence allocation
         """
         from core.cortex.events import get_next_sequence
+        from core.data.db import Database
         
         # Context-managed operation.
         with self._lock:
@@ -286,27 +282,66 @@ class DecisionLedger:
             sequenced_decision = decision.with_sequence(global_seq)
             self._decisions.append(sequenced_decision)
             
-            # Update parent index for tree queries
-            if sequenced_decision.parent_id:
-                self._by_parent.setdefault(sequenced_decision.parent_id, []).append(
-                    sequenced_decision
-                )
+            # Persist to DB (fire-and-forget)
+            try:
+                # Convert to dict for DB
+                payload = {
+                    "id": sequenced_decision.id,
+                    "sequence": sequenced_decision.sequence,
+                    "type": sequenced_decision.type.value,
+                    "chosen": sequenced_decision.chosen,
+                    "reason": sequenced_decision.reason,
+                    "alternatives": sequenced_decision.alternatives,
+                    "context": sequenced_decision.context,
+                    "evidence": sequenced_decision.evidence,
+                    "parent_id": sequenced_decision.parent_id,
+                    "trigger_event_sequence": sequenced_decision.trigger_event_sequence
+                }
+                Database.instance().save_decision(payload)
+            except Exception:
+                # DB failure should not crash the scanner
+                pass
         
         return sequenced_decision
     
-    def get_children(self, decision_id: str) -> List[DecisionPoint]:
+    async def get_children(self, decision_id: str) -> List[DecisionPoint]:
         """
         Get all decisions that were made as a result of this decision.
         Enables decision tree reconstruction.
+        
+        Fetches 'deep' children from Database (async).
         """
-        # Context-managed operation.
-        with self._lock:
-            return list(self._by_parent.get(decision_id, []))
+        from core.data.db import Database
+        try:
+            records = await Database.instance().get_decision_children(decision_id)
+            # Rehydrate DecisionPoints (approximate, as immutable/frozen might limit reconstruction fidelity without factory)
+            # We assume these are mostly for analysis/reporting.
+            children = []
+            for r in records:
+                children.append(DecisionPoint(
+                    id=r["id"],
+                    type=DecisionType(r["type"]),
+                    chosen=r["chosen"],
+                    reason=r["reason"],
+                    alternatives=r["alternatives"],
+                    context=r["context"],
+                    evidence=r["evidence"],
+                    parent_id=r["parent_id"],
+                    trigger_event_sequence=r["trigger_event_sequence"],
+                    timestamp=0.0, # DB doesn't store monotonic float
+                    sequence=r["sequence"]
+                ))
+            return children
+        except Exception:
+            return []
     
     def get_chain(self, decision_id: str) -> List[DecisionPoint]:
         """
         Get the causal chain leading to this decision.
         Returns [root_decision, ..., this_decision].
+        
+        NOTE: Only scans in-memory history (last N decisions).
+        Deep history would require DB lookups.
         """
         # Context-managed operation.
         with self._lock:
@@ -324,7 +359,7 @@ class DecisionLedger:
             return chain
     
     def get_all(self) -> List[DecisionPoint]:
-        """Get all decisions in sequence order."""
+        """Get all *in-memory* decisions in sequence order."""
         # Context-managed operation.
         with self._lock:
             return list(self._decisions)
@@ -334,8 +369,6 @@ class DecisionLedger:
         # Context-managed operation.
         with self._lock:
             self._decisions.clear()
-            self._by_parent.clear()
-            # Note: We do not reset the global event counter here.
     
     def stats(self) -> Dict[str, Any]:
         """Return diagnostic statistics."""
@@ -346,11 +379,10 @@ class DecisionLedger:
                 type_counts[d.type.value] = type_counts.get(d.type.value, 0) + 1
             
             return {
-                "total_decisions": len(self._decisions),
+                "total_decisions_memory": len(self._decisions),
                 "last_sequence": self._decisions[-1].sequence if self._decisions else 0,
                 "max_capacity": self._decisions.maxlen,
-                "decisions_by_type": type_counts,
-                "decision_chains": len(self._by_parent)
+                "decisions_by_type": type_counts
             }
 
 
@@ -608,6 +640,11 @@ def get_global_ledger() -> DecisionLedger:
 # ============================================================================
 
 if __name__ == "__main__":
+    # Initialize sequence for testing
+    import core.cortex.events as events
+    # Monkeypatch to bypass DB check
+    events._event_sequence_initialized = True
+    
     # Verify immutability
     decision = DecisionPoint.create(
         decision_type=DecisionType.INTENT_TRANSITION,

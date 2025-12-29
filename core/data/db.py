@@ -799,3 +799,115 @@ class Database:
             for row in rows
         ]
 
+    # ----------------------------
+    # Decisions (Strategic Brain)
+    # ----------------------------
+    def save_decision(self, decision: Dict[str, Any]) -> None:
+        self.blackbox.fire_and_forget(self._save_decision_impl, decision)
+
+    async def _save_decision_impl(self, decision: Dict[str, Any]):
+        await self._execute_internal(
+            """
+            INSERT OR REPLACE INTO decisions
+              (id, event_sequence, type, chosen, reason, alternatives, context, evidence, parent_id, trigger_event_sequence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                decision["id"],
+                int(decision.get("sequence", 0)),
+                decision["type"],
+                str(decision["chosen"]),
+                decision["reason"],
+                json.dumps(decision.get("alternatives", [])),
+                json.dumps(decision.get("context", {})),
+                json.dumps(decision.get("evidence", {})),
+                decision.get("parent_id"),
+                decision.get("trigger_event_sequence"),
+            ),
+        )
+
+    async def save_decision_txn(self, decision: Dict[str, Any], conn) -> None:
+        """
+        Save a decision record within a transaction.
+        """
+        await conn.execute(
+            """
+            INSERT OR REPLACE INTO decisions
+              (id, event_sequence, type, chosen, reason, alternatives, context, evidence, parent_id, trigger_event_sequence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+            (
+                decision["id"],
+                int(decision.get("sequence", 0)),
+                decision["type"],
+                str(decision["chosen"]),
+                decision["reason"],
+                json.dumps(decision.get("alternatives", [])),
+                json.dumps(decision.get("context", {})),
+                json.dumps(decision.get("evidence", {})),
+                decision.get("parent_id"),
+                decision.get("trigger_event_sequence"),
+            ),
+        )
+
+    async def get_decisions(self, limit: int = 100) -> List[Dict]:
+        """
+        Retrieve recent strategic decisions.
+        """
+        rows = await self.fetch_all(
+            """
+            SELECT id, event_sequence, type, chosen, reason, alternatives, context, evidence, parent_id, trigger_event_sequence, timestamp
+            FROM decisions
+            ORDER BY event_sequence DESC
+            LIMIT ?
+        """,
+            (limit,),
+        )
+        return [
+            {
+                "id": row[0],
+                "sequence": row[1],
+                "type": row[2],
+                "chosen": row[3],
+                "reason": row[4],
+                "alternatives": json.loads(row[5]) if row[5] else [],
+                "context": json.loads(row[6]) if row[6] else {},
+                "evidence": json.loads(row[7]) if row[7] else {},
+                "parent_id": row[8],
+                "trigger_event_sequence": row[9],
+                "timestamp": row[10],
+            }
+            for row in rows
+        ]
+
+    async def get_decision_children(self, parent_id: str) -> List[Dict]:
+        """
+        Retrieve all decisions caused by a specific parent decision.
+        """
+        rows = await self.fetch_all(
+            """
+            SELECT id, event_sequence, type, chosen, reason, alternatives, context, evidence, parent_id, trigger_event_sequence, timestamp
+            FROM decisions
+            WHERE parent_id = ?
+            ORDER BY event_sequence ASC
+        """,
+            (parent_id,),
+        )
+        return [
+            {
+                "id": row[0],
+                "sequence": row[1],
+                "type": row[2],
+                "chosen": row[3],
+                "reason": row[4],
+                "alternatives": json.loads(row[5]) if row[5] else [],
+                "context": json.loads(row[6]) if row[6] else {},
+                "evidence": json.loads(row[7]) if row[7] else {},
+                "parent_id": row[8],
+                "trigger_event_sequence": row[9],
+                "timestamp": row[10],
+            }
+            for row in rows
+        ]
+
+
