@@ -66,12 +66,16 @@ P_new = (1 - d) × Base_Pressure + d × Σ(Inbound_Pressure × Transfer_Factor)
 - Iterative relaxation algorithm
 - Convergence validation
 - Pressure contribution analysis
+- **Immutability enforcement** (prevents mutation after initialization)
+- **Symmetric edge caching** (O(k) lookups for both inbound and outbound edges)
+- **"Why" explainer** (explains why a crown jewel has its current pressure)
 
 ### 3. Counterfactual Engine (`counterfactual.py`)
 - Fast remediation impact simulation
 - Dirty subgraph optimization for performance
 - Top remediation discovery
 - Chokepoint analysis
+- **Optimized dirty-node identification** (stops at zero-confidence edges and crown jewels)
 
 ### 4. Minimal Fix Set Engine (`min_fix_set.py`)
 - Node-splitting min-cut algorithm
@@ -195,9 +199,10 @@ The manager observes store changes via signals:
 ### Optimizations
 
 1. **Dirty Subgraph**: Only recompute affected components
-2. **Edge Caching**: Lazy initialization for O(1) lookups
-3. **Damping Factor**: Guarantees fast convergence
-4. **Depth Limiting**: Prunes impossible paths in chokepoint analysis
+2. **Symmetric Edge Caching**: O(k) lookups for both inbound and outbound edges
+3. **Dirty-Node Pruning**: Stops traversal at zero-confidence edges and crown jewels
+4. **Damping Factor**: Guarantees fast convergence
+5. **Depth Limiting**: Prunes impossible paths in chokepoint analysis
 
 ## Testing
 
@@ -209,6 +214,9 @@ pytest core/data/pressure_graph/tests/
 
 # Run specific test file
 pytest core/data/pressure_graph/tests/test_propagator.py
+
+# Run property-based tests with Hypothesis
+pytest core/data/pressure_graph/tests/test_property_based.py
 ```
 
 ### Test Coverage
@@ -218,6 +226,7 @@ pytest core/data/pressure_graph/tests/test_propagator.py
 - `test_counterfactual.py`: Remediation simulation
 - `test_min_fix_set.py`: Min-cut computation
 - `test_manager.py`: Integration with stores
+- `test_property_based.py`: **Property-based invariant testing with Hypothesis**
 
 ### Invariants
 
@@ -226,6 +235,89 @@ All tests validate:
 2. **Convergence**: Propagation always converges
 3. **Non-negativity**: Pressures are never negative
 4. **Cycle Safety**: Cycles don't cause infinite loops
+5. **Property-Based Testing**: Hypothesis generates 100+ random test cases to enforce monotonicity
+
+## New Features (Production-Grade)
+
+### Pressure Explainer
+
+The propagator now includes an `explain_pressure()` method that answers:
+
+**"Why does crown jewel X have pressure Y?"**
+
+```python
+explanation = propagator.explain_pressure(
+    crown_jewel_id="database_primary",
+    top_n=3
+)
+
+# Returns:
+{
+    "crown_jewel_id": "database_primary",
+    "total_pressure": 8.5,
+    "top_contributors": [
+        {
+            "source_id": "vuln_123",
+            "pressure_contribution": 4.2,
+            "transfer_chain": [
+                {
+                    "node_id": "vuln_123",
+                    "pressure": 7.8,
+                    "edge_id": "edge_1",
+                    "transfer_factor": 0.8,
+                    "confidence": 0.9
+                },
+                {
+                    "node_id": "service",
+                    "pressure": 6.2,
+                    "edge_id": "edge_2",
+                    "transfer_factor": 0.9,
+                    "confidence": 0.95
+                },
+                {
+                    "node_id": "database_primary",
+                    "pressure": 8.5,
+                    "edge_id": None,
+                    "transfer_factor": None,
+                    "confidence": None
+                }
+            ]
+        }
+        # ... more contributors
+    ]
+}
+```
+
+This makes Sentinel feel intelligent, not just correct.
+
+### Propagator Immutability
+
+`PressurePropagator` is now frozen after initialization:
+
+```python
+propagator = PressurePropagator(nodes, edges)
+# propagator._frozen == True
+
+# Attempting to modify nodes/edges after initialization
+# will raise RuntimeError via _check_mutable()
+```
+
+This prevents subtle bugs from mutating cached structures.
+
+### Property-Based Testing
+
+New property-based tests use Hypothesis to verify critical invariants:
+
+```python
+# Monotonicity: Random severity perturbations never reduce crown jewel pressure
+@given(severity_increase=st.floats(min_value=0.1, max_value=2.0))
+def test_monotonicity_crown_jewel_pressure(severity_increase):
+    # Generate random severity increases
+    # Verify crown jewel pressure never decreases
+    # Run 100+ times with different random inputs
+```
+
+This locks in mathematical guarantees through automated testing.
 
 ## Design Decisions
 
@@ -244,6 +336,14 @@ Handles arbitrary graph structures including cycles without topological sorting.
 ### Why Deterministic?
 
 Security decisions require explainability. Black-box AI models are unacceptable for audit trails. All pressure values are mathematically traceable to evidence.
+
+### Why Immutable Propagator?
+
+Prevents race conditions and stale cache bugs. Once constructed, propagator state should never change. If graph structure changes, create a new propagator instance.
+
+### Why Property-Based Tests?
+
+Traditional unit tests can't prove invariants across all possible inputs. Hypothesis generates random test cases to mathematically enforce guarantees like monotonicity.
 
 ## Future Enhancements
 

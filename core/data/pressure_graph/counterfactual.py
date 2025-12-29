@@ -230,6 +230,10 @@ class CounterfactualEngine:
         Identify nodes affected by remediation.
         
         Dirty nodes = removed nodes + all downstream reachable nodes.
+        
+        Optimization: 
+        - Stop traversal at zero-confidence edges
+        - Stop at crown jewels (sinks)
         """
         dirty_nodes: Set[str] = set()
         
@@ -247,11 +251,20 @@ class CounterfactualEngine:
         while queue:
             node_id = queue.popleft()
             
+            # Stop at crown jewels (sinks)
+            if node_id in self._crown_jewel_ids:
+                continue
+            
             # Get outbound edges (skip removed edges)
             outbound_edges = self.propagator.get_outbound_edges(node_id)
             for edge in outbound_edges:
+                # Edge removed by remediation
                 if edge.id in remediation.edges_to_remove:
                     continue  # Edge removed, don't traverse
+                
+                # Stop at zero-confidence edges (no pressure propagates)
+                if edge.confidence == 0.0:
+                    continue
                 
                 if edge.target_id not in visited:
                     visited.add(edge.target_id)
