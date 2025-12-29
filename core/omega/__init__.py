@@ -232,7 +232,7 @@ class OmegaManager:
         """
         raise NotImplementedError(
             "Wrapper-only: CRONUS phase execution deferred. "
-            "Future implementation should use core.cronus modules."
+            "Future implementation should use core.sentient.cronus modules."
         )
 
     async def run_mimic_phase(self, config: OmegaConfig) -> Dict[str, Any]:
@@ -254,7 +254,7 @@ class OmegaManager:
         """
         raise NotImplementedError(
             "Wrapper-only: MIMIC phase execution deferred. "
-            "Future implementation should use core.mimic modules."
+            "Future implementation should use core.sentient.mimic modules."
         )
 
     async def run_nexus_phase(self, config: OmegaConfig) -> Dict[str, Any]:
@@ -276,7 +276,7 @@ class OmegaManager:
         """
         raise NotImplementedError(
             "Wrapper-only: NEXUS phase execution deferred. "
-            "Future implementation should use core.nexus modules."
+            "Future implementation should use core.aegis.nexus modules."
         )
 
     def calculate_combined_risk(

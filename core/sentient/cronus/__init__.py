@@ -22,7 +22,7 @@ INTEGRATION POINTS:
 - KnowledgeGraph: Stores zombie endpoint relationships
 """
 
-from core.cronus.time_machine import (
+from core.sentient.cronus.time_machine import (
     TimeMachine,
     SnapshotQuery,
     SnapshotResult,
@@ -30,14 +30,14 @@ from core.cronus.time_machine import (
     SAFE_MODE,
     create_time_machine,
 )
-from core.cronus.differ import (
+from core.sentient.cronus.differ import (
     SitemapDiffer,
     DiffReport,
     Endpoint,
     EndpointStatus,
     create_sitemap_differ,
 )
-from core.cronus.hunter import (
+from core.sentient.cronus.hunter import (
     ZombieHunter,
     ZombieProbe,
     ZombieReport,

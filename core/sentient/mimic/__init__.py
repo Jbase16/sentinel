@@ -24,7 +24,7 @@ INTEGRATION POINTS:
 - KnowledgeGraph: Stores hidden route relationships
 """
 
-from core.mimic.downloader import (
+from core.sentient.mimic.downloader import (
     AssetDownloader,
     AssetManifest,
     DownloadedAsset,
@@ -32,7 +32,7 @@ from core.mimic.downloader import (
     SAFE_MODE,
     create_asset_downloader,
 )
-from core.mimic.ast_parser import (
+from core.sentient.mimic.ast_parser import (
     ASTParser,
     ASTNode,
     RouteDefinition,
@@ -43,7 +43,7 @@ from core.mimic.ast_parser import (
     SAFE_MODE as AST_SAFE_MODE,
     create_ast_parser,
 )
-from core.mimic.route_miner import (
+from core.sentient.mimic.route_miner import (
     RouteMiner,
     HiddenRoute,
     RouteReport,

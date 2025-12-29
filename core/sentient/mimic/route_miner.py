@@ -444,7 +444,7 @@ def create_route_miner(safe_mode: bool = SAFE_MODE) -> RouteMiner:
 # ============================================================================
 
 if __name__ == "__main__":
-    from core.mimic.ast_parser import RouteDefinition
+    from core.sentient.mimic.ast_parser import RouteDefinition
 
     # Verify enums
     assert HiddenRouteReason.NO_LINKS.value == "no_links"

@@ -431,7 +431,7 @@ def create_zombie_hunter(
 # ============================================================================
 
 if __name__ == "__main__":
-    from core.cronus.differ import Endpoint
+    from core.sentient.cronus.differ import Endpoint
 
     # Verify ActiveStatus enum
     assert ActiveStatus.CONFIRMED.value == "confirmed"
