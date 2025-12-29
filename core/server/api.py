@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field, validator
 
 
 
-from core.base.config import get_config, setup_logging
+from core.base.config import get_config, setup_logging, SecurityInterlock
 from core.ai.ai_engine import AIEngine
 from core.base.task_router import TaskRouter
 from core.cortex.reasoning import reasoning_engine
@@ -53,6 +53,9 @@ from core.data.db import Database
 from core.errors import SentinelError, ErrorCode
 
 logger = logging.getLogger(__name__)
+
+# Pre-bind security interlock: fail closed before uvicorn binds.
+SecurityInterlock.verify_safe_boot(get_config())
 
 # --- Models ---
 
@@ -532,26 +535,14 @@ async def startup_event():
     FastAPI startup event handler.
 
     This is the first code that runs when the server starts. We use it to:
-    1. SECURITY INTERLOCK: Refuse to start if exposed without auth
-    2. Initialize logging
-    3. Initialize database
-    4. Start background tasks
+    1. Initialize logging
+    2. Initialize database
+    3. Start background tasks
+
+    The security interlock runs at import time to prevent pre-bind exposure.
     """
     global _api_loop, _session_cleanup_task
     config = get_config()
-
-    # =========================================================================
-    # SECURITY INTERLOCK: Host-Aware Boot Guard
-    # =========================================================================
-    # This MUST be the first check before any other initialization.
-    # If the API is exposed to the network (0.0.0.0) without authentication,
-    # we refuse to start. This prevents accidental exposure of an unauthenticated
-    # security platform to the network.
-    #
-    # The interlock raises CriticalSecurityBreach which halts the entire process.
-    # =========================================================================
-    from core.base.config import validate_security_posture
-    validate_security_posture(config)
 
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
