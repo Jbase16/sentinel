@@ -258,7 +258,75 @@ class SentinelError(Exception):
 # Critical Security Exceptions (Halt System Startup)
 # ============================================================================
 
-class CriticalSecurityBreach(Exception):
+class SentinelSecurityError(Exception):
+    """
+    Base class for fatal security configuration errors.
+
+    Provides a crash-card formatted message to stop startup safely
+    while giving operators explicit remediation steps.
+    """
+
+    def __init__(
+        self,
+        title: str,
+        message: str,
+        *,
+        remediation: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        code: Optional[ErrorCode] = None,
+        footer: Optional[str] = None,
+        line_width: int = 70,
+    ):
+        self.title = title
+        self.message = message
+        self.remediation = remediation
+        self.details = details or {}
+        self.code = code
+
+        crash_card = self._build_crash_card(
+            title=title,
+            message=message,
+            remediation=remediation,
+            details=self.details,
+            footer=footer,
+            line_width=line_width,
+        )
+        super().__init__(crash_card)
+
+    @staticmethod
+    def _build_crash_card(
+        *,
+        title: str,
+        message: str,
+        remediation: Optional[str],
+        details: Dict[str, Any],
+        footer: Optional[str],
+        line_width: int,
+    ) -> str:
+        line = "=" * line_width
+        full_message = f"\n{line}\n"
+        full_message += f"{title}\n"
+        full_message += f"{line}\n\n"
+        full_message += f"ERROR: {message}\n\n"
+
+        if remediation:
+            full_message += f"REMEDIATION:\n  {remediation}\n\n"
+
+        if details:
+            full_message += "DETAILS:\n"
+            for key, value in details.items():
+                full_message += f"  {key}: {value}\n"
+            full_message += "\n"
+
+        full_message += f"{line}\n"
+        if footer:
+            full_message += f"{footer}\n"
+            full_message += f"{line}\n"
+
+        return full_message
+
+
+class CriticalSecurityBreach(SentinelSecurityError):
     """
     A fatal security configuration error that prevents system startup.
 
@@ -293,31 +361,14 @@ class CriticalSecurityBreach(Exception):
             remediation: How to fix the issue (displayed to the operator)
             details: Additional context for debugging
         """
-        self.message = message
-        self.remediation = remediation
-        self.details = details or {}
-        self.code = ErrorCode.SECURITY_EXPOSED_WITHOUT_AUTH
-
-        # Build a comprehensive error message
-        full_message = f"\n{'='*70}\n"
-        full_message += "🛑 CRITICAL SECURITY BREACH - STARTUP BLOCKED\n"
-        full_message += f"{'='*70}\n\n"
-        full_message += f"ERROR: {message}\n\n"
-
-        if remediation:
-            full_message += f"REMEDIATION:\n  {remediation}\n\n"
-
-        if details:
-            full_message += "DETAILS:\n"
-            for key, value in details.items():
-                full_message += f"  {key}: {value}\n"
-            full_message += "\n"
-
-        full_message += f"{'='*70}\n"
-        full_message += "SentinelForge will NOT start in an insecure configuration.\n"
-        full_message += f"{'='*70}\n"
-
-        super().__init__(full_message)
+        super().__init__(
+            "🛑 CRITICAL SECURITY BREACH - STARTUP BLOCKED",
+            message,
+            remediation=remediation,
+            details=details,
+            code=ErrorCode.SECURITY_EXPOSED_WITHOUT_AUTH,
+            footer="SentinelForge will NOT start in an insecure configuration.",
+        )
 
 
 # ============================================================================
@@ -371,4 +422,3 @@ def handle_error(error: Exception, context: Optional[str] = None) -> SentinelErr
 # ============================================================================
 
 __all__ = ["ErrorCode", "SentinelError", "CriticalSecurityBreach", "handle_error"]
-

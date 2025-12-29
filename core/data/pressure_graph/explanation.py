@@ -90,22 +90,18 @@ class CausalExplainer:
         # We are traversing backwards.
         # Current weight tracks the cumulative transfer from Target back to here.
         
-        print(f"DEBUG: Visiting {current_node_id}, weight: {current_weight}, depth: {depth}")
         node = self.nodes.get(current_node_id)
         if not node:
-            print("DEBUG: Node not found")
             return
 
         # If this node has base pressure, it's a source candidate.
         if node.base_pressure > 0.01:
             total_contribution = node.base_pressure * current_weight
             full_path = [current_node_id] + list(reversed(current_path))
-            print(f"DEBUG: Found path: {full_path}, contrib: {total_contribution}")
             results.append(PressurePath(path=full_path, contribution=total_contribution))
             
         # Recurse to parents (incoming edges)
         incoming = self.incoming_edges.get(current_node_id, [])
-        print(f"DEBUG: Incoming edges for {current_node_id}: {len(incoming)}")
         
         # Optimization: Only follow top 3 heaviest incoming edges to prevent explosion
         top_incoming = sorted(incoming, key=lambda e: e.effective_transfer, reverse=True)[:3]
@@ -116,7 +112,6 @@ class CausalExplainer:
                 continue
                 
             new_weight = current_weight * edge.effective_transfer
-            print(f"DEBUG: Traversing edge {edge.source_id}->{edge.target_id} (transfer {edge.effective_transfer}), new weight {new_weight}")
             # Cutoff if contribution is negligible
             if new_weight < 0.01:
                 continue
