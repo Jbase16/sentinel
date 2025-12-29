@@ -51,7 +51,7 @@ class SecurityConfig:
     
     # Which websites can connect to our API (prevents random sites from accessing it)
     # 127.0.0.1 and localhost both mean "this computer only"
-    # The * means any port (8000, 8080, etc.)
+    # Port wildcards are only allowed for loopback in development mode.
     allowed_origins: tuple = ("http://127.0.0.1:*", "http://localhost:*", "tauri://localhost")
     
     # Should users need to authenticate before using the API?
