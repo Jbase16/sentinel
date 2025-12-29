@@ -1,6 +1,6 @@
+import AppKit
 import RealityKit
 import SwiftUI
-import UIKit  // for UIColor
 
 struct PressureGraphInteraction: View {
     @State private var arView: ARView?
@@ -24,7 +24,7 @@ struct PressureGraphInteraction: View {
                 .clipShape(RoundedRectangle(cornerRadius: 30))
                 .padding()
 
-                Text("GRIP VULNERABILITIES TO REMEDIATE")
+                Text("RIGHT CLICK VULNERABILITIES TO REMEDIATE")
                     .font(.caption)
                     .foregroundColor(.gray)
                     .padding(.bottom, 50)
@@ -64,23 +64,15 @@ struct PressureGraphInteraction: View {
         // 4. Connect Nodes with "Energy Beams"
         connectCluster(nodes: nodes, target: crownJewel, parent: scene)
 
-        // 5. Register System (Normally done globally in App init, but simulated here logic)
-        // RealityKit automatically registers systems found in bundle usually, or we manually add if custom
-        // For this demo, we assume PressureGraphSystem is registered.
+        // 5. Register System
         PressureGraphSystem.registerSystem()
 
-        // Feed reference to system (Static or Singleton access needed in reality, or entity tagging)
-        // Here we just ensure components are set.
-
-        // 6. Install Gestures for Interaction
+        // 6. Install Gestures for interaction (basic transforms)
+        // macOS RealityKit supports mouse drag if collision shapes are present and gestures installed.
         for nodeAnchor in nodes {
             if let nodeEntity = nodeAnchor.children.first as? ModelEntity {
-                // Component for gestures
                 nodeEntity.generateCollisionShapes(recursive: true)
-
                 arView.installGestures([.all], for: nodeEntity)
-                // Note: RealityKit installGestures handles basic transforms.
-                // For custom logic (LongPress), we usually need a UIKit GestureRecognizer on the ARView.
             }
         }
 
@@ -91,10 +83,14 @@ struct PressureGraphInteraction: View {
         cameraAnchor.addChild(camera)
         arView.scene.anchors.append(cameraAnchor)
 
-        // Manual gesture recognizer for "Remediation" logic
-        let longPress = UILongPressGestureRecognizer(
-            target: arView, action: #selector(handleLongPress(_:)))
-        arView.addGestureRecognizer(longPress)
+        // Manual gesture recognizer for "Remediation" logic (Right Click / Long Press equivalent)
+        // On macOS, we can use NSClickGestureRecognizer or check for rightMouseDown in subclass.
+        // For simplicity in SwiftUI wrapper, we attach a ClickGesture with modifiers or verify button mask.
+        // We'll use a standard NSClickGestureRecognizer and check logic in handler.
+        let click = NSClickGestureRecognizer(
+            target: arView.coordinator, action: #selector(Coordinator.handleClick(_:)))
+        click.buttonMask = 0x2  // Right click
+        arView.addGestureRecognizer(click)
     }
 
     // --- ASSET GENERATION HELPERS ---
@@ -104,8 +100,6 @@ struct PressureGraphInteraction: View {
         mat.color = .init(tint: .black)
         mat.metallic = .float(1.0)
         mat.roughness = .float(0.2)
-        // Emissive not standard in SimpleMaterial, would use PhysicallyBasedMaterial or Custom
-        // For compilation safety in this environment, using SimpleMaterial as placeholder for PBR
         return mat
     }
 
@@ -138,7 +132,7 @@ struct PressureGraphInteraction: View {
             // Generate random initial pressure
             let initialPressure = Float.random(in: 0.3...0.9)
 
-            let mesh = MeshResource.generateBox(size: 0.08)  // Box/Octahedron approx
+            let mesh = MeshResource.generateBox(size: 0.08)
             let material = createVulnerabilityMaterial(pressure: initialPressure)
             let entity = ModelEntity(mesh: mesh, materials: [material])
 
@@ -178,7 +172,7 @@ struct PressureGraphInteraction: View {
         }
     }
 
-    func lerpColor(from: UIColor, to: UIColor, t: Float) -> UIColor {
+    func lerpColor(from: NSColor, to: NSColor, t: Float) -> NSColor {
         var fR: CGFloat = 0
         var fG: CGFloat = 0
         var fB: CGFloat = 0
@@ -195,55 +189,62 @@ struct PressureGraphInteraction: View {
         let g = fG + CGFloat(t) * (tG - fG)
         let b = fB + CGFloat(t) * (tB - fB)
 
-        return UIColor(red: r, green: g, blue: b, alpha: 1.0)
+        return NSColor(red: r, green: g, blue: b, alpha: 1.0)
     }
 }
 
-// SwiftUI Integration
-struct ARViewContainer<Content: View>: UIViewRepresentable {
+// SwiftUI Integration for macOS
+struct ARViewContainer<Content: View>: NSViewRepresentable {
     let content: (ARView) -> Content
 
     init(@ViewBuilder content: @escaping (ARView) -> Content) {
         self.content = content
     }
 
-    func makeUIView(context: Context) -> ARView {
+    func makeNSView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
+        arView.environment.background = .color(.black)  // Dark void background
 
-        // Enable gestures handling
+        // Attach coordinator for gestures
+        context.coordinator.arView = arView
+
         return arView
     }
 
-    func updateUIView(_ uiView: ARView, context: Context) {
-        // Setup only once
-        if uiView.scene.anchors.isEmpty {
-            _ = content(uiView)
+    func updateNSView(_ nsView: ARView, context: Context) {
+        if nsView.scene.anchors.isEmpty {
+            _ = content(nsView)
         }
     }
-}
 
-// Extension to handle Long Press since we can't easily put it in struct
-extension ARView {
-    @objc func handleLongPress(_ sender: UILongPressGestureRecognizer) {
-        if sender.state == .began {
-            let location = sender.location(in: self)
-            if let entity = self.entity(at: location) as? ModelEntity {
-                // Remediate
-                if var pComp = entity.components[PressureStateComponent.self] {
-                    pComp.isFixed = true
-                    entity.components[PressureStateComponent.self] = pComp
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
 
-                    // Visual feedback
-                    let animationDef = FromToByAnimation<Transform>(
-                        from: entity.transform,
-                        to: Transform(
-                            scale: .init(0.5, 0.5, 0.5), rotation: entity.transform.rotation,
-                            translation: entity.transform.translation),
-                        duration: 0.2,
-                        bindTarget: .transform
-                    )
-                    // entity.playAnimation(...) // Helper needed for animation resource
+    class Coordinator: NSObject {
+        weak var arView: ARView?
+
+        @objc func handleClick(_ sender: NSClickGestureRecognizer) {
+            guard let arView = arView else { return }
+
+            if sender.state == .ended {
+                let location = sender.location(in: arView)
+                if let entity = arView.entity(at: location) as? ModelEntity {
+                    remediate(entity: entity)
                 }
+            }
+        }
+
+        func remediate(entity: ModelEntity) {
+            if var pComp = entity.components[PressureStateComponent.self] {
+                pComp.isFixed = true
+                entity.components[PressureStateComponent.self] = pComp
+
+                // Visual feedback: Shrink and turn green/safe
+                // Note: RealityKit on macOS supports some animations, but we keep it simple
+                var transform = entity.transform
+                transform.scale = simd_float3(0.5, 0.5, 0.5)
+                entity.move(to: transform, relativeTo: entity.parent, duration: 0.2)
             }
         }
     }

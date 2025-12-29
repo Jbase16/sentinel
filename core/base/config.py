@@ -633,12 +633,109 @@ def is_network_exposed(api_host: str) -> bool:
     return api_host.lower() not in LOOPBACK_ADDRESSES
 
 
+class SecurityInterlock:
+    """
+    Fail-closed security interlock for startup invariants.
+
+    This runs before the API binds to a port and halts on unsafe settings.
+    """
+
+    @staticmethod
+    def verify_safe_boot(config: "SentinelConfig") -> None:
+        """Enforce startup invariants that must never be violated."""
+        SecurityInterlock._enforce_network_interlock(config)
+        SecurityInterlock._enforce_cors_interlock(config)
+
+    @staticmethod
+    def _enforce_network_interlock(config: "SentinelConfig") -> None:
+        from core.errors import CriticalSecurityBreach
+
+        is_exposed = is_network_exposed(config.api_host)
+        is_naked = not config.security.require_auth
+
+        if is_exposed and is_naked:
+            raise CriticalSecurityBreach(
+                "SentinelForge cannot be exposed to the network without an Auth Shield.",
+                remediation=(
+                    "Choose one of these options:\n"
+                    "  1. Enable authentication: SENTINEL_REQUIRE_AUTH=true\n"
+                    "  2. Restrict to localhost: SENTINEL_API_HOST=127.0.0.1\n"
+                    "  3. Both (recommended for production)"
+                ),
+                details={
+                    "api_host": config.api_host,
+                    "require_auth": config.security.require_auth,
+                    "terminal_enabled": config.security.terminal_enabled,
+                    "terminal_require_auth": config.security.terminal_require_auth,
+                },
+            )
+
+    @staticmethod
+    def _enforce_cors_interlock(config: "SentinelConfig") -> None:
+        from core.errors import CriticalSecurityBreach
+
+        wildcard_origins = SecurityInterlock._find_wildcard_origins(config.security.allowed_origins)
+        if not wildcard_origins:
+            return
+
+        if config.security.require_auth:
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "High-risk CORS configuration: wildcard origins enabled with authentication. "
+                "allowed_origins=%s",
+                wildcard_origins,
+            )
+            return
+
+        raise CriticalSecurityBreach(
+            "Wildcard CORS origins are not allowed when authentication is disabled.",
+            remediation=(
+                "Set explicit origins (no host wildcards) or enable authentication:\n"
+                "  1. Restrict origins: SENTINEL_ALLOWED_ORIGINS=http://127.0.0.1:8000\n"
+                "  2. Enable authentication: SENTINEL_REQUIRE_AUTH=true"
+            ),
+            details={
+                "allowed_origins": config.security.allowed_origins,
+                "require_auth": config.security.require_auth,
+            },
+        )
+
+    @staticmethod
+    def _find_wildcard_origins(allowed_origins: tuple) -> tuple:
+        return tuple(origin for origin in allowed_origins if SecurityInterlock._has_wildcard_host(origin))
+
+    @staticmethod
+    def _has_wildcard_host(origin: str) -> bool:
+        if not origin:
+            return False
+
+        candidate = origin.strip()
+        if candidate == "*":
+            return True
+
+        from urllib.parse import urlparse
+
+        parsed = urlparse(candidate)
+        netloc = parsed.netloc
+
+        if not netloc:
+            if "://" in candidate:
+                netloc = candidate.split("://", 1)[1]
+            else:
+                netloc = candidate
+
+        netloc = netloc.split("/")[0]
+        netloc = netloc.split("@")[-1]
+        host = netloc.split(":")[0] if ":" in netloc else netloc
+
+        return "*" in host
+
+
 def validate_security_posture(config: "SentinelConfig") -> None:
     """
     Validate that the configuration doesn't create a security vulnerability.
 
-    This is the "Host-Aware Boot Interlock" - we refuse to allow a configuration
-    where the API is exposed to the network but authentication is disabled.
+    This is a compatibility wrapper for the SecurityInterlock guardrails.
 
     Args:
         config: The SentinelConfig to validate
@@ -654,27 +751,7 @@ def validate_security_posture(config: "SentinelConfig") -> None:
         | 0.0.0.0       | True         | ✅ OK (auth)  |
         | 0.0.0.0       | False        | ❌ BLOCKED    |
     """
-    from core.errors import CriticalSecurityBreach
-
-    is_exposed = is_network_exposed(config.api_host)
-    is_naked = not config.security.require_auth
-
-    if is_exposed and is_naked:
-        raise CriticalSecurityBreach(
-            "SentinelForge cannot be exposed to the network without an Auth Shield.",
-            remediation=(
-                "Choose one of these options:\n"
-                "  1. Enable authentication: SENTINEL_REQUIRE_AUTH=true\n"
-                "  2. Restrict to localhost: SENTINEL_API_HOST=127.0.0.1\n"
-                "  3. Both (recommended for production)"
-            ),
-            details={
-                "api_host": config.api_host,
-                "require_auth": config.security.require_auth,
-                "terminal_enabled": config.security.terminal_enabled,
-                "terminal_require_auth": config.security.terminal_require_auth,
-            }
-        )
+    SecurityInterlock.verify_safe_boot(config)
 
 
 def get_sensitive_endpoints() -> tuple:

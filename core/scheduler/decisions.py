@@ -262,22 +262,28 @@ class DecisionLedger:
     def commit(self, decision: DecisionPoint) -> DecisionPoint:
         """
         Append a decision to the ledger and assign sequence number.
-        
+
         This is the ONLY way to add decisions, ensuring sequence integrity.
         Persists to database asynchronously.
-        
+
+        SEQUENCE UNIFICATION:
+        Decisions and Events share the same GlobalSequenceAuthority timeline.
+        This ensures perfect causal ordering: if event E (seq=42) triggers
+        decision D (seq=43), we can always determine that E happened before D.
+
         Args:
             decision: The decision to commit (without sequence)
-        
+
         Returns:
             The decision with sequence number assigned
         """
+        # get_next_sequence() delegates to GlobalSequenceAuthority,
+        # ensuring Events and Decisions share the same timeline
         from core.cortex.events import get_next_sequence
         from core.data.db import Database
-        
-        # Context-managed operation.
+
         with self._lock:
-            # Use global sequence generator to ensure alignment with events
+            # Use global sequence generator (shared with EventStore)
             global_seq = get_next_sequence()
             sequenced_decision = decision.with_sequence(global_seq)
             self._decisions.append(sequenced_decision)

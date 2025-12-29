@@ -592,17 +592,10 @@ async def shutdown_event():
     from core.data.blackbox import BlackBox
     await BlackBox.instance().shutdown()
 
-    # Persist final event sequence counter to prevent loss on crash
-    # This is synchronous (not fire-and-forget) since we're shutting down
-    from core.cortex.events import get_event_bus
-    event_bus = get_event_bus()
-    if event_bus.last_event_sequence > 0:
-        db = Database.instance()
-        try:
-            await db._save_event_sequence_impl(event_bus.last_event_sequence)
-            logger.info(f"Persisted final event sequence: {event_bus.last_event_sequence}")
-        except Exception as e:
-            logger.warning(f"Failed to persist final event sequence: {e}")
+    # Persist final sequence counter to GlobalSequenceAuthority
+    # This ensures continuity across restarts for both Events and Decisions
+    from core.base.sequence import GlobalSequenceAuthority
+    await GlobalSequenceAuthority.persist_to_db()
 
     # Close database connection
     db = Database.instance()
