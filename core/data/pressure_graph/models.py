@@ -43,7 +43,6 @@ class PressureNode:
     base_pressure: float = field(init=False)
     confidence: float = field(init=False)
     inbound_pressure: float = 0.0  # Pressure flowing from upstream nodes
-    total_pressure: float = 0.0  # base_pressure + inbound_pressure
     
     def __post_init__(self):
         """Compute deterministic values after initialization."""
@@ -63,9 +62,6 @@ class PressureNode:
             (0.5 + 0.5 * self.evidence_quality) *
             (1.0 - 0.1 ** (self.corroboration_count + 1))
         )
-        
-        # Initialize total pressure
-        self.total_pressure = self.base_pressure
 
 
 @dataclass

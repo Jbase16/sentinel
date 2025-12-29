@@ -21,6 +21,12 @@ class MinimalFixSetEngine:
     - Connect V_in → V_out with capacity = remediation cost
     - Entry points → super-source, Crown jewels → super-sink
     - Min-cut = minimal cost to block all paths
+    
+    LIMITATIONS:
+    - Currently returns only the single minimum-cost min-cut
+    - Does not enumerate alternative min-cuts with same cost
+    - Future enhancement: Use Gomory-Hu tree or min-cut enumeration
+      to generate multiple disjoint fix sets
     """
     
     def __init__(self, 

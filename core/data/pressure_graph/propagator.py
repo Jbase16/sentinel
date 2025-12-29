@@ -201,19 +201,36 @@ class PressurePropagator:
         Validate invariant: If node severity increases, Crown Jewel pressure must not decrease.
         
         This is a sanity check that the propagation algorithm is working correctly.
+        
+        NOTE: This method clones nodes to avoid mutating live graph state.
         """
+        # Clone nodes to avoid mutating live objects
+        from copy import deepcopy
+        cloned_nodes = {
+            node_id: deepcopy(node)
+            for node_id, node in self.nodes.items()
+        }
+        
+        # Create temporary propagator with cloned nodes
+        temp_propagator = PressurePropagator(
+            cloned_nodes,
+            self.edges,
+            damping_factor=self.damping_factor,
+            epsilon=self.epsilon,
+            max_iterations=self.max_iterations
+        )
+        
         # For each crown jewel, verify pressure doesn't decrease when upstream severity increases
         for cj_id in crown_jewel_ids:
             baseline_pressure = baseline_pressures.get(cj_id, 0.0)
             
             # Try increasing severity of each upstream node
-            for node_id, node in self.nodes.items():
+            for node_id, node in cloned_nodes.items():
                 if node_id == cj_id:
                     continue
                 
-                # Temporarily increase severity
-                original_severity = node.severity
-                node.severity = min(10.0, original_severity + 1.0)
+                # Increase severity on cloned node (safe)
+                node.severity = min(10.0, node.severity + 1.0)
                 
                 # Recompute base pressure
                 node.base_pressure = (
@@ -224,19 +241,9 @@ class PressurePropagator:
                     node.asset_value
                 )
                 
-                # Propagate new pressures
-                new_pressures = self.propagate(crown_jewel_ids)
+                # Propagate new pressures using cloned propagator
+                new_pressures = temp_propagator.propagate(crown_jewel_ids)
                 new_cj_pressure = new_pressures.get(cj_id, 0.0)
-                
-                # Restore original severity
-                node.severity = original_severity
-                node.base_pressure = (
-                    node.severity *
-                    node.exposure *
-                    node.exploitability *
-                    node.privilege_gain *
-                    node.asset_value
-                )
                 
                 # Check invariant
                 if new_cj_pressure < baseline_pressure - self.epsilon:
