@@ -15,6 +15,17 @@ targets:
       - path: ../core
         group: Core (Python)
         buildPhase: none
+        type: folder
+        excludes:
+          - "**/__pycache__"
+          - "**/*.pyc"
+          - "**/.venv"
+          - "**/venv"
+          - "**/.env"
+          - "**/env"
+          - "**/.pytest_cache"
+          - "**/build"
+          - "**/dist"
     frameworks:
       - framework: Metal.framework
       - framework: MetalKit.framework
