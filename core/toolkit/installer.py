@@ -7,7 +7,7 @@ import logging
 import signal
 from typing import Dict, List, Optional, Tuple, NamedTuple
 
-from core.toolkit.registry import TOOLS
+from core.toolkit.registry import TOOLS, find_binary
 
 logger = logging.getLogger(__name__)
 
@@ -63,39 +63,8 @@ INSTALLERS: Dict[str, Dict] = {
         "strategies": [{"cmd": ["pip", "install", "pshtt"]}],
         "verify_cmd": ["--version"],
     },
-    "wfuzz": {
-        "strategies": [
-            {"cmd": ["pip", "install", "wfuzz"]},
-            {"cmd": ["pip3", "install", "wfuzz"]},
-        ],
-        "verify_cmd": ["--version"],
-    },
-    
+
     # Go-based tools
-    "assetfinder": {
-        "strategies": [
-            {"cmd": ["go", "install", "github.com/tomnomnom/assetfinder@latest"], "prerequisite": "go"},
-        ],
-        "verify_cmd": ["--help"],
-    },
-    "hakrevdns": {
-        "strategies": [
-            {"cmd": ["go", "install", "github.com/hakluke/hakrevdns@latest"], "prerequisite": "go"},
-        ],
-        "verify_cmd": ["--help"],
-    },
-    "hakrawler": {
-        "strategies": [
-            {"cmd": ["go", "install", "github.com/hakluke/hakrawler@latest"], "prerequisite": "go"},
-        ],
-        "verify_cmd": ["--help"],
-    },
-    "subjack": {
-        "strategies": [
-            {"cmd": ["go", "install", "github.com/haccer/subjack@latest"], "prerequisite": "go"},
-        ],
-        "verify_cmd": ["--help"],
-    },
     "httprobe": {
         "strategies": [
             {"cmd": ["go", "install", "github.com/tomnomnom/httprobe@latest"], "prerequisite": "go"},
@@ -363,31 +332,32 @@ async def install_tool(name: str) -> Dict[str, str]:
             installation_log.append(f"  ⊗ Failed: {last_error}")
             continue
         
-        # Verify binary existence
-        if not shutil.which(expected_binary):
-            last_error = f"Command succeeded but '{expected_binary}' not found in PATH"
+        # Verify binary existence (check both PATH and venv bin)
+        binary_path = find_binary(expected_binary)
+        if not binary_path:
+            last_error = f"Command succeeded but '{expected_binary}' not found in PATH or venv"
             installation_log.append(f"  ⊗ Failed: {last_error}")
             continue
         
-        # Verify binary works
+        # Verify binary works (use the found path, not just the name)
         verify_cmd = spec.get("verify_cmd", ["--version"])
         try:
             # We use a direct subprocess call here as it's a simple, single command
             verify_proc = await asyncio.create_subprocess_exec(
-                expected_binary,
+                binary_path,  # Use the full path we found
                 *verify_cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             await asyncio.wait_for(verify_proc.communicate(), timeout=5.0)
-            
+
             if verify_proc.returncode != 0:
-                last_error = f"Verification failed: '{expected_binary} {' '.join(verify_cmd)}' returned {verify_proc.returncode}"
+                last_error = f"Verification failed: '{binary_path} {' '.join(verify_cmd)}' returned {verify_proc.returncode}"
                 installation_log.append(f"  ⊗ Verification failed: {last_error}")
                 continue # Try next strategy
-                
+
         except asyncio.TimeoutError:
-            last_error = f"Verification timed out for '{expected_binary}'"
+            last_error = f"Verification timed out for '{binary_path}'"
             installation_log.append(f"  ⊗ {last_error}")
             continue
         except (OSError, Exception) as verify_err:

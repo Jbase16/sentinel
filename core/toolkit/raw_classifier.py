@@ -954,121 +954,6 @@ def _handle_dnsx(target: str, output: str) -> List[RawFinding]:
     return findings
 
 
-def _handle_hakrevdns(target: str, output: str) -> List[RawFinding]:
-    """Function _handle_hakrevdns."""
-    findings: List[RawFinding] = []
-    # Hakrevdns Wrapper Output Parser
-    # Parses custom hakrevdns-shim wrapper format: [hakrevdns-shim] IP -> PTR_RECORD
-    # Example: "[hakrevdns-shim] 192.168.1.1 -> host1.example.com"
-    #
-    # Pattern: \[hakrevdns-shim\]\s+([^\s]+)\s*->\s*(.*)
-    # \[hakrevdns-shim\] = literal wrapper tag prefix
-    # \s+ = one or more whitespace chars
-    # Group 1: IP address - ([^\s]+) = non-whitespace chars (IPv4 or IPv6)
-    # \s*->\s* = arrow separator with optional surrounding whitespace
-    #   -> = literal arrow (reverse DNS mapping indicator)
-    #   \s* on both sides handles variable spacing in wrapper output
-    # Group 2: PTR record(s) - (.*) = greedy capture of remaining line
-    #   May contain single hostname or comma-separated list for multi-PTR IPs
-    #
-    # Wrapper context:
-    #   hakrevdns-shim normalizes hakrevdns output for consistent parsing
-    #   Native hakrevdns format varies by version; wrapper provides stable [tag] IP -> PTR structure
-    #
-    # Edge cases:
-    #   - Multiple PTR records: Group 2 captures all (comma-separated or space-separated)
-    #   - No PTR record (NXDOMAIN): Wrapper emits "IP -> (none)" or similar; captured by .*
-    #   - IPv6 addresses: Contain colons, matched by [^\s]+ in Group 1
-    #   - IP addresses with port notation: Pattern doesn't expect ports; would be captured in Group 1
-    #
-    # Arrow semantics:
-    #   -> indicates direction of resolution (IP resolves to PTR)
-    #   Distinct from forward DNS lookups (hostname -> IP)
-    pattern = re.compile(r"\[hakrevdns-shim\]\s+([^\s]+)\s*->\s*(.*)")
-    # Loop over items.
-    for line in output.splitlines():
-        clean = _strip_ansi(line).strip()
-        match = pattern.match(clean)
-        if not match:
-            continue
-        ip = match.group(1)
-        ptr = match.group(2)
-        findings.append(
-            RawFinding(
-                type="Reverse DNS Mapping",
-                severity="INFO",
-                tool="hakrevdns",
-                target=target,
-                message=f"{ip} -> {ptr}",
-                proof=clean,
-                tags=["dns", "surface-mapping"],
-                families=["recon-phase:dns"],
-            )
-        )
-    return findings
-
-
-def _handle_hakrawler(target: str, output: str) -> List[RawFinding]:
-    """Function _handle_hakrawler."""
-    findings: List[RawFinding] = []
-    interesting = [
-        "admin",
-        "login",
-        "swagger",
-        "graphql",
-        "api",
-        ".git",
-        "backup",
-        "secret",
-        "staff",
-    ]
-    # Loop over items.
-    for line in output.splitlines():
-        clean = _strip_ansi(line).strip()
-        if not clean.startswith("http"):
-            continue
-        sev = "INFO"
-        lowered = clean.lower()
-        if any(keyword in lowered for keyword in interesting):
-            sev = "MEDIUM"
-        findings.append(
-            RawFinding(
-                type="Crawled Endpoint",
-                severity=sev,
-                tool="hakrawler",
-                target=target,
-                message=clean,
-                proof=clean,
-                tags=["crawler", "surface-http"],
-                families=["exposure"],
-            )
-        )
-    return findings
-
-
-def _handle_assetfinder(target: str, output: str) -> List[RawFinding]:
-    """Function _handle_assetfinder."""
-    findings: List[RawFinding] = []
-    # Loop over items.
-    for line in output.splitlines():
-        clean = _strip_ansi(line).strip()
-        if not clean or "." not in clean:
-            continue
-        findings.append(
-            RawFinding(
-                type="Discovered Subdomain",
-                severity="INFO",
-                tool="assetfinder",
-                target=target,
-                message=clean,
-                proof=clean,
-                tags=["subdomain", "surface-expansion"],
-                families=["recon-phase:subdomain"],
-            )
-        )
-    return findings
-
-
 def _handle_subfinder(target: str, output: str) -> List[RawFinding]:
     """Function _handle_subfinder."""
     findings: List[RawFinding] = []
@@ -1924,9 +1809,6 @@ _HANDLERS: Dict[str, Callable[[str, str], List[RawFinding]]] = {
     "masscan": _handle_masscan,
     "naabu": _handle_naabu,
     "dnsx": _handle_dnsx,
-    "hakrevdns": _handle_hakrevdns,
-    "hakrawler": _handle_hakrawler,
-    "assetfinder": _handle_assetfinder,
     "subfinder": _handle_subfinder,
     "httprobe": _handle_httprobe,
 }

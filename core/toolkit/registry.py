@@ -1,11 +1,45 @@
 """Module registry: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/registry.py."""
 import logging
+import os
+import shutil
+import sys
 from typing import Dict, List, Optional
 from pathlib import Path
 
 from core.toolkit.normalizer import normalize_target
 
 logger = logging.getLogger(__name__)
+
+
+def find_binary(binary: str) -> Optional[str]:
+    """
+    Find a binary in system PATH or in the project's venv bin directory.
+
+    This is necessary because pip-installed tools go to .venv/bin/ which
+    may not be in the system PATH, but they're still usable by the scanner.
+
+    Returns:
+        Path to the binary if found, None otherwise.
+    """
+    # First check system PATH
+    path = shutil.which(binary)
+    if path:
+        return path
+
+    # Check venv bin directory (where pip installs console scripts)
+    # Look for venv relative to this file's location (project root)
+    project_root = Path(__file__).parent.parent.parent
+    venv_bin = project_root / ".venv" / "bin" / binary
+    if venv_bin.exists() and os.access(venv_bin, os.X_OK):
+        return str(venv_bin)
+
+    # Also check the current Python's venv (sys.prefix)
+    if hasattr(sys, 'prefix') and sys.prefix != sys.base_prefix:
+        venv_bin_alt = Path(sys.prefix) / "bin" / binary
+        if venv_bin_alt.exists() and os.access(venv_bin_alt, os.X_OK):
+            return str(venv_bin_alt)
+
+    return None
 
 # Navigate to repository root (sentinelforge/)
 # __file__ = core/toolkit/registry.py
@@ -129,12 +163,6 @@ TOOLS: Dict[str, Dict] = {
         "aggressive": False,
         "target_type": "url",
     },
-    "hakrevdns": {
-        "label": "hakrevdns (reverse DNS)",
-        "cmd": ["hakrevdns", "-d", "{target}"],
-        "aggressive": False,
-        "target_type": "host",
-    },
     "wafw00f": {
         "label": "wafw00f (WAF detection)",
         "cmd": ["wafw00f", "{target}"],
@@ -183,26 +211,6 @@ TOOLS: Dict[str, Dict] = {
         "aggressive": True,
         "target_type": "url",
     },
-    "jaeles": {
-        "label": "Jaeles (web vuln automation)",
-        "cmd": ["jaeles", "scan", "-u", "{target}"],
-        "aggressive": True,
-        "target_type": "url",
-    },
-    "assetfinder": {
-        "label": "assetfinder (attack surface discovery)",
-        "cmd": ["assetfinder", "-subs-only", "{target}"],
-        "aggressive": False,
-        "target_type": "domain",
-    },
-    "hakrawler": {
-        "label": "hakrawler (endpoint crawler)",
-        "cmd": ["hakrawler", "-subs", "-u"],
-        "aggressive": False,
-        "target_type": "url",
-        "binary": "hakrawler",
-        "stdin": True,
-    },
     "naabu": {
         "label": "naabu (fast port scan)",
         "cmd": ["naabu", "-host", "{target}"],
@@ -229,23 +237,11 @@ TOOLS: Dict[str, Dict] = {
         "aggressive": False,
         "target_type": "domain",
     },
-    "subjack": {
-        "label": "subjack (subdomain takeover)",
-        "cmd": ["subjack", "-d", "{target}", "-ssl"],
-        "aggressive": True,
-        "target_type": "domain",
-    },
     "sslyze": {
         "label": "sslyze (TLS scanner)",
         "cmd": ["sslyze", "{target}"],
         "aggressive": False,
         "target_type": "host",
-    },
-    "wfuzz": {
-        "label": "wfuzz (parameter fuzzing)",
-        "cmd": ["wfuzz", "-c", "-w", COMMON_WORDLIST, "{target}/FUZZ"],
-        "aggressive": True,
-        "target_type": "url",
     },
     "httprobe": {
         "label": "httprobe (HTTP availability)",
@@ -260,12 +256,6 @@ TOOLS: Dict[str, Dict] = {
         "cmd": ["pshtt", "{target}"],
         "aggressive": False,
         "target_type": "domain",
-    },
-    "eyewitness": {
-        "label": "EyeWitness (screenshot/report)",
-        "cmd": ["eyewitness", "--single", "{target}", "--web"],
-        "aggressive": False,
-        "target_type": "url",
     },
 }
 

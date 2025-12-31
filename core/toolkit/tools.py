@@ -11,10 +11,9 @@
 # PUBLIC API - Used by the scanner and API server
 # CALLBACK PLUMBING - Integration with TaskRouter
 
-import shutil
 from typing import Dict, Any
 from core.base.task_router import TaskRouter
-from core.toolkit.registry import TOOLS, get_tool_command
+from core.toolkit.registry import TOOLS, get_tool_command, find_binary
 from core.toolkit.installer import install_tools, uninstall_tools
 
 __all__ = [
@@ -23,6 +22,7 @@ __all__ = [
     "TOOLS",
     "get_tool_command",
     "get_installed_tools",
+    "find_binary",
     "install_tools",
     "uninstall_tools",
 ]
@@ -48,11 +48,14 @@ def get_installed_tools() -> Dict[str, Dict[str, Any]]:
     """
     Detect which tools from the registry are installed on the system.
     Returns a dictionary of installed tools and their metadata.
+
+    Checks both system PATH and the project's venv bin directory,
+    since pip-installed tools may only exist in .venv/bin/.
     """
     installed = {}
     for name, config in TOOLS.items():
-        # Check if binary (or cmd[0]) exists in PATH
+        # Check if binary (or cmd[0]) exists in PATH or venv
         binary = config.get("binary") or config["cmd"][0]
-        if shutil.which(binary):
+        if find_binary(binary):
             installed[name] = config
     return installed
