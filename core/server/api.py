@@ -313,7 +313,8 @@ async def _begin_scan(req: ScanRequest) -> str:
         await register_session(session.id, session)
 
         # Persist session to DB to satisfy foreign key constraints in findings/evidence tables
-        await Database.instance().save_session(session.to_dict())
+        # Note: save_session() is fire-and-forget (synchronous), no await needed
+        Database.instance().save_session(session.to_dict())
 
         # Compute tool allowlist up-front so the UI can trust SCAN_STARTED payload immediately.
         installed_tools = list(get_installed_tools().keys())
@@ -828,8 +829,9 @@ async def validate_websocket_connection(
 
     # Step 1: Validate Origin (CSRF protection)
     # WebSockets bypass CORS, so we must check manually
+    # Skip origin validation in dev mode (require_auth=False) for convenience
     origin = websocket.headers.get("origin")
-    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
+    if config.security.require_auth and origin and not is_origin_allowed(origin, config.security.allowed_origins):
         logger.warning(
             f"[WebSocket] {endpoint_name} denied origin: {origin} "
             f"(allowed: {config.security.allowed_origins})"
@@ -1034,9 +1036,9 @@ async def get_results_v1(_: bool = Depends(verify_token)):
         session = await get_session(session_id)
         if session:
             return {
-                "findings": session.findings,
-                "issues": session.issues,
-                "killchain": {"edges": session.killchain},
+                "findings": session.findings.get_all(),
+                "issues": session.issues.get_all(),
+                "killchain": {"edges": session.killchain.get_all()},
                 "session_id": session_id,
             }
 
@@ -1363,7 +1365,9 @@ async def ws_graph_endpoint(websocket: WebSocket):
         logger.info("Graph WS disconnected")
 
 @app.websocket("/ws/terminal")
-async def ws_terminal_endpoint(websocket: WebSocket):
+async def ws_terminal_endpoint(
+    websocket: WebSocket, session_id: Optional[str] = Query(None)
+):
     """
     WebSocket endpoint for terminal output streaming.
 
@@ -1386,7 +1390,12 @@ async def ws_terminal_endpoint(websocket: WebSocket):
         return
 
     await websocket.accept()
-    session = PTYManager.instance().get_session()
+    manager = PTYManager.instance()
+    # Use provided session_id or create a new session
+    if session_id:
+        session = manager.get_or_create_session(session_id)
+    else:
+        session = manager.create_session()
 
     # Simple loop to pipe PTY output to WS
     try:

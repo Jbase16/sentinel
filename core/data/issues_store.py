@@ -77,16 +77,10 @@ class IssuesStore(Observable):
     def add_issue(self, issue: dict, persist: bool = True):
         """Function add_issue."""
         self._issues.append(issue)
-        # Error handling block.
+        # Persist asynchronously (fire-and-forget via BlackBox)
         if persist:
-            try:
-                asyncio.get_running_loop()
-                create_safe_task(
-                    self.db.save_issue(issue, self.session_id),
-                    name="save_issue"
-                )
-            except RuntimeError:
-                logger.warning("[IssuesStore] No event loop for async save")
+            # save_issue is fire-and-forget - it uses BlackBox internally
+            self.db.save_issue(issue, self.session_id)
         self.issues_changed.emit()
 
     def get_all(self):
@@ -102,17 +96,10 @@ class IssuesStore(Observable):
     def replace_all(self, issues: list, persist: bool = True):
         """Replace all issues with a new list"""
         self._issues = list(issues)
-        # Error handling block.
+        # Persist asynchronously (fire-and-forget via BlackBox)
         if persist:
-            try:
-                asyncio.get_running_loop()
-                for issue in issues:
-                    create_safe_task(
-                        self.db.save_issue(issue, self.session_id),
-                        name="replace_save_issue"
-                    )
-            except RuntimeError:
-                logger.warning("[IssuesStore] No event loop for async replace_all")
+            for issue in issues:
+                self.db.save_issue(issue, self.session_id)
         self.issues_changed.emit()
 
 

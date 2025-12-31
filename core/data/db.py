@@ -79,10 +79,10 @@ class Database:
                 return
 
             try:
-                self._db_connection = await aiosqlite.connect(self.db_path, timeout=5.0)
+                self._db_connection = await aiosqlite.connect(self.db_path, timeout=30.0)
                 await self._db_connection.execute("PRAGMA journal_mode=WAL;")
                 await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
-                await self._db_connection.execute("PRAGMA busy_timeout=5000;")
+                await self._db_connection.execute("PRAGMA busy_timeout=30000;")  # 30 seconds
                 await self._db_connection.execute("PRAGMA foreign_keys=ON;")
 
                 await self._create_tables()
@@ -229,6 +229,59 @@ class Database:
         )
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_decisions_sequence ON decisions(event_sequence)")
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_decisions_parent ON decisions(parent_id)")
+
+        # Migration: Add scan_sequence column to evidence if it doesn't exist
+        # This handles databases created before scan_sequence was added
+        await self._migrate_evidence_table()
+
+    async def _migrate_evidence_table(self) -> None:
+        """Add missing columns to evidence table if needed."""
+        try:
+            # Check if columns exist by querying table info
+            cursor = await self._db_connection.execute("PRAGMA table_info(evidence)")
+            columns = await cursor.fetchall()
+            column_names = {col[1] for col in columns}
+
+            migrations_needed = []
+            if "scan_sequence" not in column_names:
+                migrations_needed.append(
+                    ("scan_sequence", "ALTER TABLE evidence ADD COLUMN scan_sequence INTEGER NOT NULL DEFAULT 0")
+                )
+            if "tool_version" not in column_names:
+                migrations_needed.append(
+                    ("tool_version", "ALTER TABLE evidence ADD COLUMN tool_version TEXT")
+                )
+
+            if migrations_needed:
+                for col_name, sql in migrations_needed:
+                    logger.info(f"[Database] Migrating evidence table: adding {col_name} column")
+                    await self._db_connection.execute(sql)
+                await self._db_connection.commit()
+                logger.info(f"[Database] Migration complete: added {len(migrations_needed)} column(s)")
+        except Exception as e:
+            logger.warning(f"[Database] Evidence migration check failed: {e}")
+
+        # Ensure "global_scan" session exists for sessionless scanner operations
+        await self._ensure_global_scan_session()
+
+    async def _ensure_global_scan_session(self) -> None:
+        """Create the global_scan session if it doesn't exist."""
+        try:
+            cursor = await self._db_connection.execute(
+                "SELECT id FROM sessions WHERE id = ?", ("global_scan",)
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                await self._db_connection.execute(
+                    """
+                    INSERT INTO sessions (id, target, status, start_time)
+                    VALUES ('global_scan', 'system', 'active', datetime('now'))
+                    """
+                )
+                await self._db_connection.commit()
+                logger.info("[Database] Created global_scan session for sessionless operations")
+        except Exception as e:
+            logger.warning(f"[Database] Failed to ensure global_scan session: {e}")
 
     # ----------------------------
     # Low-level internal execution

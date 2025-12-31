@@ -105,6 +105,11 @@ class ScanSession:
         from core.wraith.automator import WraithAutomator
         self.wraith = WraithAutomator(self)
 
+    @property
+    def session_id(self) -> str:
+        """Alias for self.id for compatibility with scanner_engine."""
+        return self.id
+
     def start_ghost(self, port: int = 8080):
         """
         Activate the Ghost Protocol network proxy for this session.

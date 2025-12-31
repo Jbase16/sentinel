@@ -70,7 +70,7 @@ class GlobalSequenceAuthority:
     """
 
     _instance: Optional[GlobalSequenceAuthority] = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()  # RLock allows reentrant acquisition (same thread can acquire multiple times)
     _initialized = False
 
     def __new__(cls) -> GlobalSequenceAuthority:
@@ -123,46 +123,54 @@ class GlobalSequenceAuthority:
             - Creates singleton instance if not exists
             - Loads last sequence from database
             - Marks authority as initialized
+
+        Thread Safety:
+            Uses a two-phase approach to avoid deadlock:
+            1. Quick check under lock (fast path for already-initialized)
+            2. Async DB fetch outside lock
+            3. State update under lock with race condition handling
         """
+        # Fast path: already initialized (check under lock)
         with cls._lock:
             if cls._initialized:
-                # Already initialized, return current state
                 return cls._instance._last_issued if cls._instance else 0
 
-            # Ensure instance exists
+        # Slow path: need to fetch from DB
+        # Do the async DB operation OUTSIDE the lock to avoid deadlock
+        persisted = 0
+        try:
+            from core.data.db import Database
+            db = Database.instance()
+            persisted = await db.get_event_sequence()
+        except Exception as e:
+            logger.warning(
+                f"[SequenceAuthority] Failed to load from DB: {e}, starting from 1"
+            )
+            persisted = 0
+
+        # Now acquire lock to update state (handle race condition)
+        with cls._lock:
+            # Double-check: another coroutine may have initialized while we were awaiting
+            if cls._initialized:
+                return cls._instance._last_issued if cls._instance else 0
+
+            # Ensure instance exists and initialize it
             instance = cls()
+            instance._counter = count(start=persisted + 1)
+            instance._last_issued = persisted
+            cls._initialized = True
 
-            try:
-                from core.data.db import Database
-                db = Database.instance()
-                persisted = await db.get_event_sequence()
-
-                # Recreate counter starting from persisted value + 1
-                # (next call to next_id() will return persisted + 1)
-                instance._counter = count(start=persisted + 1)
-                instance._last_issued = persisted
-                cls._initialized = True
-
-                if persisted > 0:
-                    logger.info(
-                        f"[SequenceAuthority] Loaded from database: {persisted}, "
-                        f"next ID will be {persisted + 1}"
-                    )
-                else:
-                    logger.debug(
-                        "[SequenceAuthority] No persisted sequence found, starting from 1"
-                    )
-
-                return persisted
-
-            except Exception as e:
-                logger.warning(
-                    f"[SequenceAuthority] Failed to load from DB: {e}, starting from 1"
+            if persisted > 0:
+                logger.info(
+                    f"[SequenceAuthority] Loaded from database: {persisted}, "
+                    f"next ID will be {persisted + 1}"
                 )
-                instance._counter = count(start=1)
-                instance._last_issued = 0
-                cls._initialized = True
-                return 0
+            else:
+                logger.debug(
+                    "[SequenceAuthority] No persisted sequence found, starting from 1"
+                )
+
+            return persisted
 
     @classmethod
     def is_initialized(cls) -> bool:

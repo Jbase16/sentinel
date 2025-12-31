@@ -112,16 +112,11 @@ class EvidenceStore(Observable):
         
         self._evidence[eid] = evidence_data
 
-        # Persist to database asynchronously
+        # Persist to database asynchronously (fire-and-forget via BlackBox)
         if persist:
-            try:
-                asyncio.get_running_loop()
-                create_safe_task(
-                    self.db.save_evidence(evidence_data, self.session_id),
-                    name="save_evidence"
-                )
-            except RuntimeError:
-                logger.warning("[EvidenceStore] No event loop for async save")
+            # save_evidence is fire-and-forget - it uses BlackBox internally
+            # No need for create_safe_task wrapper
+            self.db.save_evidence(evidence_data, self.session_id)
 
         self.evidence_changed.emit()
         return eid
@@ -139,16 +134,10 @@ class EvidenceStore(Observable):
         if findings:
             self._evidence[evidence_id]["findings"] = findings
 
-        # Persist update to database
+        # Persist update to database (fire-and-forget via BlackBox)
         if persist:
-            try:
-                asyncio.get_running_loop()
-                create_safe_task(
-                    self.db.update_evidence(evidence_id, summary, findings, self.session_id),
-                    name="update_evidence"
-                )
-            except RuntimeError:
-                logger.warning("[EvidenceStore] No event loop for async update")
+            # update_evidence is fire-and-forget - it uses BlackBox internally
+            self.db.update_evidence(evidence_id, summary, findings, self.session_id)
 
         self.evidence_changed.emit()
 

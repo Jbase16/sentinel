@@ -117,16 +117,10 @@ class FindingsStore(Observable):
         with self._lock:
             self._findings.append(finding)
         
-        # Persist asynchronously with session ID (with error logging)
+        # Persist asynchronously (fire-and-forget via BlackBox)
         if persist:
-            try:
-                asyncio.get_running_loop()
-                create_safe_task(
-                    self.db.save_finding(finding, self.session_id),
-                    name="save_finding"
-                )
-            except RuntimeError:
-                logger.warning("[FindingsStore] No event loop for async save")
+            # save_finding is fire-and-forget - it uses BlackBox internally
+            self.db.save_finding(finding, self.session_id)
         self.findings_changed.emit()
 
     def add(self, finding: dict, persist: bool = True):
@@ -139,17 +133,10 @@ class FindingsStore(Observable):
         with self._lock:
             self._findings.extend(items)
         
-        # Error handling block.
+        # Persist asynchronously (fire-and-forget via BlackBox)
         if persist:
-            try:
-                asyncio.get_running_loop()
-                for item in items:
-                    create_safe_task(
-                        self.db.save_finding(item, self.session_id),
-                        name="bulk_save_finding"
-                    )
-            except RuntimeError:
-                logger.warning("[FindingsStore] No event loop for async bulk save")
+            for item in items:
+                self.db.save_finding(item, self.session_id)
             
         self.findings_changed.emit()
 
