@@ -1,7 +1,7 @@
 {
   "generated_at": 1766446864,
   "root": "/Users/jason/Developer/sentinelforge",
-  "count": 283,
+  "count": 281,
   "records": [
     {
       "path": ".pytest_cache",
@@ -82,19 +82,6 @@
       "type": "doc"
     },
     {
-      "path": "Dockerfile",
-      "is_dir": false,
-      "size_bytes": 823,
-      "mtime": 1765521494.0,
-      "git": {
-        "commit": "7a82e217e5346eb53c0769c4dec9a055e3eadde9",
-        "timestamp": 1765529731
-      },
-      "git_deleted_previously": false,
-      "references": [],
-      "type": "asset"
-    },
-    {
       "path": "ollama.log",
       "is_dir": false,
       "size_bytes": 64,
@@ -158,19 +145,6 @@
       "git_deleted_previously": false,
       "references": [],
       "type": "asset"
-    },
-    {
-      "path": "docker-compose.yml",
-      "is_dir": false,
-      "size_bytes": 729,
-      "mtime": 1765521394.0,
-      "git": {
-        "commit": "7a82e217e5346eb53c0769c4dec9a055e3eadde9",
-        "timestamp": 1765529731
-      },
-      "git_deleted_previously": false,
-      "references": [],
-      "type": "build"
     },
     {
       "path": "AGENTS.md",

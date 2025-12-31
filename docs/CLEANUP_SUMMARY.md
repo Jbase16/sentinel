@@ -51,10 +51,8 @@ Essential files remaining in root:
 /
 ├── .gitignore
 ├── AGENTS.md                    # Agent guidelines (keep in root)
-├── Dockerfile
 ├── README.md                    # Main project documentation (keep in root)
 ├── TODO.md                      # Current task list (keep in root)
-├── docker-compose.yml
 ├── requirements.txt
 ├── sentinel.code-workspace
 ├── assets/

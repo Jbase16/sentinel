@@ -20,26 +20,6 @@
     }
   },
   {
-    "path": "Dockerfile",
-    "disposition": "keep",
-    "confidence": 0.3,
-    "rationale": "protected_root",
-    "questions": [],
-    "evidence": {
-      "path": "Dockerfile",
-      "is_dir": false,
-      "size_bytes": 823,
-      "mtime": 1765521494.0,
-      "git": {
-        "commit": "7a82e217e5346eb53c0769c4dec9a055e3eadde9",
-        "timestamp": 1765529731
-      },
-      "git_deleted_previously": false,
-      "references": [],
-      "type": "asset"
-    }
-  },
-  {
     "path": "TODO.md",
     "disposition": "unknown",
     "confidence": 0.5,
@@ -120,26 +100,6 @@
       "git_deleted_previously": false,
       "references": [],
       "type": "asset"
-    }
-  },
-  {
-    "path": "docker-compose.yml",
-    "disposition": "keep",
-    "confidence": 0.3,
-    "rationale": "protected_root",
-    "questions": [],
-    "evidence": {
-      "path": "docker-compose.yml",
-      "is_dir": false,
-      "size_bytes": 729,
-      "mtime": 1765521394.0,
-      "git": {
-        "commit": "7a82e217e5346eb53c0769c4dec9a055e3eadde9",
-        "timestamp": 1765529731
-      },
-      "git_deleted_previously": false,
-      "references": [],
-      "type": "build"
     }
   },
   {
