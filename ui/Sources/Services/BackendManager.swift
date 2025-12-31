@@ -44,9 +44,20 @@ class BackendManager: ObservableObject {
     private var bootManifestURL: URL?
     private var logRingBuffer: [String] = []
 
-    private let maxStartupRetries = 30  // 30 seconds max wait
     private let healthCheckInterval: UInt64 = 1_000_000_000  // 1 second
     private let maxLogLines = 200
+    private let maxStartupDuration: TimeInterval = 40  // Hard startup deadline (seconds)
+    private let startupRequestTimeout: TimeInterval = 1.5
+    private let startupInitialBackoff: TimeInterval = 0.5
+    private let startupMaxBackoff: TimeInterval = 5.0
+    private let healthCheckURL = URL(string: "http://127.0.0.1:8765/v1/ping")!
+    private let startupFailureSignatures = [
+        "ModuleNotFoundError: No module named 'uvicorn'"
+    ]
+    private let startupStateQueue = DispatchQueue(label: "BackendManager.startupState")
+    private var startupFailureMessage: String?
+    private var startupAbortRequested: Bool = false
+    private var isStopping: Bool = false
 
     /// Function start.
     func start() {
@@ -74,6 +85,9 @@ class BackendManager: ObservableObject {
 
         // Conditional branch.
         if let p = process, p.isRunning {
+            startupStateQueue.sync {
+                self.isStopping = true
+            }
             print("[BackendManager] Terminating backend process...")
             p.terminate()
             // Don't block - let the process die asynchronously
@@ -87,10 +101,10 @@ class BackendManager: ObservableObject {
         status = "Core Stopped"
     }
 
-    private func checkBackendHealth() async -> Bool {
-        let url = URL(string: "http://127.0.0.1:8765/ping")!
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10.0  // Allow more time for slow responses
+    private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async -> Bool {
+        let requestURL = url ?? healthCheckURL
+        var request = URLRequest(url: requestURL)
+        request.timeoutInterval = timeoutInterval  // Allow more time for slow responses
         // Do-catch block.
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -187,6 +201,7 @@ class BackendManager: ObservableObject {
             self.status = "Booting Neural Core..."
         }
         print("[BackendManager] Python: \(python.path)")
+        resetStartupState()
 
         // Create and configure the process
         let p = Process()
@@ -258,9 +273,16 @@ class BackendManager: ObservableObject {
                     print("[Core] \(trimmed)")
                     Task { @MainActor in
                         self.appendLogLine(trimmed)
+                        self.detectStartupFailureSignature(in: trimmed)
                     }
+
                 }
             }
+        }
+
+        p.terminationHandler = { [weak self] process in
+            guard let self else { return }
+            self.handleProcessTermination(process)
         }
 
         self.process = p
@@ -286,10 +308,21 @@ class BackendManager: ObservableObject {
 
     /// Polls the health endpoint until the server is ready
     private func waitForServerReady() async {
-        // Loop over items.
-        for attempt in 1...maxStartupRetries {
+        let deadline = Date().addingTimeInterval(maxStartupDuration)
+        var attempt = 0
+        var backoff = startupInitialBackoff
+
+        while Date() < deadline {
+            if shouldAbortStartup() {
+                return
+            }
+
+            attempt += 1
+            let remaining = max(0, deadline.timeIntervalSinceNow)
+            let requestTimeout = min(startupRequestTimeout, remaining)
+
             // Conditional branch.
-            if await checkBackendHealth() {
+            if await checkBackendHealth(timeoutInterval: requestTimeout) {
                 await MainActor.run {
                     self.status = "Core Online"
                     self.isRunning = true
@@ -300,20 +333,19 @@ class BackendManager: ObservableObject {
                 return
             }
 
-            // Check if process died
-            if let p = process, !p.isRunning {
-                await MainActor.run {
-                    self.status = "Core Crashed (exit: \(p.terminationStatus))"
-                    self.isRunning = false
-                }
+            if shouldAbortStartup() {
                 return
             }
 
             await MainActor.run {
-                self.status = "Core Starting (\(attempt)/\(self.maxStartupRetries))..."
+                self.status = "Core Starting (attempt \(attempt))..."
             }
 
-            try? await Task.sleep(nanoseconds: healthCheckInterval)
+            let sleepDuration = min(backoff, max(0, deadline.timeIntervalSinceNow))
+            if sleepDuration > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(sleepDuration * 1_000_000_000))
+            }
+            backoff = min(backoff * 2, startupMaxBackoff)
         }
 
         let manifest = readBootManifest()
@@ -322,7 +354,59 @@ class BackendManager: ObservableObject {
         }
 
         await MainActor.run {
-            self.status = "Core Timeout - Check Logs"
+            self.status = "Core Timeout (\(Int(maxStartupDuration))s) - Check Logs"
+            self.isRunning = false
+        }
+    }
+
+    private func resetStartupState() {
+        startupStateQueue.sync {
+            self.startupFailureMessage = nil
+            self.startupAbortRequested = false
+            self.isStopping = false
+        }
+    }
+
+    private func shouldAbortStartup() -> Bool {
+        startupStateQueue.sync { startupAbortRequested }
+    }
+
+    private func detectStartupFailureSignature(in output: String) {
+        for signature in startupFailureSignatures where output.contains(signature) {
+            recordStartupFailure("Missing dependency: \(signature)")
+            return
+        }
+    }
+
+    private func recordStartupFailure(_ message: String) {
+        let shouldUpdate = startupStateQueue.sync { () -> Bool in
+            if startupFailureMessage != nil {
+                return false
+            }
+            startupFailureMessage = message
+            startupAbortRequested = true
+            return true
+        }
+        guard shouldUpdate else { return }
+
+        Task { @MainActor in
+            self.status = "Core Boot Failed: \(message)"
+            self.isRunning = false
+        }
+    }
+
+    private func handleProcessTermination(_ process: Process) {
+        let shouldReport = startupStateQueue.sync { () -> Bool in
+            if isStopping {
+                return false
+            }
+            startupAbortRequested = true
+            return true
+        }
+        guard shouldReport else { return }
+
+        Task { @MainActor in
+            self.status = "Core Crashed (exit: \(process.terminationStatus))"
             self.isRunning = false
         }
     }

@@ -51,13 +51,14 @@ class SecurityConfig:
     
     # Which websites can connect to our API (prevents random sites from accessing it)
     # 127.0.0.1 and localhost both mean "this computer only"
-    # The * means any port (8000, 8080, etc.)
+    # Port wildcards are only allowed for loopback in development mode.
     allowed_origins: tuple = ("http://127.0.0.1:*", "http://localhost:*", "tauri://localhost")
     
     # Should users need to authenticate before using the API?
-    # False = anyone on localhost can use it (fine for single-user local dev)
-    # True = must provide api_token with each request (better for production)
-    require_auth: bool = False
+    # True = must provide api_token with each request (secure default)
+    # False = anyone on localhost can use it (only safe for single-user local dev)
+    # SECURITY: Defaults to True for fail-closed posture. Disable explicitly if needed.
+    require_auth: bool = True
     
     # Can users run terminal commands through the UI?
     # True = yes (convenient but potentially dangerous if exposed remotely)
@@ -65,8 +66,9 @@ class SecurityConfig:
     terminal_enabled: bool = True
     
     # Does terminal access require authentication even if require_auth is False?
-    # Currently False for dev convenience, should be True in production
-    terminal_require_auth: bool = False
+    # True = terminal endpoints always require token (secure default)
+    # SECURITY: /ws/pty provides full shell access - defaults to True for fail-closed posture.
+    terminal_require_auth: bool = True
     
     # Can users copy/paste through the terminal interface?
     # True = clipboard works (UX improvement), False = disabled (extra security)
@@ -518,9 +520,9 @@ class SentinelConfig:
         security = SecurityConfig(
             api_token=token,
             allowed_origins=origins,
-            require_auth=os.getenv("SENTINEL_REQUIRE_AUTH", "false").lower() == "true",
+            require_auth=os.getenv("SENTINEL_REQUIRE_AUTH", "true").lower() == "true",
             terminal_enabled=os.getenv("SENTINEL_TERMINAL_ENABLED", "true").lower() == "true",
-            terminal_require_auth=os.getenv("SENTINEL_TERMINAL_REQUIRE_AUTH", "false").lower() == "true",
+            terminal_require_auth=os.getenv("SENTINEL_TERMINAL_REQUIRE_AUTH", "true").lower() == "true",
             clipboard_enabled=os.getenv("SENTINEL_CLIPBOARD_ENABLED", "true").lower() == "true",
             rate_limit_requests_per_minute=int(os.getenv("SENTINEL_RATE_LIMIT", "600")),
             rate_limit_ai_per_minute=int(os.getenv("SENTINEL_AI_RATE_LIMIT", "60")),
