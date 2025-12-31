@@ -9,7 +9,8 @@
 *.pyc
 *.tmp
 # Keep xcodeproj but ignore user-specific data inside it
-# xcuserdata/ is already ignored below
+xcuserdata/
+*.xcuserstate
 *.zip
 .DS_Store
 .swiftpm/
