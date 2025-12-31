@@ -282,7 +282,9 @@ class BackendManager: ObservableObject {
 
         p.terminationHandler = { [weak self] process in
             guard let self else { return }
-            self.handleProcessTermination(process)
+            Task { @MainActor in
+                self.handleProcessTermination(process)
+            }
         }
 
         self.process = p
@@ -466,3 +468,4 @@ class BackendManager: ObservableObject {
         return json
     }
 }
+
