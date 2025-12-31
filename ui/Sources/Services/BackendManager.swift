@@ -28,6 +28,7 @@ class BackendManager: ObservableObject {
     @Published var status: String = "Initializing..."
     @Published var isRunning: Bool = false
     @Published var pythonPath: String = ""
+    @Published var lastCoreLogs: [String] = []
 
     /// Set to true when app is actively making requests (chat, scan, etc.)
     /// Health monitor won't mark as disconnected during active operations
@@ -40,8 +41,11 @@ class BackendManager: ObservableObject {
     private var process: Process?
     private var pipe: Pipe?
     private var healthCheckTask: Task<Void, Never>?
+    private var bootManifestURL: URL?
+    private var logRingBuffer: [String] = []
 
     private let healthCheckInterval: UInt64 = 1_000_000_000  // 1 second
+    private let maxLogLines = 200
     private let maxStartupDuration: TimeInterval = 40  // Hard startup deadline (seconds)
     private let startupRequestTimeout: TimeInterval = 1.5
     private let startupInitialBackoff: TimeInterval = 0.5
@@ -90,6 +94,9 @@ class BackendManager: ObservableObject {
         }
         process = nil
         pipe = nil
+        bootManifestURL = nil
+        logRingBuffer.removeAll()
+        lastCoreLogs.removeAll()
         isRunning = false
         status = "Core Stopped"
     }
@@ -207,6 +214,31 @@ class BackendManager: ObservableObject {
         env["PYTHONPATH"] = repoPath.path
         env["PYTHONUNBUFFERED"] = "1"  // Disable output buffering
 
+        // Ensure UI-integrated core binds to the expected localhost endpoint.
+        // This prevents accidental overrides from shell environment variables
+        // (e.g., Docker-era SENTINEL_API_HOST/PORT) that can break connectivity.
+        env["SENTINEL_API_HOST"] = "127.0.0.1"
+        env["SENTINEL_API_PORT"] = "8765"
+        env["SENTINEL_REQUIRE_AUTH"] = "false"
+
+        // If Docker-era Ollama endpoints are still set, normalize to localhost.
+        if let ollamaURL = env["SENTINEL_OLLAMA_URL"],
+            ollamaURL.contains("host.docker.internal")
+        {
+            env["SENTINEL_OLLAMA_URL"] = "http://localhost:11434"
+            print("[BackendManager] Normalized SENTINEL_OLLAMA_URL to localhost (Docker legacy)")
+        }
+
+        // Provide a boot manifest path for deterministic readiness diagnostics.
+        let manifestDir = home
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("run")
+        let manifestPath = manifestDir.appendingPathComponent("boot_manifest.json")
+        bootManifestURL = manifestPath
+        try? FileManager.default.createDirectory(at: manifestDir, withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: manifestPath)
+        env["SENTINEL_BOOT_MANIFEST"] = manifestPath.path
+
         // CRITICAL: Inject Homebrew/System paths so Core can find tools (nmap, nuclei)
         // Even with SIP disabled, GUI apps don't inherit the full shell PATH.
         let extraPaths = [
@@ -239,7 +271,11 @@ class BackendManager: ObservableObject {
                 // Conditional branch.
                 if !trimmed.isEmpty {
                     print("[Core] \(trimmed)")
-                    self.detectStartupFailureSignature(in: trimmed)
+                    Task { @MainActor in
+                        self.appendLogLine(trimmed)
+                        self.detectStartupFailureSignature(in: trimmed)
+                    }
+
                 }
             }
         }
@@ -310,6 +346,11 @@ class BackendManager: ObservableObject {
                 try? await Task.sleep(nanoseconds: UInt64(sleepDuration * 1_000_000_000))
             }
             backoff = min(backoff * 2, startupMaxBackoff)
+        }
+
+        let manifest = readBootManifest()
+        if let manifestState = manifest?["state"] as? String {
+            print("[BackendManager] Boot manifest state: \(manifestState)")
         }
 
         await MainActor.run {
@@ -406,5 +447,22 @@ class BackendManager: ObservableObject {
         }
 
         return nil
+    }
+
+    @MainActor
+    private func appendLogLine(_ line: String) {
+        logRingBuffer.append(line)
+        if logRingBuffer.count > maxLogLines {
+            logRingBuffer.removeFirst(logRingBuffer.count - maxLogLines)
+        }
+        lastCoreLogs = logRingBuffer
+    }
+
+    private func readBootManifest() -> [String: Any]? {
+        guard let manifestURL = bootManifestURL,
+            let data = try? Data(contentsOf: manifestURL),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return json
     }
 }

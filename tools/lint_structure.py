@@ -4,7 +4,7 @@ Verifies that the SentinelForge project structure is still clean and consistent.
 
 import os
 
-ALLOWED_ROOT = {"sentinelforge", "Dockerfile", "docker-compose.yml", "README.md",
+ALLOWED_ROOT = {"sentinelforge", "README.md",
                 "requirements.txt", "tests", "ui", "docs", "tools"}
 
 def main():

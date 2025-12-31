@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 from collections import defaultdict
@@ -158,6 +159,29 @@ _log_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
 _api_loop: Optional[asyncio.AbstractEventLoop] = None
 _scan_state: Dict[str, Any] = {}
 _cancel_requested = threading.Event()
+
+
+def _boot_manifest_path() -> Optional[str]:
+    path = os.getenv("SENTINEL_BOOT_MANIFEST")
+    return path if path else None
+
+
+def _write_boot_manifest(state: str, detail: Optional[Dict[str, Any]] = None) -> None:
+    manifest_path = _boot_manifest_path()
+    if not manifest_path:
+        return
+    payload = {
+        "state": state,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if detail:
+        payload.update(detail)
+    try:
+        os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+        with open(manifest_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+    except Exception as exc:
+        logger.warning(f"[BootManifest] Failed to write manifest: {exc}")
 _active_scan_task: Optional[asyncio.Task] = None
 _scan_lock = asyncio.Lock()
 
@@ -546,6 +570,17 @@ async def startup_event():
 
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
+    _write_boot_manifest(
+        "starting",
+        {
+            "pid": os.getpid(),
+            "api_host": config.api_host,
+            "api_port": config.api_port,
+            "require_auth": config.security.require_auth,
+            "ai_provider": config.ai.provider,
+            "ollama_url": config.ai.ollama_url,
+        },
+    )
 
     # Error handling block.
     try:
@@ -565,12 +600,14 @@ async def startup_event():
     # Start session cleanup task
     _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
     logger.info("Session cleanup task started")
+    _write_boot_manifest("ready")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """AsyncFunction shutdown_event."""
     global _session_cleanup_task
     logger.info("SentinelForge API Shutting Down...")
+    _write_boot_manifest("stopping")
 
     # Cancel session cleanup task
     if _session_cleanup_task and not _session_cleanup_task.done():
@@ -591,6 +628,7 @@ async def shutdown_event():
     # Close database connection
     db = Database.instance()
     await db.close()
+    _write_boot_manifest("stopped")
 
 def is_origin_allowed(origin: str, allowed_patterns: Iterable[str]) -> bool:
     """

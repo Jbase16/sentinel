@@ -73,8 +73,6 @@ PROTECTED_ROOTS = {
     "tools",
     "models",
     ".github",
-    "Dockerfile",
-    "docker-compose.yml",
     "requirements.txt",
     "README.md",
     "AGENTS.md",

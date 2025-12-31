@@ -27,7 +27,7 @@
 #
 # KEY CONCEPTS:
 # - **JIT Compilation**: Generate code at runtime, not ahead-of-time
-# - **Sandbox**: Isolated environment (Docker container, VM, etc.)
+# - **Sandbox**: Isolated environment (container, VM, etc.)
 # - **Proof-of-Concept**: Demonstrates vulnerability without causing harm
 #
 

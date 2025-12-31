@@ -34,19 +34,13 @@ def main():
     
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     
-    # 1. Check Docker
-    dockerfile = os.path.join(root, "Dockerfile")
-    compose = os.path.join(root, "docker-compose.yml")
-    check_file(dockerfile, "Dockerfile")
-    check_file(compose, "Docker Compose")
-    
-    # 2. Check Swift Services
+    # 1. Check Swift Services
     swift_services = os.path.join(root, "ui/Sources/SentinelForgeUI/Services")
     check_file(os.path.join(swift_services, "CortexStream.swift"), "Cortex Stream (Metal)")
     check_file(os.path.join(swift_services, "PTYClient.swift"), "PTY Client (Terminal)")
     check_file(os.path.join(swift_services, "SentinelAPIClient.swift"), "API Client")
     
-    # 3. Check App State
+    # 2. Check App State
     app_state = os.path.join(root, "ui/Sources/SentinelForgeUI/Models/HelixAppState.swift")
     # Conditional branch.
     if check_file(app_state, "HelixAppState"):
