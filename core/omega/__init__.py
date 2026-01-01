@@ -202,7 +202,7 @@ class OmegaManager:
         )
 
         # Create result skeleton
-        result = OmegaResult(
+        OmegaResult(
             config=config,
             target=config.target,
             started_at=datetime.utcnow(),

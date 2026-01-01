@@ -41,7 +41,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
 
 # Safety fuse: prevents unsafe operations
 SAFE_MODE: bool = True
@@ -270,7 +269,7 @@ class RouteMiner:
         )
 
         # Create report skeleton
-        report = RouteReport(
+        RouteReport(
             target=target,
             total_routes=len(all_routes),
         )

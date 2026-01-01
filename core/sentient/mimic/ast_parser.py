@@ -39,12 +39,10 @@ DEPENDENCIES (Future):
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional
 
 # Safety fuse: prevents unsafe operations
 SAFE_MODE: bool = True
@@ -360,7 +358,7 @@ class ASTParser:
         )
 
         # Create result skeleton
-        result = ParseResult(source_file=source_file)
+        ParseResult(source_file=source_file)
 
         raise NotImplementedError(
             "Wrapper-only: JavaScript parsing implementation deferred. "

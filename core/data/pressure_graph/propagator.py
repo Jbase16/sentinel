@@ -4,7 +4,7 @@ The Solver.
 Implements Iterative Relaxation with Weight Normalization guarantees.
 """
 
-from typing import Dict, Set, Optional
+from typing import Dict, Set, Optional, List
 from collections import defaultdict
 
 from .models import PressureNode, PressureEdge

@@ -4,7 +4,6 @@ import os
 import shutil
 import sys
 import logging
-import signal
 from typing import Dict, List, Optional, Tuple, NamedTuple
 
 from core.toolkit.registry import TOOLS, find_binary
@@ -201,7 +200,6 @@ class CommandChain:
         """
         last_rc = 0
         output_buffer = []
-        run_next = True
         
         for i, segment in enumerate(self.segments):
             # Calculate if we should run this segment based on the previous result and operator

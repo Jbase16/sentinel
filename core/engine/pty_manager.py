@@ -25,7 +25,7 @@ import time
 import uuid
 import logging
 import select
-from typing import Dict, Optional, Tuple, List, Union
+from typing import Dict, Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 

@@ -315,7 +315,7 @@ class MinimalFixSetEngine:
         """
         # Extract components
         super_source = flow_network["super_source"]
-        super_sink = flow_network["super_sink"]
+        flow_network["super_sink"]
         capacity = flow_network["capacity"]
         flow = flow_network.get("flow", {})
         adj = flow_network["adj"]

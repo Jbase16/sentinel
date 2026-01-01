@@ -18,7 +18,7 @@ Integration:
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Set
+from typing import Any, Dict, Protocol, Set
 
 SAFE_MODE: bool = True
 

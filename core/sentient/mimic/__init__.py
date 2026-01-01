@@ -70,12 +70,14 @@ __all__ = [
     "NodeType",
     "SecretType",
     "ParseResult",
+    "AST_SAFE_MODE",
     # Route Miner
     "RouteMiner",
     "HiddenRoute",
     "RouteReport",
     "HiddenRouteReason",
     "RiskLevel",
+    "MINER_SAFE_MODE",
     # Factory Functions
     "create_asset_downloader",
     "create_ast_parser",

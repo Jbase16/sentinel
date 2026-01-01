@@ -4,7 +4,7 @@ Fast counterfactual analysis with dirty subgraph optimization.
 Exposes clean properties for external query, hiding internal state.
 """
 
-from typing import Dict, Set, List, Optional, Tuple
+from typing import Dict, Set, Optional, Tuple
 from collections import deque
 
 from .models import PressureNode, PressureEdge, Remediation
@@ -124,12 +124,12 @@ class CounterfactualEngine:
                             remediation: Remediation, 
                             dirty_nodes: Set[str]) -> Tuple[Dict, Dict]:
         # Deep copy only dirty nodes
-        from copy import deepcopy
         s_nodes = {}
         for nid in dirty_nodes:
             orig = self.nodes[nid]
             mod = remediation.apply_to_node(orig)
-            if mod: s_nodes[nid] = mod
+            if mod:
+                s_nodes[nid] = mod
         
         # Copy relevant edges
         s_edges = {}
@@ -137,6 +137,7 @@ class CounterfactualEngine:
             if edge.source_id not in dirty_nodes and edge.target_id not in dirty_nodes:
                 continue
             mod = remediation.apply_to_edge(edge)
-            if mod: s_edges[eid] = mod
+            if mod:
+                s_edges[eid] = mod
             
         return s_nodes, s_edges

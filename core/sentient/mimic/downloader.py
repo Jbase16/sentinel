@@ -329,7 +329,7 @@ class AssetDownloader:
         )
 
         # Create manifest skeleton
-        manifest = AssetManifest(
+        AssetManifest(
             target=parsed.netloc,
             base_url=target.rstrip("/"),
         )

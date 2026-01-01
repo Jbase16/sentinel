@@ -20,19 +20,19 @@
 import uuid
 import time
 from threading import Lock
-from threading import Lock
-from typing import Dict, List, Deque
+from typing import Dict, Deque
 from collections import deque
 import logging
+
+from core.data.findings_store import FindingsStore  # Stores security vulnerabilities/discoveries
+from core.data.issues_store import IssuesStore  # Stores confirmed issues/exploits
+from core.data.killchain_store import KillchainStore  # Tracks attack progression
+from core.data.evidence_store import EvidenceStore  # Stores raw tool outputs
 
 logger = logging.getLogger(__name__)
 
 # Max logs to keep in memory per session
 MAX_SESSION_LOGS = 5000
-from core.data.findings_store import FindingsStore  # Stores security vulnerabilities/discoveries
-from core.data.issues_store import IssuesStore  # Stores confirmed issues/exploits
-from core.data.killchain_store import KillchainStore  # Tracks attack progression
-from core.data.evidence_store import EvidenceStore  # Stores raw tool outputs
 
 class ScanSession:
     """

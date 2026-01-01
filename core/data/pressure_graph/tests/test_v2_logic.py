@@ -1,9 +1,7 @@
 
 import unittest
-from core.data.pressure_graph.models import PressureNode, PressureEdge, EdgeType, Remediation, PressureSource, RemediationState
-from core.data.pressure_graph.explanation import CausalExplainer, PressurePath
-from core.data.pressure_graph.counterfactual import CounterfactualEngine
-from core.data.pressure_graph.propagator import PressurePropagator
+from core.data.pressure_graph.models import PressureNode, PressureEdge, EdgeType, Remediation, RemediationState
+from core.data.pressure_graph.explanation import CausalExplainer
 
 class TestV2Logic(unittest.TestCase):
     def setUp(self):
