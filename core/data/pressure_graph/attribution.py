@@ -49,7 +49,8 @@ class LeaveOneOutStrategy(AttributionStrategy):
         
         attributions = []
         for cid in candidates:
-            if cid == crown_jewel_id: continue
+            if cid == crown_jewel_id:
+                continue
             
             rem = Remediation(id=f"r_{cid}", name="", nodes_to_remove={cid})
             new_p_map = self.engine.simulate_remediation(rem)
@@ -69,7 +70,8 @@ class LeaveOneOutStrategy(AttributionStrategy):
         c = set()
         q = [node_id]
         for _ in range(2):
-            if not q: break
+            if not q:
+                break
             next_q = []
             for nid in q:
                 for e in self.engine.propagator.get_inbound_edges(nid):
@@ -88,7 +90,8 @@ class LeaveOneOutStrategy(AttributionStrategy):
             for nid, _ in sorted_n:
                 if nid not in c:
                     c.add(nid)
-                if len(c) >= limit: break
+                if len(c) >= limit:
+                    break
         return c
 
 

@@ -30,7 +30,6 @@ from typing import Any, Dict, Iterable, List, Optional
 import uvicorn
 from fastapi import APIRouter, Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, validator
 
@@ -1030,6 +1029,10 @@ async def get_logs_v1(limit: int = 100, _: bool = Depends(verify_token)):
 @v1_router.get("/results")
 async def get_results_v1(_: bool = Depends(verify_token)):
     """API v1: Get scan results including findings, issues, and killchain data."""
+    from core.data.findings_store import findings_store
+    from core.data.issues_store import issues_store
+    from core.data.killchain_store import killchain_store
+    
     # If there's an active scan with a session, return session-specific results
     session_id = _scan_state.get("session_id")
     if session_id:

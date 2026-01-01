@@ -9,8 +9,7 @@ Ensures the "Crown Jewel" stress can be instantly understood by the user.
 """
 
 from dataclasses import dataclass
-from typing import List, Dict, Set, Optional
-import heapq
+from typing import List, Dict
 
 from core.data.pressure_graph.models import NodeId, PressureNode, PressureEdge
 
@@ -53,7 +52,7 @@ class CausalExplainer:
         if target_id not in self.nodes:
             return []
             
-        target = self.nodes[target_id]
+        self.nodes[target_id]
         paths: List[PressurePath] = []
         
         # Simple implementation: Find top contributing neighbors, then recurse?

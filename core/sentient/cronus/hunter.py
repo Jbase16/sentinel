@@ -328,7 +328,7 @@ class ZombieHunter:
         )
 
         # Create report skeleton
-        report = ZombieReport(
+        ZombieReport(
             target=target,
             started_at=datetime.utcnow(),
         )
