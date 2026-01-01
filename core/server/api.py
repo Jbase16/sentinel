@@ -1733,19 +1733,50 @@ async def terminal_websocket_pty(websocket: WebSocket, session_id: Optional[str]
     # -------------------------------------------------------------------------
     # 4. Writer Loop (Client -> Server)
     # -------------------------------------------------------------------------
+
+    def _sanitize_terminal_input(data: str) -> str:
+        """
+        Sanitizes usage of terminal escape sequences to prevent injection attacks.
+        
+        Blocks dangerous control sequences (OSC, DCS, APC, PM) that could be used checks 
+        to manipulate the terminal state or exfiltrate data (e.g. clipboard reading).
+        Allows standard Control Sequence Introducer (CSI) sequences (e.g. arrow keys).
+        """
+        # Block:
+        # \x1b] = OSC (Operating System Command)
+        # \x1bP = DCS (Device Control String)
+        # \x1b_ = APC (Application Program Command)
+        # \x1b^ = PM  (Privacy Message)
+        dangerous_sequences = ["\x1b]", "\x1bP", "\x1b_", "\x1b^"]
+        
+        for seq in dangerous_sequences:
+            if seq in data:
+                logger.warning(f"Blocked potential terminal injection in session {session_id}")
+                return ""
+        return data
+
     try:
         while True:
             # Wait for input from the browser
-            msg = await websocket.receive_text()
+            # We use receive_text() to handle both JSON packets and raw keystrokes
+            message_text = await websocket.receive_text()
             
-            # Check for control messages (JSON) vs Raw Input
-            # We assume anything starting with '{' is a control sequence.
-            if msg.startswith("{"):
-                try:
-                    cmd = json.loads(msg)
+            # 1. Attempt to parse as JSON Command (New Protocol)
+            try:
+                # Optimized for "startsWith" check to avoid costly exception on every keystroke
+                if message_text.startswith("{"):
+                    cmd = json.loads(message_text)
                     msg_type = cmd.get("type")
                     
-                    if msg_type == "resize":
+                    if msg_type == "input":
+                        # Standard input payload
+                        raw_data = cmd.get("data", "")
+                        safe_data = _sanitize_terminal_input(raw_data)
+                        if safe_data:
+                            pty_session.write(safe_data)
+                        continue
+
+                    elif msg_type == "resize":
                         # Handle window resize events
                         rows = cmd.get("rows", 24)
                         cols = cmd.get("cols", 80)
@@ -1756,13 +1787,17 @@ async def terminal_websocket_pty(websocket: WebSocket, session_id: Optional[str]
                         # Keep-alive
                         await websocket.send_json({"type": "pong"})
                         continue
-                        
-                except json.JSONDecodeError:
-                    # Not valid JSON? Treat as raw input bytes.
-                    pass
             
-            # Forward the keystrokes to the actual PTY master fd
-            pty_session.write(msg)
+            except json.JSONDecodeError:
+                # If it looked like JSON but failed, treat as raw input
+                pass
+
+            # 2. Fallback: Treat as Raw Input (Keystrokes/Legacy)
+            # This handles direct xterm.js "data" events if not wrapped
+            if not message_text.startswith("{") or "type" not in message_text:
+                safe_data = _sanitize_terminal_input(message_text)
+                if safe_data:
+                    pty_session.write(safe_data)
             
     except WebSocketDisconnect:
         # Normal closure (user closed tab)

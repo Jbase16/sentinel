@@ -33,6 +33,7 @@ public struct GraphEvent: Decodable, Identifiable, Equatable {
     public let sequence: Int
     public let payload: [String: AnyCodable]
     public let source: String?  // Made optional: not all events have source
+    public let epoch: String?   // Server process epoch - changes on restart
 
     /// Event type as enum for pattern matching
     public var eventType: GraphEventType {
@@ -156,6 +157,9 @@ public class EventStreamClient: ObservableObject {
 
     /// Last received sequence number (for reconnection)
     @Published private(set) var lastSequence: Int = 0
+
+    /// Last known server epoch (detects server restarts)
+    @Published private(set) var lastKnownEpoch: String? = nil
 
     /// Event count since connection
     @Published private(set) var eventCount: Int = 0
@@ -330,6 +334,20 @@ public class EventStreamClient: ObservableObject {
             isConnected = true
         }
 
+        // EPOCH DETECTION: Server restart resets sequence counters.
+        // If epoch changes, we must reset our state to avoid silent event drops.
+        if let eventEpoch = event.epoch {
+            if let knownEpoch = lastKnownEpoch, knownEpoch != eventEpoch {
+                // Server restarted! Reset state to avoid deduplication errors.
+                print("[EventStreamClient] ⚠️ Epoch changed: \(knownEpoch) -> \(eventEpoch)")
+                print("[EventStreamClient] Resetting sequence tracking (server restarted)")
+                lastSequence = 0
+                eventCount = 0
+            }
+            lastKnownEpoch = eventEpoch
+            persistEpoch()
+        }
+
         // Update tracking
         lastSequence = max(lastSequence, event.sequence)
         eventCount += 1
@@ -361,9 +379,11 @@ public class EventStreamClient: ObservableObject {
     // MARK: - Persistence
 
     private let sequenceKey = "EventStreamClient.lastSequence"
+    private let epochKey = "EventStreamClient.lastEpoch"
 
     private func loadPersistedSequence() {
         lastSequence = UserDefaults.standard.integer(forKey: sequenceKey)
+        lastKnownEpoch = UserDefaults.standard.string(forKey: epochKey)
     }
 
     private func persistSequence() {
@@ -373,11 +393,19 @@ public class EventStreamClient: ObservableObject {
         }
     }
 
+    private func persistEpoch() {
+        if let epoch = lastKnownEpoch {
+            UserDefaults.standard.set(epoch, forKey: epochKey)
+        }
+    }
+
     /// Reset the sequence to replay all events
     func resetSequence() {
         lastSequence = 0
         eventCount = 0
+        lastKnownEpoch = nil
         UserDefaults.standard.removeObject(forKey: sequenceKey)
+        UserDefaults.standard.removeObject(forKey: epochKey)
     }
 }
 

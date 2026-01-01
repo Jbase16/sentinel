@@ -114,7 +114,7 @@ public class HelixAppState: ObservableObject {
             cortexStream.connect(url: wsURL)
         }
         // Conditional branch.
-        if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/terminal") {
+        if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/pty") {
             ptyClient.connect(url: ptyURL)
         }
         // Kick off HTTP streams

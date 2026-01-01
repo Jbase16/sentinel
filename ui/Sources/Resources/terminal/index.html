@@ -23,7 +23,7 @@
       term.open(document.getElementById('terminal'));
       fitAddon.fit();
 
-      const ws = new WebSocket("ws://127.0.0.1:8765/ws/terminal");
+      const ws = new WebSocket("ws://127.0.0.1:8765/ws/pty");
 
       term.onData(data => {
         ws.send(data);

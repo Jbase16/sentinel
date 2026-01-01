@@ -108,13 +108,44 @@ class GhostAddon:
                     "metadata": {"server_header": server}
                 })
             
-            # Lazarus Engine: De-obfuscation
+            # Lazarus Engine: De-obfuscation (async)
+            # Note: We use create_task here because mitmproxy's response() hook is sync
+            # but LazarusEngine.response() is async (it needs to call AI).
+            # This allows the HTTP response to flow through without blocking.
             if self.lazarus.should_process(flow):
                 self.session.log(f"[Lazarus] De-obfuscating JS: {flow.request.pretty_url}")
-                self.lazarus.process(flow)
+                asyncio.create_task(self._process_lazarus(flow))
                 
         except Exception as e:
             logger.error(f"[Ghost] Response processing error: {e}")
+
+    async def _process_lazarus(self, flow: http.HTTPFlow):
+        """
+        Async helper to process JavaScript de-obfuscation.
+
+        This is called via asyncio.create_task() from the sync response() hook,
+        allowing the HTTP response to continue without blocking while AI processes JS.
+
+        Args:
+            flow: The HTTP flow containing JavaScript to de-obfuscate
+
+        Side effects:
+            - Modifies flow.response.text with de-obfuscated code
+            - Adds findings to session on errors
+            - Updates Lazarus cache
+        """
+        try:
+            await self.lazarus.response(flow)
+        except Exception as e:
+            logger.error(f"[Ghost] Lazarus processing failed: {e}")
+            # Add finding about the failure
+            self.session.findings.add_finding({
+                "tool": "ghost_proxy",
+                "type": "lazarus_error",
+                "severity": "LOW",
+                "target": flow.request.host,
+                "metadata": {"error": str(e), "url": flow.request.pretty_url}
+            })
 
 class GhostInterceptor:
     """

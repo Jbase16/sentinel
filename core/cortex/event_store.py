@@ -34,16 +34,16 @@ class StoredEvent:
         """Serialize for SSE transmission. Matches Swift GraphEvent structure."""
         import uuid
         from datetime import datetime
-        
+
         # Generate a stable ID from sequence (or use UUID for uniqueness)
         event_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"sentinel-event-{self.sequence}"))
-        
+
         # Human-readable wall time
         wall_time = datetime.fromtimestamp(self.event.timestamp).isoformat()
-        
+
         # Extract source from payload if available, otherwise use default
         source = self.event.payload.get("source", "strategos")
-        
+
         return json.dumps({
             "id": event_id,
             "sequence": self.sequence,
@@ -51,7 +51,10 @@ class StoredEvent:
             "payload": self.event.payload,
             "timestamp": self.event.timestamp,
             "wall_time": wall_time,
-            "source": source
+            "source": source,
+            # Epoch: Unique per process lifetime. Client must reset state when this changes.
+            # This prevents silent event drops after server restart.
+            "epoch": self.event.run_id
         }, default=str)
 
 

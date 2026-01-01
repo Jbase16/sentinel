@@ -52,7 +52,7 @@ struct TerminalView: NSViewRepresentable {
               fitAddon.fit();
 
               // Connect to backend WebSocket
-              const ws = new WebSocket("ws://127.0.0.1:8765/ws/terminal");
+              const ws = new WebSocket("ws://127.0.0.1:8765/ws/pty");
 
               term.onData(data => {
                 // Conditional branch.
