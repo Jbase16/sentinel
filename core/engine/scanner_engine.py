@@ -609,9 +609,59 @@ class ScannerEngine:
                 except Exception as exc:
                     await queue.put(f"[{exec_id}] force-kill error on timeout: {exc}")
 
-    # ----------------------------
-    # Public API
-    # ----------------------------
+# ----------------------------
+# Self-Healing (Resilience)
+# ----------------------------
+from core.sentient.diagnosis import ErrorClassifier, ErrorType, Diagnosis
+
+class ResilienceContext:
+    """
+    Manages the 'Life Loop' of a scan task.
+    Decides whether to retry, abort, or ignore failures.
+    """
+    def __init__(self, max_retries: int = 3):
+        self.max_retries = max_retries
+        self.errors: List[Exception] = []
+        self._classifier = ErrorClassifier()
+
+    def diagnose(self, exc: Exception) -> str:
+        diagnosis = self._classifier.diagnose(exc)
+        logger.warning(f"[Resilience] Failure Diagnosed: {diagnosis.type} ({diagnosis.reason}) -> {diagnosis.recommendation}")
+        
+        if diagnosis.type == ErrorType.TRANSIENT:
+            return "RETRY"
+        elif diagnosis.type == ErrorType.WAF_BLOCK:
+            # Future: Rotate proxy here
+            return "RETRY" # Simple retry for now, eventually COOLDOWN
+        elif diagnosis.type == ErrorType.RESOURCE:
+            return "ABORT"
+        else:
+            return "FAIL"
+
+    async def execute_with_retry(self, func, *args, **kwargs):
+        """
+        Execute a function with adaptive retry logic.
+        """
+        attempts = 0
+        while attempts <= self.max_retries:
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                attempts += 1
+                decision = self.diagnose(e)
+                
+                if decision == "RETRY" and attempts <= self.max_retries:
+                    backoff = 2 ** attempts # Exponential backoff: 2s, 4s, 8s
+                    logger.info(f"[Resilience] Retrying task in {backoff}s (Attempt {attempts}/{self.max_retries})...")
+                    await asyncio.sleep(backoff)
+                    continue
+                elif decision == "FAIL" or attempts > self.max_retries:
+                    logger.error(f"[Resilience] Task failed permanently after {attempts} attempts.")
+                    raise e
+                elif decision == "ABORT":
+                    raise ResourceExhaustedError(f"Aborting scan due to resource exhaustion: {e}")
+                else:
+                    raise e
     async def scan(self, target: str, selected_tools: List[str] | None = None, cancel_flag=None) -> AsyncGenerator[str, None]:
         """
         Async generator that yields log-style strings while tools run.

@@ -93,9 +93,10 @@ class StrategyEngine:
     4. Continue functioning with reduced capability
     """
 
-    def __init__(self, session: ScanSession):
-        """Initialize with a scan session for logging and findings storage."""
+    def __init__(self, session: ScanSession, shadow_spec: Optional[Any] = None):
+        """Initialize with a scan session and optional Shadow Spec (MIMIC)."""
         self.session = session
+        self.shadow_spec = shadow_spec
         self.ai = AIEngine.instance()
 
     async def analyze_traffic(self, flow_data: Dict) -> List[AttackVector]:
@@ -330,7 +331,7 @@ class StrategyEngine:
 
     async def propose_attacks(self, flow_data: Dict):
         """
-        High-level entry: Analyze traffic → Create findings → Trigger Wraith.
+        High-level entry: Analyze traffic → Create findings → Trigger Wraith → ASSERT CLAIMS.
 
         This is the main entry point called by the Ghost proxy when it
         intercepts interesting traffic.
@@ -338,23 +339,63 @@ class StrategyEngine:
         vectors = await self.analyze_traffic(flow_data)
         logger.debug(f"[Strategy] propose_attacks generated {len(vectors)} vectors")
 
+        # [CAL INTEGRATION]
+        # We need a ReasoningSession to debate these hypotheses.
+        # For now, we'll create a session per target host, or retrieve one if we attach it to ScanSession.
+        # Ideally, ScanSession should hold the ReasoningSession.
+        # Fallback: Create ephemeral session for now to verify the flow is working.
+        from core.cal.engine import ReasoningSession
+        from core.cal.types import Evidence, Provenance
+        
+        # In a real impl, this session would be persistent
+        cal_session = ReasoningSession(
+            session_id=self.session.id, 
+            topic=flow_data.get("host", "unknown")
+        )
+
         for vec in vectors:
-            # Create a "Neural Finding" - a finding that is a HYPOTHESIS, not a fact.
+            # 1. Create Evidence for the Traffic
+            traffic_evidence = Evidence(
+                content={
+                    "url": flow_data.get("url"),
+                    "method": flow_data.get("method"),
+                    "params": flow_data.get("params")
+                },
+                description=f"Intercepted Request to {flow_data.get('url')}",
+                provenance=Provenance(source="GhostProxy", method="intercept"),
+                confidence=1.0 # Traffic definitely happened
+            )
+
+            # 2. Assert the Claim (Neural Hypothesis)
+            cal_session.assert_claim(
+                statement=f"{vec.vuln_class} suspected on parameter '{vec.parameter}'",
+                evidence=traffic_evidence,
+                metadata={
+                    "type": f"hypothesis::{vec.vuln_class.lower()}",
+                    "vuln_class": vec.vuln_class,
+                    "parameter": vec.parameter,
+                    "target": flow_data.get("host"),
+                    "payloads": vec.suggested_payloads,
+                    "source": vec.source
+                }
+            )
+
+            # 3. Legacy Finding (Keep for UI compatibility)
             self.session.findings.add_finding({
                 "tool": "neural_strategy",
                 "type": f"hypothesis::{vec.vuln_class.lower()}",
-                "severity": "MEDIUM",  # Hypotheses are medium until proven
+                "severity": "MEDIUM",
                 "target": flow_data.get("host", "unknown"),
                 "value": vec.hypothesis,
                 "metadata": {
                     "parameter": vec.parameter,
                     "payloads": vec.suggested_payloads,
                     "url": flow_data.get("url"),
-                    "source": vec.source  # Track if AI or heuristic
+                    "source": vec.source
                 }
             })
 
-            # TRIGGER WRAITH (The Hand) - Auto-verification of the hypothesis
+            # 4. Trigger Wraith (The Hand)
             asyncio.create_task(self.session.wraith.on_hypothesis({
                 "type": f"hypothesis::{vec.vuln_class.lower()}",
                 "target": flow_data.get("host", "unknown"),

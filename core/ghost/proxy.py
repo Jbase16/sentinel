@@ -32,16 +32,24 @@ logger = logging.getLogger(__name__)
 class GhostAddon:
     """
     mitmproxy addon that bridges traffic to the ScanSession.
-    Now equipped with Neural Strategy Engine.
+    Now equipped with Neural Strategy Engine AND MIMIC Shadow Spec.
     """
     def __init__(self, session: ScanSession):
         """Function __init__."""
         self.session = session
-        self.strategy = StrategyEngine(session)
         
         # Lazy load Lazarus
         from core.ghost.lazarus import LazarusEngine
         self.lazarus = LazarusEngine.instance()
+
+        # [MIMIC INTEGRATION]
+        # The Shadow Spec (Dynamic OpenAPI Store)
+        # Ideally this should be persistent on the ScanSession (to be done in refactor)
+        # For now, we instantiate it here.
+        from core.sentient.mimic.shadow_spec import ShadowSpec
+        self.shadow_spec = ShadowSpec()
+        
+        self.strategy = StrategyEngine(session, shadow_spec=self.shadow_spec)
 
     def request(self, flow: http.HTTPFlow):
         """
@@ -56,6 +64,10 @@ class GhostAddon:
             # 1. Log the 'Sight'
             msg = f"[Ghost] Intercepted: {method} {url}"
             self.session.log(msg)
+
+            # [MIMIC INTEGRATION]
+            # 1.5 Mine the Route
+            self.shadow_spec.observe(method, url)
             
             # 2. Analyze Attack Surface (Quick Heuristics)
             query = flow.request.query
@@ -107,6 +119,14 @@ class GhostAddon:
                     "target": flow.request.host,
                     "metadata": {"server_header": server}
                 })
+
+            # [MIMIC INTEGRATION]
+            # Observe Response Body?
+            # Doing this carefully to avoid overhead on large binaries
+            # For now, simplistic check if JSON
+            # if "application/json" in flow.response.headers.get("Content-Type", ""):
+            #     # TODO: Decode and pass to self.shadow_spec.observe(..., response_body=json)
+            #     pass
             
             # Lazarus Engine: De-obfuscation (async)
             # Note: We use create_task here because mitmproxy's response() hook is sync
