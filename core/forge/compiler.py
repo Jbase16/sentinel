@@ -154,8 +154,17 @@ class ExploitCompiler:
         """
         Internal sync implementation of exploit compilation.
 
-        This is where the actual AI call and validation happens.
+        This is where the actual AI call, validation, and adversarial debate happens.
+        
+        TRINITY OF HARDENING - Chapter 20: Ethical Leash
+        ─────────────────────────────────────────────────
+        1. Static Validation: Check for forbidden patterns (validator.py)
+        2. Adversarial Debate: Red/Blue agents critique the code (debate.py)
+        3. Attestation: Arbiter must sign off before code hits disk
         """
+        from core.forge.validator import validate_code, RiskLevel
+        from core.ai.debate import run_debate, DebateVerdict
+        
         system_prompt = (
             "You are a Zero-Day Exploit Developer. "
             "Write a standalone Python 3 script to poc-exploit the described anomaly. "
@@ -164,6 +173,10 @@ class ExploitCompiler:
             "2. Accept the target as a command line argument (or hardcode it in a variable at the top). "
             "3. Print 'EXPLOIT SUCCESS' if it works. "
             "4. Include comments explaining what each section does. "
+            "SAFETY RULES: "
+            "- Never use os.system() - use subprocess.run() with shell=False "
+            "- Never access /etc/, /root/, or system directories "
+            "- Never include reverse shell code "
             "Return ONLY the code block, no markdown formatting."
         )
 
@@ -183,21 +196,61 @@ class ExploitCompiler:
         # Extract code block if wrapped in markdown
         code = self._extract_code(response)
 
-        # SECURITY: Validate before saving
-        validation_result = self._validate_code(code)
-        if not validation_result["safe"]:
-            logger.error(f"[Forge] Generated code REJECTED: {validation_result['reason']}")
-            # Save to quarantine directory instead
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 1: Static Validation (The Validator)
+        # ═══════════════════════════════════════════════════════════════════
+        validation_result = validate_code(code, strict=True)
+        
+        if not validation_result.safe:
+            logger.error(f"[Forge] Generated code REJECTED by validator: {validation_result.risk_level.value}")
+            for v in validation_result.violations:
+                logger.error(f"  - [{v['level']}] {v.get('reason', 'Unknown violation')}")
+            
+            # Save to quarantine directory
             quarantine_dir = os.path.join(self.output_dir, "quarantine")
             os.makedirs(quarantine_dir, exist_ok=True)
             filename = f"QUARANTINED_{uuid.uuid4().hex[:8]}.py"
             filepath = os.path.join(quarantine_dir, filename)
             with open(filepath, "w") as f:
-                f.write(f"# QUARANTINED: {validation_result['reason']}\n")
+                f.write(f"# QUARANTINED: {validation_result.risk_level.value} risk\n")
+                f.write(f"# Violations:\n")
+                for v in validation_result.violations:
+                    f.write(f"#   - {v.get('reason', 'Unknown')}\n")
                 f.write(f"# DO NOT EXECUTE - FLAGGED AS POTENTIALLY MALICIOUS\n\n")
                 f.write(code)
             logger.warning(f"[Forge] Quarantined suspicious code: {filepath}")
-            raise RuntimeError(f"Generated code failed validation: {validation_result['reason']}")
+            raise RuntimeError(f"Generated code failed validation: {validation_result.risk_level.value}")
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 2: Adversarial Debate (Red/Blue/Arbiter)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("[Forge] Starting adversarial debate...")
+        debate_result = run_debate(code, target, anomaly_context)
+        
+        if debate_result.verdict == DebateVerdict.REJECTED:
+            logger.error(f"[Forge] Exploit REJECTED by Arbiter: {debate_result.arbiter_ruling}")
+            
+            # Save to quarantine with debate transcript
+            quarantine_dir = os.path.join(self.output_dir, "quarantine")
+            os.makedirs(quarantine_dir, exist_ok=True)
+            filename = f"DEBATE_REJECTED_{uuid.uuid4().hex[:8]}.py"
+            filepath = os.path.join(quarantine_dir, filename)
+            with open(filepath, "w") as f:
+                f.write(f"# REJECTED BY ADVERSARIAL DEBATE\n")
+                f.write(f"# Arbiter Ruling: {debate_result.arbiter_ruling}\n")
+                f.write(f"# Blue Agent Concerns:\n")
+                for arg in debate_result.blue_arguments:
+                    f.write(f"#   - {arg.position[:100]}...\n")
+                f.write(f"#\n# DO NOT EXECUTE\n\n")
+                f.write(code)
+            logger.warning(f"[Forge] Debate-rejected code saved: {filepath}")
+            raise RuntimeError(f"Exploit rejected by adversarial debate: {debate_result.arbiter_ruling}")
+        
+        elif debate_result.verdict == DebateVerdict.INCONCLUSIVE:
+            logger.warning("[Forge] Adversarial debate was inconclusive - proceeding with caution")
+        
+        elif debate_result.verdict == DebateVerdict.APPROVED:
+            logger.info("[Forge] Exploit APPROVED by Arbiter")
 
         # Save to disk
         filename = f"exploit_{uuid.uuid4().hex[:8]}.py"

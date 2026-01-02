@@ -40,6 +40,8 @@ from dataclasses import dataclass
 
 from core.ai.ai_engine import AIEngine
 from core.base.session import ScanSession
+from core.cal.types import Claim, Evidence, Provenance
+from core.cal.engine import ReasoningSession
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +100,12 @@ class StrategyEngine:
         self.session = session
         self.shadow_spec = shadow_spec
         self.ai = AIEngine.instance()
+        
+        # CAL Integration: Create a reasoning session for this strategy instance
+        self.reasoning_session = ReasoningSession(
+            session_id=session.session_id,
+            topic=f"Strategy Analysis for {session.target}"
+        )
 
     async def analyze_traffic(self, flow_data: Dict) -> List[AttackVector]:
         """
@@ -230,6 +238,34 @@ class StrategyEngine:
             )
             results.append(vec)
             self.session.log(f"[Neural Strategy] Proposed {vec.vuln_class} on {vec.parameter}")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # CAL INTEGRATION: Assert AI's hypothesis as a Claim
+            # ═══════════════════════════════════════════════════════════════
+            # The AI is making an assertion: "This parameter is vulnerable to X"
+            # We create Evidence from the AI's reasoning and assert the Claim
+            ai_evidence = Evidence(
+                content={"ai_reasoning": vec.hypothesis, "payloads": vec.suggested_payloads},
+                description=f"AI-generated attack hypothesis for {vec.parameter}",
+                provenance=Provenance(
+                    source="StrategyEngine:AI",
+                    method="neural_reasoning",
+                    run_id=self.session.session_id
+                ),
+                confidence=0.5  # AI suspicion, not confirmed
+            )
+            
+            claim = self.reasoning_session.assert_claim(
+                statement=f"{vec.parameter} is vulnerable to {vec.vuln_class}",
+                evidence=ai_evidence,
+                metadata={
+                    "url": flow_data.get("url"),
+                    "parameter": vec.parameter,
+                    "vuln_class": vec.vuln_class
+                }
+            )
+            
+            logger.debug(f"[CAL] Asserted Claim {claim.id}: {vec.vuln_class} on {vec.parameter}")
 
         return results
 

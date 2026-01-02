@@ -32,7 +32,11 @@ logger = logging.getLogger(__name__)
 class GhostAddon:
     """
     mitmproxy addon that bridges traffic to the ScanSession.
-    Now equipped with Neural Strategy Engine AND MIMIC Shadow Spec.
+    Now equipped with Neural Strategy Engine, MIMIC Shadow Spec, AND CAL Integration.
+    
+    CAL INTEGRATION:
+    Every intercepted request/response is emitted as Evidence to the central
+    ReasoningSession, enabling cross-component reasoning.
     """
     def __init__(self, session: ScanSession):
         """Function __init__."""
@@ -44,18 +48,23 @@ class GhostAddon:
 
         # [MIMIC INTEGRATION]
         # The Shadow Spec (Dynamic OpenAPI Store)
-        # Ideally this should be persistent on the ScanSession (to be done in refactor)
-        # For now, we instantiate it here.
         from core.sentient.mimic.shadow_spec import ShadowSpec
         self.shadow_spec = ShadowSpec()
         
         self.strategy = StrategyEngine(session, shadow_spec=self.shadow_spec)
+        
+        # [CAL INTEGRATION]
+        # Get the global ReasoningEngine for system-wide claims
+        from core.cortex.reasoning import get_reasoning_engine
+        self.reasoning_engine = get_reasoning_engine()
+        
+        logger.info("[Ghost] CAL integration enabled - traffic will emit Evidence")
 
     def request(self, flow: http.HTTPFlow):
         """
         Intercept requests to identify new endpoints/params.
+        Emits CAL Evidence for every request.
         """
-        # Error handling block.
         try:
             url = flow.request.pretty_url
             method = flow.request.method
@@ -66,11 +75,42 @@ class GhostAddon:
             self.session.log(msg)
 
             # [MIMIC INTEGRATION]
-            # 1.5 Mine the Route
+            # Mine the Route
             self.shadow_spec.observe(method, url)
             
-            # 2. Analyze Attack Surface (Quick Heuristics)
+            # ═══════════════════════════════════════════════════════════════
+            # CAL INTEGRATION: Emit Evidence for this request
+            # ═══════════════════════════════════════════════════════════════
+            # Every HTTP request is a data point that can support/dispute claims.
+            # For example:
+            #   - If strategy claimed "user_id param exists", this evidence proves it
+            #   - If we see auth headers, we have evidence of authentication scheme
+            #
             query = flow.request.query
+            from core.cal.types import Evidence, Provenance
+            traffic_evidence = Evidence(
+                content={
+                    "method": method,
+                    "url": url,
+                    "host": host,
+                    "params": list(query.keys()) if query else [],
+                    "has_auth": "authorization" in [h.lower() for h in flow.request.headers.keys()],
+                    "content_type": flow.request.headers.get("content-type", ""),
+                },
+                description=f"HTTP Request: {method} {url}",
+                provenance=Provenance(
+                    source="Ghost:request",
+                    method="traffic_interception",
+                    run_id=self.session.session_id
+                ),
+                confidence=1.0  # Traffic is fact
+            )
+            
+            # Add to the global reasoning session
+            self.reasoning_engine.reasoning_session.evidence[traffic_evidence.id] = traffic_evidence
+            logger.debug(f"[CAL] Ghost emitted request Evidence: {traffic_evidence.id}")
+            
+            # 2. Analyze Attack Surface (Quick Heuristics)
             if query:
                 # "Passive Node" discovery
                 self.session.findings.add_finding({
@@ -81,17 +121,13 @@ class GhostAddon:
                     "metadata": {
                         "url": url,
                         "params": list(query.keys()),
-                        "method": method
+                        "method": method,
+                        "cal_evidence_id": traffic_evidence.id  # Link to CAL
                     }
                 })
 
                 # 3. TRIGGER NEURAL STRATEGY (The God Tier Logic)
-                # Fire and forget analysis
                 if self.session.ghost and self.session.ghost._task:
-                     # We need to find the main loop. 
-                     # self.session.ghost._task.get_loop() might be available?
-                     # Safest is to just use asyncio.create_task if we are in the loop.
-                     # Since mitmproxy 12 is async, we are in a loop.
                      flow_data = {
                          "url": url,
                          "method": method,

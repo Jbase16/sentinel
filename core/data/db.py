@@ -87,6 +87,10 @@ class Database:
 
                 await self._create_tables()
                 await self._db_connection.commit()
+
+                # Run schema migrations (automatic upgrades)
+                await self._run_migrations()
+
                 self._initialized = True
 
                 # Start BlackBox worker
@@ -96,6 +100,18 @@ class Database:
             except Exception as e:
                 logger.error(f"Database init failed: {e}")
                 raise
+
+    async def _run_migrations(self):
+        """Run schema migrations automatically on startup."""
+        try:
+            from core.data.migrations import MigrationRunner
+
+            runner = MigrationRunner(self.db_path)
+            await runner.run_migrations()
+
+        except Exception as e:
+            logger.warning(f"[Database] Migration runner failed (non-fatal): {e}")
+            # Non-fatal - database can still function with base schema
 
     async def close(self):
         if self._db_connection:

@@ -1311,6 +1311,276 @@ async def get_causal_graph_graphviz(
 
 
 # ============================================================================
+# Continuous Monitoring Endpoints - Baseline + Change Detection
+# ============================================================================
+
+@v1_router.post("/monitor/baseline")
+@app.post("/monitor/baseline")
+async def set_monitoring_baseline(
+    target: str,
+    session_id: str,
+    alert_threshold: float = 0.7,
+    _: bool = Depends(verify_token)
+):
+    """
+    Set baseline scan state for continuous monitoring.
+
+    Args:
+        target: Target being monitored
+        session_id: Session ID to use as baseline
+        alert_threshold: Alert threshold (0.0-1.0, default 0.7)
+
+    Returns:
+        Baseline summary
+    """
+    from core.monitoring.continuous import get_monitor
+
+    try:
+        monitor = get_monitor(target, alert_threshold)
+        await monitor.load_baseline_from_session(session_id)
+
+        return {
+            "success": True,
+            "target": target,
+            "baseline_session_id": session_id,
+            "baseline_findings": monitor.baseline.total_findings,
+            "baseline_critical": monitor.baseline.critical_count,
+            "baseline_high": monitor.baseline.high_count,
+            "baseline_medium": monitor.baseline.medium_count,
+            "baseline_low": monitor.baseline.low_count,
+            "alert_threshold": alert_threshold
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to set baseline: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set baseline: {e}")
+
+
+@v1_router.get("/monitor/check")
+@app.get("/monitor/check")
+async def check_for_changes(
+    target: str,
+    current_session_id: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Check for changes between baseline and current scan.
+
+    Args:
+        target: Target being monitored
+        current_session_id: Current scan session to compare
+
+    Returns:
+        Delta summary with new/resolved findings
+    """
+    from core.monitoring.continuous import get_monitor
+
+    try:
+        monitor = get_monitor(target)
+
+        if not monitor.baseline:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No baseline set for target {target}. Call /monitor/baseline first."
+            )
+
+        delta = await monitor.check_for_changes(current_session_id)
+
+        return {
+            "success": True,
+            "target": target,
+            "severity": delta.severity,
+            "should_alert": delta.should_alert(monitor.alert_threshold),
+            "new_findings_count": len(delta.new_findings),
+            "new_critical": delta.new_critical,
+            "new_high": delta.new_high,
+            "new_medium": delta.new_medium,
+            "new_low": delta.new_low,
+            "resolved_findings_count": len(delta.resolved_findings),
+            "resolved_critical": delta.resolved_critical,
+            "resolved_high": delta.resolved_high,
+            "resolved_medium": delta.resolved_medium,
+            "resolved_low": delta.resolved_low,
+            "summary": delta.summary(),
+            "new_findings": delta.new_findings[:10],  # First 10 only
+            "resolved_findings": delta.resolved_findings[:10]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] Failed to check for changes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check for changes: {e}")
+
+
+@v1_router.post("/monitor/compare")
+@app.post("/monitor/compare")
+async def compare_scans(
+    baseline_session_id: str,
+    current_session_id: str,
+    alert_threshold: float = 0.7,
+    _: bool = Depends(verify_token)
+):
+    """
+    Compare two scan sessions (one-time comparison without setting baseline).
+
+    Args:
+        baseline_session_id: Baseline scan
+        current_session_id: Current scan
+        alert_threshold: Alert threshold
+
+    Returns:
+        Delta summary
+    """
+    from core.monitoring.continuous import ScanState, ContinuousMonitor
+
+    try:
+        # Load both states
+        baseline = await ScanState.from_session(baseline_session_id)
+        current = await ScanState.from_session(current_session_id)
+
+        # Create temporary monitor for comparison
+        monitor = ContinuousMonitor(baseline.target, alert_threshold)
+        delta = monitor.diff(baseline, current)
+
+        return {
+            "success": True,
+            "baseline_session_id": baseline_session_id,
+            "current_session_id": current_session_id,
+            "target": baseline.target,
+            "severity": delta.severity,
+            "should_alert": delta.should_alert(alert_threshold),
+            "new_findings_count": len(delta.new_findings),
+            "new_critical": delta.new_critical,
+            "new_high": delta.new_high,
+            "new_medium": delta.new_medium,
+            "new_low": delta.new_low,
+            "resolved_findings_count": len(delta.resolved_findings),
+            "summary": delta.summary(),
+            "new_findings": delta.new_findings,
+            "resolved_findings": delta.resolved_findings
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to compare scans: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to compare scans: {e}")
+
+
+# ============================================================================
+# Time-Travel Debugging Endpoints - Scan Timeline Navigation
+# ============================================================================
+
+@v1_router.get("/debug/{session_id}/timeline")
+@app.get("/debug/{session_id}/timeline")
+async def get_scan_timeline(
+    session_id: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Get complete timeline for a scan session.
+
+    Returns:
+        List of (sequence, type, description) tuples
+    """
+    from core.debugging.time_travel import get_debugger
+
+    try:
+        debugger = await get_debugger(session_id)
+        timeline = debugger.get_timeline()
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "timeline_length": len(timeline),
+            "timeline": [
+                {"sequence": seq, "type": typ, "description": desc}
+                for seq, typ, desc in timeline
+            ]
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to get timeline: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get timeline: {e}")
+
+
+@v1_router.get("/debug/{session_id}/state/{sequence}")
+@app.get("/debug/{session_id}/state/{sequence}")
+async def get_state_at_sequence(
+    session_id: str,
+    sequence: int,
+    _: bool = Depends(verify_token)
+):
+    """
+    Get scan state at a specific sequence number.
+
+    Args:
+        session_id: Session UUID
+        sequence: Sequence number to seek to
+
+    Returns:
+        Snapshot of scan state at that point
+    """
+    from core.debugging.time_travel import get_debugger
+
+    try:
+        debugger = await get_debugger(session_id)
+        snapshot = debugger.get_state_at(sequence)
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "sequence": snapshot.sequence,
+            "timestamp": snapshot.timestamp,
+            "target": snapshot.target,
+            "findings_count": snapshot.findings_count,
+            "issues_count": snapshot.issues_count,
+            "tools_run": snapshot.tools_run,
+            "decisions_count": len(snapshot.decisions),
+            "events_count": len(snapshot.events),
+            "last_decision_type": snapshot.last_decision_type,
+            "last_tool": snapshot.last_tool,
+            # Include actual data (limited)
+            "findings": snapshot.findings[:20],  # First 20
+            "decisions": snapshot.decisions[:10],  # First 10
+            "recent_events": snapshot.events[-10:]  # Last 10
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to get state: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get state: {e}")
+
+
+# ============================================================================
+# Schema Migration Endpoints - Database Version Control
+# ============================================================================
+
+@v1_router.get("/migrations/history")
+@app.get("/migrations/history")
+async def get_migration_history(_: bool = Depends(verify_token)):
+    """
+    Get history of applied schema migrations.
+
+    Returns:
+        List of applied migrations with versions and timestamps
+    """
+    from core.data.migrations import MigrationRunner
+    from core.base.config import get_config
+
+    try:
+        config = get_config()
+        db_path = str(config.storage.db_path)
+
+        runner = MigrationRunner(db_path)
+        history = await runner.get_migration_history()
+        current_version = await runner.get_current_version()
+
+        return {
+            "success": True,
+            "current_version": current_version,
+            "migrations_applied": len(history),
+            "history": history
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to get migration history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get migration history: {e}")
+
+
+# ============================================================================
 # Cortex Endpoints
 # ============================================================================
 

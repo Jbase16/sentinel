@@ -3,6 +3,11 @@
 # PURPOSE:
 # To infer the API structure (Routes) from raw traffic.
 #
+# CAL INTEGRATION:
+# - New routes discovered → Assert Claim ("Endpoint {method} {path} exists")
+# - Repeated observations → Add supporting Evidence (strengthens claim)
+# - High observation count → Claim converges to VALIDATED
+#
 # ALGORITHM:
 # 1. Ingest URL path (e.g. "/users/123/profile")
 # 2. Tokenize path segments.
@@ -16,12 +21,17 @@ import re
 import logging
 from typing import List, Dict, Optional
 from core.sentient.mimic.types import RouteNode, Endpoint
+from core.cal.types import Evidence, Provenance
 
 logger = logging.getLogger(__name__)
 
 class RouteMiner:
     """
     The Cartographer. Builds a map of the API from observed traffic.
+    
+    CAL INTEGRATION:
+    Every discovered route is a Claim in the global ReasoningSession.
+    Repeated observations strengthen the claim until it reaches VALIDATED.
     """
     def __init__(self):
         self.root = RouteNode(segment="")
@@ -29,6 +39,15 @@ class RouteMiner:
         # Regex for identifying likely parameters
         self.uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
         self.int_pattern = re.compile(r'^\d+$')
+        
+        # [CAL INTEGRATION]
+        from core.cortex.reasoning import get_reasoning_engine
+        self.reasoning_engine = get_reasoning_engine()
+        
+        # Track which routes have CAL claims (keyed by path_template)
+        self._route_claims: Dict[str, str] = {}  # path_template -> claim_id
+        
+        logger.info("[MIMIC] CAL integration enabled - routes will emit Claims")
 
     def ingest(self, method: str, path: str) -> Endpoint:
         """
@@ -37,6 +56,7 @@ class RouteMiner:
         2. Walk/Build Trie.
         3. Detect Parameters.
         4. Return the resolved Endpoint model.
+        5. [CAL] Assert/strengthen route Claim.
         """
         segments = [s for s in path.split('/') if s]
         current_node = self.root
@@ -80,9 +100,10 @@ class RouteMiner:
             template_parts.append(segment)
 
         # We are at the leaf node. Get or Create Endpoint.
-        if method not in current_node.endpoints:
-            # Reconstruct template: /users/{id}/profile
-            path_template = "/" + "/".join(template_parts)
+        path_template = "/" + "/".join(template_parts)
+        is_new_route = method not in current_node.endpoints
+        
+        if is_new_route:
             current_node.endpoints[method] = Endpoint(
                 method=method,
                 path_template=path_template,
@@ -90,8 +111,58 @@ class RouteMiner:
             )
             logger.info(f"[MIMIC] Discovered New Route: {method} {path_template}")
             
+            # ═══════════════════════════════════════════════════════════════
+            # CAL INTEGRATION: Assert Claim for new route
+            # ═══════════════════════════════════════════════════════════════
+            claim_key = f"{method}:{path_template}"
+            claim = self.reasoning_engine.assert_claim(
+                statement=f"API endpoint {method} {path_template} exists",
+                source="Mimic",
+                evidence_content={
+                    "method": method,
+                    "path_template": path_template,
+                    "path_params": path_params,
+                    "observed_path": path,
+                    "observation_count": 1
+                },
+                confidence=0.6,  # First observation - moderate confidence
+                metadata={
+                    "method": method,
+                    "path_template": path_template
+                }
+            )
+            self._route_claims[claim_key] = claim.id
+            logger.debug(f"[CAL] Mimic asserted Claim {claim.id} for route {claim_key}")
+            
         endpoint = current_node.endpoints[method]
         endpoint.observation_count += 1
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # CAL INTEGRATION: Add Evidence for repeated observations
+        # ═══════════════════════════════════════════════════════════════════
+        if not is_new_route:
+            claim_key = f"{method}:{path_template}"
+            claim_id = self._route_claims.get(claim_key)
+            if claim_id:
+                observation_evidence = Evidence(
+                    content={
+                        "method": method,
+                        "observed_path": path,
+                        "observation_count": endpoint.observation_count
+                    },
+                    description=f"Additional observation of {method} {path_template}",
+                    provenance=Provenance(
+                        source="Mimic:observation",
+                        method="traffic_analysis",
+                        run_id="global"
+                    ),
+                    confidence=0.3  # Each observation adds a bit of confidence
+                )
+                self.reasoning_engine.add_evidence(claim_id, observation_evidence, supporting=True)
+                
+                if endpoint.observation_count % 10 == 0:
+                    logger.debug(f"[CAL] Mimic strengthened Claim {claim_id} ({endpoint.observation_count} observations)")
+        
         return endpoint
 
     def _is_likely_param_value(self, segment: str) -> bool:
@@ -103,3 +174,4 @@ class RouteMiner:
         if len(segment) > 20 and any(c.isdigit() for c in segment): # High entropy hash?
             return True
         return False
+
