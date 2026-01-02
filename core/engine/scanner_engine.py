@@ -46,6 +46,61 @@ from core.cortex.correlator import GraphCorrelator
 logger = logging.getLogger(__name__)
 
 
+# ----------------------------
+# Self-Healing (Resilience)
+# ----------------------------
+from core.sentient.diagnosis import ErrorClassifier, ErrorType, Diagnosis
+
+class ResilienceContext:
+    """
+    Manages the 'Life Loop' of a scan task.
+    Decides whether to retry, abort, or ignore failures.
+    """
+    def __init__(self, max_retries: int = 3):
+        self.max_retries = max_retries
+        self.errors: List[Exception] = []
+        self._classifier = ErrorClassifier()
+
+    def diagnose(self, exc: Exception) -> str:
+        diagnosis = self._classifier.diagnose(exc)
+        logger.warning(f"[Resilience] Failure Diagnosed: {diagnosis.type} ({diagnosis.reason}) -> {diagnosis.recommendation}")
+        
+        if diagnosis.type == ErrorType.TRANSIENT:
+            return "RETRY"
+        elif diagnosis.type == ErrorType.WAF_BLOCK:
+            # Future: Rotate proxy here
+            return "RETRY" # Simple retry for now, eventually COOLDOWN
+        elif diagnosis.type == ErrorType.RESOURCE:
+            return "ABORT"
+        else:
+            return "FAIL"
+
+    async def execute_with_retry(self, func, *args, **kwargs):
+        """
+        Execute a function with adaptive retry logic.
+        """
+        attempts = 0
+        while attempts <= self.max_retries:
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                attempts += 1
+                decision = self.diagnose(e)
+                
+                if decision == "RETRY" and attempts <= self.max_retries:
+                    backoff = 2 ** attempts # Exponential backoff: 2s, 4s, 8s
+                    logger.info(f"[Resilience] Retrying task in {backoff}s (Attempt {attempts}/{self.max_retries})...")
+                    await asyncio.sleep(backoff)
+                    continue
+                elif decision == "FAIL" or attempts > self.max_retries:
+                    logger.error(f"[Resilience] Task failed permanently after {attempts} attempts.")
+                    raise e
+                elif decision == "ABORT":
+                    raise ResourceExhaustedError(f"Aborting scan due to resource exhaustion: {e}")
+                else:
+                    raise e
+
+
 class ResourceExhaustedError(Exception):
     """Raised when resource limits are exceeded."""
 
@@ -609,59 +664,7 @@ class ScannerEngine:
                 except Exception as exc:
                     await queue.put(f"[{exec_id}] force-kill error on timeout: {exc}")
 
-# ----------------------------
-# Self-Healing (Resilience)
-# ----------------------------
-from core.sentient.diagnosis import ErrorClassifier, ErrorType, Diagnosis
 
-class ResilienceContext:
-    """
-    Manages the 'Life Loop' of a scan task.
-    Decides whether to retry, abort, or ignore failures.
-    """
-    def __init__(self, max_retries: int = 3):
-        self.max_retries = max_retries
-        self.errors: List[Exception] = []
-        self._classifier = ErrorClassifier()
-
-    def diagnose(self, exc: Exception) -> str:
-        diagnosis = self._classifier.diagnose(exc)
-        logger.warning(f"[Resilience] Failure Diagnosed: {diagnosis.type} ({diagnosis.reason}) -> {diagnosis.recommendation}")
-        
-        if diagnosis.type == ErrorType.TRANSIENT:
-            return "RETRY"
-        elif diagnosis.type == ErrorType.WAF_BLOCK:
-            # Future: Rotate proxy here
-            return "RETRY" # Simple retry for now, eventually COOLDOWN
-        elif diagnosis.type == ErrorType.RESOURCE:
-            return "ABORT"
-        else:
-            return "FAIL"
-
-    async def execute_with_retry(self, func, *args, **kwargs):
-        """
-        Execute a function with adaptive retry logic.
-        """
-        attempts = 0
-        while attempts <= self.max_retries:
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                attempts += 1
-                decision = self.diagnose(e)
-                
-                if decision == "RETRY" and attempts <= self.max_retries:
-                    backoff = 2 ** attempts # Exponential backoff: 2s, 4s, 8s
-                    logger.info(f"[Resilience] Retrying task in {backoff}s (Attempt {attempts}/{self.max_retries})...")
-                    await asyncio.sleep(backoff)
-                    continue
-                elif decision == "FAIL" or attempts > self.max_retries:
-                    logger.error(f"[Resilience] Task failed permanently after {attempts} attempts.")
-                    raise e
-                elif decision == "ABORT":
-                    raise ResourceExhaustedError(f"Aborting scan due to resource exhaustion: {e}")
-                else:
-                    raise e
     async def scan(self, target: str, selected_tools: List[str] | None = None, cancel_flag=None) -> AsyncGenerator[str, None]:
         """
         Async generator that yields log-style strings while tools run.
@@ -849,8 +852,30 @@ class ResilienceContext:
                 stats = txn.stats()
                 yield f"[scanner] Processed {stats['findings']} findings, committed transaction"
 
+    def queue_task(self, tool: str, args: List[str] | None = None) -> None:
+        """
+        Dynamically add a tool to the current scan queue.
+
+        Args:
+            tool: Name of tool to run
+            args: Optional arguments
+        """
+        if tool not in TOOLS:
+            raise ValueError(f"Unknown tool: {tool}")
+        if tool not in self._installed_meta:
+            raise ValueError(f"Tool not installed: {tool}")
+
+        if args:
+             # Basic sanity check on args
+             for arg in args:
+                 if ";" in arg or "|" in arg:
+                     raise ValueError(f"Potentially unsafe argument: {arg}")
+
+        self._pending_tasks.append({"tool": tool, "args": args})
+        logger.info(f"[ScannerEngine] Dynamically queued task: {tool} {args}")
+
     async def shutdown(self, reason: str = "shutdown") -> None:
-        """Best-effort cleanup for cancellation/error paths."""
+        """Cleanup running tasks and processes."""
         try:
             self._pending_tasks.clear()
         except Exception:
@@ -1091,16 +1116,39 @@ class ResilienceContext:
         tool: str,
         target: str,
         queue: asyncio.Queue[str],
-        custom_args: List[str] = None,
-        cancel_flag: Optional[asyncio.Event] = None,
+        args: List[str] | None,
+        cancel_flag: asyncio.Event,
+    ) -> List[dict]:
+        """
+        Run a single tool with resilience wrapper.
+        """
+        async def _core_executor():
+             return await self._execute_tool(exec_id, tool, target, queue, args, cancel_flag)
+
+        # Initialize resilience context
+        ctx = ResilienceContext(max_retries=3)
+        try:
+             return await ctx.execute_with_retry(_core_executor)
+        except Exception:
+             # Errors logged by resilience context, propagate up
+             raise
+
+    async def _execute_tool(
+        self,
+        exec_id: str,
+        tool: str,
+        target: str,
+        queue: asyncio.Queue[str],
+        args: List[str] | None,
+        cancel_flag: asyncio.Event,
     ) -> List[dict]:
         meta_override = self._installed_meta.get(tool)
 
         tool_timeout = self._tool_timeout_seconds()
         idle_timeout = self._tool_idle_timeout_seconds()
 
-        if custom_args:
-            cmd = [tool] + custom_args
+        if args:
+            cmd = [tool] + args
             cmd = [arg.replace("{target}", target) for arg in cmd]
             stdin_input = None
         else:
@@ -1303,3 +1351,25 @@ class ResilienceContext:
         if host.startswith("www."):
             host = host[4:]
         return host
+
+    def queue_task(self, tool: str, args: List[str] | None = None) -> None:
+        """
+        Dynamically add a tool to the current scan queue.
+
+        Args:
+            tool: Name of tool to run
+            args: Optional arguments
+        """
+        if tool not in TOOLS:
+            raise ValueError(f"Unknown tool: {tool}")
+        if tool not in self._installed_meta:
+            raise ValueError(f"Tool not installed: {tool}")
+
+        if args:
+             # Basic sanity check on args
+             for arg in args:
+                 if ";" in arg or "|" in arg:
+                     raise ValueError(f"Potentially unsafe argument: {arg}")
+
+        self._pending_tasks.append({"tool": tool, "args": args})
+        logger.info(f"[ScannerEngine] Dynamically queued task: {tool} {args}")

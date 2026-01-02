@@ -102,6 +102,8 @@ async def test_dynamic_task_queue(engine):
     
     # Manually setup pending tasks list as if scan started
     engine._pending_tasks = []
+    # FIX: Populate installed tools meta for queue_task check
+    engine._installed_meta = {"nmap": {"version": "1.0"}}
     
     # 1. Valid
     engine.queue_task("nmap", ["-p", "80"])
