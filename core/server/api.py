@@ -1057,8 +1057,27 @@ async def get_results_v1(_: bool = Depends(verify_token)):
 # ============================================================================
 # Legacy Routes (without /v1 prefix) - Kept for backward compatibility
 # ============================================================================
-# These routes are DEPRECATED and will be removed in a future version.
-# Please migrate to use the /v1 prefixed endpoints.
+# ⚠️  DEPRECATION NOTICE ⚠️
+#
+# ALL @app.* routes (without /v1 prefix) are DEPRECATED and will be removed
+# in a future version. Please migrate to /v1 prefixed endpoints.
+#
+# DUAL DECORATOR PATTERN:
+# Many endpoints have BOTH decorators:
+#   @v1_router.post("/scan")  # Recommended: /v1/scan
+#   @app.post("/scan")        # Deprecated: /scan
+#
+# This allows gradual migration without breaking existing clients.
+#
+# MIGRATION GUIDE:
+# - Swift UI: Update URLs in HelixAppState.swift to use /v1 prefix
+# - REST clients: Change "http://localhost:8765/scan" → ".../v1/scan"
+# - WebSockets: Change "ws://localhost:8765/ws/graph" → ".../v1/ws/graph"
+#
+# TIMELINE:
+# - v1.0: Dual routes active (current)
+# - v1.1: Legacy routes log warnings
+# - v2.0: Legacy routes removed
 # ============================================================================
 
 @app.get("/ping")
@@ -1636,21 +1655,26 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
     return {"status": "ok", "action_id": action_id, "result": verb}
 
 # Terminal WebSocket endpoint with config check
+@v1_router.websocket("/ws/pty")
 @app.websocket("/ws/pty")
 async def terminal_websocket_pty(websocket: WebSocket, session_id: Optional[str] = Query(None)):
     """
     WebSocket endpoint for Bidirectional PTY access (Terminal Virtual Session).
-    
+
     This endpoint powers the "Terminal VS" feature.
-    
+
     FEATURES:
     - Virtual Sessions: Connect to a specific persistent shell instance via ?session_id=UUID.
     - Multiplexing: Multiple clients can view/control the same session simultaneously without data loss.
     - Threaded I/O: Uses PTYManager's non-blocking architecture.
-    
+
     ARGS:
     - websocket: The active connection.
     - session_id: (Optional) UUID of an existing session to join. If None, creates a new one.
+
+    Available at:
+    - /v1/ws/pty (versioned, recommended)
+    - /ws/pty (legacy, will be deprecated)
     """
     config = get_config()
 
