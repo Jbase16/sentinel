@@ -48,37 +48,37 @@ class SecurityConfig:
     # Each time the app starts, it gets a new token unless you set SENTINEL_API_TOKEN
     """Class SecurityConfig."""
     api_token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
-    
+
     # Which websites can connect to our API (prevents random sites from accessing it)
     # 127.0.0.1 and localhost both mean "this computer only"
     # Port wildcards are only allowed for loopback in development mode.
     allowed_origins: tuple = ("http://127.0.0.1:*", "http://localhost:*", "tauri://localhost")
-    
+
     # Should users need to authenticate before using the API?
     # False = anyone on localhost can use it (convenient for development)
     # True = must provide api_token with each request (enable for production)
     # Note: Boot interlock still prevents network-exposed + no-auth configurations
     require_auth: bool = False
-    
+
     # Can users run terminal commands through the UI?
     # True = yes (convenient but potentially dangerous if exposed remotely)
     # False = no terminal access (safer for untrusted environments)
     terminal_enabled: bool = True
-    
+
     # Does terminal access require authentication even if require_auth is False?
     # False = terminal follows require_auth setting (convenient for local dev)
     # True = terminal always requires token regardless of require_auth
     # Note: Boot interlock still prevents network-exposed + no-auth configurations
     terminal_require_auth: bool = False
-    
+
     # Can users copy/paste through the terminal interface?
     # True = clipboard works (UX improvement), False = disabled (extra security)
     clipboard_enabled: bool = True
-    
+
     # Rate limiting: Maximum API requests per minute (prevents abuse/accidents)
     # 600 = 10 requests per second (generous for local dev)
     rate_limit_requests_per_minute: int = 600
-    
+
     # Rate limiting specifically for AI requests (these are expensive/slow)
     # 60 = 1 request per second (AI processing is the bottleneck)
     rate_limit_ai_per_minute: int = 60
@@ -96,33 +96,33 @@ class StorageConfig:
     # Keeps all data organized in one hidden folder
     """Class StorageConfig."""
     base_dir: Path = field(default_factory=lambda: Path.home() / ".sentinelforge")
-    
+
     # Name of the SQLite database file (stores findings, sessions, evidence metadata)
     db_name: str = "sentinel.db"
-    
+
     # Subdirectory name for raw evidence (tool outputs, screenshots, pcaps)
     evidence_dir: str = "evidence"
-    
+
     # Subdirectory name for generated reports (PDFs, JSON exports)
     reports_dir: str = "reports"
-    
+
     # Maximum size of a single piece of evidence (prevents filling disk)
     # 100 MB is enough for most tool outputs but prevents huge files
     max_evidence_size_mb: int = 100
-    
+
     # Property: Computed path to the database file
     # @property makes this look like a regular attribute but it's calculated dynamically
     @property
     def db_path(self) -> Path:
         """Function db_path."""
         return self.base_dir / self.db_name  # / operator joins paths (OS-independent)
-    
+
     # Property: Computed path to the evidence directory
     @property
     def evidence_path(self) -> Path:
         """Function evidence_path."""
         return self.base_dir / self.evidence_dir
-    
+
     # Property: Computed path to the reports directory
     @property
     def reports_path(self) -> Path:
@@ -142,25 +142,25 @@ class ScanConfig:
     # Higher = faster scans but more resource usage
     """Class ScanConfig."""
     max_concurrent_tools: int = 2
-    
+
     # How long to wait for a single tool to finish before killing it (in seconds)
     # 300 seconds = 5 minutes (some scans like nmap can take a while)
     tool_timeout_seconds: int = 300
-    
+
     # Maximum number of results one tool can return (prevents memory exhaustion)
     # 1000 findings is enough for most scans, more likely means noise/errors
     max_findings_per_tool: int = 1000
-    
+
     # Should "safe" tools run automatically without asking permission?
     # True = reconnaissance tools auto-run (faster workflow)
     # False = every tool requires manual approval (safer but slower)
     auto_approve_safe_tools: bool = True
-    
+
     # List of "safe" tools that can run without approval
     # These are passive reconnaissance tools that just gather public information
     # (httpx checks what website responds, subfinder finds subdomains from DNS, etc.)
     safe_tools: tuple = ("httpx", "dnsx", "subfinder", "whois")
-    
+
     # List of "restricted" tools that require explicit human approval
     # These are active/intrusive tools that could trigger alerts or cause damage
     # (nmap sends probe packets, sqlmap tests for SQL injection, etc.)
@@ -182,26 +182,26 @@ class LogConfig:
     # ERROR = only actual failures
     """Class LogConfig."""
     level: str = "INFO"
-    
+
     # Log message format template (Python's logging format string)
     # %(asctime)s = timestamp when event occurred
     # %(levelname)s = severity (INFO, WARNING, ERROR, etc.)
     # %(name)s = which module logged this (e.g., "core.ai.ai_engine")
     # %(message)s = the actual log message
     format: str = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    
+
     # Should logs be written to a file? (in addition to console output)
     # True = yes, keep a permanent log file (useful for reviewing past scans)
     # False = only print to console (logs disappear when program closes)
     file_enabled: bool = True
-    
+
     # Name of the log file (stored in the base_dir)
     file_name: str = "sentinel.log"
-    
+
     # Maximum size of a single log file before rotation (in megabytes)
     # When file hits 10 MB, it gets renamed to sentinel.log.1 and a new file starts
     max_file_size_mb: int = 10
-    
+
     # How many old log files to keep after rotation
     # 5 = keep 5 old files (total ~50 MB of logs: 10 MB × 5 = 50 MB)
     # Oldest file gets deleted when we exceed this limit
@@ -218,13 +218,13 @@ class GhostConfig:
     # Minimum JS file size to consider for de-obfuscation (bytes)
     """Class GhostConfig."""
     min_js_size: int = 500
-    
+
     # Maximum JS file size to process (bytes) - larger files skipped for performance
     max_js_size: int = 100_000
-    
+
     # Maximum characters to send to LLM for de-obfuscation context
     max_context_chars: int = 2000
-    
+
     # Known library hashes to skip (jQuery, React, etc.)
     skip_library_hashes: tuple = ()
 
@@ -429,19 +429,19 @@ class SentinelConfig:
     # AI engine settings (which model, timeouts, etc.)
     """Class SentinelConfig."""
     ai: AIConfig = field(default_factory=AIConfig)
-    
+
     # Security/access control settings (authentication, rate limiting, etc.)
     security: SecurityConfig = field(default_factory=SecurityConfig)
-    
+
     # File storage settings (where to save data)
     storage: StorageConfig = field(default_factory=StorageConfig)
-    
+
     # Scanning behavior settings (tool restrictions, timeouts, etc.)
     scan: ScanConfig = field(default_factory=ScanConfig)
-    
+
     # Logging behavior settings (verbosity, file rotation, etc.)
     log: LogConfig = field(default_factory=LogConfig)
-    
+
     # Ghost module settings (Lazarus JS de-obfuscation, proxy)
     ghost: GhostConfig = field(default_factory=GhostConfig)
 
@@ -461,16 +461,16 @@ class SentinelConfig:
     # False = production mode (clean output, fast)
     # True = debug mode (verbose logging, extra checks)
     debug: bool = False
-    
+
     # IP address the API server should listen on
     # 127.0.0.1 = only accessible from this computer (secure default)
     # 0.0.0.0 = accessible from network (risky, only use if you know what you're doing)
     api_host: str = "127.0.0.1"
-    
+
     # Port number the API server should listen on
     # 8765 = our chosen default port (arbitrary, not used by other common services)
     api_port: int = 8765
-    
+
     # Special method that runs automatically after __init__ completes
     # Used to create necessary directories before the app starts using them
     def __post_init__(self):
@@ -481,7 +481,28 @@ class SentinelConfig:
         self.storage.base_dir.mkdir(parents=True, exist_ok=True)
         self.storage.evidence_path.mkdir(parents=True, exist_ok=True)
         self.storage.reports_path.mkdir(parents=True, exist_ok=True)
-    
+
+        # Write the API token to a discoverable file so UI clients can authenticate
+        # This solves the "Auth Singularity" - backend generates token, UI discovers it
+        self._write_token_file()
+
+    def _write_token_file(self) -> None:
+        """
+        Write the current API token to ~/.sentinelforge/api_token.
+
+        This enables the Swift UI to discover the token that the Python backend
+        generated at startup. The file is chmod 0600 (owner read/write only).
+
+        Security: Token changes each restart, limiting exposure window.
+        """
+        token_path = self.storage.base_dir / "api_token"
+        try:
+            token_path.write_text(self.security.api_token)
+            token_path.chmod(0o600)
+            logging.getLogger(__name__).info(f"[Config] API token written to {token_path}")
+        except OSError as e:
+            logging.getLogger(__name__).warning(f"[Config] Failed to write token file: {e}")
+
     # Class method: builds a SentinelConfig by reading environment variables
     # @classmethod means this is called on the class itself (SentinelConfig.from_env())
     # not on an instance. Think of it as a factory function.
@@ -504,20 +525,20 @@ class SentinelConfig:
             # Convert string to integer for concurrent requests
             max_concurrent_requests=int(os.getenv("SENTINEL_AI_MAX_CONCURRENT", "2")),
         )
-        
+
         # Get API token from environment, generate random one if not provided
         token = os.getenv("SENTINEL_API_TOKEN")
         # Conditional branch.
         if not token:
             # No token provided, generate a cryptographically secure random token
             token = secrets.token_urlsafe(32)
-        
+
         # Parse allowed origins (comma-separated list from environment)
         origins_str = os.getenv("SENTINEL_ALLOWED_ORIGINS", "")
         # Split "http://a.com,http://b.com" into tuple ("http://a.com", "http://b.com")
         # If empty, use localhost defaults
         origins = tuple(origins_str.split(",")) if origins_str else ("http://127.0.0.1:*", "http://localhost:*")
-        
+
         security = SecurityConfig(
             api_token=token,
             allowed_origins=origins,
@@ -528,15 +549,15 @@ class SentinelConfig:
             rate_limit_requests_per_minute=int(os.getenv("SENTINEL_RATE_LIMIT", "600")),
             rate_limit_ai_per_minute=int(os.getenv("SENTINEL_AI_RATE_LIMIT", "60")),
         )
-        
+
         base_dir = Path(os.getenv("SENTINEL_DATA_DIR", str(Path.home() / ".sentinelforge")))
         storage = StorageConfig(base_dir=base_dir)
-        
+
         scan = ScanConfig(
             max_concurrent_tools=int(os.getenv("SENTINEL_MAX_CONCURRENT_TOOLS", "2")),
             tool_timeout_seconds=int(os.getenv("SENTINEL_TOOL_TIMEOUT", "300")),
         )
-        
+
         log = LogConfig(
             level=os.getenv("SENTINEL_LOG_LEVEL", "INFO"),
         )
@@ -881,10 +902,10 @@ def validate_security_posture(config: "SentinelConfig") -> None:
     Security Matrix:
         | api_host      | require_auth | Result        |
         |---------------|--------------|---------------|
-        | 127.0.0.1     | False        | ✅ OK (local) |
-        | 127.0.0.1     | True         | ✅ OK         |
-        | 0.0.0.0       | True         | ✅ OK (auth)  |
-        | 0.0.0.0       | False        | ❌ BLOCKED    |
+        | 127.0.0.1     | False        | OK (local) |
+        | 127.0.0.1     | True         | OK         |
+        | 0.0.0.0       | True         | OK (auth)  |
+        | 0.0.0.0       | False        | BLOCKED    |
     """
     SecurityInterlock.verify_safe_boot(config)
 
@@ -923,10 +944,10 @@ _config: Optional[SentinelConfig] = None
 def get_config() -> SentinelConfig:
     """
     Get the global configuration instance.
-    
+
     Singleton pattern: only creates the config once, then reuses it.
     This ensures all parts of the application use the same settings.
-    
+
     Returns:
         The shared SentinelConfig instance (creates it if it doesn't exist yet)
     """
@@ -941,10 +962,10 @@ def get_config() -> SentinelConfig:
 def set_config(config: SentinelConfig) -> None:
     """
     Replace the global configuration (mainly used for testing).
-    
+
     In production, config comes from environment variables.
     In tests, we might want to inject a specific config.
-    
+
     Args:
         config: The SentinelConfig instance to use globally
     """
@@ -955,19 +976,19 @@ def set_config(config: SentinelConfig) -> None:
 def setup_logging(config: Optional[SentinelConfig] = None) -> None:
     """
     Configure Python's logging system based on our settings.
-    
+
     Sets up console and file logging with rotation.
     Call this once at application startup.
-    
+
     Args:
         config: Optional config to use (defaults to global config)
     """
     # Use provided config or get the global one
     cfg = config or get_config()
-    
+
     # Start with a console handler (prints logs to terminal)
     handlers: List[logging.Handler] = [logging.StreamHandler()]
-    
+
     # If file logging is enabled, add a rotating file handler
     if cfg.log.file_enabled:
         from logging.handlers import RotatingFileHandler
@@ -979,7 +1000,7 @@ def setup_logging(config: Optional[SentinelConfig] = None) -> None:
             backupCount=cfg.log.backup_count,  # How many old files to keep
         )
         handlers.append(file_handler)
-    
+
     # Configure Python's logging system with our settings
     logging.basicConfig(
         level=getattr(logging, cfg.log.level.upper()),  # Convert "INFO" string to logging.INFO constant
@@ -1004,6 +1025,6 @@ AI_PROVIDER = _cfg.ai.provider  # Extract provider string for old imports
 OLLAMA_URL = _cfg.ai.ollama_url  # Extract URL for old imports
 AI_MODEL = _cfg.ai.model  # Extract model name for old imports
 AI_FALLBACK_ENABLED = _cfg.ai.fallback_enabled  # Extract fallback flag for old imports
-    
+
 # Compatibility Alias
 AppConfig = SentinelConfig

@@ -1339,6 +1339,7 @@ async def mission_start(
 
 # --- WebSockets ---
 
+@v1_router.websocket("/ws/graph")
 @app.websocket("/ws/graph")
 async def ws_graph_endpoint(websocket: WebSocket):
     """
@@ -1346,6 +1347,10 @@ async def ws_graph_endpoint(websocket: WebSocket):
 
     Uses validate_websocket_connection() for consistent security.
     Requires token if require_auth is enabled in config.
+
+    Available at:
+    - /v1/ws/graph (versioned, recommended)
+    - /ws/graph (legacy, will be deprecated)
     """
     # Validate connection using the centralized security helper
     if not await validate_websocket_connection(
@@ -1367,6 +1372,7 @@ async def ws_graph_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         logger.info("Graph WS disconnected")
 
+@v1_router.websocket("/ws/terminal")
 @app.websocket("/ws/terminal")
 async def ws_terminal_endpoint(
     websocket: WebSocket, session_id: Optional[str] = Query(None)
@@ -1376,6 +1382,10 @@ async def ws_terminal_endpoint(
 
     Uses validate_websocket_connection() for consistent security.
     Requires token if terminal_require_auth is enabled in config.
+
+    Available at:
+    - /v1/ws/terminal (versioned, recommended)
+    - /ws/terminal (legacy, will be deprecated)
     """
     config = get_config()
 

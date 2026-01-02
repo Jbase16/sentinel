@@ -20,6 +20,12 @@
 # This is NOT used for event identity (sequence serves that purpose).
 # It helps answer "Which runtime generated this event?" during post-mortem analysis.
 #
+# SCHEMA UNIFICATION (P1 #10):
+# GraphEventType is now an ALIAS for EventType from core.contracts.events.
+# This ensures a single source of truth for all event types across the system.
+# The contracts module defines the authoritative taxonomy with 49+ event types,
+# schema validation, causal tracking, and Swift code generation.
+#
 
 from __future__ import annotations
 
@@ -28,7 +34,20 @@ import time
 import uuid
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass, field
-from enum import Enum
+
+# ============================================================================
+# SCHEMA UNIFICATION: Import from authoritative source
+# ============================================================================
+# EventType in contracts/events.py is the SINGLE SOURCE OF TRUTH.
+# GraphEventType is kept as an alias for backward compatibility.
+# All existing code (imports, comparisons) continues to work unchanged.
+# ============================================================================
+from core.contracts.events import EventType, EventContract, ContractViolation
+
+# BACKWARD COMPATIBILITY ALIAS:
+# This allows existing code like `from core.cortex.events import GraphEventType`
+# to keep working without modification.
+GraphEventType = EventType
 
 logger = logging.getLogger(__name__)
 
@@ -135,20 +154,13 @@ def get_next_sequence() -> int:
     from core.base.sequence import GlobalSequenceAuthority
     return GlobalSequenceAuthority.instance().next_id()
 
-class GraphEventType(str, Enum):
-    """
-    Taxonomy of observable events.
-    """
-    SCAN_STARTED = "scan_started"
-    SCAN_COMPLETED = "scan_completed"
-    SCAN_FAILED = "scan_failed"
-    SCAN_PHASE_CHANGED = "scan_phase_changed"
-    DECISION_MADE = "decision_made"
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
-    FINDING_CREATED = "finding_created"
-    NARRATIVE_EMITTED = "narrative_emitted"
-    LOG = "log"  # System/session logging
+# ============================================================================
+# GraphEventType REMOVED - Now imported from core.contracts.events
+# ============================================================================
+# The old 11-type enum has been replaced by the 49-type EventType enum.
+# The alias `GraphEventType = EventType` ensures backward compatibility.
+# See core/contracts/events.py for the authoritative type definitions.
+# ============================================================================
 
 @dataclass
 class GraphEvent:
@@ -181,11 +193,30 @@ class GraphEvent:
 class EventBus:
     """
     Synchronous Event Bus for strategic observability.
+
+    CONTRACT VALIDATION (P1 #10):
+    ─────────────────────────────
+    The EventBus now validates all emitted events against the EventContract.
+    This ensures:
+    1. Events have required fields (schema validation)
+    2. Events follow causal ordering (tool_completed after tool_started)
+    3. Invalid events are caught early in development
+
+    Validation behavior is controlled by EventContract.set_strict_mode():
+    - strict=True (dev): Raises ContractViolation on invalid events
+    - strict=False (prod): Logs warning but continues execution
     """
-    def __init__(self):
-        """Function __init__."""
+    def __init__(self, validate: bool = True):
+        """
+        Initialize EventBus.
+
+        Args:
+            validate: Enable contract validation (default True).
+                      Set False for legacy code or performance-critical paths.
+        """
         self._subscribers: List[Callable[[GraphEvent], None]] = []
         self._last_event_sequence: int = 0  # Track last sequence for diagnostics
+        self._validate = validate
 
     def subscribe(self, callback: Callable[[GraphEvent], None]):
         """Function subscribe."""
@@ -197,9 +228,28 @@ class EventBus:
         return self._last_event_sequence
 
     def emit(self, event: GraphEvent):
-        """Broadcast event to all subscribers."""
+        """
+        Broadcast event to all subscribers.
+
+        CONTRACT VALIDATION:
+        Before broadcasting, the event is validated against the EventContract.
+        In strict mode (development), invalid events raise ContractViolation.
+        In non-strict mode (production), invalid events log warnings.
+        """
         # Track last sequence for diagnostics
         self._last_event_sequence = event.event_sequence
+
+        # CONTRACT VALIDATION: Ensure event conforms to schema and causal rules
+        if self._validate:
+            try:
+                EventContract.validate(event.type, event.payload)
+            except ContractViolation as e:
+                # In strict mode, this raises. In non-strict, it only logs.
+                # The validate() method already handles logging for non-strict.
+                logger.warning(f"[EventBus] Contract violation: {e}")
+                # Re-raise if we're in strict mode
+                if EventContract._strict_mode:
+                    raise
 
         # Loop over items.
         for callback in self._subscribers:
@@ -314,3 +364,41 @@ def reset_event_sequence() -> None:
     """
     from core.base.sequence import GlobalSequenceAuthority
     GlobalSequenceAuthority.reset_for_testing()
+
+
+# ============================================================================
+# CONTRACT CONFIGURATION
+# ============================================================================
+# By default, contract validation is NON-STRICT in production to avoid
+# breaking existing code during the migration period. Tests can enable
+# strict mode to catch contract violations early.
+#
+# To enable strict mode (recommended for development):
+#     from core.cortex.events import set_strict_contract_mode
+#     set_strict_contract_mode(True)
+# ============================================================================
+
+def set_strict_contract_mode(strict: bool) -> None:
+    """
+    Enable or disable strict contract validation mode.
+
+    Args:
+        strict: True = raise ContractViolation on invalid events (dev)
+                False = log warning but continue (prod, default)
+    """
+    EventContract.set_strict_mode(strict)
+
+
+def reset_contract_state() -> None:
+    """
+    Reset the causal tracker state.
+
+    WARNING: This should ONLY be used in tests!
+    Resets the tracker that enforces tool_started → tool_completed ordering.
+    """
+    EventContract.reset_causal_state()
+
+
+# Initialize contract to non-strict mode for backward compatibility
+# Tests should call set_strict_contract_mode(True) to enable strict validation
+EventContract.set_strict_mode(False)
