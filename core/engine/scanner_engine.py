@@ -772,28 +772,22 @@ class ScannerEngine:
                     normalized = self._normalize_findings(all_findings)
                     self._last_results = normalized
 
-                    # Stage findings only, no UI store updates
-                    if txn.is_active:
-                        for f in normalized:
-                            txn.add_finding(f)
+                    # ================================================================
+                    # TRANSACTIONAL INVARIANT:
+                    # All findings MUST go through txn.add_finding().
+                    # The transaction ensures atomicity: either ALL findings are
+                    # committed to DB and published to UI stores, or NONE are.
+                    # ================================================================
+                    # Stage findings (no UI store updates until commit succeeds)
+                    for f in normalized:
+                        txn.add_finding(f)
 
-                        recon_edges = self._build_recon_edges(normalized)
-                        txn.add_recon_edges(recon_edges)
+                    # Stage recon edges (graph relationships between findings)
+                    recon_edges = self._build_recon_edges(normalized)
+                    txn.add_recon_edges(recon_edges)
 
-                        # Enrichment during transaction: stage issues + stage rule killchain edges
-                        self._refresh_enrichment(txn)
-
-                    else:
-                        # Legacy / non-transactional path
-                        if self.session:
-                            self.session.findings.bulk_add(normalized)
-                        else:
-                            findings_store.bulk_add(normalized)
-
-                        recon_edges = self._build_recon_edges(normalized)
-                        self._record_recon_edges(recon_edges)
-                        enriched_count, edge_count = self._refresh_enrichment(None)
-                        yield f"[scanner] Processed {len(normalized)} findings, {enriched_count} issues, {edge_count} killchain edges"
+                    # Enrichment: stage issues + killchain edges
+                    self._refresh_enrichment(txn)
 
                 except Exception as e:
                     await txn.rollback(str(e))
@@ -1004,75 +998,42 @@ class ScannerEngine:
     def _edge_signature(self, edge: dict) -> tuple:
         return (edge.get("source"), edge.get("target"), edge.get("label"), edge.get("edge_type"), edge.get("severity"))
 
-    def _refresh_enrichment(self, txn: Optional[ScanTransaction]) -> tuple[int, int]:
+    def _refresh_enrichment(self, txn: ScanTransaction) -> tuple[int, int]:
         """
         Enrich findings with issues and killchain analysis.
 
-        Transactional:
-        - stage issues into txn
-        - stage rule killchain edges into txn
-        - do NOT mutate stores or run correlator here
+        TRANSACTIONAL INVARIANT:
+        - All issues are staged via txn.add_issue()
+        - All killchain edges are staged via txn.stage_rule_killchain_edges()
+        - NO direct writes to stores (deferred until commit succeeds)
+        - Correlator is run AFTER commit in ScanTransaction._update_stores_after_commit()
 
-        Non-transactional:
-        - update issue + killchain stores
-        - run correlator and persist implied edges
+        Args:
+            txn: Active ScanTransaction (must be non-None and is_active)
+
+        Returns:
+            (enriched_count, edge_count): Number of issues and edges staged
         """
-        is_transactional = txn is not None and txn.is_active
+        if not txn or not txn.is_active:
+            raise RuntimeError("_refresh_enrichment requires an active transaction")
 
         if self._last_results:
             enriched, _, rule_killchain_edges = apply_rules(self._last_results)
         else:
             enriched, _, rule_killchain_edges = [], [], []
 
-        if is_transactional:
-            for issue in enriched:
-                txn.add_issue(issue)
+        # Stage issues for commit
+        for issue in enriched:
+            txn.add_issue(issue)
 
-            txn.stage_rule_killchain_edges(rule_killchain_edges)
-            # Killchain store publish will happen after commit, using txn staged recon edges + rules
-            return len(enriched), len(rule_killchain_edges)
+        # Stage rule-generated killchain edges for commit
+        txn.stage_rule_killchain_edges(rule_killchain_edges)
 
-        # Non-transactional path: combine rule edges + engine recon edges
-        combined_edges = list(rule_killchain_edges) + list(self._recon_edges)
-
-        if self.session:
-            self.session.issues.replace_all(enriched, persist=True)
-        else:
-            issues_store.replace_all(enriched, persist=True)
-
-        if self.session:
-            self.session.killchain.replace_all(combined_edges, persist=True)
-        else:
-            killchain_store.replace_all(combined_edges, persist=True)
-
-        # Correlator only for non-transactional path
-        source_findings = self.session.findings.get_all() if self.session else findings_store.get_all()
-
-        nodes = []
-        for f in source_findings:
-            asset = f.get("asset") or f.get("target") or "unknown"
-            if asset == "unknown":
-                continue
-            attributes = {}
-            meta = f.get("metadata", {})
-            for key in ["simhash", "favicon_hash", "ssl_serial", "ga_id"]:
-                val = meta.get(key)
-                if val:
-                    attributes[key] = val
-            if attributes:
-                nodes.append({"id": asset, "attributes": attributes})
-
-        if nodes:
-            correlator = GraphCorrelator()
-            implied_edges = correlator.process(nodes)
-            if implied_edges:
-                combined_edges.extend(implied_edges)
-                if self.session:
-                    self.session.killchain.replace_all(combined_edges, persist=True)
-                else:
-                    killchain_store.replace_all(combined_edges, persist=True)
-
-        return len(enriched), len(combined_edges)
+        # Killchain store publish happens after commit, combining:
+        # - txn staged recon edges (from findings)
+        # - rule killchain edges (from this method)
+        # - correlator implied edges (computed after commit)
+        return len(enriched), len(rule_killchain_edges)
 
     async def _run_tool_task(
         self,
