@@ -14,12 +14,16 @@
 """
 core/scheduler/laws.py
 The Constitution of Strategos.
-Enforces the 5 Laws of a God-Level Scan.
+Enforces the Laws of a God-Level Scan via CAL (Collaborative Agent Logic).
 """
 
-from typing import Dict, List, Any
 import logging
+import os
+from typing import Dict, Any, List
 from dataclasses import dataclass
+from pathlib import Path
+
+from core.cal.parser import CALParser, Law, Action, Condition
 
 logger = logging.getLogger(__name__)
 
@@ -30,124 +34,79 @@ class Decision:
     reason: str
     blocking_law: str = None
 
-class Law:
-    """Base class for a Scan Law."""
-    def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
-        """Function check."""
-        raise NotImplementedError
-
-class Law1_PassiveBeforeActive(Law):
-    """
-    Law 1: Passive Before Active.
-    Aggressive tools cannot run until Passive Phase is complete.
-    """
-    def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
-        """Function check."""
-        current_phase = getattr(context, "phase_index", 0)
-        tool_phase = tool_def.get("phase", 99)
-        
-        # If we are in Phase 0 or 1, we cannot run Phase 2+ tools
-        if current_phase < 2 and tool_phase >= 2:
-            return Decision(False, f"Phase {tool_phase} tool blocked during Phase {current_phase} (Passive Mode)", "Law1_PassiveBeforeActive")
-        return Decision(True, "Phase check passed")
-
-class Law3_EvidenceGates(Law):
-    """
-    Law 3: Evidence Gates Everything.
-    Tools only run if their prerequisites are met in the Knowledge Graph.
-    Also enforces Confidence Thresholds in Bug Bounty Mode.
-    """
-    def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
-        """Function check."""
-        gates = tool_def.get("gates", [])
-        # Conditional branch.
-        if not gates:
-            return Decision(True, "No prerequisites required")
-            
-        # Context.knowledge is a Dict
-        knowledge = getattr(context, "knowledge", {}) or {}
-        # mode = knowledge.get("mode", None)  <-- Removed unused variable
-        
-        # Build the active tag set from context + knowledge.
-        tags: set[str] = set()
-
-        known_tags = knowledge.get("tags")
-        # Conditional branch.
-        if isinstance(known_tags, set):
-            tags.update(t for t in known_tags if isinstance(t, str) and t)
-        elif isinstance(known_tags, list):
-            tags.update(t for t in known_tags if isinstance(t, str) and t)
-
-        # Fold in tags/types from findings if present.
-        # Supports both legacy `knowledge['findings']` and `context.findings`.
-        findings_sources: List[Any] = []
-        knowledge_findings = knowledge.get("findings")
-        # Conditional branch.
-        if isinstance(knowledge_findings, list):
-            findings_sources.append(knowledge_findings)
-        context_findings = getattr(context, "findings", None)
-        # Conditional branch.
-        if isinstance(context_findings, list):
-            findings_sources.append(context_findings)
-
-        # Loop over items.
-        for findings in findings_sources:
-            for f in findings:
-                if not isinstance(f, dict):
-                    continue
-                finding_type = f.get("type")
-                if isinstance(finding_type, str) and finding_type:
-                    tags.add(finding_type)
-                    tags.add(f"type:{finding_type}")
-                for tag in f.get("tags", []) or []:
-                    if isinstance(tag, str) and tag:
-                        tags.add(tag)
-            
-        # Check gate satisfaction
-        for gate in gates:
-             if gate in tags:
-                 # In Bug Bounty Mode, check High Confidence if available?
-                 # (For V1, existence is enough, but structure allows extension)
-                 return Decision(True, f"Prerequisite '{gate}' met")
-                 
-        return Decision(False, f"Missing requirements: {gates}", "Law3_EvidenceGates")
-
-class Law4_ResourceAwareness(Law):
-    """
-    Law 4: Resource-Aware Scheduling.
-    Don't exceed system max load.
-    """
-    def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
-        # Simple implementation: Check active tool count vs max
-        """Function check."""
-        active = getattr(context, "active_tools", 0)
-        max_concurrent = getattr(context, "max_concurrent", 5)
-        
-        cost = tool_def.get("resource_cost", 1) # 1=Low, 3=High
-        
-        # Conditional branch.
-        if active + cost > max_concurrent:
-            return Decision(False, f"System load too high ({active}+{cost} > {max_concurrent})", "Law4_ResourceAwareness")
-        return Decision(True, "Resource check passed")
-
 class Constitution:
-    """Enforces all laws."""
-    def __init__(self):
-        """Function __init__."""
-        self.laws = [
-            Law1_PassiveBeforeActive(),
-            Law3_EvidenceGates(),
-            Law4_ResourceAwareness()
-        ]
+    """
+    Enforces laws defined in assets/laws/constitution.cal.
+    Replaces legacy hardcoded Law classes.
+    """
+    _instance = None
+    
+    def __init__(self, constitution_path: str = "assets/laws/constitution.cal"):
+        self.laws: List[Law] = []
+        self._load_laws(constitution_path)
         
-    def check(self, context: Any, tool_def: Dict) -> Decision:
+    @classmethod
+    def instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _load_laws(self, path_str: str):
+        """Parse the CAL file."""
+        try:
+            # Resolve relative paths from project root
+            # heuristic: finding sentinel root by looking for 'core'
+            base_dir = Path(os.getcwd())
+            full_path = base_dir / path_str
+            
+            if not full_path.exists():
+                logger.warning(f"[CAL] Constitution file not found at {full_path}. Laws will be empty.")
+                return
+
+            parser = CALParser()
+            self.laws = parser.parse_file(str(full_path))
+            logger.info(f"[CAL] Loaded {len(self.laws)} laws from {path_str}")
+        except Exception as e:
+            logger.error(f"[CAL] Failed to load constitution: {e}")
+            self.laws = []
+
+    def check(self, context: Any, tool_def: Dict[str, Any]) -> Decision:
         """
-        Returns a Decision. If blocked, returns the first blocking decision.
-        If allowed, returns an Allowed decision.
+        Evaluate all loaded CAL laws against the context.
         """
-        # Loop over items.
+        if not self.laws:
+            # Fail open or closed? 
+            # For V1, if no laws, allow (legacy behavior default)
+            return Decision(True, "No laws loaded (Anarchy Mode)")
+
         for law in self.laws:
-            decision = law.check(context, tool_def)
-            if not decision.allowed:
-                return decision
+            # Check conditions (AND logic)
+            all_conditions_met = True
+            for condition in law.conditions:
+                if not condition.evaluate(context, tool_def):
+                    all_conditions_met = False
+                    break
+            
+            # If all triggers match, EXECUTE the Action
+            if all_conditions_met:
+                if law.action and law.action.verb == "DENY":
+                    # Format the reason string
+                    reason = law.action.reason_template
+                    try:
+                        # Simple format map
+                        safe_scope = {
+                            "context": context, 
+                            "tool": tool_def
+                        }
+                        # We might need a better formatter for objects
+                        # This is a basic f-string simulation
+                        reason = reason.replace("{tool.phase}", str(tool_def.get("phase", "?")))
+                        reason = reason.replace("{context.phase_index}", str(getattr(context, "phase_index", "?")))
+                        reason = reason.replace("{tool.gates}", str(tool_def.get("gates", "?")))
+                    except Exception:
+                        pass
+                        
+                    return Decision(False, reason, law.name)
+
         return Decision(True, "All laws passed")
+

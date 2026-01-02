@@ -642,6 +642,26 @@ def get_global_ledger() -> DecisionLedger:
 
 
 # ============================================================================
+# Singleton Instance
+# ============================================================================
+
+_decision_ledger_instance: Optional[DecisionLedger] = None
+
+
+def get_decision_ledger() -> DecisionLedger:
+    """
+    Get the global DecisionLedger singleton instance.
+
+    Returns:
+        Global DecisionLedger instance
+    """
+    global _decision_ledger_instance
+    if _decision_ledger_instance is None:
+        _decision_ledger_instance = DecisionLedger()
+    return _decision_ledger_instance
+
+
+# ============================================================================
 # Self-Test / Design Verification
 # ============================================================================
 

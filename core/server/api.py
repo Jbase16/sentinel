@@ -1120,6 +1120,200 @@ async def get_results(_: bool = Depends(verify_token)):
     """
     return await get_results_v1(_)
 
+# ============================================================================
+# Replay Capsule Endpoints - Deterministic Scan Reproduction
+# ============================================================================
+
+@v1_router.post("/capsule/create")
+@app.post("/capsule/create")
+async def create_replay_capsule(
+    session_id: str,
+    sanitize: bool = False,
+    _: bool = Depends(verify_token)
+):
+    """
+    Create a deterministic replay capsule for a completed scan session.
+
+    Args:
+        session_id: UUID of the scan session
+        sanitize: If True, remove sensitive data (API keys, tokens, private IPs, etc.)
+
+    Returns:
+        Dict with capsule_path and checksum
+    """
+    from core.cortex.replay_capsule import create_capsule_for_session, get_capsule_store_path
+
+    try:
+        capsule = await create_capsule_for_session(session_id, sanitize=sanitize)
+
+        return {
+            "success": True,
+            "session_id": capsule.session_id,
+            "checksum": capsule.checksum,
+            "sanitized": capsule.metadata.sanitized,
+            "capsule_path": str(get_capsule_store_path() / f"{capsule.session_id}.json"),
+            "target": capsule.target,
+            "status": capsule.status,
+            "events_count": len(capsule.events),
+            "decisions_count": len(capsule.decisions),
+            "findings_count": len(capsule.findings),
+            "issues_count": len(capsule.issues),
+            "tool_executions_count": len(capsule.tool_executions)
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"[API] Failed to create capsule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create capsule: {e}")
+
+
+@v1_router.get("/capsule/{session_id}")
+@app.get("/capsule/{session_id}")
+async def get_replay_capsule(
+    session_id: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Retrieve a replay capsule for a session.
+
+    Args:
+        session_id: UUID of the scan session (with optional _sanitized suffix)
+
+    Returns:
+        The complete capsule as JSON
+    """
+    from core.cortex.replay_capsule import get_capsule_store_path, ScanCapsule
+    from pathlib import Path
+
+    # Check both raw and sanitized versions
+    capsule_path = get_capsule_store_path() / f"{session_id}.json"
+
+    if not capsule_path.exists():
+        raise HTTPException(status_code=404, detail=f"Capsule not found for session {session_id}")
+
+    try:
+        capsule = ScanCapsule.load(capsule_path)
+
+        # Verify integrity
+        if not capsule.verify():
+            logger.warning(f"[API] Capsule integrity check failed for {session_id}")
+
+        # Return capsule as dict
+        from dataclasses import asdict
+        return {
+            "capsule": asdict(capsule),
+            "integrity_verified": capsule.verify()
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to load capsule: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to load capsule: {e}")
+
+
+@v1_router.get("/capsules/list")
+@app.get("/capsules/list")
+async def list_replay_capsules(_: bool = Depends(verify_token)):
+    """
+    List all available replay capsules.
+
+    Returns:
+        List of capsule metadata
+    """
+    from core.cortex.replay_capsule import get_capsule_store_path
+
+    capsules_dir = get_capsule_store_path()
+    capsule_files = list(capsules_dir.glob("*.json"))
+
+    capsules_list = []
+    for capsule_file in capsule_files:
+        try:
+            # Just read basic info without full load
+            import json
+            with open(capsule_file, 'r') as f:
+                data = json.load(f)
+
+            capsules_list.append({
+                "session_id": data.get("session_id"),
+                "target": data.get("target"),
+                "status": data.get("status"),
+                "created_at": data.get("metadata", {}).get("created_at"),
+                "sanitized": data.get("metadata", {}).get("sanitized", False),
+                "file_path": str(capsule_file)
+            })
+        except Exception as e:
+            logger.warning(f"[API] Failed to read capsule {capsule_file}: {e}")
+            continue
+
+    return {"capsules": capsules_list, "count": len(capsules_list)}
+
+# ============================================================================
+# Causal Attack-Pressure Graph Endpoints - Vulnerability Dependency Analysis
+# ============================================================================
+
+@v1_router.get("/causal-graph/{session_id}")
+@app.get("/causal-graph/{session_id}")
+async def get_causal_attack_graph(
+    session_id: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Build and analyze causal dependency graph for a scan session.
+
+    Returns:
+        Graph summary with pressure points and attack chains
+    """
+    from core.cortex.causal_graph import build_causal_graph_for_session
+
+    try:
+        summary = await build_causal_graph_for_session(session_id)
+        return {
+            "success": True,
+            "session_id": session_id,
+            **summary
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to build causal graph: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to build causal graph: {e}")
+
+
+@v1_router.get("/causal-graph/{session_id}/graphviz")
+@app.get("/causal-graph/{session_id}/graphviz")
+async def get_causal_graph_graphviz(
+    session_id: str,
+    _: bool = Depends(verify_token)
+):
+    """
+    Get Graphviz DOT representation of causal graph for visualization.
+
+    Returns:
+        DOT format string
+    """
+    from core.cortex.causal_graph import CausalGraphBuilder
+    from core.data.db import Database
+
+    try:
+        db = Database.instance()
+        await db.init()
+
+        findings = await db.get_findings(session_id)
+        builder = CausalGraphBuilder()
+        builder.build(findings)
+
+        dot_format = builder.export_graphviz()
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "graphviz_dot": dot_format
+        }
+    except Exception as e:
+        logger.error(f"[API] Failed to generate graphviz: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate graphviz: {e}")
+
+
+# ============================================================================
+# Cortex Endpoints
+# ============================================================================
+
 @v1_router.get("/cortex/graph")
 @app.get("/cortex/graph")
 async def get_cortex_graph(_: bool = Depends(verify_token)):

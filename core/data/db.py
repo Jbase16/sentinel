@@ -629,6 +629,32 @@ class Database:
     async def get_all_evidence(self) -> List[Dict]:
         return await self.get_evidence(None)
 
+    async def get_session(self, session_id: str) -> Optional[Dict]:
+        """
+        Retrieve session metadata from database.
+
+        Args:
+            session_id: Session UUID
+
+        Returns:
+            Dict with session data or None if not found
+        """
+        query = "SELECT id, target, status, start_time, end_time, logs FROM sessions WHERE id = ?"
+        rows = await self.fetch_all(query, (session_id,))
+
+        if not rows:
+            return None
+
+        row = rows[0]
+        return {
+            'id': row[0],
+            'target': row[1],
+            'status': row[2],
+            'start_time': row[3],
+            'end_time': row[4],
+            'logs': row[5]
+        }
+
     # ----------------------------
     # System state counters
     # ----------------------------

@@ -56,7 +56,8 @@ class ResilienceContext:
     Manages the 'Life Loop' of a scan task.
     Decides whether to retry, abort, or ignore failures.
     """
-    def __init__(self, max_retries: int = 3):
+    def __init__(self, engine: "ScannerEngine", max_retries: int = 3):
+        self.engine = engine
         self.max_retries = max_retries
         self.errors: List[Exception] = []
         self._classifier = ErrorClassifier()
@@ -68,7 +69,9 @@ class ResilienceContext:
         if diagnosis.type == ErrorType.TRANSIENT:
             return "RETRY"
         elif diagnosis.type == ErrorType.WAF_BLOCK:
-            # Future: Rotate proxy here
+            # Trigger Stealth Mode
+            if hasattr(self.engine, "enable_stealth_mode"):
+                self.engine.enable_stealth_mode()
             return "RETRY" # Simple retry for now, eventually COOLDOWN
         elif diagnosis.type == ErrorType.RESOURCE:
             return "ABORT"
@@ -115,11 +118,22 @@ class ResourceGuard:
     """
 
     def __init__(self, max_findings: int = 10000, max_disk_mb: int = 1000):
+        self.base_max_findings = max_findings
+        self.base_max_disk_mb = max_disk_mb
         self.max_findings = max_findings
         self.max_disk_mb = max_disk_mb
         self.findings_count = 0
         self.disk_usage_bytes = 0
         self._lock = threading.Lock()
+        self._stealth_mode = False
+
+    def set_stealth_mode(self, enabled: bool):
+        with self._lock:
+            self._stealth_mode = enabled
+            factor = 0.5 if enabled else 1.0
+            self.max_findings = int(self.base_max_findings * factor)
+            # Disk limit usually stays hard cap, but we could lower it too
+            logger.info(f"[ResourceGuard] Stealth Mode={'ON' if enabled else 'OFF'}. New Limits: Findings={self.max_findings}")
 
     def reset(self) -> None:
         """Reset counters for a new scan."""
@@ -1125,13 +1139,20 @@ class ScannerEngine:
         async def _core_executor():
              return await self._execute_tool(exec_id, tool, target, queue, args, cancel_flag)
 
-        # Initialize resilience context
-        ctx = ResilienceContext(max_retries=3)
+        # Initialize resilience context with engine reference
+        ctx = ResilienceContext(self, max_retries=3)
         try:
              return await ctx.execute_with_retry(_core_executor)
         except Exception:
              # Errors logged by resilience context, propagate up
              raise
+
+    def enable_stealth_mode(self):
+        """
+        Activate Stealth Mode: Reduce resource limits and (TODO) increase delays.
+        """
+        logger.warning("[ScannerEngine] 🛡️ ACTIVATING STEALTH MODE due to detected WAF/Block.")
+        self.resource_guard.set_stealth_mode(True)
 
     async def _execute_tool(
         self,

@@ -1,0 +1,22 @@
+# The Constitution of Strategos
+# Defined in Collaborative Agent Logic (CAL)
+
+Law PassiveBeforeActive {
+    Claim: "Aggressive tools are forbidden during passive phase"
+    When: context.phase_index < 2
+    And:  tool.phase >= 2
+    Then: DENY "Passive Mode Violation: Phase {context.phase_index} cannot run Phase {tool.phase} tool"
+}
+
+Law EvidenceGates {
+    Claim: "Tools require prerequisite evidence"
+    When: tool.gates IS NOT EMPTY
+    And:  tool.gates NOT IN context.knowledge.tags
+    Then: DENY "Missing Prerequisite: {tool.gates}"
+}
+
+Law ResourceAwareness {
+    Claim: "Don't exceed system max load"
+    When: (context.active_tools + tool.resource_cost) > context.max_concurrent
+    Then: DENY "System load too high ({context.active_tools} + {tool.resource_cost} > {context.max_concurrent})"
+}
