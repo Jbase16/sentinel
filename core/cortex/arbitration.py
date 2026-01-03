@@ -123,42 +123,76 @@ class ArbitrationEngine:
     def review(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         """
         Review a proposed decision.
-        Returns a single Judgment: APPROVE or VETO.
+
+        Policies are evaluated in priority order (higher priority first).
+        Returns a single Judgment: APPROVE, VETO, or MODIFY.
+
+        Arbitration Rules:
+        - VETO always wins (fail-closed for safety)
+        - MODIFY suggestions are collected and returned if approved
+        - APPROVE is default consensus
         """
         vetoes: List[Judgment] = []
         approvals: List[Judgment] = []
-        
-        # 1. Collect Judgments
-        for policy in self._policies:
+        modifications: List[Judgment] = []
+
+        # Sort policies by priority (higher = evaluated first)
+        # Python policies default to priority 50 if no priority property
+        sorted_policies = sorted(
+            self._policies,
+            key=lambda p: getattr(p, 'priority', 50),
+            reverse=True  # Higher priority first
+        )
+
+        # 1. Collect Judgments in priority order
+        for policy in sorted_policies:
             try:
                 judgment = policy.evaluate(decision, context)
+
                 if judgment.verdict == Verdict.VETO:
                     vetoes.append(judgment)
+                    # Early exit on veto for performance (veto always wins)
+                    break
                 elif judgment.verdict == Verdict.APPROVE:
                     approvals.append(judgment)
-                # MODIFY is treated as VETO for now in strict mode
                 elif judgment.verdict == Verdict.MODIFY:
-                     logger.warning(f"[Arbitration] MODIFY requested by {policy.name} but not supported yet. Treating as INFO.")
-                     approvals.append(judgment) # Treat as allow-with-modification-request (soft allow)
+                    modifications.append(judgment)
+                    logger.debug(f"[Arbitration] MODIFY requested by {policy.name}: {judgment.reason}")
+
             except Exception as e:
-                # Fail Closed: If a policy crashes, we default to VETO for safety? 
-                # Or Log and Ignore? 
-                # "Fail Safe" usually means Fail Open in non-critical, Fail Closed in critical.
-                # Let's Fail Closed for safety.
+                # Fail Closed: Policy crash = VETO for safety
                 logger.error(f"[Arbitration] Policy {policy.name} crashed: {e}")
                 vetoes.append(Judgment(Verdict.VETO, policy.name, f"Policy Crashed: {e}"))
-        
+                break
+
         # 2. Arbitrate
         if vetoes:
-            # Veto wins
+            # Veto wins (fail-closed)
             reasons = "; ".join([f"{j.policy_name}: {j.reason}" for j in vetoes])
             return Judgment(
                 verdict=Verdict.VETO,
                 policy_name="ArbitrationEngine",
                 reason=f"Blocked by {len(vetoes)} policies. [{reasons}]"
             )
-            
-        # 3. Consensus
+
+        # 3. Handle modifications
+        if modifications:
+            # Collect all modification suggestions
+            all_modifications = {}
+            reasons = []
+            for mod_judgment in modifications:
+                if mod_judgment.modifications:
+                    all_modifications.update(mod_judgment.modifications)
+                reasons.append(f"{mod_judgment.policy_name}: {mod_judgment.reason}")
+
+            return Judgment(
+                verdict=Verdict.MODIFY,
+                policy_name="ArbitrationEngine",
+                reason=f"Approved with modifications from {len(modifications)} policies. [{'; '.join(reasons)}]",
+                modifications=all_modifications
+            )
+
+        # 4. Consensus (all approved or no policies matched)
         return Judgment(
             verdict=Verdict.APPROVE,
             policy_name="ArbitrationEngine",

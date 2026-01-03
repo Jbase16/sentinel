@@ -38,7 +38,13 @@ class Condition:
         # Wrap BOTH context and tool to support dot notation (context.x, tool.phase)
         safe_scope = {
             "context": _DictWrapper(context) if isinstance(context, dict) else context,
-            "tool": _DictWrapper(tool) if isinstance(tool, dict) else tool
+            "tool": _DictWrapper(tool) if isinstance(tool, dict) else tool,
+            "all": all,
+            "any": any,
+            "len": len,
+            "int": int,
+            "float": float,
+            "str": str,
         }
         
         # Operators map for custom CAL syntax "IS NOT EMPTY" etc.
@@ -62,9 +68,24 @@ class _DictWrapper:
         self._data = data
     def __getattr__(self, item):
         val = self._data.get(item)
+        if val is None:
+            # Return 0 for missing numeric fields to prevent CAL eval crashes
+            if item in ["resource_cost", "active_tools", "max_concurrent"]:
+                return 0
+            # Return empty list for tags/gates
+            if item in ["tags", "gates", "knowledge"]:
+                return []
+            return None
         if isinstance(val, dict):
             return _DictWrapper(val)
+        # Ensure lists are converted to tuples if they might be used in 'in set' checks
+        # Actually, it's safer to just return as is and let the expr handle it,
+        # but the CAL error was 'list as set element'.
         return val
+    def __iter__(self):
+        return iter(self._data)
+    def __contains__(self, item):
+        return item in self._data
 
 @dataclass
 class Action:
@@ -77,6 +98,7 @@ class Law:
     claim: str
     conditions: List[Condition] = field(default_factory=list)
     action: Optional[Action] = None
+    priority: int = 50  # Default priority (0-100, higher = evaluated first)
 
 class CALParser:
     def parse_file(self, path: str) -> List[Law]:
@@ -113,13 +135,22 @@ class CALParser:
             # Directives
             if line.startswith("Claim:"):
                 current_law.claim = line.split(":", 1)[1].strip().strip('"')
-            elif line.startswith("When:"):
+            elif line.startswith("Priority:"):
+                try:
+                    priority_str = line.split(":", 1)[1].strip()
+                    current_law.priority = int(priority_str)
+                except ValueError:
+                    logger.warning(f"[CAL] Invalid priority value: {line}")
+            elif line.startswith("When:") or line.startswith("REQUIRE:"):
+                # When: and REQUIRE: are equivalent (REQUIRE is shorthand)
                 expr = line.split(":", 1)[1].strip()
                 current_law.conditions.append(Condition(expr))
-            elif line.startswith("And:"):
+            elif line.startswith("And:") or line.startswith("IF:"):
+                # And: and IF: are equivalent (IF for readability)
                 expr = line.split(":", 1)[1].strip()
                 current_law.conditions.append(Condition(expr))
             elif line.startswith("Then:"):
+                # Support ALLOW, DENY, and MODIFY verbs
                 parts = line.split(":", 1)[1].strip().split(" ", 1)
                 verb = parts[0]
                 reason = parts[1].strip('"') if len(parts) > 1 else ""

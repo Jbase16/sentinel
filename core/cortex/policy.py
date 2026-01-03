@@ -62,7 +62,12 @@ class ScopePolicy(Policy):
     def name(self) -> str:
         """Function name."""
         return "ScopePolicy"
-        
+
+    @property
+    def priority(self) -> int:
+        """Priority for evaluation order (0-100, higher = first)."""
+        return 60  # Higher than default (50) - scope checks are important
+
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         # If decision proposes a tool targeting a host, check if it's in scope.
         # This is a stub logic - normally we'd check decision.context['target'] vs global scope.
@@ -88,6 +93,11 @@ class RiskPolicy(Policy):
         """Function name."""
         return "RiskPolicy"
 
+    @property
+    def priority(self) -> int:
+        """Priority for evaluation order (0-100, higher = first)."""
+        return 55  # Slightly above default - risk checks are important
+
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         # Example: If Mode is PASSIVE, block ACTIVE tools.
         # This duplicates some reasoning in Strategos, but as a hard safety net.
@@ -111,6 +121,7 @@ class CALCompiledPolicy(Policy):
 
     Example CAL:
         Law PassiveBeforeActive {
+            Priority: 80
             Claim: "Aggressive tools are forbidden during passive phase"
             When: context.phase_index < 2
             And:  tool.phase >= 2
@@ -126,11 +137,17 @@ class CALCompiledPolicy(Policy):
 
         self._law: Law = law
         self._action: Action = law.action
+        self._priority: int = law.priority
 
     @property
     def name(self) -> str:
         """Returns the law name as policy identifier."""
         return f"CAL:{self._law.name}"
+
+    @property
+    def priority(self) -> int:
+        """Returns the policy priority (0-100, higher = evaluated first)."""
+        return self._priority
 
     def evaluate(self, decision: DecisionPoint, context: Dict[str, Any]) -> Judgment:
         """
@@ -182,21 +199,31 @@ class CALCompiledPolicy(Policy):
             )
 
         # Conditions passed - execute the action
-        if self._action and self._action.verb == "DENY":
-            # Format the reason template
+        if self._action:
             reason = self._format_reason(self._action.reason_template, eval_context, tool_def)
-            return Judgment(
-                verdict=Verdict.VETO,
-                policy_name=self.name,
-                reason=reason
-            )
-        elif self._action and self._action.verb == "ALLOW":
-            reason = self._format_reason(self._action.reason_template, eval_context, tool_def)
-            return Judgment(
-                verdict=Verdict.APPROVE,
-                policy_name=self.name,
-                reason=reason
-            )
+
+            if self._action.verb == "DENY":
+                return Judgment(
+                    verdict=Verdict.VETO,
+                    policy_name=self.name,
+                    reason=reason
+                )
+            elif self._action.verb == "ALLOW":
+                return Judgment(
+                    verdict=Verdict.APPROVE,
+                    policy_name=self.name,
+                    reason=reason
+                )
+            elif self._action.verb == "MODIFY":
+                # MODIFY verdict can suggest changes without blocking
+                # Extract modification hints from the reason (format: "key=value")
+                modifications = self._parse_modifications(reason)
+                return Judgment(
+                    verdict=Verdict.MODIFY,
+                    policy_name=self.name,
+                    reason=reason,
+                    modifications=modifications
+                )
 
         # No action or unknown verb - default to approve
         return Judgment(
@@ -231,6 +258,41 @@ class CALCompiledPolicy(Policy):
             pass
 
         return result
+
+    def _parse_modifications(self, reason: str) -> Dict[str, Any]:
+        """
+        Parse modification hints from reason string.
+
+        Expected format: "Add rate_limit=10 and timeout=30"
+        Extracts: {"rate_limit": "10", "timeout": "30"}
+
+        Args:
+            reason: The reason string potentially containing modifications
+
+        Returns:
+            Dictionary of key=value pairs found in reason
+        """
+        modifications = {}
+        try:
+            import re
+            # Find all key=value patterns
+            pattern = r'(\w+)=([^\s,]+)'
+            matches = re.findall(pattern, reason)
+            for key, value in matches:
+                # Try to convert to int/float if possible
+                try:
+                    if '.' in value:
+                        modifications[key] = float(value)
+                    else:
+                        modifications[key] = int(value)
+                except ValueError:
+                    # Keep as string if not a number
+                    modifications[key] = value
+        except Exception:
+            # If parsing fails, return empty dict
+            pass
+
+        return modifications
 
 class _ContextWrapper:
     """

@@ -246,6 +246,22 @@ class Database:
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_decisions_sequence ON decisions(event_sequence)")
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_decisions_parent ON decisions(parent_id)")
 
+        # Policies table for CAL policy persistence
+        await self._db_connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS policies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                cal_source TEXT NOT NULL,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_policies_name ON policies(name)")
+        await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_policies_enabled ON policies(enabled)")
+
         # Migration: Add scan_sequence column to evidence if it doesn't exist
         # This handles databases created before scan_sequence was added
         await self._migrate_evidence_table()
@@ -995,5 +1011,150 @@ class Database:
             }
             for row in rows
         ]
+
+    # ============================================================================
+    # Policy Management Methods
+    # ============================================================================
+
+    async def save_policy(self, name: str, cal_source: str, enabled: bool = True) -> int:
+        """
+        Save a new CAL policy to the database.
+
+        Args:
+            name: Unique policy name
+            cal_source: CAL DSL source code
+            enabled: Whether policy should be active
+
+        Returns:
+            The database ID of the inserted policy
+
+        Raises:
+            sqlite3.IntegrityError: If policy name already exists
+        """
+        cursor = await self._db_connection.execute(
+            """
+            INSERT INTO policies (name, cal_source, enabled, created_at, updated_at)
+            VALUES (?, ?, ?, datetime('now'), datetime('now'))
+            """,
+            (name, cal_source, 1 if enabled else 0)
+        )
+        await self._db_connection.commit()
+        return cursor.lastrowid
+
+    async def get_policy_by_name(self, name: str) -> Optional[Dict]:
+        """
+        Get a policy by its name.
+
+        Args:
+            name: Policy name to retrieve
+
+        Returns:
+            Policy dict with id, name, cal_source, enabled, created_at, updated_at
+            or None if not found
+        """
+        cursor = await self._db_connection.execute(
+            """
+            SELECT id, name, cal_source, enabled, created_at, updated_at
+            FROM policies
+            WHERE name = ?
+            """,
+            (name,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        return {
+            "id": row[0],
+            "name": row[1],
+            "cal_source": row[2],
+            "enabled": bool(row[3]),
+            "created_at": row[4],
+            "updated_at": row[5]
+        }
+
+    async def list_policies(self) -> List[Dict]:
+        """
+        List all policies in the database.
+
+        Returns:
+            List of policy dicts sorted by creation date
+        """
+        cursor = await self._db_connection.execute(
+            """
+            SELECT id, name, cal_source, enabled, created_at, updated_at
+            FROM policies
+            ORDER BY created_at DESC
+            """
+        )
+        rows = await cursor.fetchall()
+
+        return [
+            {
+                "id": row[0],
+                "name": row[1],
+                "cal_source": row[2],
+                "enabled": bool(row[3]),
+                "created_at": row[4],
+                "updated_at": row[5]
+            }
+            for row in rows
+        ]
+
+    async def update_policy(self, name: str, cal_source: str = None, enabled: bool = None) -> bool:
+        """
+        Update an existing policy.
+
+        Args:
+            name: Policy name to update
+            cal_source: New CAL source (optional)
+            enabled: New enabled status (optional)
+
+        Returns:
+            True if policy was updated, False if not found
+        """
+        # Build dynamic UPDATE query
+        updates = []
+        params = []
+
+        if cal_source is not None:
+            updates.append("cal_source = ?")
+            params.append(cal_source)
+
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+
+        if not updates:
+            return False  # Nothing to update
+
+        # Always update updated_at
+        updates.append("updated_at = datetime('now')")
+
+        params.append(name)  # WHERE clause parameter
+
+        query = f"UPDATE policies SET {', '.join(updates)} WHERE name = ?"
+
+        cursor = await self._db_connection.execute(query, params)
+        await self._db_connection.commit()
+
+        return cursor.rowcount > 0
+
+    async def delete_policy(self, name: str) -> bool:
+        """
+        Delete a policy by name.
+
+        Args:
+            name: Policy name to delete
+
+        Returns:
+            True if policy was deleted, False if not found
+        """
+        cursor = await self._db_connection.execute(
+            "DELETE FROM policies WHERE name = ?",
+            (name,)
+        )
+        await self._db_connection.commit()
+        return cursor.rowcount > 0
 
 

@@ -34,7 +34,7 @@ from typing import List, Dict, Any, Callable, Awaitable, Optional, Set, TYPE_CHE
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from core.scheduler.laws import Constitution
+# Constitution class replaced by CAL policies loaded into ArbitrationEngine
 from core.scheduler.registry import ToolRegistry, PHASE_1_PASSIVE, PHASE_2_LIGHT, PHASE_3_SURFACE, PHASE_4_DEEP, PHASE_5_HEAVY
 from core.scheduler.modes import ScanMode, ModeRegistry
 from core.scheduler.intents import (
@@ -97,7 +97,7 @@ class Strategos:
         narrator: Optional["NarratorEngine"] = None,
     ):
         """Function __init__."""
-        self.constitution = Constitution()
+        # Constitution is now loaded into ArbitrationEngine (see Layer 4 below)
         self.registry = ToolRegistry()
         self.context: Optional[ScanContext] = None
         self.event_queue: asyncio.Queue = asyncio.Queue(maxsize=event_queue_maxsize)
@@ -120,8 +120,56 @@ class Strategos:
 
         # Layer 4: Policy Arbitration
         self.arbitrator = ArbitrationEngine()
+
+        # Register Python policies
         self.arbitrator.register_policy(ScopePolicy())
         self.arbitrator.register_policy(RiskPolicy())
+
+        # Load CAL constitution (replaces legacy Constitution class)
+        # This unifies CAL laws with Python policies under a single enforcement engine
+        cal_policies = self.arbitrator.load_cal_file("assets/laws/constitution.cal")
+        if cal_policies:
+            logger.info(f"[Strategos] Loaded {len(cal_policies)} CAL laws from constitution")
+        else:
+            logger.warning("[Strategos] No CAL laws loaded - constitution.cal missing or empty")
+
+        # Note: Database policies loaded separately via load_policies_from_db()
+        # (must be called after async DB initialization)
+
+    async def load_policies_from_db(self):
+        """
+        Load enabled CAL policies from database into ArbitrationEngine.
+
+        This must be called after Database.init() completes, as it requires
+        database access. Typically called during server startup.
+
+        Returns:
+            Number of policies loaded
+        """
+        try:
+            from core.data.db import Database
+
+            db = Database.instance()
+            db_policies = await db.list_policies()
+            enabled_policies = [p for p in db_policies if p.get("enabled", True)]
+
+            loaded_count = 0
+            for policy in enabled_policies:
+                try:
+                    policies = self.arbitrator.load_cal_policy(policy["cal_source"])
+                    loaded_count += len(policies)
+                    logger.info(f"[Strategos] Loaded DB policy '{policy['name']}' with {len(policies)} laws")
+                except Exception as e:
+                    logger.error(f"[Strategos] Failed to load policy '{policy['name']}': {e}")
+
+            if loaded_count > 0:
+                logger.info(f"[Strategos] Loaded {loaded_count} policies from database")
+
+            return loaded_count
+
+        except Exception as e:
+            logger.error(f"[Strategos] Failed to load policies from database: {e}")
+            return 0
 
     def _emit_log(self, message: str, level: str = "info") -> None:
         """Function _emit_log."""
@@ -545,22 +593,24 @@ class Strategos:
                 rejected_count += 1
                 reasons.setdefault("Mode Overlay", []).append(t)
                 continue
-            
-            # DECISION POINT: Constitutional check (safety rules)
-            constitution_decision = self.constitution.check(self.context, tool_def)
-            if not constitution_decision.allowed:
-                rejected_count += 1
-                reason = f"{constitution_decision.blocking_law} ({constitution_decision.reason})"
-                reasons.setdefault(reason, []).append(t)
-                continue
-            
-            # DECISION POINT: Policy Arbitration (Flexible Rules)
-            # Create a transient decision to query the arbitrator
-            # We must verify if this tool is acceptable under current policies
+
+            # DECISION POINT: Policy Arbitration (Unified: CAL + Python)
+            # Create enriched context for policy evaluation
+            # Includes fields required by both CAL laws and Python policies
             sim_ctx = {
-                **tool_def, 
-                "target": self.context.target if self.context else "unknown", 
-                "mode": mode.value
+                # Tool definition fields
+                **tool_def,
+                "tool": tool_def,  # For CAL's tool.field access
+
+                # Scan context fields
+                "target": self.context.target if self.context else "unknown",
+                "mode": mode.value,
+
+                # CAL-specific fields (required by constitution.cal)
+                "phase_index": self.context.phase_index if self.context else 0,
+                "knowledge": self.context.knowledge if self.context else {},
+                "active_tools": len(self._tool_tasks),
+                "max_concurrent": self._tool_semaphore._value if self._tool_semaphore else 10,
             }
             simulated_decision = DecisionPoint.create(
                 DecisionType.TOOL_SELECTION,

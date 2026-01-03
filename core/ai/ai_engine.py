@@ -37,7 +37,7 @@ import logging
 import httpx
 import time
 import threading
-from typing import Dict, List, Optional, Generator, Callable, Any
+from typing import Dict, List, Optional, Generator, AsyncGenerator, Callable, Any
 
 from core.data.findings_store import findings_store
 from core.data.killchain_store import killchain_store
@@ -197,7 +197,7 @@ class OllamaClient:
         """Generate plain text response without JSON formatting."""
         return self.generate(prompt, system, force_json=False)
 
-    def stream_generate(self, prompt: str, system: str = "") -> Generator[str, None, None]:
+    async def stream_generate(self, prompt: str, system: str = "") -> AsyncGenerator[str, None]:
         """Function stream_generate."""
         url = f"{self.base_url}/api/generate"
         payload = {
@@ -211,14 +211,14 @@ class OllamaClient:
         
         # Error handling block.
         try:
-            with httpx.Client(timeout=300.0) as client:
-                with client.stream("POST", url, json=payload) as response:
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream("POST", url, json=payload) as response:
                     logger.info(f"Ollama Response Status: {response.status_code}")
                     if response.status_code != 200:
                         yield f"[Error: Ollama returned {response.status_code}]"
                         return
 
-                    for line in response.iter_lines():
+                    async for line in response.aiter_lines():
                         if not line:
                             continue
                         try:
@@ -278,7 +278,7 @@ class ProtectedOllamaClient:
         """Wrapper for generate_text."""
         return self.generate(prompt, system, force_json=False)
 
-    def stream_generate(self, prompt: str, system: str = "") -> Generator[str, None, None]:
+    async def stream_generate(self, prompt: str, system: str = "") -> AsyncGenerator[str, None]:
         """wrapper for stream_generate with circuit breaker."""
         if self._breaker.is_open():
             yield "[AI unavailable - circuit breaker open]"
@@ -288,8 +288,7 @@ class ProtectedOllamaClient:
         try:
             # Note: The generator itself is lazy. The real work happens during iteration.
             # Ideally we'd wrap the iterator, but simple wrapping catches connection errors.
-            stream = self._client.stream_generate(prompt, system)
-            for chunk in stream:
+            async for chunk in self._client.stream_generate(prompt, system):
                 # Basic heuristic: if chunk looks like our hardcoded error, count as fail
                 if isinstance(chunk, str) and chunk.startswith("[Error:"):
                      self._breaker.on_failure()
@@ -408,7 +407,7 @@ class AIEngine:
             logger.warning("Failed to fetch available models: %s", exc)
             return []
 
-    def stream_chat(self, question: str) -> Generator[str, None, None]:
+    async def stream_chat(self, question: str) -> AsyncGenerator[str, None]:
         """
         Stream answer to a natural-language question based on stored evidence & findings.
         """
@@ -464,7 +463,8 @@ class AIEngine:
             
             user_prompt = f"{context_block}\n\nUser Question: {question}"
             
-            yield from self.client.stream_generate(user_prompt, system_prompt)
+            async for chunk in self.client.stream_generate(user_prompt, system_prompt):
+                yield chunk
             return
 
         yield "AI Chat unavailable (Ollama offline). Please check connection."

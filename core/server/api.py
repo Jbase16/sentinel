@@ -597,6 +597,53 @@ async def startup_event():
     from core.cortex.events import initialize_event_sequence_from_db
     await initialize_event_sequence_from_db()
 
+    # Load CAL policies from database into ArbitrationEngine
+    # This enables persistent policy management via REST API
+    try:
+        from core.cortex.reasoning import reasoning_engine
+        policy_count = await reasoning_engine.strategos.load_policies_from_db()
+        if policy_count > 0:
+            logger.info(f"[Startup] Loaded {policy_count} CAL policies from database")
+    except Exception as e:
+        logger.error(f"[Startup] Failed to load policies from database: {e}")
+        # Non-fatal - server can still start with constitution.cal policies
+
+    # Start policy file watcher for hot-reload
+    try:
+        from core.cortex.policy_watcher import get_policy_watcher
+        from core.cortex.reasoning import reasoning_engine
+
+        watcher = get_policy_watcher()
+
+        # Set reload callback to reload policies when files change
+        async def reload_policies_on_change():
+            """Reload policies from constitution.cal when file changes."""
+            try:
+                # Clear existing CAL policies
+                arbitrator = reasoning_engine.strategos.arbitrator
+                active_policies = arbitrator.list_policies()
+                for policy_name in active_policies:
+                    if policy_name.startswith("CAL:"):
+                        arbitrator.unregister_policy(policy_name)
+
+                # Reload from file
+                policies = arbitrator.load_cal_file("assets/laws/constitution.cal")
+                logger.info(f"[PolicyWatcher] Reloaded {len(policies)} policies from constitution.cal")
+
+                # Also reload from database
+                db_count = await reasoning_engine.strategos.load_policies_from_db()
+                logger.info(f"[PolicyWatcher] Reloaded {db_count} policies from database")
+
+            except Exception as e:
+                logger.error(f"[PolicyWatcher] Reload callback failed: {e}")
+
+        watcher.set_reload_callback(reload_policies_on_change)
+        await watcher.start()
+        logger.info("[Startup] Policy file watcher started")
+    except Exception as e:
+        logger.error(f"[Startup] Failed to start policy watcher: {e}")
+        # Non-fatal - server can still operate without hot-reload
+
     # Start session cleanup task
     _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
     logger.info("Session cleanup task started")
@@ -616,6 +663,15 @@ async def shutdown_event():
             await _session_cleanup_task
         except asyncio.CancelledError:
             pass
+
+    # Stop policy file watcher
+    try:
+        from core.cortex.policy_watcher import get_policy_watcher
+        watcher = get_policy_watcher()
+        await watcher.stop()
+        logger.info("[Shutdown] Policy file watcher stopped")
+    except Exception as e:
+        logger.error(f"[Shutdown] Failed to stop policy watcher: {e}")
 
     from core.data.blackbox import BlackBox
     await BlackBox.instance().shutdown()
@@ -1581,6 +1637,304 @@ async def get_migration_history(_: bool = Depends(verify_token)):
 
 
 # ============================================================================
+# Policy Management Endpoints
+# ============================================================================
+
+class PolicyUploadRequest(BaseModel):
+    """Request to upload a new CAL policy."""
+    name: str = Field(..., description="Unique policy name")
+    cal_source: str = Field(..., description="CAL DSL source code")
+    enabled: bool = Field(True, description="Whether policy is active")
+
+@v1_router.post("/policies")
+@app.post("/policies")
+async def upload_policy(request: PolicyUploadRequest, _: bool = Depends(verify_token)):
+    """
+    Upload a new CAL policy and register it with the ArbitrationEngine.
+
+    Args:
+        request: Policy upload request with name, cal_source, enabled
+
+    Returns:
+        Success status and loaded policy details
+    """
+    try:
+        from core.data.db import Database
+        from core.cortex.reasoning import reasoning_engine
+
+        db = Database.instance()
+
+        # Check if policy already exists
+        existing = await db.get_policy_by_name(request.name)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"Policy '{request.name}' already exists")
+
+        # Validate CAL syntax by attempting to parse
+        from core.cal.parser import CALParser
+        parser = CALParser()
+        try:
+            laws = parser.parse_string(request.cal_source)
+            if not laws:
+                raise ValueError("No laws found in CAL source")
+        except Exception as parse_error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid CAL syntax: {parse_error}"
+            )
+
+        # Save to database
+        policy_id = await db.save_policy(
+            name=request.name,
+            cal_source=request.cal_source,
+            enabled=request.enabled
+        )
+
+        # Load into ArbitrationEngine if enabled
+        if request.enabled:
+            arbitrator = reasoning_engine.strategos.arbitrator
+            loaded_policies = arbitrator.load_cal_policy(request.cal_source)
+            logger.info(f"[API] Loaded policy '{request.name}' with {len(loaded_policies)} laws")
+
+        return {
+            "success": True,
+            "policy_id": policy_id,
+            "name": request.name,
+            "laws_count": len(laws),
+            "enabled": request.enabled
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] Failed to upload policy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upload policy: {e}")
+
+
+@v1_router.get("/policies")
+@app.get("/policies")
+async def list_policies(_: bool = Depends(verify_token)):
+    """
+    List all policies (both database-persisted and runtime-loaded).
+
+    Returns:
+        List of policies with metadata and active status
+    """
+    try:
+        from core.data.db import Database
+        from core.cortex.reasoning import reasoning_engine
+
+        db = Database.instance()
+
+        # Get policies from database
+        db_policies = await db.list_policies()
+
+        # Get active policies from ArbitrationEngine
+        arbitrator = reasoning_engine.strategos.arbitrator
+        active_policy_names = arbitrator.list_policies()
+
+        # Merge information
+        policies = []
+        for db_policy in db_policies:
+            # Check if CAL policy is loaded (name format: "CAL:{name}")
+            cal_name = f"CAL:{db_policy['name']}"
+            is_loaded = cal_name in active_policy_names
+
+            policies.append({
+                **db_policy,
+                "loaded": is_loaded,
+                "type": "cal"
+            })
+
+        # Add Python policies (not in database)
+        for policy_name in active_policy_names:
+            if not policy_name.startswith("CAL:"):
+                policies.append({
+                    "name": policy_name,
+                    "type": "python",
+                    "enabled": True,
+                    "loaded": True,
+                    "created_at": None
+                })
+
+        return {
+            "success": True,
+            "policies": policies,
+            "total": len(policies)
+        }
+
+    except Exception as e:
+        logger.error(f"[API] Failed to list policies: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to list policies: {e}")
+
+
+@v1_router.get("/policies/{policy_name}")
+@app.get("/policies/{policy_name}")
+async def get_policy(policy_name: str, _: bool = Depends(verify_token)):
+    """
+    Get detailed information about a specific policy.
+
+    Args:
+        policy_name: Name of the policy to retrieve
+
+    Returns:
+        Policy details including source code and metadata
+    """
+    try:
+        from core.data.db import Database
+        from core.cortex.reasoning import reasoning_engine
+
+        db = Database.instance()
+
+        # Try to find in database
+        policy = await db.get_policy_by_name(policy_name)
+        if not policy:
+            raise HTTPException(status_code=404, detail=f"Policy '{policy_name}' not found")
+
+        # Check if loaded in ArbitrationEngine
+        arbitrator = reasoning_engine.strategos.arbitrator
+        active_policies = arbitrator.list_policies()
+        cal_name = f"CAL:{policy_name}"
+        is_loaded = cal_name in active_policies
+
+        return {
+            "success": True,
+            "policy": {
+                **policy,
+                "loaded": is_loaded
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] Failed to get policy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get policy: {e}")
+
+
+@v1_router.delete("/policies/{policy_name}")
+@app.delete("/policies/{policy_name}")
+async def delete_policy(policy_name: str, _: bool = Depends(verify_token)):
+    """
+    Delete a policy from database and unload from ArbitrationEngine.
+
+    Args:
+        policy_name: Name of the policy to delete
+
+    Returns:
+        Success status
+    """
+    try:
+        from core.data.db import Database
+        from core.cortex.reasoning import reasoning_engine
+
+        db = Database.instance()
+
+        # Check if policy exists
+        policy = await db.get_policy_by_name(policy_name)
+        if not policy:
+            raise HTTPException(status_code=404, detail=f"Policy '{policy_name}' not found")
+
+        # Unload from ArbitrationEngine
+        arbitrator = reasoning_engine.strategos.arbitrator
+        cal_name = f"CAL:{policy_name}"
+        unloaded = arbitrator.unregister_policy(cal_name)
+
+        # Delete from database
+        await db.delete_policy(policy_name)
+
+        return {
+            "success": True,
+            "policy_name": policy_name,
+            "unloaded": unloaded
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] Failed to delete policy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete policy: {e}")
+
+
+@v1_router.post("/policies/reload")
+@app.post("/policies/reload")
+async def reload_policies(_: bool = Depends(verify_token)):
+    """
+    Reload all enabled policies from database into ArbitrationEngine.
+
+    Useful for hot-reloading after database changes or constitution.cal updates.
+
+    Returns:
+        Count of policies reloaded
+    """
+    try:
+        from core.data.db import Database
+        from core.cortex.reasoning import reasoning_engine
+
+        db = Database.instance()
+        arbitrator = reasoning_engine.strategos.arbitrator
+
+        # Get all enabled policies from database
+        db_policies = await db.list_policies()
+        enabled_policies = [p for p in db_policies if p.get("enabled", True)]
+
+        # Clear existing CAL policies (keep Python policies)
+        active_policies = arbitrator.list_policies()
+        for policy_name in active_policies:
+            if policy_name.startswith("CAL:"):
+                arbitrator.unregister_policy(policy_name)
+
+        # Reload from database
+        loaded_count = 0
+        for policy in enabled_policies:
+            policies = arbitrator.load_cal_policy(policy["cal_source"])
+            loaded_count += len(policies)
+            logger.info(f"[API] Reloaded policy '{policy['name']}' with {len(policies)} laws")
+
+        # Also reload constitution.cal
+        const_policies = arbitrator.load_cal_file("assets/laws/constitution.cal")
+        loaded_count += len(const_policies)
+
+        return {
+            "success": True,
+            "policies_reloaded": loaded_count,
+            "active_policies": arbitrator.list_policies()
+        }
+
+    except Exception as e:
+        logger.error(f"[API] Failed to reload policies: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to reload policies: {e}")
+
+
+@v1_router.get("/policies/watcher/status")
+@app.get("/policies/watcher/status")
+async def get_watcher_status(_: bool = Depends(verify_token)):
+    """
+    Get status of the policy file watcher.
+
+    Returns:
+        Watcher running status and watched files
+    """
+    try:
+        from core.cortex.policy_watcher import get_policy_watcher
+
+        watcher = get_policy_watcher()
+        watched_files = watcher.get_watched_files()
+
+        return {
+            "success": True,
+            "running": watcher._running,
+            "watch_directory": str(watcher.watch_directory),
+            "poll_interval": watcher.poll_interval,
+            "watched_files": [str(f) for f in watched_files],
+            "file_count": len(watched_files)
+        }
+
+    except Exception as e:
+        logger.error(f"[API] Failed to get watcher status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get watcher status: {e}")
+
+
+# ============================================================================
 # Cortex Endpoints
 # ============================================================================
 
@@ -1946,7 +2300,7 @@ async def chat(
         full_response = ""
         # Error handling block.
         try:
-            for token in AIEngine.instance().stream_chat(req.prompt):
+            async for token in AIEngine.instance().stream_chat(req.prompt):
                 if await request.is_disconnected():
                     break
                 
