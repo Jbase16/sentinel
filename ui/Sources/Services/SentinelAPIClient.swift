@@ -521,11 +521,31 @@ public struct AIStatus: Decodable {
     public let connected: Bool
     public let fallbackEnabled: Bool
     public let availableModels: [String]?
+    public let circuitBreaker: CircuitBreakerState?  // NEW: Trinity of Hardening
 
     enum CodingKeys: String, CodingKey {
         case provider, model, connected
         case fallbackEnabled = "fallback_enabled"
         case availableModels = "available_models"
+        case circuitBreaker = "circuit_breaker"
+    }
+}
+
+/// Circuit breaker state for AI availability tracking
+/// Part of Trinity of Hardening - Chapter 19
+public struct CircuitBreakerState: Decodable {
+    public let failureCount: Int
+    public let threshold: Int
+    public let isOpen: Bool
+    public let openUntil: Double?  // Unix timestamp when circuit closes
+    public let timeRemaining: Double  // Seconds until circuit closes
+
+    enum CodingKeys: String, CodingKey {
+        case threshold
+        case failureCount = "failure_count"
+        case isOpen = "is_open"
+        case openUntil = "open_until"
+        case timeRemaining = "time_remaining"
     }
 }
 

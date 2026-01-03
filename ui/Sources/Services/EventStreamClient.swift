@@ -33,7 +33,7 @@ public struct GraphEvent: Decodable, Identifiable, Equatable {
     public let sequence: Int
     public let payload: [String: AnyCodable]
     public let source: String?  // Made optional: not all events have source
-    public let epoch: String?   // Server process epoch - changes on restart
+    public let epoch: String?  // Server process epoch - changes on restart
 
     /// Event type as enum for pattern matching
     public var eventType: GraphEventType {
@@ -58,22 +58,28 @@ public enum GraphEventType: String, CaseIterable {
     case scanStarted = "scan_started"
     case scanPhaseChanged = "scan_phase_changed"
     case scanCompleted = "scan_completed"
-    case scanFailed = "scan_failed"  // Aligned: was "scan_error"
+    case scanFailed = "scan_failed"
 
     // Findings
-    case findingCreated = "finding_created"  // Aligned: was "finding_discovered"
+    case findingCreated = "finding_created"
     case findingConfirmed = "finding_confirmed"
     case findingDismissed = "finding_dismissed"
+    case findingDiscovered = "finding_discovered"  // NEW: Lazarus hidden routes
 
     // Tool Execution
-    case toolStarted = "tool_started"  // Aligned: was "tool_invoked"
+    case toolStarted = "tool_started"
     case toolCompleted = "tool_completed"
 
     // Logging & Reasoning
-    case log = "log"  // Aligned: was "log_emitted"
+    case log = "log"
     case narrativeEmitted = "narrative_emitted"
-    case decisionMade = "decision_made"  // NEW: Added for Strategos decisions
+    case decisionMade = "decision_made"
     case actionNeeded = "action_needed"
+
+    // Trinity of Hardening Events
+    case circuitBreakerStateChanged = "circuit_breaker_state"  // NEW: AI fuse state
+    case exploitValidated = "exploit_validated"  // NEW: Forge approved
+    case exploitRejected = "exploit_rejected"  // NEW: Forge rejected
 
     // Fallback
     case unknown = "unknown"
@@ -364,11 +370,15 @@ public class EventStreamClient: ObservableObject {
         case .log:
             logEventPublisher.send(event)
 
-        case .findingCreated, .findingConfirmed, .findingDismissed:
+        case .findingCreated, .findingConfirmed, .findingDismissed, .findingDiscovered:
             findingEventPublisher.send(event)
 
         case .scanStarted, .scanPhaseChanged, .scanCompleted, .scanFailed, .toolStarted,
             .toolCompleted, .narrativeEmitted, .decisionMade, .actionNeeded:
+            scanEventPublisher.send(event)
+
+        case .circuitBreakerStateChanged, .exploitValidated, .exploitRejected:
+            // Trinity of Hardening events - publish to scan stream for status updates
             scanEventPublisher.send(event)
 
         case .unknown:

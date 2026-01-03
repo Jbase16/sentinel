@@ -17,7 +17,7 @@ import SwiftUI
 /// Shows connection status at the top of views
 struct ConnectionStatusBanner: View {
     @StateObject var backend = BackendManager.shared
-    
+
     var body: some View {
         // Conditional branch.
         if !backend.isRunning {
@@ -41,11 +41,11 @@ struct ConnectionStatusBanner: View {
 struct IndeterminateProgressBar: View {
     @State private var animating = false
     let color: Color
-    
+
     init(color: Color = .blue) {
         self.color = color
     }
-    
+
     var body: some View {
         GeometryReader { geo in
             RoundedRectangle(cornerRadius: 2)
@@ -71,7 +71,7 @@ struct IndeterminateProgressBar: View {
 /// Compact status indicator with icon and text
 struct StatusPill: View {
     let status: ConnectionStatus
-    
+
     /// Enum ConnectionStatus {.
     enum ConnectionStatus {
         case connecting
@@ -79,7 +79,7 @@ struct StatusPill: View {
         case disconnected
         case processing
         case error(String)
-        
+
         var icon: String {
             // Switch over value.
             switch self {
@@ -90,7 +90,7 @@ struct StatusPill: View {
             case .error: return "exclamationmark.triangle.fill"
             }
         }
-        
+
         var color: Color {
             // Switch over value.
             switch self {
@@ -101,7 +101,7 @@ struct StatusPill: View {
             case .error: return .red
             }
         }
-        
+
         var text: String {
             // Switch over value.
             switch self {
@@ -113,7 +113,7 @@ struct StatusPill: View {
             }
         }
     }
-    
+
     var body: some View {
         HStack(spacing: 6) {
             // Conditional branch.
@@ -141,7 +141,7 @@ struct StatusPill: View {
 struct ActivityIndicator: View {
     let message: String
     let isActive: Bool
-    
+
     var body: some View {
         // Conditional branch.
         if isActive {
@@ -161,7 +161,7 @@ struct ActivityIndicator: View {
 /// Struct TypingIndicator.
 struct TypingIndicator: View {
     @State private var phase = 0.0
-    
+
     var body: some View {
         HStack(spacing: 4) {
             ForEach(0..<3) { index in
@@ -183,7 +183,7 @@ struct TypingIndicator: View {
         .cornerRadius(16)
         .onAppear { phase = 1.0 }
     }
-    
+
     private func dotScale(for index: Int) -> CGFloat {
         let offset = Double(index) * 0.2
         return phase > offset ? 1.3 : 1.0
@@ -196,12 +196,14 @@ struct ScanProgressCard: View {
     let isRunning: Bool
     let status: String
     let logsCount: Int
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: isRunning ? "antenna.radiowaves.left.and.right" : "checkmark.circle")
-                    .foregroundColor(isRunning ? .blue : .green)
+                Image(
+                    systemName: isRunning ? "antenna.radiowaves.left.and.right" : "checkmark.circle"
+                )
+                .foregroundColor(isRunning ? .blue : .green)
                 Text(isRunning ? "Scan In Progress" : "Ready")
                     .font(.headline)
                 Spacer()
@@ -211,16 +213,16 @@ struct ScanProgressCard: View {
                         .scaleEffect(0.7)
                 }
             }
-            
+
             // Conditional branch.
             if isRunning {
                 IndeterminateProgressBar(color: .blue)
-                
+
                 Text(status)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                
+
                 Text("\(logsCount) log entries")
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -238,18 +240,19 @@ struct AIStatusCard: View {
     let isConnected: Bool
     let modelName: String
     let isGenerating: Bool
-    
+    let circuitBreakerState: CircuitBreakerState?  // NEW: Trinity of Hardening
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "cpu")
-                    .foregroundColor(isConnected ? .green : .red)
+                Image(systemName: isCircuitOpen ? "bolt.trianglebadge.exclamationmark.fill" : "cpu")
+                    .foregroundColor(statusColor)
                 Text("AI Engine")
                     .font(.headline)
                 Spacer()
-                StatusPill(status: isConnected ? (isGenerating ? .processing : .connected) : .disconnected)
+                StatusPill(status: computedStatus)
             }
-            
+
             // Conditional branch.
             if isConnected {
                 HStack {
@@ -261,7 +264,29 @@ struct AIStatusCard: View {
                         .fontWeight(.medium)
                 }
             }
-            
+
+            // Circuit Breaker Status (Trinity of Hardening)
+            if isCircuitOpen {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                    Text("Circuit OPEN - Using heuristic fallbacks")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.orange)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.15))
+                .cornerRadius(6)
+
+                if let cb = circuitBreakerState, cb.timeRemaining > 0 {
+                    Text("Resumes in \(Int(cb.timeRemaining))s")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             // Conditional branch.
             if isGenerating {
                 IndeterminateProgressBar(color: .purple)
@@ -271,6 +296,24 @@ struct AIStatusCard: View {
         .background(Color(NSColor.controlBackgroundColor))
         .cornerRadius(12)
     }
+
+    // MARK: - Computed Properties
+
+    private var isCircuitOpen: Bool {
+        circuitBreakerState?.isOpen ?? false
+    }
+
+    private var statusColor: Color {
+        if isCircuitOpen { return .orange }
+        return isConnected ? .green : .red
+    }
+
+    private var computedStatus: StatusPill.ConnectionStatus {
+        if isCircuitOpen { return .error("Degraded") }
+        if !isConnected { return .disconnected }
+        if isGenerating { return .processing }
+        return .connected
+    }
 }
 
 // MARK: - Loading Overlay
@@ -278,14 +321,14 @@ struct AIStatusCard: View {
 struct LoadingOverlay: View {
     let message: String
     let isShowing: Bool
-    
+
     var body: some View {
         // Conditional branch.
         if isShowing {
             ZStack {
                 Color.black.opacity(0.3)
                     .ignoresSafeArea()
-                
+
                 VStack(spacing: 16) {
                     ProgressView()
                         .scaleEffect(1.5)
@@ -309,7 +352,7 @@ struct EmptyStateView: View {
     let title: String
     let message: String
     let isLoading: Bool
-    
+
     var body: some View {
         VStack(spacing: 16) {
             // Conditional branch.
@@ -321,10 +364,10 @@ struct EmptyStateView: View {
                     .font(.system(size: 48))
                     .foregroundColor(.secondary)
             }
-            
+
             Text(title)
                 .font(.headline)
-            
+
             Text(message)
                 .font(.caption)
                 .foregroundColor(.secondary)

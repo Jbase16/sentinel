@@ -236,9 +236,48 @@ public class HelixAppState: ObservableObject {
             let narrative = event.payload["narrative"]?.stringValue ?? "..."
             return "🧠 \(narrative)"
 
+        // ═══════════════════════════════════════════════════════════════════
+        // Trinity of Hardening Events
+        // ═══════════════════════════════════════════════════════════════════
+        case .findingDiscovered:
+            let findingType = event.payload["type"]?.stringValue ?? "finding"
+            let value = event.payload["value"]?.stringValue ?? ""
+            return "🔍 [Lazarus] \(findingType): \(value)"
+
+        case .circuitBreakerStateChanged:
+            let isOpen = event.payload["is_open"]?.boolValue ?? false
+            let failureCount = event.payload["failure_count"]?.intValue ?? 0
+            if isOpen {
+                return
+                    "⚡ [AI] Circuit OPEN - Switching to heuristic fallbacks (failures: \(failureCount))"
+            } else {
+                return "⚡ [AI] Circuit CLOSED - AI available"
+            }
+
+        case .exploitValidated:
+            let target = event.payload["target"]?.stringValue ?? "unknown"
+            return "✅ [Forge] Exploit approved: \(target)"
+
+        case .exploitRejected:
+            let reason = event.payload["reason"]?.stringValue ?? "validation failed"
+            return "❌ [Forge] Exploit rejected: \(reason)"
+
         default:
             return nil
         }
+    }
+
+    // MARK: - Trinity of Hardening: Circuit Breaker State
+
+    /// Computed property to check if AI circuit breaker is open
+    /// Used by StatusComponents for visual indicator
+    var isAICircuitOpen: Bool {
+        aiStatus?.circuitBreaker?.isOpen ?? false
+    }
+
+    /// Time remaining until circuit closes (for countdown display)
+    var circuitBreakerTimeRemaining: Double {
+        aiStatus?.circuitBreaker?.timeRemaining ?? 0
     }
 
     private func setupLLMBindings() {
