@@ -811,12 +811,7 @@ class ScannerEngine:
                                         pass
                             await self._queue.put("[scanner] All tools terminated due to cancellation")
 
-                    if watchdog_task is not None:
-                        try:
-                            watchdog_task.cancel()
-                        except Exception:
-                            pass
-
+                    # Queue drain before aggregation
                     while not self._queue.empty():
                         yield self._queue.get_nowait()
 
@@ -860,6 +855,15 @@ class ScannerEngine:
                     await txn.rollback(str(e))
                     logger.error(f"[ScannerEngine] Critical error, rolling back: {e}")
                     raise
+                finally:
+                    # CRITICAL: Always cancel watchdog, even on exception paths
+                    # This prevents the watchdog from continuing to run after
+                    # the scan loop exits (exception, cancellation, or completion)
+                    if watchdog_task is not None:
+                        try:
+                            watchdog_task.cancel()
+                        except Exception:
+                            pass
 
             # After context exit, commit has run and stores updated
             if hasattr(txn, "_committed") and txn._committed:
