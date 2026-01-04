@@ -405,6 +405,46 @@ public class HelixAppState: ObservableObject {
             }
         }
     }
+
+    /// Send a message to the AI.
+    func send(_ text: String) {
+        let userMsg = ChatMessage(role: .user, text: text)
+        thread.append(userMsg)
+
+        // Placeholder for assistant response
+        let assistantMsg = ChatMessage(role: .assistant, text: "")
+        thread.append(assistantMsg)
+
+        llm.generate(prompt: text) { [weak self] token in
+            guard let self else { return }
+            // Update the last message directly
+            if var last = self.thread.messages.last, last.role == .assistant {
+                last.text += token
+                self.thread.messages[self.thread.messages.count - 1] = last
+            }
+        }
+    }
+
+    /// Function startScan.
+    func startScan(target: String, modules: [String], mode: ScanMode) {
+        Task {
+            do {
+                _ = try await apiClient.startScan(
+                    target: target, modules: modules, mode: mode.rawValue)
+                await MainActor.run {
+                    self.isScanRunning = true
+                }
+            } catch {
+                print("[AppState] Failed to start scan: \(error)")
+            }
+        }
+    }
+
+    /// Function clearLogs.
+    func clearLogs() {
+        apiLogs.removeAll()
+        apiLogItems.removeAll()
+    }
 }
 
 /// Struct PendingAction.

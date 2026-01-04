@@ -58,7 +58,6 @@ struct SentinelApp: App {
         _llmService = StateObject(wrappedValue: llm)
         _appState = StateObject(wrappedValue: HelixAppState(llm: llm))
     }
-    @StateObject private var backendManager = BackendManager.shared
 
     var body: some Scene {
         WindowGroup {
