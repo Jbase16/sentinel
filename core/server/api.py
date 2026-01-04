@@ -945,7 +945,7 @@ def _log_sink_sync(msg: str) -> None:
     try:
         get_event_bus().emit(GraphEvent(
             type=GraphEventType.LOG,  # Need to ensure LOG type exists or use generic
-            payload={"line": msg}
+            payload={"line": msg, "message": msg}
         ))
     except Exception:
         pass
