@@ -7,6 +7,13 @@ Bridges issues_store and killchain_store to pressure graph.
 from typing import Dict, Set, Optional
 
 from core.utils.observer import Observable, Signal
+from core.data.db import Database
+from core.utils.async_helpers import create_safe_task
+import asyncio
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     PressureNode,
@@ -20,6 +27,8 @@ from .propagator import PressurePropagator
 from .counterfactual import CounterfactualEngine
 from .min_fix_set import MinimalFixSetEngine
 from .explanation import CausalExplainer
+# ... imports continue ...
+
 
 # Import Sentinel stores (will be available at runtime)
 try:
@@ -29,7 +38,6 @@ except ImportError:
     # Fallback for testing
     issues_store = None
     killchain_store = None
-
 
 class PressureGraphManager(Observable):
     """
@@ -50,6 +58,7 @@ class PressureGraphManager(Observable):
         """
         super().__init__()
         self.session_id = session_id
+        self.db = Database.instance()
         
         # Graph data
         self.nodes: Dict[str, PressureNode] = {}
@@ -70,6 +79,107 @@ class PressureGraphManager(Observable):
         
         # Initialize engines on first data
         self._engines_initialized = False
+
+        # Attempt to load persistent state if loop exists
+        try:
+            asyncio.get_running_loop()
+            create_safe_task(self._load_state(), name="graph_load_state")
+        except RuntimeError:
+            pass
+    
+    async def _load_state(self):
+        """Load graph state from DB."""
+        if not self.session_id:
+            return
+            
+        nodes_data, edges_data = await self.db.load_graph_snapshot(self.session_id)
+        if not nodes_data and not edges_data:
+            return
+            
+        # Reconstruct nodes
+        for n in nodes_data:
+            node = PressureNode(
+                id=n["id"],
+                type=n["type"],
+                revision=n["data"].get("revision", 1),
+                severity=n["data"].get("severity", 1.0),
+                exposure=n["data"].get("exposure", 0.5),
+                exploitability=n["data"].get("exploitability", 0.5),
+                privilege_gain=n["data"].get("privilege_gain", 0.3),
+                asset_value=n["data"].get("asset_value", 5.0),
+                tool_reliability=n["data"].get("tool_reliability", 1.0),
+                evidence_quality=n["data"].get("evidence_quality", 0.8),
+                corroboration_count=n["data"].get("corroboration_count", 0),
+                pressure_source=PressureSource(n["data"].get("pressure_source", "engine")),
+                remediation_state=RemediationState(n["data"].get("remediation_state", "none"))
+            )
+            self.nodes[node.id] = node
+            
+        # Reconstruct edges
+        for e in edges_data:
+            edge = PressureEdge(
+                id=e["id"],
+                source_id=e["source"],
+                target_id=e["target"],
+                type=EdgeType(e["type"]),
+                transfer_factor=e.get("weight", 0.8),
+                confidence=e["data"].get("confidence", 0.8),
+                evidence_sources=e["data"].get("evidence_sources", []),
+                created_at=e["data"].get("created_at", 0.0)
+            )
+            self.edges[edge.id] = edge
+            
+        if self.nodes or self.edges:
+            self._initialize_engines()
+            self.graph_updated.emit()
+            logger.info(f"[GraphManager] Loaded {len(self.nodes)} nodes, {len(self.edges)} edges from DB.")
+
+    async def save_snapshot(self):
+        """Persist current graph state to DB."""
+        if not self.session_id:
+            return
+
+        nodes_data = [
+            {
+                "id": n.id,
+                "type": n.type,
+                "label": f"{n.type}:{n.id}",
+                "data": {
+                    "severity": n.severity,
+                    "exposure": n.exposure,
+                    "exploitability": n.exploitability,
+                    "privilege_gain": n.privilege_gain,
+                    "asset_value": n.asset_value,
+                    "tool_reliability": n.tool_reliability,
+                    "evidence_quality": n.evidence_quality,
+                    "corroboration_count": n.corroboration_count,
+                    "pressure_source": n.pressure_source.value,
+                    "remediation_state": n.remediation_state.value,
+                    "revision": n.revision
+                }
+            }
+            for n in self.nodes.values()
+        ]
+        
+        edges_data = [
+            {
+                "id": e.id,
+                "source": e.source_id,
+                "target": e.target_id,
+                "type": e.type.value,
+                "weight": e.transfer_factor,
+                "data": {
+                    "confidence": e.confidence,
+                    "evidence_sources": e.evidence_sources,
+                    "created_at": e.created_at
+                }
+            }
+            for e in self.edges.values()
+        ]
+        
+        await self.db.save_graph_snapshot(self.session_id, nodes_data, edges_data)
+
+
     
     def _connect_stores(self):
         """Connect to Sentinel store change signals."""
@@ -319,12 +429,14 @@ class PressureGraphManager(Observable):
         
         self.baseline_pressures = self.propagator.propagate(self.crown_jewel_ids)
         
-        # Update counterfactual baseline
         if self.counterfactual:
             self.counterfactual.set_baseline(
                 self.crown_jewel_ids,
                 self.baseline_pressures
             )
+        
+        # Persist graph state
+        create_safe_task(self.save_snapshot(), name="graph_save_snapshot")
         
         self.graph_updated.emit()
     

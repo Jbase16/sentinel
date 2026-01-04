@@ -93,6 +93,7 @@ class PressureEdge:
     confidence: float
     
     evidence_sources: List[str] = field(default_factory=list)
+    created_at: float = 0.0
     
     # Internal state for optimization (mutable for perf, logically immutable)
     # We allow _cached_... fields to be mutable to support post-init normalization

@@ -262,6 +262,40 @@ class Database:
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_policies_name ON policies(name)")
         await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_policies_enabled ON policies(enabled)")
 
+        # Graph Persistence (Session Persistence)
+        await self._db_connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_nodes (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                label TEXT,
+                data JSON,
+                timestamp TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_session ON graph_nodes(session_id)")
+
+        await self._db_connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS graph_edges (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                target_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                weight REAL DEFAULT 1.0,
+                data JSON,
+                timestamp TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            )
+            """
+        )
+        await self._db_connection.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_session ON graph_edges(session_id)")
+
+
         # Migration: Add scan_sequence column to evidence if it doesn't exist
         # This handles databases created before scan_sequence was added
         await self._migrate_evidence_table()
@@ -1158,3 +1192,128 @@ class Database:
         return cursor.rowcount > 0
 
 
+
+    async def save_graph_snapshot(
+        self, session_id: str, nodes: List[Dict], edges: List[Dict]
+    ) -> None:
+        """
+        Transactional wipe-and-replace of the graph for a session.
+        Ensures the DB always reflects the latest in-memory state.
+        """
+        if not session_id:
+            return
+
+        async with self._db_lock:
+            try:
+                await self._db_connection.execute("BEGIN TRANSACTION")
+
+                # Wipe existing graph for this session
+                await self._db_connection.execute(
+                    "DELETE FROM graph_nodes WHERE session_id = ?", (session_id,)
+                )
+                await self._db_connection.execute(
+                    "DELETE FROM graph_edges WHERE session_id = ?", (session_id,)
+                )
+
+                # Bulk insert nodes
+                if nodes:
+                    await self._db_connection.executemany(
+                        """
+                        INSERT INTO graph_nodes (id, session_id, type, label, data)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        [
+                            (
+                                n["id"],
+                                session_id,
+                                n["type"],
+                                n.get("label"),
+                                json.dumps(n.get("data", {})),
+                            )
+                            for n in nodes
+                        ],
+                    )
+
+                # Bulk insert edges
+                if edges:
+                    await self._db_connection.executemany(
+                        """
+                        INSERT INTO graph_edges (id, session_id, source_id, target_id, type, weight, data)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            (
+                                e["id"],
+                                session_id,
+                                e["source"],
+                                e["target"],
+                                e["type"],
+                                e.get("weight", 1.0),
+                                json.dumps(e.get("data", {})),
+                            )
+                            for e in edges
+                        ],
+                    )
+
+                await self._db_connection.execute("COMMIT")
+                logger.debug(
+                    f"[Database] Saved graph snapshot for {session_id} "
+                    f"({len(nodes)} nodes, {len(edges)} edges)"
+                )
+
+            except Exception as e:
+                await self._db_connection.execute("ROLLBACK")
+                logger.error(f"[Database] Failed to save graph snapshot: {e}")
+                raise
+
+    async def load_graph_snapshot(
+        self, session_id: str
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Load the full graph for a session.
+        Returns (nodes, edges) lists of dicts.
+        """
+        if not session_id:
+            return [], []
+
+        async with self._db_lock:
+            try:
+                # Load Nodes
+                nodes = []
+                async with self._db_connection.execute(
+                    "SELECT id, type, label, data FROM graph_nodes WHERE session_id = ?",
+                    (session_id,),
+                ) as cursor:
+                    async for row in cursor:
+                        nodes.append(
+                            {
+                                "id": row[0],
+                                "type": row[1],
+                                "label": row[2],
+                                "data": json.loads(row[3]) if row[3] else {},
+                            }
+                        )
+
+                # Load Edges
+                edges = []
+                async with self._db_connection.execute(
+                    "SELECT id, source_id, target_id, type, weight, data FROM graph_edges WHERE session_id = ?",
+                    (session_id,),
+                ) as cursor:
+                    async for row in cursor:
+                        edges.append(
+                            {
+                                "id": row[0],
+                                "source": row[1],
+                                "target": row[2],
+                                "type": row[3],
+                                "weight": row[4],
+                                "data": json.loads(row[5]) if row[5] else {},
+                            }
+                        )
+
+                return nodes, edges
+
+            except Exception as e:
+                logger.error(f"[Database] Failed to load graph snapshot: {e}")
+                return [], []
