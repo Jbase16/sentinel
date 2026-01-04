@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Union
 
-SAFE_MODE: bool = True
+SAFE_MODE: bool = False  # ACTIVATED
 
 @dataclass(frozen=True)
 class HereticRequest:
@@ -35,7 +35,13 @@ class HereticRequest:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize for storage/replay."""
-        raise NotImplementedError("Wrapper-only: implementation deferred")
+        return {
+            "method": self.method,
+            "target": self.target,
+            "headers": self.headers,
+            "body": self.body.decode('utf-8', errors='replace'),
+            "axiom_violation_type": self.axiom_violation_type
+        }
 
 @dataclass
 class HereticMutation:
@@ -54,24 +60,90 @@ class AxiomSynthesizer(Protocol):
         """Mutate a valid request into a heretic one."""
         ...
 
+class StandardAxiomSynthesizer:
+    """
+    Default implementation of logic breaker.
+    Generates specific ontological violations.
+    """
+    
+    def generate_violation(self, base_request: Dict[str, Any], violation_type: str) -> HereticRequest:
+        base_method = base_request.get("method", "GET")
+        base_target = base_request.get("target", "/")
+        base_headers = base_request.get("headers", {})
+        base_body = base_request.get("body", b"")
+        
+        if violation_type == "VERB_INVENTION":
+            # Violation: HTTP verbs are a closed set.
+            # Heretic: Invent a verb that implies a privileged action.
+            return HereticRequest(
+                method="FORCE_ADMIN", # Heretic Verb
+                target=base_target,
+                headers=base_headers,
+                body=base_body,
+                axiom_violation_type="VERB_INVENTION"
+            )
+            
+        elif violation_type == "INTEGER_OVERFLOW":
+            # Violation: Quantities are bounded.
+            # Heretic: Use values exceeding 64-bit integers.
+            # We assume a header injection for this simple example.
+            headers = base_headers.copy()
+            headers["X-Quantity"] = "9223372036854775808" # MAX_INT64 + 1
+            return HereticRequest(
+                method=base_method,
+                target=base_target,
+                headers=headers,
+                body=base_body,
+                axiom_violation_type="INTEGER_OVERFLOW"
+            )
+
+        elif violation_type == "NULL_TERMINATOR_INJECTION":
+             # Violation: HTTP headers are text.
+             # Heretic: Inject null bytes to confuse C-based parsers.
+             headers = base_headers.copy()
+             headers["X-Injection"] = "Value\0Captured"
+             return HereticRequest(
+                 method=base_method,
+                 target=base_target,
+                 headers=headers,
+                 body=base_body,
+                 axiom_violation_type="NULL_TERMINATOR_INJECTION"
+             )
+             
+        # Default fallback
+        return HereticRequest(
+            method=base_method,
+            target=base_target,
+            headers=base_headers,
+            body=base_body,
+            axiom_violation_type="UNKNOWN"
+        )
+
 class OntologyBreakerService:
     """
     Main Service entry point for the Ontology Breaker.
     """
 
     def __init__(self):
-        if not SAFE_MODE:
-            raise RuntimeError("OntologyBreakerService initiated in unsafe mode (Not Implemented)")
+        self.synthesizer = StandardAxiomSynthesizer()
 
     async def hallucinate_batch(self, seed_request: Dict[str, Any]) -> List[HereticRequest]:
         """
         Generate a batch of heretic requests from a seed.
         """
-        raise NotImplementedError("Wrapper-only: implementation deferred")
+        mutations = []
+        violation_types = ["VERB_INVENTION", "INTEGER_OVERFLOW", "NULL_TERMINATOR_INJECTION"]
+        
+        for v_type in violation_types:
+            mutation = self.synthesizer.generate_violation(seed_request, v_type)
+            mutations.append(mutation)
+            
+        return mutations
 
     async def replay(self, artifact: Dict[str, Any]) -> None:
         """Replay a specific hallucination sequence."""
-        raise NotImplementedError("Wrapper-only: replay deferred")
+        # TODO: Implement replay logic using an HTTP client (raw socket preferred for heretic reqs)
+        pass
 
 # Placeholder for registry integration
 def register_ontology_breaker_hooks():

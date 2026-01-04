@@ -18,7 +18,8 @@ Integration:
 from __future__ import annotations
 from typing import Any, Dict, Protocol, Optional
 
-SAFE_MODE: bool = True
+SAFE_MODE: bool = False # ACTIVATED
+from .ontology_breaker import OntologyBreakerService
 
 class ThanatosManager:
     """
@@ -27,13 +28,12 @@ class ThanatosManager:
     """
 
     def __init__(self):
-        if not SAFE_MODE:
-            raise RuntimeError("ThanatosManager initiated in unsafe mode (Not Implemented)")
+        self._ontology_breaker = OntologyBreakerService()
             
     # --- Pillar I: Ontology Breaker ---
-    async def get_ontology_breaker(self) -> Any:
+    async def get_ontology_breaker(self) -> OntologyBreakerService:
         """Clean access to Ontology Breaker."""
-        raise NotImplementedError("Wrapper-only: implementation deferred")
+        return self._ontology_breaker
 
     # --- Pillar II: Economic Recon (Aegis) ---
     async def get_economic_map(self) -> Any:
