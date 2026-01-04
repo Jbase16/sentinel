@@ -19,6 +19,7 @@ DerivedData/
 __pycache__/
 ui/.build/
 venv/
+.analysis-venv/
 userdata/
 
 tests/test_aegis_phase1.py
