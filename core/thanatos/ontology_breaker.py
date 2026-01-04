@@ -27,7 +27,8 @@ class OntologyBreakerService:
         Produce a batch of strict, ontology-breaking test cases.
         """
         # 1. Safety Check (Scope Gate)
-        if not self.scope_gate.check(target.endpoint):
+        # Check against policy allowlist
+        if not self.scope_gate.policy.allows_target(target):
             log.warning(f"Thanatos: Target {target.endpoint} out of scope. Rejecting.")
             return []
 

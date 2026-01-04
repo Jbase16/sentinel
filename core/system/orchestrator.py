@@ -100,7 +100,8 @@ class SystemOrchestrator:
             "status": "active"
         })
         
-        self.aegis = PressureGraphManager(session_id=session_id)
+        self.pg_manager = PressureGraphManager(session_id=session_id)
+        # self.sentient handles decisions
         
         # 3. Start Reasoning Engines
         gate = ScopeGate(ScopePolicy())
@@ -124,7 +125,7 @@ class SystemOrchestrator:
         
         # 5. Wire Feedback (Nerves)
         self.feedback = FeedbackLoop(
-            pressure_system=self.aegis,
+            pressure_system=self.pg_manager,
             economic_system=self.sentient.economics,
             policy=DefaultFeedbackPolicy()
         )
@@ -145,8 +146,8 @@ class SystemOrchestrator:
         await HttpHarness.close_client()
         
         # 2. Stop Data (Save Graph)
-        if self.aegis:
-            await self.aegis.save_snapshot()
+        if self.pg_manager:
+            await self.pg_manager.save_snapshot()
         
         if self.db:
             await self.db.close()
@@ -208,7 +209,7 @@ class SystemOrchestrator:
             )
             
             # Update Graph
-            self.aegis.nodes[node_id] = node
+            self.pg_manager.nodes[node_id] = node
             
             # Emit Discovery Event
             await self.bus.emit(TelemetryEvent(

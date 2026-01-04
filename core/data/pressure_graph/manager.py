@@ -641,15 +641,35 @@ class PressureGraphManager(Observable):
         entry_points = list(all_node_ids - nodes_with_inbound)
         return entry_points
 
-    def increase_pressure(self, node_id: str, amount: float) -> None:
+    def increase_pressure(self, node_id: str, amount: float, reason: str) -> None:
         """
-        Feedback API: Manually spike pressure on a node usually due to breach/anomaly.
-        
-        This increases 'exploitability' (0.0-1.0) and 'severity' (1.0-10.0) based on the amount.
+        Directly increase pressure on a node (e.g., from Fuzzing Feedback).
         """
         if node_id not in self.nodes:
-            logger.warning(f"Feedback: Cannot increase pressure on unknown node {node_id}")
-            return
+            logger.info(f"PressureGraph: Auto-creating missing node {node_id} from feedback.")
+            # Heuristic: If it starts with service:, it's a Component.
+            if node_id.startswith("service:"):
+                 # Use PressureNode directly as ComponentNode doesn't exist yet/here
+                 from core.data.pressure_graph.models import PressureNode, PressureSource, RemediationState
+                 # Quick hack to get a valid node
+                 self.nodes[node_id] = PressureNode(
+                     id=node_id, 
+                     type="service", # Generic type
+                     severity=5.0,
+                     exposure=0.5,
+                     exploitability=0.5,
+                     privilege_gain=0.1,
+                     asset_value=5.0,
+                     tool_reliability=1.0,
+                     evidence_quality=1.0,
+                     corroboration_count=0,
+                     pressure_source=PressureSource.ENGINE, 
+                     remediation_state=RemediationState.NONE,
+                     revision=1
+                 )
+            else:
+                 logger.warning(f"Feedback: Cannot increase pressure on unknown node {node_id} (and cannot auto-create).")
+                 return
             
         node = self.nodes[node_id]
         

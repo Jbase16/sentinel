@@ -19,7 +19,8 @@ import hashlib
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from .models import ExecutionResult, ExecutionStatus, BreachStatus, OracleSpec
+from core.thanatos.models import OracleSpec
+from .models import ExecutionResult, ExecutionStatus, BreachStatus
 
 log = logging.getLogger("executor.oracle")
 

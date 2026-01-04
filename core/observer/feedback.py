@@ -75,7 +75,11 @@ class FeedbackLoop:
             if target_id:
                 amount = self.policy.breach_pressure(float(severity))
                 log.info(f"Feedback: Increasing pressure on {target_id} by {amount:.2f} (Breach).")
-                self.pressure_system.increase_pressure(target_id, amount=amount)
+                self.pressure_system.increase_pressure(
+                    node_id=target_id,
+                    amount=amount,
+                    reason=f"Feedback: {event.type.name}"
+                )
         except Exception as e:
             log.error(f"Feedback Error (Breach): {e}")
 
