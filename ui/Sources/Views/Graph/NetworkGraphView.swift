@@ -65,11 +65,33 @@ struct NetworkGraphView: View {
 
                     Spacer()
 
+                    // Identity Badge
+                    IdentityStatusView(appState: appState)
+                        .padding(.trailing, 8)
+
                     Text("NODES: \(appState.cortexStream.nodes.count)")
                         .font(.custom("Courier New", size: 12))
                         .foregroundColor(.white)
                 }
                 .padding()
+
+                // BREACH WARNING
+                if let target = appState.activeBreachTarget {
+                    VStack {
+                        Text("🚨 CRITICAL BREACH DETECTED 🚨")
+                            .font(.headline)  // Using standard font for safety
+                            .fontWeight(.black)
+                            .foregroundColor(.white)
+                        Text(target)
+                            .font(.subheadline)  // Using standard font
+                            .foregroundColor(.white)
+                    }
+                    .padding()
+                    .background(Color.red.opacity(0.8))
+                    .cornerRadius(12)
+                    .padding(.top, 20)
+                    .transition(.opacity)
+                }
 
                 Spacer()
 

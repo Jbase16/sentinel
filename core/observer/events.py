@@ -41,6 +41,9 @@ class EventType(str, Enum):
     
     # Sentient (Decision)
     DECISION_MADE = "DECISION_MADE"
+
+    # Doppelganger (Identity)
+    IDENTITY_ESTABLISHED = "IDENTITY_ESTABLISHED" # payload: {persona_id, role}
     
     # Executor (Action)
     EXECUTION_STARTED = "EXECUTION_STARTED"

@@ -48,6 +48,7 @@ from core.executor.models import ExecutionOrder, ExecutionStatus
 
 # Pillar VI: Identity
 from core.doppelganger.engine import DoppelgangerEngine
+from core.doppelganger.models import Credential, Role
 
 log = logging.getLogger("system.orchestrator")
 
@@ -235,6 +236,15 @@ class SystemOrchestrator:
         persona = await self.doppelganger.authenticate(admin_cred, target_url)
         if persona:
             log.info(f"🎭 Identity Established: {persona.id}")
+            await self.bus.emit(TelemetryEvent(
+                type=EventType.IDENTITY_ESTABLISHED,
+                source="Orchestrator",
+                level=EventLevel.INFO,
+                payload={
+                    "persona_id": persona.id,
+                    "role": persona.credential.role.value if persona.credential else "UNKNOWN"
+                }
+            ))
         else:
             log.warning("🎭 Identity Failed: Proceeding anonymously (Expect 401s)")
 
@@ -287,30 +297,15 @@ class SystemOrchestrator:
                 # 2.3 ACT (Executor)
                 order_id = str(uuid.uuid4())
                 
-                # Inject Auth Headers into the Order Context
-                # Note: ExecutionOrder needs to support 'context' or we modify HttpHarness to accept it
-                # For this iteration, let's pass it via metadata? 
-                # Better: Update ExecutionOrder model to include `auth_context`
-                # Or just put it in the test_case temporarily?
-                # No, cleanliness matters. 
-                # Let's update ExecutionOrder model first, or just hack it into headers for now?
-                # The prompt said "Inject auth_context into ExecutionOrder".
-                
+                # Contextual Headers (Doppelganger)
+                headers = persona.get_auth_headers() if persona else None
+
                 order = ExecutionOrder(
                     test_case=test_case, 
                     decision=decision,
-                    idempotency_token=order_id
+                    idempotency_token=order_id,
+                    auth_headers=headers
                 )
-                
-                # HACK: Manually append auth headers to the test case mutation for now
-                # Ideally HttpHarness handles this contextually.
-                # But to avoid touching too many files in one go:
-                if persona:
-                    # We need to tell HttpHarness to use these headers.
-                    # Currently HttpHarness uses a singleton client with fixed headers.
-                    # We should probably pass headers in the `signals` request? No.
-                    # Let's add it to the ExecutionOrder dynamically.
-                    order.auth_headers = persona.get_auth_headers()
                 
                 # Interlock Check
                 lock_reason = self.interlock.check(order)

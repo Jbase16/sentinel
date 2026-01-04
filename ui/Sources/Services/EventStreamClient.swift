@@ -81,6 +81,10 @@ public enum GraphEventType: String, CaseIterable {
     case exploitValidated = "exploit_validated"  // NEW: Forge approved
     case exploitRejected = "exploit_rejected"  // NEW: Forge rejected
 
+    // Cortex / Doppelganger Events (SCREAMING_SNAKE match)
+    case breachDetected = "BREACH_DETECTED"
+    case identityEstablished = "IDENTITY_ESTABLISHED"
+
     // Fallback
     case unknown = "unknown"
 }
@@ -379,6 +383,10 @@ public class EventStreamClient: ObservableObject {
 
         case .circuitBreakerStateChanged, .exploitValidated, .exploitRejected:
             // Trinity of Hardening events - publish to scan stream for status updates
+            scanEventPublisher.send(event)
+
+        case .breachDetected, .identityEstablished:
+            // Critical Identity/Security events - broadcast to scan stream (where HelixAppState listens)
             scanEventPublisher.send(event)
 
         case .unknown:

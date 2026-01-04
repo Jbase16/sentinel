@@ -80,6 +80,13 @@ public class HelixAppState: ObservableObject {
     @Published var reportIsGenerating: Bool = false
     @Published var selectedSection: String = "executive_summary"
 
+    // Identity State (Doppelganger)
+    @Published var currentIdentity: String? = nil
+    @Published var currentRole: String? = nil
+
+    // Security State
+    @Published var activeBreachTarget: String? = nil
+
     private let llm: LLMService
 
     init(llm: LLMService) {
@@ -179,6 +186,34 @@ public class HelixAppState: ObservableObject {
                         }
                     case .findingCreated, .findingConfirmed, .findingDismissed, .toolCompleted:
                         self.refreshResults()
+
+                    // Doppelganger
+                    case .identityEstablished:
+                        if let persona = event.payload["persona_id"]?.stringValue {
+                            self.currentIdentity = persona
+                            self.currentRole = event.payload["role"]?.stringValue
+                            self.apiLogs.append("🎭 [Doppelganger] Identity Active: \(persona)")
+                        }
+
+                    // Crash Reflex / Breach
+                    case .breachDetected:
+                        let target = event.payload["target_node_id"]?.stringValue ?? "unknown"
+                        let type = event.payload["type"]?.stringValue ?? "BREACH"
+                        let sev = event.payload["severity"]?.doubleValue ?? 0.0
+                        let msg = "🚨 [ORACLE] \(type) DETECTED at \(target) (Severity: \(sev))"
+
+                        self.activeBreachTarget = target
+                        self.apiLogs.append(msg)
+                        self.apiLogItems.append(LogItem(id: UUID(), text: msg))
+                        self.refreshResults()  // Refresh graph to show red node
+
+                        // Auto-clear breach alert after 5 seconds
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                            if self.activeBreachTarget == target {
+                                self.activeBreachTarget = nil
+                            }
+                        }
+
                     default:
                         break
                     }
