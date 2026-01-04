@@ -11,8 +11,8 @@
 // - Depends on: [To be documented]
 //
 
-import Foundation
 import Combine
+import Foundation
 
 // Thin wrapper around Ollama's HTTP API with streaming token support.
 // This service is kept UI-friendly (ObservableObject) so SwiftUI can react
@@ -28,7 +28,7 @@ final class LLMService: ObservableObject {
     @Published var ollamaOnline: Bool = true
 
     private let router = ModelRouter()
-    private let api = SentinelAPIClient() // Chat now goes through Python API
+    private let api = SentinelAPIClient()  // Chat now goes through Python API
     private var currentTask: Task<Void, Never>?
 
     // Stop any in-flight generation and reset flags.
@@ -78,7 +78,7 @@ final class LLMService: ObservableObject {
         streamedResponse = ""
         isGenerating = true
 
-        let client = self.api // Capture value type for detached task
+        let client = self.api  // Capture value type for detached task
 
         currentTask = Task.detached { [weak self] in
             // Guard condition.
@@ -106,5 +106,29 @@ final class LLMService: ObservableObject {
                 }
             }
         }
+    }
+    // MARK: - Publishers for HelixAppState Binding
+
+    /// Publishes streamed tokens (alias for streamedResponse for bindings)
+    var textStream: AnyPublisher<String, Never> {
+        $streamedResponse.eraseToAnyPublisher()
+    }
+
+    /// Publishes processing state (alias for isGenerating for bindings)
+    var isProcessingPublisher: AnyPublisher<Bool, Never> {
+        $isGenerating.eraseToAnyPublisher()
+    }
+
+    // Legacy support property
+    var isProcessing: AnyPublisher<Bool, Never> { isProcessingPublisher }
+
+    // Thread binding support - LLMService doesn't own the whole thread anymore,
+    // but we provide a publisher that HelixAppState can bind to if needed.
+    // For now, we'll expose a PassthroughSubject that AppState can drive,
+    // or just rely on the fact that AppState owns the thread.
+    // However, to fix the specific error 'Value of type LLMService has no member threadPublisher':
+    private let _threadPublisher = PassthroughSubject<ChatThread, Never>()
+    var threadPublisher: AnyPublisher<ChatThread, Never> {
+        _threadPublisher.eraseToAnyPublisher()
     }
 }

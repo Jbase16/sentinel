@@ -164,6 +164,7 @@ public struct ChatThread: Identifiable, Codable, Hashable {
     public var title: String
     public var messages: [ChatMessage]
     public var lastUpdated: Date
+    public var streamBuffer: String = ""
 
     public init(id: UUID = UUID(), title: String, messages: [ChatMessage] = []) {
         self.id = id
@@ -175,10 +176,12 @@ public struct ChatThread: Identifiable, Codable, Hashable {
     public mutating func append(_ message: ChatMessage) {
         messages.append(message)
         lastUpdated = Date()
+        streamBuffer = ""  // Clear buffer on commit
     }
 
     public mutating func clear() {
         messages.removeAll()
         lastUpdated = Date()
+        streamBuffer = ""
     }
 }
