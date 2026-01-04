@@ -9,14 +9,13 @@ Purpose:
     1. Listen to Telemetry Events (e.g. BREACH_DETECTED).
     2. Normalize the signal.
     3. Update the State Engines (Aegis Pressure, Sentient Economics).
-
+    
 Magnum Opus Standards:
-    - Loose Coupling: Use Dependency Injection for target systems to avoid import cycles.
-    - Resilience: Feedback errors must not stop the event stream.
+    - Async: Callbacks are async to support potentially IO-bound updates (like DB writes).
 """
 
 import logging
-from typing import Protocol, Any
+from typing import Protocol, Any, Awaitable
 
 from .events import TelemetryEvent, EventType
 from .bus import get_event_bus
@@ -29,12 +28,33 @@ class PressureSystem(Protocol):
 
 class EconomicSystem(Protocol):
     def record_cost(self, trace_id: str, cost: float) -> None: ...
-    def record_value(self, trace_id: str, value: float) -> None: ...
+
+class FeedbackPolicy(Protocol):
+    """
+    Defines HOW the system learns from outcomes.
+    Separates policy (tuning) from mechanism (routing).
+    """
+    def breach_pressure(self, severity: float) -> float: ...
+    def execution_cost(self, duration_ms: float) -> float: ...
+
+class DefaultFeedbackPolicy:
+    """Standard learning rates."""
+    def breach_pressure(self, severity: float) -> float:
+        return severity * 10.0
+
+    def execution_cost(self, duration_ms: float) -> float:
+        return duration_ms * 0.001
 
 class FeedbackLoop:
-    def __init__(self, pressure_system: PressureSystem, economic_system: EconomicSystem):
+    def __init__(
+        self, 
+        pressure_system: PressureSystem, 
+        economic_system: EconomicSystem,
+        policy: FeedbackPolicy = DefaultFeedbackPolicy()
+    ):
         self.pressure_system = pressure_system
         self.economic_system = economic_system
+        self.policy = policy
         self.bus = get_event_bus()
 
     def start(self):
@@ -43,22 +63,23 @@ class FeedbackLoop:
         self.bus.subscribe(EventType.EXECUTION_COMPLETED, self._on_execution_complete)
         log.info("Feedback Loop engaged.")
 
-    def _on_breach(self, event: TelemetryEvent):
+    async def _on_breach(self, event: TelemetryEvent):
         """
         When a breach is detected, increase pressure on the target node.
+        Async wrapper allows for future async system calls.
         """
         try:
-            target_id = event.payload.get("target_node_id") # Assuming payload has this
+            target_id = event.payload.get("target_node_id")
             severity = event.payload.get("severity", 1.0)
             
             if target_id:
-                log.info(f"Feedback: Increasing pressure on {target_id} due to Breach.")
-                # We boost pressure significantly on a proven breach
-                self.pressure_system.increase_pressure(target_id, amount=severity * 10.0)
+                amount = self.policy.breach_pressure(float(severity))
+                log.info(f"Feedback: Increasing pressure on {target_id} by {amount:.2f} (Breach).")
+                self.pressure_system.increase_pressure(target_id, amount=amount)
         except Exception as e:
             log.error(f"Feedback Error (Breach): {e}")
 
-    def _on_execution_complete(self, event: TelemetryEvent):
+    async def _on_execution_complete(self, event: TelemetryEvent):
         """
         Record the resource cost of the execution.
         """
@@ -66,8 +87,7 @@ class FeedbackLoop:
             trace_id = event.trace_id
             duration = event.payload.get("duration_ms", 0)
             
-            # Simple cost model: 1ms = 0.001 units
-            cost = duration * 0.001
+            cost = self.policy.execution_cost(float(duration))
             
             if trace_id:
                 self.economic_system.record_cost(trace_id, cost)

@@ -2,27 +2,31 @@
 core/observer/bus.py
 
 Purpose:
-    The central message bus.
+    The central asynchronous message bus.
     Implements the Publish-Subscribe pattern for system-wide telemetry.
 
 Magnum Opus Standards:
-    - Exception Safety: Subscriber errors are isolated.
-    - Singleton Integrity: Single shared instance.
-    - Typing: Callback protocols.
+    - Async Detection: Automatically handles both sync and async subscribers.
+    - Exception Isolation: Failures in listeners never propagate to the emitter.
+    - Performance: Low-overhead dispatch.
 """
 
 from __future__ import annotations
 import logging
-from typing import Callable, List, Dict, Type
+import inspect
+import asyncio
+from typing import Callable, List, Dict, Union, Awaitable
 from collections import defaultdict
 
 from .events import TelemetryEvent, EventType
 
 log = logging.getLogger("observer.bus")
 
-# Type alias for a subscriber callback
-# Subscriber receives the event and returns nothing
-Subscriber = Callable[[TelemetryEvent], None]
+# Subscriber can be a sync function or an async coroutine
+Subscriber = Union[
+    Callable[[TelemetryEvent], None],
+    Callable[[TelemetryEvent], Awaitable[None]]
+]
 
 class EventBus:
     _instance = None
@@ -37,11 +41,10 @@ class EventBus:
         if self._initialized:
             return
         
-        # Subscribers map: EventType -> List[Callbacks]
-        # Use "*" as a key for global subscribers (wildcard)
+        # Subscribers map: EventType -> List[Subscriber]
         self._subscribers: Dict[str, List[Subscriber]] = defaultdict(list)
         self._initialized = True
-        log.info("EventBus initialized.")
+        log.info("Async EventBus initialized.")
 
     def subscribe(self, event_type: EventType | str, callback: Subscriber):
         """
@@ -50,33 +53,47 @@ class EventBus:
         """
         key = event_type.value if isinstance(event_type, EventType) else event_type
         self._subscribers[key].append(callback)
-        log.debug(f"Subscribed {callback.__name__} to {key}")
+        func_name = getattr(callback, "__name__", str(callback))
+        log.debug(f"Subscribed {func_name} to {key}")
 
-    def emit(self, event: TelemetryEvent):
+    async def emit(self, event: TelemetryEvent):
         """
         Publish an event to all interested subscribers.
-        Errors in subscribers are caught and logged to prevent system crash.
+        Awaits all async subscribers concurrently.
         """
-        # 1. Notify specific subscribers
-        self._notify_list(event.type.value, event)
+        tasks = []
         
-        # 2. Notify global subscribers ("*")
-        self._notify_list("*", event)
+        # 1. Collect all callbacks (specific + global)
+        specific = self._subscribers.get(event.type.value, [])
+        global_subs = self._subscribers.get("*", [])
+        
+        # Deduplicate is tricky with objects, but usually lists are disjoint enough.
+        # We will just iterate both.
+        
+        for callback in specific + global_subs:
+            tasks.append(self._invoke(callback, event))
+            
+        if tasks:
+            # Run all invokes; _invoke handles error catching internally
+            await asyncio.gather(*tasks)
 
-    def _notify_list(self, key: str, event: TelemetryEvent):
-        if key not in self._subscribers:
-            return
-
-        for callback in self._subscribers[key]:
-            try:
+    async def _invoke(self, callback: Subscriber, event: TelemetryEvent):
+        """
+        Safely executes a single subscriber, handling sync vs async.
+        """
+        try:
+            if inspect.iscoroutinefunction(callback):
+                await callback(event)
+            else:
+                # Run sync functions directly (or could offload to thread if blocking?)
+                # For high-perf, sync functions should remain fast/non-blocking.
                 callback(event)
-            except Exception as e:
-                # CRITICAL: A logging error must not crash the app.
-                # We use the python logger as a fallback.
-                log.error(f"EventBus Subscriber Error ({callback.__name__}): {e}", exc_info=True)
+        except Exception as e:
+            func_name = getattr(callback, "__name__", str(callback))
+            log.error(f"EventBus Subscriber Error ({func_name}): {e}", exc_info=True)
 
     def clear(self):
-        """Reset subscribers (Useful for testing)."""
+        """Reset subscribers."""
         self._subscribers.clear()
 
 # Global Accessor
