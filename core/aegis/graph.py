@@ -86,6 +86,13 @@ class BusinessModelGraph:
         """
         Calculate total business risk for each node given a map of technical pressure.
         
+        Semantics:
+        - Risk = Business Value (Impact) * Technical Pressure (Likelihood-proxy)
+        - Propagation Strategy: MAXIMUM CREDIBLE IMPACT.
+          We use max() rather than sum() for dependencies because a business process
+          is usually invalidated by its *worst* failing dependency, not the sum of them.
+          (e.g., Auth Service failure breaks the Portal completely; adding a Logging failure doesn't make it "more broken").
+        
         technical_pressure_map: { business_node_id: direct_technical_pressure }
         
         Returns: { business_node_id: aggregated_risk_score }

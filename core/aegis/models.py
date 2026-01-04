@@ -17,9 +17,9 @@ class BusinessNode:
     name: str
     type: str  # 'asset', 'process', 'reputation', 'service'
     
-    # Intrinsic Business Value (0.0 - 10.0)
-    # 10.0 = Company Ending Event
-    # 1.0  = Minor Annoyance
+    # Intrinsic Business Value (1.0 - 10.0)
+    # 10.0 = Company Ending Event (Crown Jewel)
+    # 1.0  = Minor Operational Nuisance
     value: float
     
     # Description or Notes

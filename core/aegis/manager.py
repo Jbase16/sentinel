@@ -24,6 +24,11 @@ class AegisManager:
     1. Maintain the Business BusinessModelGraph.
     2. Bridge Technical findings to Business Assets.
     3. Calculate and broadcasting Business Risk.
+    
+    Philosophy:
+    - The Business Graph contains ONLY Business Nodes.
+    - Technical Pressure is treated as an *external force* applied to this graph.
+    - We do not merge Technical and Business ontologies.
     """
     
     def __init__(self, technical_manager: PressureGraphManager):
