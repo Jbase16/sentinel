@@ -165,6 +165,17 @@ public struct SentinelAPIClient: Sendable {
         return try JSONDecoder().decode(SentinelResults.self, from: data)
     }
 
+    /// Fetch the Pressure Graph (Ground Truth).
+    public func fetchGraph() async throws -> PressureGraphDTO? {
+        guard let url = URL(string: "/v1/graph", relativeTo: baseURL) else { return nil }
+        let request = authenticatedRequest(url: url, method: "GET")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 204 { return nil }
+        guard http.statusCode == 200 else { throw APIError.badStatus }
+        return try JSONDecoder().decode(PressureGraphDTO.self, from: data)
+    }
+
     // MARK: - Tool Management
 
     /// Install selected tools

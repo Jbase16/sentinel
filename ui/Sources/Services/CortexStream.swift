@@ -119,11 +119,13 @@ class CortexStream: ObservableObject {
 
                 // If backend omits coords, keep a stable pseudo-layout per node id
                 // so the graph doesn't jitter each snapshot.
-                let base = positionCache[n.id] ?? SIMD3<Float>(
-                    Float.random(in: -50...50),
-                    Float.random(in: -50...50),
-                    Float.random(in: -50...50)
-                )
+                let base =
+                    positionCache[n.id]
+                    ?? SIMD3<Float>(
+                        Float.random(in: -50...50),
+                        Float.random(in: -50...50),
+                        Float.random(in: -50...50)
+                    )
                 let x = n.x ?? base.x
                 let y = n.y ?? base.y
                 let z = n.z ?? base.z
@@ -156,6 +158,71 @@ class CortexStream: ObservableObject {
             }
         } catch {
             print("Graph Decode Error: \(error)")
+        }
+    }
+    /// Generate stable 3D coordinates from a string seed (Node ID).
+    private func stablePosition(for id: String) -> SIMD3<Float> {
+        var hash: UInt64 = 1_469_598_103_934_665_603  // FNV-1a offset basis
+        for byte in id.utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 1_099_511_628_211
+        }
+
+        // Use different bit segments for X, Y, Z to decorrelate axes
+        let h1 = Float(hash & 0xFFFF) / 65535.0
+        let h2 = Float((hash >> 16) & 0xFFFF) / 65535.0
+        let h3 = Float((hash >> 32) & 0xFFFF) / 65535.0
+
+        // Map to -50...50 range
+        let x = (h1 * 100.0) - 50.0
+        let y = (h2 * 100.0) - 50.0
+        let z = (h3 * 100.0) - 50.0
+
+        return SIMD3<Float>(x, y, z)
+    }
+
+    func updateFromPressureGraph(_ graph: PressureGraphDTO) {
+        // Map DTO -> NodeModel
+        let mappedNodes = graph.nodes.map { node -> NodeModel in
+            let id = node.id
+
+            // Get cached position or generate stable one (Deterministic Layout)
+            let base = positionCache[id] ?? stablePosition(for: id)
+
+            // Map Color based on Severity & Type
+            var color: SIMD4<Float>
+            if node.data.severity >= 8.0 {
+                // Critical/High Severity -> Red pulsing (visualized as bright red here)
+                color = SIMD4<Float>(1.0, 0.0, 0.0, 1.0)
+            } else if node.data.exploitability > 0.8 {
+                // Highly Exploitable -> Orange/Red
+                color = SIMD4<Float>(1.0, 0.3, 0.0, 1.0)
+            } else {
+                // Standard Type Coloring
+                switch node.type {
+                case "service": color = SIMD4<Float>(0, 1, 0, 1)  // Green
+                case "vulnerability": color = SIMD4<Float>(1, 0, 0, 0.8)  // Red
+                case "exposure": color = SIMD4<Float>(1, 0.5, 0, 0.8)  // Orange
+                case "trust": color = SIMD4<Float>(0, 0.5, 1, 0.8)  // Blue
+                default: color = SIMD4<Float>(0.5, 0.5, 0.5, 0.8)  // Grey
+                }
+            }
+
+            // Update Cache
+            positionCache[id] = base
+
+            return NodeModel(
+                id: id,
+                type: node.type,
+                x: base.x,
+                y: base.y,
+                z: base.z,
+                color: color
+            )
+        }
+
+        DispatchQueue.main.async {
+            self.nodes = mappedNodes
         }
     }
 }

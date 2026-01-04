@@ -28,7 +28,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 import uvicorn
-from fastapi import APIRouter, Depends, FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, validator
@@ -1088,30 +1088,79 @@ async def get_logs_v1(limit: int = 100, _: bool = Depends(verify_token)):
     return {"lines": lines}
 
 @v1_router.get("/results")
-async def get_results_v1(_: bool = Depends(verify_token)):
-    """API v1: Get scan results including findings, issues, and killchain data."""
-    from core.data.findings_store import findings_store
-    from core.data.issues_store import issues_store
-    from core.data.killchain_store import killchain_store
-    
-    # If there's an active scan with a session, return session-specific results
-    session_id = _scan_state.get("session_id")
-    if session_id:
-        session = await get_session(session_id)
-        if session:
-            return {
-                "findings": session.findings.get_all(),
-                "issues": session.issues.get_all(),
-                "killchain": {"edges": session.killchain.get_all()},
-                "session_id": session_id,
-            }
+async def get_results(
+    session_id: Optional[str] = None,
+    current_user: Optional[HTTPAuthorizationCredentials] = Depends(verify_token),
+):
+    """
+    Get scan results (findings, issues, killchain, evidence).
+    If session_id is not provided, returns results for the currently active (or last finished) scan.
+    """
+    sid = session_id or _scan_state.get("session_id")
+    if not sid:
+        # No 404, just 204 No Content if no scan has ever run
+        return Response(status_code=204)
 
-    # Fallback to global stores (legacy behavior or no session)
+    db = Database.instance()
+    
+    # Run queries in parallel for performance
+    findings, issues, killchain_edges, evidence = await asyncio.gather(
+        db.get_findings(sid),
+        db.get_issues(sid),
+        db.fetch_all("SELECT data FROM graph_edges WHERE session_id = ? AND type IN ('ENABLES', 'REACHES', 'AMPLIFIES', 'REQUIRES')", (sid,)),
+        db.get_evidence(sid)
+    )
+
+    # Process Killchain Edges (if raw graph edges are used as killchain proxy for now)
+    # Ideally killchain_store has its own table, but we might rely on graph_edges for V1
+    killchain_data = [json.loads(row[0]) for row in killchain_edges] if killchain_edges else []
+
+    # Basic stats
+    summary = {
+        "counts": {
+            "findings": len(findings),
+            "issues": len(issues),
+            "killchain_edges": len(killchain_data),
+            "logs": 0, # TODO: persisted logs
+            "phase_results": {} 
+        },
+        "ai": None # TODO: snapshot AI status
+    }
+    
     return {
-        "findings": findings_store.get_all(),
-        "issues": issues_store.get_all(),
-        "killchain": {"edges": killchain_store.get_all()},
-        "scan": _scan_state,
+        "scan": await db.get_session(sid),
+        "summary": summary,
+        "findings": findings,
+        "issues": issues,
+        "killchain": { "edges": killchain_data },
+        "evidence": evidence
+    }
+
+
+@v1_router.get("/graph")
+async def get_graph(
+    session_id: Optional[str] = None,
+    current_user: Optional[HTTPAuthorizationCredentials] = Depends(verify_token),
+):
+    """
+    Get the PressureGraph snapshot (Nodes & Edges).
+    Visualization of the system's "belief state".
+    """
+    sid = session_id or _scan_state.get("session_id")
+    if not sid:
+        return Response(status_code=204)
+
+    db = Database.instance()
+    nodes, edges = await db.load_graph_snapshot(sid)
+
+    return {
+        "session_id": sid,
+        "nodes": nodes,
+        "edges": edges,
+        "count": {
+            "nodes": len(nodes),
+            "edges": len(edges)
+        }
     }
 
 

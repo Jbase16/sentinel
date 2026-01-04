@@ -556,6 +556,16 @@ public class HelixAppState: ObservableObject {
                     self.apiResults = results
                 }
             }
+            // Optimization: Graph refresh is now event-driven (see eventClient sink)
+        }
+    }
+
+    /// Pull the latest Pressure Graph snapshot.
+    func refreshGraph() {
+        Task {
+            if let graph = try? await apiClient.fetchGraph() {
+                cortexStream.updateFromPressureGraph(graph)
+            }
         }
     }
 
