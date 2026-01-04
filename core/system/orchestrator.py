@@ -30,7 +30,7 @@ from core.data.pressure_graph.manager import PressureGraphManager
 # Pillar II: Planning
 from core.thanatos.ontology_breaker import OntologyBreakerService
 from core.thanatos.scope_gate import ScopeGate, ScopePolicy
-from core.thanatos.axiom_synthesizer import StandardAxiomSynthesizer
+from core.thanatos.axiom_synthesizer import MutationEngine
 
 # Pillar III: Observer
 from core.observer import get_event_bus, EventType, EventLevel, TelemetryEvent
@@ -104,7 +104,7 @@ class SystemOrchestrator:
         
         # 3. Start Reasoning Engines
         gate = ScopeGate(ScopePolicy())
-        synth = StandardAxiomSynthesizer()
+        synth = MutationEngine()
         
         self.thanatos = OntologyBreakerService(
             scope_gate=gate,
@@ -267,7 +267,7 @@ class SystemOrchestrator:
                     value=surface["value"]
                 )
 
-                test_cases = self.thanatos.hallucinate_batch(target=handle)
+                test_cases = self.thanatos.generate_mutations(target=handle)
                 
                 if not test_cases:
                     log.warning(f"Thanatos returned no ideas for {endpoint}.")
@@ -298,13 +298,16 @@ class SystemOrchestrator:
                 order_id = str(uuid.uuid4())
                 
                 # Contextual Headers (Doppelganger)
-                headers = persona.get_auth_headers() if persona else None
+                # Use inject_auth to get both headers and cookies
+                headers, cookies = self.doppelganger.inject_auth(None, None, persona)
 
                 order = ExecutionOrder(
                     test_case=test_case, 
                     decision=decision,
                     idempotency_token=order_id,
-                    auth_headers=headers
+                    auth_headers=headers,
+                    auth_cookies=cookies,
+                    target_base_url=target_url
                 )
                 
                 # Interlock Check
@@ -327,6 +330,33 @@ class SystemOrchestrator:
                     trace_id=order.idempotency_token
                 ))
                 
+                # 401 Auto-Heal (One-shot)
+                status_code = result.signals.get("status_code") if result.signals else None
+                if status_code == 401 and persona and self.doppelganger:
+                    log.warning("🎭 401 detected. Attempting session heal + single retry...")
+
+                    refreshed = await self.doppelganger.refresh(persona, target_url)
+                    if refreshed and refreshed.session_token:
+                        persona = refreshed  # swap active persona reference
+
+                        new_headers, new_cookies = self.doppelganger.inject_auth(
+                            headers=None,
+                            cookies=None,
+                            persona=persona
+                        )
+
+                        healed_order = ExecutionOrder(
+                            test_case=order.test_case,
+                            decision=order.decision,
+                            idempotency_token=str(uuid.uuid4()),
+                            auth_headers=new_headers,
+                            auth_cookies=new_cookies,
+                            target_base_url=target_url
+                        )
+
+                        result = await self.executor_harness.execute(healed_order)
+
+                
                 # 2.4 EVALUATE (Oracle)
                 breach_status = self.oracle.evaluate(result, test_case.oracle)
                 
@@ -338,15 +368,15 @@ class SystemOrchestrator:
                         trace_id=order.idempotency_token
                     ))
                 elif breach_status == BreachStatus.ANOMALY:
-                 log.critical(f"💣 CRASH DETECTED: {test_case.id} (Status 500+)")
-                 # 1. Emit Anomaly Event
-                 await self.bus.emit(TelemetryEvent(
-                    type=EventType.BREACH_DETECTED, source="Oracle", level=EventLevel.CRITICAL,
-                    payload={"target_node_id": node_id, "severity": 9.0, "type": "CRASH"},
-                    trace_id=order.idempotency_token
-                 ))
-                 # 2. Reflex: Spike Exploration (Simulated for now)
-                 log.warning(f"Reflex: Exploitability of {node_id} increased to 0.9")
+                    log.critical(f"💣 CRASH DETECTED: {test_case.id} (Status 500+)")
+                    # 1. Emit Anomaly Event
+                    await self.bus.emit(TelemetryEvent(
+                        type=EventType.BREACH_DETECTED, source="Oracle", level=EventLevel.CRITICAL,
+                        payload={"target_node_id": node_id, "severity": 9.0, "type": "CRASH"},
+                        trace_id=order.idempotency_token
+                    ))
+                    # 2. Reflex: Spike Exploration (Simulated for now)
+                    log.warning(f"Reflex: Exploitability of {node_id} increased to 0.9")
                  
                 elif breach_status == BreachStatus.SECURE:
                      log.info(f"Target Verified SECURE ({result.status}).")
@@ -356,8 +386,19 @@ class SystemOrchestrator:
         log.info("Campaign Complete.")
 
     async def _emit_lifecycle(self, phase: str, **kwargs):
+        # Determine strict event type
+        if "BOOT" in phase or phase == "SYSTEM_STARTUP":
+            evt_type = EventType.SYSTEM_STARTUP
+        elif "SHUTDOWN" in phase or phase == "SYSTEM_SHUTDOWN":
+            evt_type = EventType.SYSTEM_SHUTDOWN
+        else:
+            # Fallback for mid-lifecycle events (e.g. PAUSE, RESUME) if added later
+            # For now, default to INFO or create a LifecycleChange event if needed.
+            # Sticking to valid types:
+            evt_type = EventType.SYSTEM_STARTUP if "START" in phase else EventType.SYSTEM_SHUTDOWN
+
         await self.bus.emit(TelemetryEvent(
-            type=EventType.SYSTEM_STARTUP if "BOOT" in phase else EventType.SYSTEM_SHUTDOWN, 
+            type=evt_type, 
             source="Orchestrator", 
             level=EventLevel.INFO,
             payload={"phase": phase, **kwargs}

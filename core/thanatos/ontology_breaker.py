@@ -1,51 +1,43 @@
 from __future__ import annotations
 
+import logging
+from typing import List
 from dataclasses import dataclass
-from typing import Any, Dict, List
 
-from .axiom_synthesizer import StandardAxiomSynthesizer
-from .models import InvariantClass, LogicTestCase, MutationOpType, TargetHandle
+from .models import TargetHandle, LogicTestCase
 from .scope_gate import ScopeGate
+from .axiom_synthesizer import MutationEngine
 
+SAFE_MODE = True
+MAX_TESTS_PER_TARGET = 5
 
-SAFE_MODE: bool = True  # default ON
-
+log = logging.getLogger("thanatos.breaker")
 
 @dataclass
 class OntologyBreakerService:
     """
-    Generates invariant-driven LogicTestCases for high-value targets.
-    Does not execute network operations.
+    The High-Level "Planner" for Thanatos.
+    Orchestrates the attack generation by combining Scope (Safety) and MutationEngine (Tactics).
     """
-
     scope_gate: ScopeGate
-    synthesizer: StandardAxiomSynthesizer
+    synthesizer: MutationEngine
 
-    def hallucinate_batch(self, target: TargetHandle) -> List[LogicTestCase]:
+    def generate_mutations(self, target: TargetHandle) -> List[LogicTestCase]:
         """
-        Produce a batch of safe testcases for a target, filtered by ScopeGate.
+        Produce a batch of strict, ontology-breaking test cases.
         """
-        if not SAFE_MODE:
-            # Explicit Fail-Safe. This service should NEVER run with SAFE_MODE off 
-            # until we have a real harness that respects it.
-            # Even active scanning needs safety rails.
-            raise RuntimeError("OntologyBreakerService currently requires SAFE_MODE=True for Logic Generation.")
+        # 1. Safety Check (Scope Gate)
+        if not self.scope_gate.check(target.endpoint):
+            log.warning(f"Thanatos: Target {target.endpoint} out of scope. Rejecting.")
+            return []
 
-        candidates = self.synthesizer.synthesize(target)
-        out: List[LogicTestCase] = []
-
-        max_allowed = self.scope_gate.policy.max_testcases_per_target
-
-        for tc in candidates:
-            # Cardinality Check
-            if max_allowed is not None and len(out) >= max_allowed:
-                break
-                
-            inv = tc.hypothesis.invariant
-            mut = tc.mutation.op
-            # Hard block anything not explicitly allowed
-            self.scope_gate.assert_allowed(target, inv, mut)
-            out.append(tc)
-
-        return out
-
+        # 2. Strict Generation (Mutation Engine)
+        cases = self.synthesizer.synthesize(target)
+        
+        # 3. Safety Check (Volume Cap)
+        if SAFE_MODE:
+            if len(cases) > MAX_TESTS_PER_TARGET:
+                log.info(f"Thanatos: Capping {len(cases)} tests to {MAX_TESTS_PER_TARGET} (SAFE_MODE).")
+                cases = cases[:MAX_TESTS_PER_TARGET]
+        
+        return cases

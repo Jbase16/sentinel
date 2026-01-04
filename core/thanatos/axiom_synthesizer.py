@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from .models import (
     BreachHypothesis,
@@ -15,213 +15,130 @@ from .models import (
     OracleSpec,
     TargetHandle,
 )
+from .mutations import MutationLibrary
 
 
 def _stable_id(*parts: str) -> str:
     h = hashlib.sha256()
     for p in parts:
-        h.update(p.encode("utf-8", errors="ignore"))
+        h.update(str(p).encode("utf-8", errors="ignore"))
         h.update(b"|")
     return h.hexdigest()[:16]
 
 
 @dataclass
-class StandardAxiomSynthesizer:
+class MutationEngine:
     """
-    Produces invariant-driven testcases for a given high-value target.
-    No raw HTTP payloads. No “invented verbs.” No byte-level injection.
+    Produces invariant-driven testcases using the new MutationLibrary.
+    Replaces the old StandardAxiomSynthesizer.
     """
+    library: MutationLibrary = MutationLibrary()
 
     def synthesize(self, target: TargetHandle) -> List[LogicTestCase]:
-        endpoint = target.endpoint.lower()
-
         cases: List[LogicTestCase] = []
+        now = int(time.time())
 
-        # Heuristic: payment-ish endpoints get money invariants
-        if "pay" in endpoint or "charge" in endpoint or "refund" in endpoint:
-            cases.extend(self._payment_invariants(target))
-
-        # Generic authz boundary checks for high-value nodes
-        cases.extend(self._authz_invariants(target))
-
-        # Generic state-machine checks (if tagged as stateful)
-        if "stateful" in target.tags or "workflow" in target.tags:
-            cases.extend(self._state_machine_invariants(target))
+        # Construct Context from TargetHandle
+        # In a real system, we'd infer schema from OpenApi/Spyder, but for V1 we guess based on endpoint
+        context = self._infer_context(target)
+        
+        # portable mutations from the library
+        raw_mutations = self.library.generate_all(context)
+        
+        for mut in raw_mutations:
+            # Map raw Mutation -> LogicTestCase
+            # We need to pick a Hypothesis and Oracle for each mutation type
+            # This logic mimics the old _xxx_invariants methods but dynamic
+            
+            hypothesis, oracle = self._derive_hypothesis_and_oracle(mut.op, target)
+            
+            cases.append(LogicTestCase(
+                id=_stable_id(target.node_id, mut.op, mut.description),
+                target=target,
+                hypothesis=hypothesis,
+                mutation=MutationSpec(op=mut.op, params=mut.params),
+                oracle=oracle,
+                priority=0.8, # Default priority
+                provenance={"synth": "MutationEngine", "desc": mut.description, "ts": now}
+            ))
 
         return cases
 
-    def _payment_invariants(self, target: TargetHandle) -> List[LogicTestCase]:
-        now = int(time.time())
-        base_priority = min(1.0, target.value / 10.0)
-
-        out: List[LogicTestCase] = []
-
-        # NON_NEGATIVE_AMOUNT
-        out.append(
-            LogicTestCase(
-                id=_stable_id(target.node_id, target.method, target.endpoint, "NON_NEGATIVE_AMOUNT", "SET_NUMERIC_BELOW_MIN"),
-                target=target,
-                hypothesis=BreachHypothesis(
-                    invariant=InvariantClass.NON_NEGATIVE_AMOUNT,
-                    domain=InvariantDomain.ECONOMIC,
-                    rationale="Monetary amounts must not be negative; negative values can invert debit/credit semantics.",
-                    required_signals=["ledger_delta", "account_balance_change", "authz_decision"],
-                ),
-                mutation=MutationSpec(
-                    op=MutationOpType.SET_NUMERIC_BELOW_MIN,
-                    params={"field": "amount", "min": 0, "strategy": "boundary_below_min"},
-                ),
-                oracle=OracleSpec(
-                    name="no_negative_amount_applied",
-                    expected={"result": "rejected_or_no_effect"},
-                    forbidden={"signals": ["ledger_delta_nonzero", "balance_decrease_without_authorization"]},
-                    notes="A 200 OK is not success; require ledger/balance invariants from harness signals.",
-                ),
-                priority=0.85 * base_priority,
-                provenance={"synth": "StandardAxiomSynthesizer", "ts": now},
-            )
-        )
-
-        # IDEMPOTENCY
-        out.append(
-            LogicTestCase(
-                id=_stable_id(target.node_id, target.method, target.endpoint, "IDEMPOTENCY", "DUPLICATE_IDEMPOTENCY_KEY"),
-                target=target,
-                hypothesis=BreachHypothesis(
-                    invariant=InvariantClass.IDEMPOTENCY,
-                    domain=InvariantDomain.STATE,
-                    rationale="Duplicate submissions must not double-apply economic effects.",
-                    required_signals=["ledger_delta", "idempotency_key_seen", "state_change"],
-                ),
-                mutation=MutationSpec(
-                    op=MutationOpType.DUPLICATE_IDEMPOTENCY_KEY,
-                    params={"header": "Idempotency-Key", "strategy": "replay_same_key"},
-                ),
-                oracle=OracleSpec(
-                    name="no_double_apply",
-                    expected={"ledger_effect": "at_most_once"},
-                    forbidden={"signals": ["double_charge_detected", "duplicate_ledger_entry"]},
-                    notes="Harness should compare ledger effects across two executions with same idempotency key.",
-                ),
-                priority=0.95 * base_priority,
-                provenance={"synth": "StandardAxiomSynthesizer", "ts": now},
-            )
-        )
-
-        # CONSERVATION_OF_VALUE
-        out.append(
-            LogicTestCase(
-                id=_stable_id(target.node_id, target.method, target.endpoint, "CONSERVATION_OF_VALUE", "REPLAY_PREVIOUS_REQUEST"),
-                target=target,
-                hypothesis=BreachHypothesis(
-                    invariant=InvariantClass.CONSERVATION_OF_VALUE,
-                    domain=InvariantDomain.ECONOMIC,
-                    rationale="Economic effects must conserve value across accounts and not create/destroy funds via replay/timing.",
-                    required_signals=["ledger_entries", "ledger_delta", "audit_trail"],
-                ),
-                mutation=MutationSpec(
-                    op=MutationOpType.REPLAY_PREVIOUS_REQUEST,
-                    params={"strategy": "replay_with_time_skew", "max_replays": 2},
-                ),
-                oracle=OracleSpec(
-                    name="ledger_conserves_value",
-                    expected={"sum_debits_equals_sum_credits": True},
-                    forbidden={"signals": ["net_value_created", "net_value_destroyed"]},
-                    notes="Harness must compute conservation across ledger entries, not trust response body.",
-                ),
-                priority=0.75 * base_priority,
-                provenance={"synth": "StandardAxiomSynthesizer", "ts": now},
-            )
-        )
-
-        return out
-
-    def _authz_invariants(self, target: TargetHandle) -> List[LogicTestCase]:
-        now = int(time.time())
-        base_priority = min(1.0, target.value / 10.0)
-
-        cases = []
+    def _infer_context(self, target: TargetHandle) -> Dict[str, Any]:
+        """
+        Infer schema/context from target tags or known profiles.
+        """
+        context = {"body_schema": {}}
+        ep = target.endpoint
         
-        # AUTHZ_BOUNDARY
-        cases.append(
-            LogicTestCase(
-                id=_stable_id(target.node_id, target.method, target.endpoint, "AUTHZ_BOUNDARY", "REMOVE_REQUIRED_FIELD"),
-                target=target,
-                hypothesis=BreachHypothesis(
+        # Hardcoded heuristics for V1 (Juice Shop specific)
+        if "/login" in ep:
+            context["body_schema"] = {"email": "string", "password": "string"}
+        elif "/search" in ep:
+            context["body_schema"] = {"q": "string"} # usually query param, but for simplicity
+        elif "/basket" in ep or "/api/BasketItems" in ep:
+             context["body_schema"] = {"ProductId": "int", "BinderId": "int", "quantity": "int"}
+             
+        return context
+
+    def _derive_hypothesis_and_oracle(self, op: MutationOpType, target: TargetHandle) -> tuple[BreachHypothesis, OracleSpec]:
+        """
+        Map a basic mutation op to a sophisticated hypothesis/oracle pair.
+        """
+        if op == MutationOpType.TYPE_JUGGLING:
+            return (
+                BreachHypothesis(
+                    invariant=InvariantClass.DATA, 
+                    domain=InvariantDomain.DATA, 
+                    rationale="Server should reject invalid types gracefully (400), not crash (500).",
+                    required_signals=["http_status"]
+                ),
+                OracleSpec(
+                    name="no_5xx_on_bad_types", 
+                    expected={"status_code": 400}, 
+                    forbidden={"status_code": 500}
+                )
+            )
+        elif op == MutationOpType.BOUNDARY_VIOLATION:
+             return (
+                BreachHypothesis(
+                    invariant=InvariantClass.NON_NEGATIVE_AMOUNT if "amount" in str(op) else InvariantClass.DATA,
+                    domain=InvariantDomain.ECONOMIC if "amount" in str(op) else InvariantDomain.DATA,
+                    rationale="Boundary values should be validated.",
+                    required_signals=["http_status"]
+                ),
+                OracleSpec(
+                    name="boundary_enforced", 
+                    expected={"status_code": 400}, 
+                    forbidden={"status_code": 500}
+                )
+             )
+        elif op == MutationOpType.AUTH_CONFUSION:
+             return (
+                BreachHypothesis(
                     invariant=InvariantClass.AUTHZ_BOUNDARY,
                     domain=InvariantDomain.AUTHZ,
-                    rationale="Authorization should not be bypassable by omitting or altering identity binding inputs.",
-                    required_signals=["authz_decision", "principal", "policy_rule_id"],
+                    rationale="Removing auth headers should deny access.",
+                    required_signals=["http_status"]
                 ),
-                mutation=MutationSpec(
-                    op=MutationOpType.REMOVE_REQUIRED_FIELD,
-                    params={"field": "actor_id", "strategy": "remove_identity_binding_field"},
+                OracleSpec(
+                    name="auth_enforced", 
+                    expected={"status_code": 401}, 
+                    forbidden={"status_code": 200}
+                )
+             )
+        else:
+            # Default fallback
+             return (
+                BreachHypothesis(
+                    invariant=InvariantClass.DATA,
+                    domain=InvariantDomain.DATA,
+                    rationale="Fuzzing should not cause unhandled exceptions.",
+                    required_signals=["http_status"]
                 ),
-                oracle=OracleSpec(
-                    name="authz_enforced",
-                    expected={"authz": "deny_or_requires_principal"},
-                    forbidden={"signals": ["authz_allow_without_principal"]},
-                    notes="Harness should expose authz decision + principal binding; HTTP status alone is insufficient.",
-                ),
-                priority=0.65 * base_priority,
-                provenance={"synth": "StandardAxiomSynthesizer", "ts": now},
-            )
-        )
-        
-        # AUTHZ_EFFECT_SCOPE (New)
-        cases.append(
-            LogicTestCase(
-                id=_stable_id(target.node_id, target.method, target.endpoint, "AUTHZ_EFFECT_SCOPE", "CROSS_TENANT_REFERENCE"),
-                target=target,
-                hypothesis=BreachHypothesis(
-                    invariant=InvariantClass.AUTHZ_EFFECT_SCOPE,
-                    domain=InvariantDomain.AUTHZ,
-                    rationale="Authorized actions must not produce effects outside the caller's permission scope (e.g. cross-tenant refund).",
-                    required_signals=["authz_scope", "effect_target_id"],
-                ),
-                mutation=MutationSpec(
-                    op=MutationOpType.CROSS_TENANT_REFERENCE,
-                    params={"strategy": "substitute_resource_id", "target_type": "cross_tenant"},
-                ),
-                oracle=OracleSpec(
-                    name="effect_scoped_to_caller",
-                    expected={"effect": "blocked_or_scoped"},
-                    forbidden={"signals": ["cross_tenant_write", "elevation_of_privilege"]},
-                    fallbacks=["audit_log_tenant_check"],
-                    notes="Verifier must check that the resource ID in the effect matches the caller's tenant/scope context.",
-                ),
-                priority=0.90 * base_priority,  # High priority: this is a common critical vuln
-                provenance={"synth": "StandardAxiomSynthesizer", "ts": now},
-            )
-        )
-        return cases
-
-    def _state_machine_invariants(self, target: TargetHandle) -> List[LogicTestCase]:
-        now = int(time.time())
-        base_priority = min(1.0, target.value / 10.0)
-
-        return [
-            LogicTestCase(
-                id=_stable_id(target.node_id, target.method, target.endpoint, "VALID_STATE_TRANSITION", "SWAP_STATE_TRANSITION"),
-                target=target,
-                hypothesis=BreachHypothesis(
-                    invariant=InvariantClass.VALID_STATE_TRANSITION,
-                    domain=InvariantDomain.STATE,
-                    rationale="Workflows must reject illegal state transitions (e.g., skipping required steps).",
-                    required_signals=["state_before", "state_after", "transition_rule_id"],
-                ),
-                mutation=MutationSpec(
-                    op=MutationOpType.SWAP_STATE_TRANSITION,
-                    params={"strategy": "jump_forward", "notes": "Attempt a transition not adjacent in the state graph"},
-                ),
-                oracle=OracleSpec(
-                    name="illegal_transition_rejected",
-                    expected={"transition": "rejected"},
-                    forbidden={"signals": ["state_changed_via_illegal_transition"]},
-                    fallbacks=["state_poller"],
-                    notes="Harness must validate state graph adjacency, not rely on response strings.",
-                ),
-                priority=0.7 * base_priority,
-                provenance={"synth": "StandardAxiomSynthesizer", "ts": now},
-            )
-        ]
+                OracleSpec(
+                    name="robustness_check", 
+                    expected={"status_code": [200, 400, 401, 403, 404]}, 
+                    forbidden={"status_code": 500}
+                )
+             )
