@@ -26,5 +26,6 @@
     }
   },
   "editor.acceptSuggestionOnEnter": "on",
-  "chat.agent.maxRequests": 50
+  "chat.agent.maxRequests": 50,
+  "git.ignoreLimitWarning": true
 }
