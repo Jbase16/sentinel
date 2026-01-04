@@ -894,14 +894,19 @@ async def validate_websocket_connection(
         await websocket.close(code=4003, reason="Origin not allowed")
         return False
 
-    # Step 2: Optional token validation
-    if require_token:
+    # Step 2: Token Validation
+    # Enforce auth if explicitly requested for this endpoint OR if globally required
+    # This ensures no endpoint accidentally bypasses global security.
+    should_enforce_auth = require_token or config.security.require_auth
+
+    if should_enforce_auth:
         token = websocket.query_params.get("token")
         if not token or token != config.security.api_token:
             logger.warning(
                 f"[WebSocket] {endpoint_name} denied: invalid or missing token "
                 f"(require_auth={config.security.require_auth}, "
-                f"terminal_require_auth={config.security.terminal_require_auth})"
+                f"terminal_require_auth={config.security.terminal_require_auth}, "
+                f"endpoint_require_token={require_token})"
             )
             await websocket.close(code=4001, reason="Unauthorized")
             return False

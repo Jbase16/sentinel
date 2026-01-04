@@ -37,6 +37,16 @@ class HereticRequest:
         """Serialize for storage/replay."""
         raise NotImplementedError("Wrapper-only: implementation deferred")
 
+@dataclass
+class HereticMutation:
+    """
+    Represents a raw byte-level mutation for socket fuzzing.
+    Used by AnomalyClient.
+    """
+    raw_payload: bytes
+    description: str = "Unknown Mutation"
+
+
 class AxiomSynthesizer(Protocol):
     """Interface for generative logic that invents heretic states."""
     

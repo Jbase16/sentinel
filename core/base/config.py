@@ -25,6 +25,13 @@ import re
 from pathlib import Path
 from typing import Optional, List
 from dataclasses import dataclass, field
+from enum import Enum
+
+class AIProvider(str, Enum):
+    """Supported AI Providers."""
+    OLLAMA = "ollama"
+    OPENAI = "openai"
+    MOCK = "mock"
 
 @dataclass(frozen=True)
 class AIConfig:
