@@ -21,22 +21,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Force the app to be a "regular" foreground app
         NSApp.setActivationPolicy(.regular)
-        
+
         // Activate the app (bring to front) ignoring other apps
         NSApp.activate(ignoringOtherApps: true)
-        
+
         // Force the main window to make itself key and order front
         if let window = NSApp.windows.first {
             window.makeKeyAndOrderFront(nil)
         }
     }
-    
+
     /// Function applicationWillTerminate.
     func applicationWillTerminate(_ notification: Notification) {
         // Ensure backend is stopped when app quits
         BackendManager.shared.stop()
     }
-    
+
     /// Function applicationShouldTerminateAfterLastWindowClosed.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
@@ -47,9 +47,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 /// Struct SentinelApp.
 struct SentinelApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
     // One shared state container for chat + IPC. Keeps UI and LLM in sync.
-    @StateObject private var appState = HelixAppState()
+    @StateObject private var llmService = LLMService()
+    @StateObject private var appState: HelixAppState
+    @StateObject private var backendManager = BackendManager.shared
+
+    init() {
+        let llm = LLMService()
+        _llmService = StateObject(wrappedValue: llm)
+        _appState = StateObject(wrappedValue: HelixAppState(llm: llm))
+    }
     @StateObject private var backendManager = BackendManager.shared
 
     var body: some Scene {

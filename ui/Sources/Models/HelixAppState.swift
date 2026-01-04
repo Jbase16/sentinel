@@ -230,7 +230,12 @@ public class HelixAppState: ObservableObject {
         eventClient.connect()
     }
 
-    // ... (renderLiveLogLine implementation omitted for brevity as it is unchanged) ...
+    private func renderLiveLogLine(event: GraphEvent) -> String? {
+        if event.eventType == .log {
+            return event.payload["line"]?.stringValue ?? event.payload["message"]?.stringValue
+        }
+        return nil
+    }
 
     /// Pull the latest Pressure Graph snapshot.
     func refreshGraph() {
@@ -352,8 +357,8 @@ public class HelixAppState: ObservableObject {
             do {
                 let status = try await apiClient.fetchStatus()
                 await MainActor.run {
-                    self.engineStatus = status.ai
-                    // self.aiStatus = status.ai // Wait, type mismatch? Using engineStatus.ai for now
+                    self.engineStatus = status
+                    self.aiStatus = status?.ai
                 }
             } catch {
                 print("[AppState] Status refresh failed: \(error)")
