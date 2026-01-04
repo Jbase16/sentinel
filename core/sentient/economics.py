@@ -7,14 +7,22 @@ Purpose:
 """
 
 from __future__ import annotations
+import logging
 from .models import EconomicFactor
 
+log = logging.getLogger("sentient.economics")
 
 class EconomicEngine:
     """
     Calculates Test Return on Investment (ROI).
     """
     
+    def record_cost(self, trace_id: str, cost: float) -> None:
+        """
+        Log the actual realized cost of an execution.
+        """
+        log.info(f"Cost Recorded for {trace_id}: {cost:.4f} credits")
+
     def compute_roi(self, factor: EconomicFactor) -> float:
         """
         ROI Formula:

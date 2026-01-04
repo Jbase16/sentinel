@@ -30,6 +30,7 @@ class ExecutionStatus(str, Enum):
 class BreachStatus(str, Enum):
     BREACH = "BREACH"      # Invariant violated (Vulnerability)
     SECURE = "SECURE"      # Invariant held
+    ANOMALY = "ANOMALY"    # Unexpected State (Crash/Timeout)
     UNKNOWN = "UNKNOWN"    # Could not determine
 
 
@@ -42,6 +43,7 @@ class ExecutionOrder:
     test_case: LogicTestCase
     decision: SentientDecision
     idempotency_token: str
+    auth_headers: Optional[Dict[str, str]] = None
     created_at: float = field(default_factory=lambda: datetime.now().timestamp())
 
     def __post_init__(self):

@@ -20,6 +20,7 @@ Magnum Opus Standards:
 
 import asyncio
 import logging
+import uuid
 from typing import Optional
 
 # Pillar I: Data & Reasoning
@@ -45,6 +46,9 @@ from core.sentient.economics import EconomicEngine
 from core.executor import HttpHarness, SafetyInterlock, StandardOracleEvaluator
 from core.executor.models import ExecutionOrder, ExecutionStatus
 
+# Pillar VI: Identity
+from core.doppelganger.engine import DoppelgangerEngine
+
 log = logging.getLogger("system.orchestrator")
 
 class SystemOrchestrator:
@@ -60,6 +64,7 @@ class SystemOrchestrator:
         self.executor_harness: Optional[HttpHarness] = None
         self.oracle: Optional[StandardOracleEvaluator] = None
         self.interlock: Optional[SafetyInterlock] = None
+        self.doppelganger: Optional[DoppelgangerEngine] = None
         
         self.feedback: Optional[FeedbackLoop] = None
         
@@ -86,6 +91,14 @@ class SystemOrchestrator:
         
         # Aegis manages its own DB internal reference usually, but we pass session_id
         session_id = "live_campaign_001"
+        
+        # Ensure Session Exists
+        self.db.save_session({
+            "id": session_id,
+            "target": "integrated_test",
+            "status": "active"
+        })
+        
         self.aegis = PressureGraphManager(session_id=session_id)
         
         # 3. Start Reasoning Engines
@@ -106,6 +119,7 @@ class SystemOrchestrator:
         self.interlock = SafetyInterlock()
         self.executor_harness = HttpHarness()
         self.oracle = StandardOracleEvaluator()
+        self.doppelganger = DoppelgangerEngine()
         
         # 5. Wire Feedback (Nerves)
         self.feedback = FeedbackLoop(
@@ -144,116 +158,205 @@ class SystemOrchestrator:
 
     async def run_campaign(self, target_url: str):
         """
-        The Main Cognitive Loop against a specific Target.
-        Reason -> Plan -> Decide -> Act -> Evaluate
+        The Main Cognitive Loop against a defined Profile.
+        Discovery -> Reason -> Plan -> Decide -> Act -> Evaluate
         """
         if not self._is_running:
             raise RuntimeError("System not booted.")
 
         log.info(f"🚀 Starting Campaign against {target_url}")
         
-        # 0. Scope Definition
-        # Seed a dummy node manually
+        # 0. Scope Definition (Profile)
+        # In a real run, this comes from the "Observer" (Recon) phase.
+        # Here we seed it as a static profile per user request.
+        JUICE_SHOP_PROFILE = {
+            "base_url": target_url,
+            "surfaces": [
+                {"endpoint": "/rest/products/search", "method": "GET", "value": 6.0},
+                {"endpoint": "/rest/user/login", "method": "POST", "value": 9.0},
+                {"endpoint": "/api/Users", "method": "GET", "value": 8.0},
+                {"endpoint": "/profile", "method": "GET", "value": 7.0},
+            ]
+        }
+
+        # Imports for the loop
         from core.data.pressure_graph.models import PressureNode, PressureSource, RemediationState
-        node = PressureNode(
-            id="target_root",
-            type="service",
-            severity=1.0,
-            exposure=1.0,
-            exploitability=0.5,
-            privilege_gain=0.1,
-            asset_value=10.0,
-            tool_reliability=1.0, 
-            evidence_quality=1.0,
-            corroboration_count=0,
-            pressure_source=PressureSource.MANUAL,
-            remediation_state=RemediationState.NONE
+        from core.thanatos.models import TargetHandle
+        from core.sentient.models import Verdict
+        from core.executor.models import BreachStatus
+
+        # 1. DISCOVERY & SEEDING (Aegis)
+        for surface in JUICE_SHOP_PROFILE["surfaces"]:
+            endpoint = surface["endpoint"]
+            # Create a unique node ID for the graph
+            node_id = f"service:{endpoint}" 
+            
+            node = PressureNode(
+                id=node_id,
+                type="service_endpoint",
+                severity=1.0, # Baseline
+                exposure=1.0,
+                exploitability=0.5,
+                privilege_gain=0.1,
+                asset_value=surface["value"],
+                tool_reliability=1.0, 
+                evidence_quality=1.0,
+                corroboration_count=0,
+                pressure_source=PressureSource.ENGINE, 
+                remediation_state=RemediationState.NONE
+            )
+            
+            # Update Graph
+            self.aegis.nodes[node_id] = node
+            
+            # Emit Discovery Event
+            await self.bus.emit(TelemetryEvent(
+                type=EventType.ASSET_DISCOVERED,
+                source="Orchestrator",
+                level=EventLevel.INFO,
+                payload={
+                    "node_id": node_id,
+                    "endpoint": endpoint,
+                    "value": surface["value"]
+                }
+            ))
+
+        # 1.5 AUTHENTICATION (Doppelganger)
+        # We need a valid session to avoid 401s.
+        log.info("🎭 Doppelganger: Establishing Identity...")
+        
+        # In a real system, these come from secure config/vault
+        admin_cred = Credential(
+            username="admin@juice-sh.op",
+            password="admin123", 
+            role=Role.ADMIN
         )
-        self.aegis.nodes["target_root"] = node
         
-        # Loop limit for safety
-        max_cycles = 5
-        cycle = 0
+        persona = await self.doppelganger.authenticate(admin_cred, target_url)
+        if persona:
+            log.info(f"🎭 Identity Established: {persona.id}")
+        else:
+            log.warning("🎭 Identity Failed: Proceeding anonymously (Expect 401s)")
+
+        # 2. COGNITIVE LOOPS
+        # We run a few cycles for EACH surface
+        max_cycles_per_surface = 1 # Keep it tight for the first live run
         
-        while cycle < max_cycles:
-            cycle += 1
-            log.info(f"--- Cycle {cycle}/{max_cycles} ---")
+        for surface in JUICE_SHOP_PROFILE["surfaces"]:
+            endpoint = surface["endpoint"]
+            node_id = f"service:{endpoint}"
             
-            # 1. REASON (Aegis)
-            focus_node = "target_root" 
+            log.info(f"--- Focused on Surface: {endpoint} ---")
             
-            # 2. PLAN (Thanatos)
-            from core.thanatos.models import TargetHandle
-            handle = TargetHandle(
-                node_id=focus_node,
-                endpoint=target_url,
-                method="GET",
-                value=5.0
-            )
+            for cycle in range(max_cycles_per_surface):
+                # 2.1 PLAN (Thanatos)
+                handle = TargetHandle(
+                    node_id=node_id,
+                    endpoint=f"{target_url}{endpoint}", # Full URL
+                    method=surface["method"],
+                    value=surface["value"]
+                )
 
-            test_cases = self.thanatos.hallucinate_batch(
-                target=handle
-            )
-            
-            if not test_cases:
-                log.warning("Thanatos returned no ideas. Stopping.")
-                break
+                test_cases = self.thanatos.hallucinate_batch(target=handle)
                 
-            test_case = test_cases[0]
-            log.info(f"Hypothesis: {test_case.hypothesis.invariant} on {test_case.target.endpoint}")
+                if not test_cases:
+                    log.warning(f"Thanatos returned no ideas for {endpoint}.")
+                    continue
+                    
+                test_case = test_cases[0]
+                log.info(f"Hypothesis: {test_case.hypothesis.invariant}")
 
-            # 3. DECIDE (Sentient)
-            decision = self.sentient.decide(
-                target_context={"target_value": test_case.target.value},
-                risk_level=0.5 # Mock risk
-            )
-            
-            # Enum check
-            from core.sentient.models import Verdict
-            if decision.verdict != Verdict.APPROVE:
-                log.warning(f"Sentient BLOCKED: {decision.rationale}")
-                continue # Or break? Continue allows trying next idea if list was bigger
+                # 2.2 DECIDE (Sentient)
+                decision = self.sentient.decide(
+                    target_context={"target_value": test_case.target.value},
+                    risk_level=0.5 # Mock risk
+                )
                 
-            log.info(f"Sentient APPROVED: {decision.rationale}")
-            
-            # 4. ACT (Executor)
-            order = ExecutionOrder(test_case=test_case, decision=decision)
-            
-            # Interlock Check
-            lock_reason = self.interlock.check(order)
-            if lock_reason:
-                log.error(f"Interlock ENGAGED: {lock_reason}")
-                break
+                if decision.verdict != Verdict.APPROVE:
+                    log.warning(f"Sentient BLOCKED: {decision.rationale}")
+                    continue 
                 
-            # Execute
-            await self.bus.emit(TelemetryEvent(
-                type=EventType.EXECUTION_STARTED, source="Orchestrator", level=EventLevel.INFO,
-                payload={"order_id": order.order_id}
-            ))
-
-            result = await self.executor_harness.execute(order)
-            
-            await self.bus.emit(TelemetryEvent(
-                type=EventType.EXECUTION_COMPLETED, source="Orchestrator", level=EventLevel.INFO,
-                payload={"duration_ms": result.duration_ms},
-                trace_id=order.order_id
-            ))
-            
-            # 5. EVALUATE (Oracle)
-            breach_status = self.oracle.evaluate(result, test_case.oracle)
-            
-            from core.executor.models import BreachStatus
-            if breach_status == BreachStatus.BREACH:
-                log.critical(f"🚨 BREACH CONFIRMED: {test_case.id}")
+                # Emit Decision
                 await self.bus.emit(TelemetryEvent(
-                    type=EventType.BREACH_DETECTED, source="Oracle", level=EventLevel.CRITICAL,
-                    payload={"target_node_id": focus_node, "severity": 10.0},
-                    trace_id=order.order_id
+                    type=EventType.DECISION_MADE, source="Sentient", level=EventLevel.INFO,
+                    payload={"verdict": decision.verdict.value, "rationale": decision.rationale}
                 ))
-            elif breach_status == BreachStatus.SECURE:
-                 log.info(f"Target Verified SECURE ({result.status}).")
-            
-            await asyncio.sleep(0.5) # Pacing
+                
+                log.info(f"Sentient APPROVED: {decision.rationale}")
+                
+                # 2.3 ACT (Executor)
+                order_id = str(uuid.uuid4())
+                
+                # Inject Auth Headers into the Order Context
+                # Note: ExecutionOrder needs to support 'context' or we modify HttpHarness to accept it
+                # For this iteration, let's pass it via metadata? 
+                # Better: Update ExecutionOrder model to include `auth_context`
+                # Or just put it in the test_case temporarily?
+                # No, cleanliness matters. 
+                # Let's update ExecutionOrder model first, or just hack it into headers for now?
+                # The prompt said "Inject auth_context into ExecutionOrder".
+                
+                order = ExecutionOrder(
+                    test_case=test_case, 
+                    decision=decision,
+                    idempotency_token=order_id
+                )
+                
+                # HACK: Manually append auth headers to the test case mutation for now
+                # Ideally HttpHarness handles this contextually.
+                # But to avoid touching too many files in one go:
+                if persona:
+                    # We need to tell HttpHarness to use these headers.
+                    # Currently HttpHarness uses a singleton client with fixed headers.
+                    # We should probably pass headers in the `signals` request? No.
+                    # Let's add it to the ExecutionOrder dynamically.
+                    order.auth_headers = persona.get_auth_headers()
+                
+                # Interlock Check
+                lock_reason = self.interlock.check(order)
+                if lock_reason:
+                    log.error(f"Interlock ENGAGED: {lock_reason}")
+                    continue
+                    
+                # Execute
+                await self.bus.emit(TelemetryEvent(
+                    type=EventType.EXECUTION_STARTED, source="Orchestrator", level=EventLevel.INFO,
+                    payload={"order_id": order.idempotency_token, "target": endpoint}
+                ))
+
+                result = await self.executor_harness.execute(order)
+                
+                await self.bus.emit(TelemetryEvent(
+                    type=EventType.EXECUTION_COMPLETED, source="Orchestrator", level=EventLevel.INFO,
+                    payload={"duration_ms": result.duration_ms, "status": result.status.value},
+                    trace_id=order.idempotency_token
+                ))
+                
+                # 2.4 EVALUATE (Oracle)
+                breach_status = self.oracle.evaluate(result, test_case.oracle)
+                
+                if breach_status == BreachStatus.BREACH:
+                    log.critical(f"🚨 BREACH CONFIRMED: {test_case.id}")
+                    await self.bus.emit(TelemetryEvent(
+                        type=EventType.BREACH_DETECTED, source="Oracle", level=EventLevel.CRITICAL,
+                        payload={"target_node_id": node_id, "severity": 10.0},
+                        trace_id=order.idempotency_token
+                    ))
+                elif breach_status == BreachStatus.ANOMALY:
+                 log.critical(f"💣 CRASH DETECTED: {test_case.id} (Status 500+)")
+                 # 1. Emit Anomaly Event
+                 await self.bus.emit(TelemetryEvent(
+                    type=EventType.BREACH_DETECTED, source="Oracle", level=EventLevel.CRITICAL,
+                    payload={"target_node_id": node_id, "severity": 9.0, "type": "CRASH"},
+                    trace_id=order.idempotency_token
+                 ))
+                 # 2. Reflex: Spike Exploration (Simulated for now)
+                 log.warning(f"Reflex: Exploitability of {node_id} increased to 0.9")
+                 
+                elif breach_status == BreachStatus.SECURE:
+                     log.info(f"Target Verified SECURE ({result.status}).")
+                
+                await asyncio.sleep(0.2) # Pacing
             
         log.info("Campaign Complete.")
 

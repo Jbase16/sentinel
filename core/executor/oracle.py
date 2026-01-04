@@ -41,6 +41,12 @@ class StandardOracleEvaluator:
 
         signals = result.signals
         
+        # 0. ANOMALY CHECK (Crash Reflex)
+        actual_status = signals.get("status_code")
+        if actual_status and actual_status >= 500:
+             log.warning(f"🚨 ANOMALY: Server returned {actual_status} (Crash Check)")
+             return BreachStatus.ANOMALY
+
         # 1. Status Code Check (The most common oracle)
         if self._check_status_code_violation(signals, oracle):
             return BreachStatus.BREACH

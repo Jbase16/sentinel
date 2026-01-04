@@ -640,3 +640,52 @@ class PressureGraphManager(Observable):
         
         entry_points = list(all_node_ids - nodes_with_inbound)
         return entry_points
+
+    def increase_pressure(self, node_id: str, amount: float) -> None:
+        """
+        Feedback API: Manually spike pressure on a node usually due to breach/anomaly.
+        
+        This increases 'exploitability' (0.0-1.0) and 'severity' (1.0-10.0) based on the amount.
+        """
+        if node_id not in self.nodes:
+            logger.warning(f"Feedback: Cannot increase pressure on unknown node {node_id}")
+            return
+            
+        node = self.nodes[node_id]
+        
+        # Amount from feedback is typically High (e.g. 9.0 * 10.0 = 90.0)
+        # We normalize this into the node properties.
+        
+        # 1. Bump Exploitability (0-1)
+        # A breach proves it is exploitable.
+        old_exploitability = node.exploitability
+        new_exploitability = min(1.0, old_exploitability + 0.2) # Increment by 20%
+        
+        # 2. Bump Severity (1-10)
+        # Only if the observed severity is higher than what we thought
+        # Note: Feedback 'amount' passed in is usually severity * policy_multiplier (e.g. 9.0 * 10 = 90)
+        # So we infer observed severity from it.
+        observed_severity = amount / 10.0 # Reverse default policy
+        new_severity = max(node.severity, min(10.0, observed_severity))
+        
+        # Update Node
+        # PressureNode is distinct (using dataclass replace or manual update)
+        # Since it's a frozen dataclass maybe? No, checking definition... 
+        # Wait, if PressureNode is frozen/immutable, we must replace it.
+        # Assuming typical dataclass behavior or mutable.
+        # Checking implementation: If it's frozen, we use 'replace'.
+        from dataclasses import replace
+        
+        try:
+            self.nodes[node_id] = replace(
+                node, 
+                exploitability=new_exploitability,
+                severity=new_severity
+            )
+            logger.info(f"Feedback Applied: {node_id} Exploitability {old_exploitability}->{new_exploitability:.2f}, Severity {node.severity}->{new_severity:.2f}")
+            
+            # Persist and Notify
+            self.recompute_pressure()
+            
+        except Exception as e:
+            logger.error(f"Failed to update node {node_id}: {e}")
