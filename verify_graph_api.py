@@ -16,7 +16,7 @@ async def main():
     
     # Get latest session with graph nodes
     cursor = await db.execute("""
-        SELECT session_id, count(*) as c, MAX(created_at) as last_seen 
+        SELECT session_id, count(*) as c, MAX(timestamp) as last_seen 
         FROM graph_nodes 
         GROUP BY session_id 
         ORDER BY last_seen DESC 

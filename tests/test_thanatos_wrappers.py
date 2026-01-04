@@ -3,14 +3,14 @@ import unittest
 from typing import Protocol
 
 # Phase 1
-from core.aegis.doppelganger import DoppelgangerService, PersonaManager, SAFE_MODE as DOPPEL_SAFE
-from core.thanatos.economic_recon import EconomicReconService, ScraperEngine, SAFE_MODE as ECON_SAFE
+from core.sentient.doppelganger import DoppelgangerService, PersonaManager, SAFE_MODE as DOPPEL_SAFE
+from core.aegis.economic_recon import EconomicReconService, ScraperEngine, SAFE_MODE as ECON_SAFE
 
 # Phase 2
-from core.thanatos.hallucinator import HallucinatorService, AxiomSynthesizer, SAFE_MODE as HAL_SAFE
+from core.thanatos.axiom_synthesizer import MutationEngine, SAFE_MODE as HAL_SAFE
 from core.thanatos.anomaly_client import AnomalyClientService, RawSocketHandler, SAFE_MODE as ANOM_SAFE
-from core.thanatos.isomorphism import IsomorphismService, GraphMatcher, SAFE_MODE as ISO_SAFE
-from core.thanatos.karma_wallet import KarmaWalletService, KarmaPolicy, SAFE_MODE as KARMA_SAFE
+from core.thanatos.isomorphism_engine import IsomorphismService, GraphMatcher, SAFE_MODE as ISO_SAFE
+from core.thanatos.karma_model import KarmaModelService, KarmaPolicy, SAFE_MODE as KARMA_SAFE
 
 # Phase 3
 from core.thanatos.meta_observer import ObserverService, EntropyMonitor, SAFE_MODE as OBS_SAFE
@@ -43,8 +43,9 @@ class TestThanatosStructure(unittest.TestCase):
     def test_phase2_structure(self):
         """Verify Architecture structure."""
         # Hallucinator
-        hal = HallucinatorService()
-        self.assertTrue(hasattr(hal, "hallucinate_batch"))
+        # Mutation Engine (formerly Hallucinator)
+        hal = MutationEngine()
+        self.assertTrue(hasattr(hal, "synthesize"))
         
         # Anomaly Client
         anom = AnomalyClientService()
@@ -55,7 +56,7 @@ class TestThanatosStructure(unittest.TestCase):
         self.assertTrue(hasattr(iso, "analyze_target"))
         
         # Karma
-        karma = KarmaWalletService()
+        karma = KarmaModelService()
         self.assertTrue(hasattr(karma, "authorize_action"))
 
     def test_phase3_structure(self):
@@ -69,9 +70,14 @@ class TestThanatosStructure(unittest.TestCase):
         self.assertTrue(hasattr(truth, "analyze_session"))
         
         # Manager
-        mgr = ThanatosManager()
-        self.assertTrue(hasattr(mgr, "get_hallucinator"))
-        self.assertTrue(hasattr(mgr, "verify_reality"))
+        class MockAegis:
+             pass
+        class MockEvents:
+             pass
+             
+        mgr = ThanatosManager(aegis=MockAegis(), events=MockEvents())
+        self.assertTrue(hasattr(mgr, "generate_for_high_value_targets"))
+        self.assertTrue(hasattr(mgr, "configure_scope"))
 
 if __name__ == "__main__":
     unittest.main()

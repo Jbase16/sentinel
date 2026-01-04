@@ -1,5 +1,5 @@
 from typing import Dict, Optional, Tuple
-from core.aegis.business_graph import BusinessModelGraph
+from core.aegis.graph import BusinessModelGraph
 
 class ValueMapper:
     """
@@ -27,9 +27,10 @@ class ValueMapper:
             # Fallback: No business context found. standard severity applies.
             return 0.1, "Technical finding with no mapped business asset."
 
-        # Take the highest value entity
+        # Take the highest value entity (Node)
         crown_jewel = impacted_entities[0]
-        base_score = crown_jewel.value_score
+        # Normalize 1-10 scale to 0-1
+        base_score = crown_jewel.value / 10.0
 
         # Contextual Multipliers
         # (A logic flaw in a billing endpoint is worse than a typo)
@@ -44,7 +45,7 @@ class ValueMapper:
         final_score = min(base_score * multiplier, 1.0)
         
         justification = (
-            f"Finding affects '{crown_jewel.name}' (Value: {crown_jewel.value_score}). "
+            f"Finding affects '{crown_jewel.name}' (Value: {crown_jewel.value}). "
             f"Business Impact: High risk to {crown_jewel.description or 'core revenue/operations'}."
         )
         

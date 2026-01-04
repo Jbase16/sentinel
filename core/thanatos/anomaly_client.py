@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, Tuple
 
-from core.thanatos.ontology_breaker import HereticRequest
+from core.thanatos.models import LogicTestCase
 
 SAFE_MODE: bool = True
 
@@ -56,7 +56,7 @@ class AnomalyClientService:
             # Circuit breaker logic would live here
             raise RuntimeError("AnomalyClientService initiated in unsafe mode (Not Implemented)")
 
-    async def transmit_heretic(self, request: HereticRequest) -> AnomalyResponse:
+    async def transmit_heretic(self, request: LogicTestCase) -> AnomalyResponse:
         """
         Transmit a heretic request via raw sockets.
         """

@@ -17,6 +17,9 @@ from .models import (
 )
 from .mutations import MutationLibrary
 
+SAFE_MODE = True
+
+
 
 def _stable_id(*parts: str) -> str:
     h = hashlib.sha256()

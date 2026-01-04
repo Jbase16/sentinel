@@ -3,10 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Protocol
 
-from .axiom_synthesizer import StandardAxiomSynthesizer
+from .axiom_synthesizer import MutationEngine
 from .models import LogicTestCase, TargetHandle
 from .ontology_breaker import OntologyBreakerService
 from .scope_gate import ScopeGate, ScopePolicy
+
+SAFE_MODE = True
+
 
 
 class EventBus(Protocol):
@@ -53,7 +56,7 @@ class ThanatosManager:
         self.scope_gate = ScopeGate(policy)
         self.breaker = OntologyBreakerService(
             scope_gate=self.scope_gate,
-            synthesizer=StandardAxiomSynthesizer(),
+            synthesizer=MutationEngine(),
         )
 
     def configure_scope(self, *, node_ids: Iterable[str], endpoints: Iterable[str], methods: Iterable[str],
@@ -84,7 +87,7 @@ class ThanatosManager:
         all_cases: List[LogicTestCase] = []
 
         for t in targets:
-            cases = self.breaker.hallucinate_batch(t)
+            cases = self.breaker.generate_mutations(t)
             all_cases.extend(cases)
 
             await self.events.emit(

@@ -1,7 +1,8 @@
 import re
 import logging
 from typing import List, Set, Dict, Optional
-from core.aegis.business_graph import BusinessEntity, BusinessModelGraph
+from core.aegis.graph import BusinessModelGraph
+from core.aegis.models import BusinessNode
 
 logger = logging.getLogger(__name__)
 
@@ -69,27 +70,29 @@ class PricingScraper:
                 if category == "Auth/Privilege": score = 1.0
                 if category == "Enterprise Features": score = 0.8
                 
-                entity = BusinessEntity(
+                entity = BusinessNode(
+                    id=f"{category.lower()}:{term.lower()}",
                     name=f"{category}: {term.capitalize()}",
-                    value_score=score,
-                    source_term=term,
-                    description=f"Passive-ingested term from {category}",
-                    related_endpoints=self._guess_endpoints(term)
+                    type="asset",
+                    value=score * 10.0, # Scale 0-1 to 0-10
+                    description=f"Passive-ingested term from {category}. Source: {term}",
+                    tags=self._guess_endpoints(term)
                 )
-                self.graph.add_entity(entity)
+                self.graph.add_node(entity)
 
         # 2. Extract Pricing Tiers specifically
         # (Very naive implementation for Phase 1)
         tiers = re.findall(self.TIER_PATTERN, text)
         for tier in set(tiers):
-            entity = BusinessEntity(
+            entity = BusinessNode(
+                id=f"plan:{tier.lower()}",
                 name=f"Plan: {tier.capitalize()}",
-                value_score=0.7 if "free" not in tier.lower() else 0.1,
-                source_term=tier,
+                type="service",
+                value=7.0 if "free" not in tier.lower() else 1.0,
                 description="Detected Pricing Tier",
-                related_endpoints=self._guess_endpoints(tier)
+                tags=self._guess_endpoints(tier)
             )
-            self.graph.add_entity(entity)
+            self.graph.add_node(entity)
 
     def _guess_endpoints(self, term: str) -> Set[str]:
         """

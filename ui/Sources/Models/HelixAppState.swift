@@ -158,9 +158,11 @@ public class HelixAppState: ObservableObject {
                         self.apiLogItems.append(
                             LogItem(
                                 id: UUID(), text: "[Scan] started: \(target) (\(toolCount) tools)"))
+                        self.refreshGraph()
                     case .scanCompleted:
                         self.isScanRunning = false
                         self.refreshResults()
+                        self.refreshGraph()
                     case .scanFailed:
                         self.isScanRunning = false
                         self.refreshResults()
@@ -186,6 +188,7 @@ public class HelixAppState: ObservableObject {
                         }
                     case .findingCreated, .findingConfirmed, .findingDismissed, .toolCompleted:
                         self.refreshResults()
+                        self.refreshGraph()
 
                     // Doppelganger
                     case .identityEstablished:
@@ -206,6 +209,7 @@ public class HelixAppState: ObservableObject {
                         self.apiLogs.append(msg)
                         self.apiLogItems.append(LogItem(id: UUID(), text: msg))
                         self.refreshResults()  // Refresh graph to show red node
+                        self.refreshGraph()
 
                         // Auto-clear breach alert after 5 seconds
                         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {

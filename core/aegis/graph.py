@@ -137,3 +137,22 @@ class BusinessModelGraph:
             
         return final_risk
 
+    def map_endpoint(self, endpoint: str) -> List[BusinessNode]:
+        """
+        Return business nodes associated with this endpoint (via tags/endpoints).
+        """
+        results = []
+        for node in self.nodes.values():
+            # Check tags (where we stored related endpoints)
+            if endpoint in node.tags:
+                results.append(node)
+                continue
+                
+            # Heuristic match
+            if node.name.lower() in endpoint.lower(): # Very loose
+                results.append(node)
+                continue
+                
+        # Return sorted by value (highest first)
+        return sorted(results, key=lambda x: x.value, reverse=True)
+
