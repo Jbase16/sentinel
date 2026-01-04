@@ -81,6 +81,8 @@ class _DictWrapper:
         # Ensure lists are converted to tuples if they might be used in 'in set' checks
         # Actually, it's safer to just return as is and let the expr handle it,
         # but the CAL error was 'list as set element'.
+        if isinstance(val, list):
+            return tuple(val)
         return val
     def __iter__(self):
         return iter(self._data)

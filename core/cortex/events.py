@@ -338,6 +338,168 @@ class EventBus:
             }
         ))
 
+    # --- CRONUS Event Convenience Methods ---
+
+    def emit_cronus_query_started(
+        self,
+        target: str,
+        sources: List[str],
+        timestamp_start: Optional[str] = None,
+        timestamp_end: Optional[str] = None
+    ):
+        """Emit CRONUS_QUERY_STARTED event when TimeMachine begins archive query."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_QUERY_STARTED,
+            payload={
+                "target": target,
+                "sources": sources,
+                "timestamp_start": timestamp_start,
+                "timestamp_end": timestamp_end,
+            }
+        ))
+
+    def emit_cronus_query_completed(
+        self,
+        target: str,
+        snapshots_found: int,
+        duration_ms: Optional[int] = None
+    ):
+        """Emit CRONUS_QUERY_COMPLETED event when TimeMachine finishes."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_QUERY_COMPLETED,
+            payload={
+                "target": target,
+                "snapshots_found": snapshots_found,
+                "duration_ms": duration_ms,
+            }
+        ))
+
+    def emit_cronus_query_failed(self, target: str, error: str, source: Optional[str] = None):
+        """Emit CRONUS_QUERY_FAILED event when archive query fails."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_QUERY_FAILED,
+            payload={
+                "target": target,
+                "error": error,
+                "source": source,
+            }
+        ))
+
+    def emit_cronus_snapshot_found(
+        self,
+        url: str,
+        timestamp: str,
+        source: str,
+        status_code: Optional[int] = None
+    ):
+        """Emit CRONUS_SNAPSHOT_FOUND event when historical snapshot is discovered."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_SNAPSHOT_FOUND,
+            payload={
+                "url": url,
+                "timestamp": timestamp,
+                "source": source,
+                "status_code": status_code,
+            }
+        ))
+
+    def emit_cronus_diff_started(self, target: str, old_count: int, new_count: int):
+        """Emit CRONUS_DIFF_STARTED event when sitemap comparison begins."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_DIFF_STARTED,
+            payload={
+                "target": target,
+                "old_count": old_count,
+                "new_count": new_count,
+            }
+        ))
+
+    def emit_cronus_diff_completed(
+        self,
+        target: str,
+        deleted_count: int,
+        stable_count: int,
+        added_count: int,
+        modified_count: int,
+        confidence: Optional[float] = None
+    ):
+        """Emit CRONUS_DIFF_COMPLETED event when sitemap comparison finishes."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_DIFF_COMPLETED,
+            payload={
+                "target": target,
+                "deleted_count": deleted_count,
+                "stable_count": stable_count,
+                "added_count": added_count,
+                "modified_count": modified_count,
+                "confidence": confidence,
+            }
+        ))
+
+    def emit_cronus_hunt_started(self, target: str, candidate_count: int):
+        """Emit CRONUS_HUNT_STARTED event when zombie hunting begins."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_HUNT_STARTED,
+            payload={
+                "target": target,
+                "candidate_count": candidate_count,
+            }
+        ))
+
+    def emit_cronus_hunt_completed(
+        self,
+        target: str,
+        confirmed: int,
+        denied: int,
+        dead: int,
+        duration_ms: Optional[int] = None
+    ):
+        """Emit CRONUS_HUNT_COMPLETED event when zombie hunting finishes."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_HUNT_COMPLETED,
+            payload={
+                "target": target,
+                "confirmed": confirmed,
+                "denied": denied,
+                "dead": dead,
+                "duration_ms": duration_ms,
+            }
+        ))
+
+    def emit_cronus_zombie_confirmed(
+        self,
+        path: str,
+        status_code: int,
+        method: Optional[str] = None,
+        confidence: Optional[float] = None
+    ):
+        """Emit CRONUS_ZOMBIE_CONFIRMED event when zombie endpoint is verified active."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_ZOMBIE_CONFIRMED,
+            payload={
+                "path": path,
+                "method": method,
+                "status_code": status_code,
+                "confidence": confidence,
+            }
+        ))
+
+    def emit_cronus_zombie_denied(
+        self,
+        path: str,
+        status_code: int,
+        method: Optional[str] = None
+    ):
+        """Emit CRONUS_ZOMBIE_DENIED event when zombie endpoint requires auth."""
+        self.emit(GraphEvent(
+            type=GraphEventType.CRONUS_ZOMBIE_DENIED,
+            payload={
+                "path": path,
+                "method": method,
+                "status_code": status_code,
+            }
+        ))
+
 # --- Singleton Accessor ---
 
 _event_bus: Optional[EventBus] = None

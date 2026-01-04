@@ -59,10 +59,35 @@ try:
 except ImportError:
     BS4_AVAILABLE = False
 
+# EventBus import - optional, gracefully degrades to logging if not available
+try:
+    from core.cortex.events import get_event_bus
+    EVENTBUS_AVAILABLE = True
+except ImportError:
+    EVENTBUS_AVAILABLE = False
+
 # Safety fuse: prevents unsafe operations
 SAFE_MODE: bool = True
 
 logger = logging.getLogger(__name__)
+
+
+def _emit_event(method_name: str, **kwargs) -> None:
+    """
+    Helper to emit events via EventBus with graceful degradation.
+
+    If EventBus is not available, falls back to logging.
+    """
+    if EVENTBUS_AVAILABLE:
+        try:
+            bus = get_event_bus()
+            emit_method = getattr(bus, method_name, None)
+            if emit_method:
+                emit_method(**kwargs)
+        except Exception as e:
+            logger.debug(f"[TimeMachine] EventBus emission failed: {e}")
+    else:
+        logger.debug(f"[TimeMachine] Event: {method_name} {kwargs}")
 
 # Wayback Machine CDX API configuration
 WAYBACK_CDX_URL = "https://web.archive.org/cdx/search/cdx"
@@ -526,8 +551,17 @@ class TimeMachine:
         # Update query statistics
         self._query_count += 1
         self._last_query_time = datetime.utcnow()
+        start_time = time.monotonic()
 
-        # Emit event (integration point)
+        # Emit CRONUS_QUERY_STARTED event
+        _emit_event(
+            "emit_cronus_query_started",
+            target=query.target,
+            sources=[s.value for s in query.sources],
+            timestamp_start=query.timestamp_start.isoformat(),
+            timestamp_end=query.timestamp_end.isoformat(),
+        )
+
         logger.info(
             f"[TimeMachine] {self.EVENT_QUERY_STARTED}: "
             f"target={query.target}, sources={[s.value for s in query.sources]}"
@@ -548,6 +582,16 @@ class TimeMachine:
                     )
                     all_results.extend(results)
 
+                    # Emit SNAPSHOT_FOUND events for each result
+                    for result in results:
+                        _emit_event(
+                            "emit_cronus_snapshot_found",
+                            url=result.url,
+                            timestamp=result.timestamp.isoformat(),
+                            source=source.value,
+                            status_code=result.status_code,
+                        )
+
                 elif source == ArchiveSource.COMMON_CRAWL:
                     # CommonCrawl integration (future)
                     logger.debug(f"[TimeMachine] CommonCrawl not yet implemented")
@@ -562,12 +606,29 @@ class TimeMachine:
 
             except Exception as e:
                 logger.error(f"[TimeMachine] Error querying {source.value}: {e}")
+                _emit_event(
+                    "emit_cronus_query_failed",
+                    target=query.target,
+                    error=str(e),
+                    source=source.value,
+                )
 
         # Sort by timestamp (newest first)
         all_results.sort(key=lambda x: x.timestamp, reverse=True)
 
         # Cache results
         self._cache[cache_key] = all_results
+
+        # Calculate duration
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+
+        # Emit CRONUS_QUERY_COMPLETED event
+        _emit_event(
+            "emit_cronus_query_completed",
+            target=query.target,
+            snapshots_found=len(all_results),
+            duration_ms=duration_ms,
+        )
 
         logger.info(
             f"[TimeMachine] {self.EVENT_QUERY_COMPLETED}: "

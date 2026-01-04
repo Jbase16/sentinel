@@ -417,6 +417,120 @@ class EventContract:
                 FieldSpec("label", str, required=False),
             ]
         )
+
+        # ----------------------------------------------------------------
+        # CRONUS - Temporal Mining
+        # ----------------------------------------------------------------
+        cls._schemas[EventType.CRONUS_QUERY_STARTED] = EventSchema(
+            event_type=EventType.CRONUS_QUERY_STARTED,
+            description="TimeMachine archive query started.",
+            fields=[
+                FieldSpec("target", str, required=True, description="Domain being queried"),
+                FieldSpec("sources", list, required=True, description="Archive sources to query"),
+                FieldSpec("timestamp_start", str, required=False, description="Start of time range"),
+                FieldSpec("timestamp_end", str, required=False, description="End of time range"),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_QUERY_COMPLETED] = EventSchema(
+            event_type=EventType.CRONUS_QUERY_COMPLETED,
+            description="TimeMachine archive query completed.",
+            preconditions=[EventType.CRONUS_QUERY_STARTED],
+            fields=[
+                FieldSpec("target", str, required=True),
+                FieldSpec("snapshots_found", int, required=True, description="Number of snapshots found"),
+                FieldSpec("duration_ms", int, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_QUERY_FAILED] = EventSchema(
+            event_type=EventType.CRONUS_QUERY_FAILED,
+            description="TimeMachine archive query failed.",
+            preconditions=[EventType.CRONUS_QUERY_STARTED],
+            fields=[
+                FieldSpec("target", str, required=True),
+                FieldSpec("error", str, required=True),
+                FieldSpec("source", str, required=False, description="Which archive source failed"),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_SNAPSHOT_FOUND] = EventSchema(
+            event_type=EventType.CRONUS_SNAPSHOT_FOUND,
+            description="Historical snapshot discovered.",
+            fields=[
+                FieldSpec("url", str, required=True, description="Original URL of snapshot"),
+                FieldSpec("timestamp", str, required=True, description="When snapshot was captured"),
+                FieldSpec("source", str, required=True, description="Archive source (wayback_machine, etc)"),
+                FieldSpec("status_code", int, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_DIFF_STARTED] = EventSchema(
+            event_type=EventType.CRONUS_DIFF_STARTED,
+            description="Sitemap comparison started.",
+            fields=[
+                FieldSpec("target", str, required=True),
+                FieldSpec("old_count", int, required=True, description="Historical endpoint count"),
+                FieldSpec("new_count", int, required=True, description="Current endpoint count"),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_DIFF_COMPLETED] = EventSchema(
+            event_type=EventType.CRONUS_DIFF_COMPLETED,
+            description="Sitemap comparison completed.",
+            preconditions=[EventType.CRONUS_DIFF_STARTED],
+            fields=[
+                FieldSpec("target", str, required=True),
+                FieldSpec("deleted_count", int, required=True, description="Zombie candidates"),
+                FieldSpec("stable_count", int, required=True),
+                FieldSpec("added_count", int, required=True),
+                FieldSpec("modified_count", int, required=True),
+                FieldSpec("confidence", float, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_HUNT_STARTED] = EventSchema(
+            event_type=EventType.CRONUS_HUNT_STARTED,
+            description="Zombie endpoint hunting started.",
+            fields=[
+                FieldSpec("target", str, required=True),
+                FieldSpec("candidate_count", int, required=True, description="Endpoints to probe"),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_HUNT_COMPLETED] = EventSchema(
+            event_type=EventType.CRONUS_HUNT_COMPLETED,
+            description="Zombie endpoint hunting completed.",
+            preconditions=[EventType.CRONUS_HUNT_STARTED],
+            fields=[
+                FieldSpec("target", str, required=True),
+                FieldSpec("confirmed", int, required=True, description="Active zombie count"),
+                FieldSpec("denied", int, required=True, description="Auth-blocked count"),
+                FieldSpec("dead", int, required=True, description="Properly removed count"),
+                FieldSpec("duration_ms", int, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_ZOMBIE_CONFIRMED] = EventSchema(
+            event_type=EventType.CRONUS_ZOMBIE_CONFIRMED,
+            description="Zombie endpoint confirmed active.",
+            fields=[
+                FieldSpec("path", str, required=True, description="Endpoint path"),
+                FieldSpec("method", str, required=False, description="HTTP method"),
+                FieldSpec("status_code", int, required=True, description="HTTP response code"),
+                FieldSpec("confidence", float, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.CRONUS_ZOMBIE_DENIED] = EventSchema(
+            event_type=EventType.CRONUS_ZOMBIE_DENIED,
+            description="Zombie endpoint exists but requires authentication.",
+            fields=[
+                FieldSpec("path", str, required=True),
+                FieldSpec("method", str, required=False),
+                FieldSpec("status_code", int, required=True, description="401 or 403"),
+            ]
+        )
     
     @classmethod
     def validate(cls, event_type: EventType, payload: Dict[str, Any]) -> None:

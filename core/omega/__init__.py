@@ -213,27 +213,165 @@ class OmegaManager:
             "Future implementation should coordinate all three pillars."
         )
 
-    async def run_cronus_phase(self, config: OmegaConfig) -> Dict[str, Any]:
+    async def run_cronus_phase(
+        self,
+        config: OmegaConfig,
+        timestamp_start: Optional[datetime] = None,
+        timestamp_end: Optional[datetime] = None,
+    ) -> Dict[str, Any]:
         """
         Run CRONUS phase (temporal mining).
 
-        TODO: Orchestrate TimeMachine, Differ, Hunter.
-        TODO: Collect confirmed zombie endpoints.
-        TODO: Return structured results.
+        Orchestrates the three CRONUS components:
+        1. TimeMachine: Query historical archives for snapshots
+        2. SitemapDiffer: Compare old vs new endpoints
+        3. ZombieHunter: Probe deleted endpoints to confirm zombies
 
         Args:
             config: Analysis configuration
+            timestamp_start: Start of historical time range (default: 1 year ago)
+            timestamp_end: End of historical time range (default: now)
 
         Returns:
-            CRONUS phase results
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
+            CRONUS phase results with confirmed zombie endpoints
         """
-        raise NotImplementedError(
-            "Wrapper-only: CRONUS phase execution deferred. "
-            "Future implementation should use core.sentient.cronus modules."
+        from datetime import timedelta
+        from core.sentient.cronus import (
+            create_time_machine,
+            create_sitemap_differ,
+            create_zombie_hunter,
+            SnapshotQuery,
+            Endpoint,
         )
+
+        logger.info(f"[OmegaManager] {self.EVENT_PHASE_STARTED}: CRONUS")
+
+        # Default time range: 1 year ago to now
+        if timestamp_end is None:
+            timestamp_end = datetime.utcnow()
+        if timestamp_start is None:
+            timestamp_start = timestamp_end - timedelta(days=365)
+
+        result = {
+            "phase": OmegaPhase.CRONUS.value,
+            "target": config.target,
+            "status": "pending",
+            "snapshots_found": 0,
+            "historical_endpoints": 0,
+            "current_endpoints": 0,
+            "zombie_candidates": 0,
+            "confirmed_zombies": [],
+            "diff_report": None,
+            "hunt_report": None,
+            "error": None,
+        }
+
+        try:
+            # Step 1: Query historical archives
+            time_machine = create_time_machine(safe_mode=config.safe_mode)
+
+            if config.safe_mode:
+                # In safe mode, skip actual archive queries
+                logger.info("[OmegaManager] CRONUS safe mode: skipping archive queries")
+                result["status"] = "skipped_safe_mode"
+                return result
+
+            query = SnapshotQuery(
+                target=config.target,
+                timestamp_start=timestamp_start,
+                timestamp_end=timestamp_end,
+                max_results=100,
+            )
+
+            snapshots = await time_machine.query_async(query)
+            result["snapshots_found"] = len(snapshots)
+
+            if not snapshots:
+                logger.info(f"[OmegaManager] CRONUS: No historical snapshots found for {config.target}")
+                result["status"] = "no_snapshots"
+                return result
+
+            # Step 2: Extract endpoints from historical snapshots
+            historical_endpoints = []
+            for snapshot in snapshots:
+                if snapshot.content:
+                    paths = time_machine.parse_sitemap(snapshot)
+                    for path in paths:
+                        ep = Endpoint(path=path, source="wayback_machine")
+                        if ep not in historical_endpoints:
+                            historical_endpoints.append(ep)
+
+            result["historical_endpoints"] = len(historical_endpoints)
+
+            # TODO: Fetch current endpoints from target (not implemented)
+            # For now, we treat all historical endpoints as zombie candidates
+            current_endpoints: List[Endpoint] = []
+            result["current_endpoints"] = 0
+
+            # Step 3: Diff historical vs current
+            differ = create_sitemap_differ(safe_mode=False)
+            diff_report = differ.compare_sets(
+                historical_endpoints,
+                current_endpoints,
+                f"https://{config.target}",
+                timestamp_past=timestamp_start,
+                timestamp_present=timestamp_end,
+            )
+
+            zombie_candidates = diff_report.get_zombie_candidates()
+            result["zombie_candidates"] = len(zombie_candidates)
+            result["diff_report"] = diff_report.to_dict()
+
+            if not zombie_candidates:
+                logger.info(f"[OmegaManager] CRONUS: No zombie candidates found")
+                result["status"] = "no_candidates"
+                return result
+
+            # Step 4: Hunt for active zombies
+            hunter = create_zombie_hunter(
+                safe_mode=False,
+                max_concurrent=5,
+                rate_limit=5,
+            )
+
+            hunt_report = await hunter.hunt(
+                zombie_candidates,
+                f"https://{config.target}",
+                method="HEAD",
+            )
+
+            result["hunt_report"] = hunt_report.to_dict()
+
+            # Collect confirmed zombies
+            for probe in hunt_report.probes:
+                if probe.is_zombie:
+                    result["confirmed_zombies"].append({
+                        "path": probe.endpoint.path,
+                        "method": probe.endpoint.method,
+                        "status": probe.status.value,
+                        "status_code": probe.status_code,
+                        "confidence": probe.confidence,
+                    })
+
+            result["status"] = "completed"
+            logger.info(
+                f"[OmegaManager] CRONUS completed: "
+                f"{len(result['confirmed_zombies'])} zombies confirmed"
+            )
+
+        except ValueError as e:
+            # Safe mode or validation error
+            result["status"] = "blocked"
+            result["error"] = str(e)
+            logger.warning(f"[OmegaManager] CRONUS blocked: {e}")
+
+        except Exception as e:
+            result["status"] = "error"
+            result["error"] = str(e)
+            logger.error(f"[OmegaManager] CRONUS error: {e}")
+
+        logger.info(f"[OmegaManager] {self.EVENT_PHASE_COMPLETED}: CRONUS")
+        return result
 
     async def run_mimic_phase(self, config: OmegaConfig) -> Dict[str, Any]:
         """

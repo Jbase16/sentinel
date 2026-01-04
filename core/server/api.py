@@ -1097,6 +1097,16 @@ async def get_results(
     If session_id is not provided, returns results for the currently active (or last finished) scan.
     """
     sid = session_id or _scan_state.get("session_id")
+    
+    if not sid:
+        # Fallback to latest session
+        try:
+            rows = await Database.instance().fetch_all("SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1")
+            if rows:
+                sid = rows[0][0]
+        except Exception:
+            pass
+            
     if not sid:
         # No 404, just 204 No Content if no scan has ever run
         return Response(status_code=204)
@@ -1147,6 +1157,18 @@ async def get_graph(
     Visualization of the system's "belief state".
     """
     sid = session_id or _scan_state.get("session_id")
+    
+    # Fallback: If no session ID provided and no active scan, try to get the latest session from DB
+    if not sid:
+        try:
+            db = Database.instance()
+            # Find the most recent session
+            rows = await db.fetch_all("SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1")
+            if rows:
+                sid = rows[0][0]
+        except Exception:
+            pass
+
     if not sid:
         return Response(status_code=204)
 

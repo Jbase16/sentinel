@@ -48,6 +48,31 @@ SAFE_MODE: bool = True
 
 logger = logging.getLogger(__name__)
 
+# EventBus import - optional, gracefully degrades to logging if not available
+try:
+    from core.cortex.events import get_event_bus
+    EVENTBUS_AVAILABLE = True
+except ImportError:
+    EVENTBUS_AVAILABLE = False
+
+
+def _emit_event(method_name: str, **kwargs) -> None:
+    """
+    Helper to emit events via EventBus with graceful degradation.
+
+    If EventBus is not available, falls back to logging.
+    """
+    if EVENTBUS_AVAILABLE:
+        try:
+            bus = get_event_bus()
+            emit_method = getattr(bus, method_name, None)
+            if emit_method:
+                emit_method(**kwargs)
+        except Exception as e:
+            logger.debug(f"[SitemapDiffer] EventBus emission failed: {e}")
+    else:
+        logger.debug(f"[SitemapDiffer] Event: {method_name} {kwargs}")
+
 
 class EndpointStatus(str, Enum):
     """
@@ -270,7 +295,14 @@ class SitemapDiffer:
         # Update statistics
         self._comparison_count += 1
 
-        # Emit event (integration point)
+        # Emit CRONUS_DIFF_STARTED event
+        _emit_event(
+            "emit_cronus_diff_started",
+            target=target,
+            old_count=len(old_sitemap),
+            new_count=len(new_sitemap),
+        )
+
         logger.info(
             f"[SitemapDiffer] {self.EVENT_DIFF_STARTED}: "
             f"target={target}, old_count={len(old_sitemap)}, new_count={len(new_sitemap)}"
@@ -321,6 +353,17 @@ class SitemapDiffer:
             stable=stable,
             added=added,
             modified=modified,
+            confidence=confidence,
+        )
+
+        # Emit CRONUS_DIFF_COMPLETED event
+        _emit_event(
+            "emit_cronus_diff_completed",
+            target=target,
+            deleted_count=len(deleted),
+            stable_count=len(stable),
+            added_count=len(added),
+            modified_count=len(modified),
             confidence=confidence,
         )
 

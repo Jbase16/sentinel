@@ -13,6 +13,7 @@
 		23885C7C1426DA781B5E460F /* NeuralGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71DA56ED4F2F3426B9E02034 /* NeuralGraphView.swift */; };
 		250D8E25220B3AB535717493 /* ChatBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEBD4BFB76B48DD1736FC1FA /* ChatBubbleView.swift */; };
 		2F3DA20D5D2C21A0200A21C9 /* SharedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D47C9AABA588CA41003B700 /* SharedModels.swift */; };
+		31F9071AEE2F7FBEBD7D9A36 /* IdentityStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5A2EAB8B8B727F4AF90C39 /* IdentityStatusView.swift */; };
 		442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */ = {isa = PBXBuildFile; fileRef = D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */; };
 		4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1FB66EC2747EC1973D336E /* DashboardView.swift */; };
 		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
@@ -21,14 +22,13 @@
 		80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B8394185D36FC0D1095C1111 /* Shaders.metal */; };
 		84565490131B06C520A4801A /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */; };
 		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
-		98D73663B2E3F863CCA36605 /* PressureGraphInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD0611A28C329570C1DFA2CE /* PressureGraphInteraction.swift */; };
+		96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */; };
 		9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */; };
 		9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C910B6EF70385F75EC7BA /* PTYClient.swift */; };
 		A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */; };
 		A96E61E2762FD4FD4E275E4B /* ActionRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB064037D50A118943B7AB93 /* ActionRequestView.swift */; };
 		AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */; };
 		AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230001B3E6349D392B2FE004 /* AppReducer.swift */; };
-		AF698F3CB60A8D9E2C986F96 /* PressureGraphSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E7F79C93E3029AB79EC8115 /* PressureGraphSystem.swift */; };
 		B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C303CDE894C92523DAC01B0A /* ToolsBankView.swift */; };
 		B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE68CC8F07C4B289363C486 /* CortexStream.swift */; };
 		B4BB52D55A287ED8069CD66A /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 66511897847C968BFC7F8D7A /* index.html */; };
@@ -51,8 +51,8 @@
 		24341BFC06FC18EE38977FFC /* SentinelForge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SentinelForge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2569FD3CDF297078C1886472 /* StatusComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusComponents.swift; sourceTree = "<group>"; };
 		2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenerateModels.swift; sourceTree = "<group>"; };
+		3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressureGraphModels.swift; sourceTree = "<group>"; };
 		3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphView.swift; sourceTree = "<group>"; };
-		3E7F79C93E3029AB79EC8115 /* PressureGraphSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressureGraphSystem.swift; sourceTree = "<group>"; };
 		426219598E6076D786D8DAD8 /* ReportComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportComposerView.swift; sourceTree = "<group>"; };
 		493C6711EF03532E783C01F1 /* GraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphModels.swift; sourceTree = "<group>"; };
 		58466552B0906B21951240F1 /* HelixAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixAppState.swift; sourceTree = "<group>"; };
@@ -69,11 +69,11 @@
 		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
 		B28396B11B909875C4B8BB20 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		B8394185D36FC0D1095C1111 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		BA5A2EAB8B8B727F4AF90C39 /* IdentityStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityStatusView.swift; sourceTree = "<group>"; };
 		BB064037D50A118943B7AB93 /* ActionRequestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionRequestView.swift; sourceTree = "<group>"; };
 		BCE68CC8F07C4B289363C486 /* CortexStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexStream.swift; sourceTree = "<group>"; };
 		C303CDE894C92523DAC01B0A /* ToolsBankView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBankView.swift; sourceTree = "<group>"; };
 		CA1FB66EC2747EC1973D336E /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		CD0611A28C329570C1DFA2CE /* PressureGraphInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressureGraphInteraction.swift; sourceTree = "<group>"; };
 		D45E68340782F5F007892DD6 /* HelixError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixError.swift; sourceTree = "<group>"; };
 		D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = PressureShader.metal; sourceTree = "<group>"; };
 		F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
@@ -94,6 +94,7 @@
 			isa = PBXGroup;
 			children = (
 				58466552B0906B21951240F1 /* HelixAppState.swift */,
+				3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */,
 				7D47C9AABA588CA41003B700 /* SharedModels.swift */,
 			);
 			path = Models;
@@ -111,6 +112,7 @@
 		47686AF82049D529E08F45D3 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				BA5A2EAB8B8B727F4AF90C39 /* IdentityStatusView.swift */,
 				2569FD3CDF297078C1886472 /* StatusComponents.swift */,
 			);
 			path = Components;
@@ -178,8 +180,6 @@
 		9F4A1567420A88A2907C77A7 /* Pressure */ = {
 			isa = PBXGroup;
 			children = (
-				CD0611A28C329570C1DFA2CE /* PressureGraphInteraction.swift */,
-				3E7F79C93E3029AB79EC8115 /* PressureGraphSystem.swift */,
 				D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */,
 			);
 			path = Pressure;
@@ -341,14 +341,14 @@
 				F1D02E19B9E5B252F227CA09 /* GraphRenderer.swift in Sources */,
 				0D5D3E555E784A70305E042C /* HelixAppState.swift in Sources */,
 				BA612DD4500BA86414972F25 /* HelixError.swift in Sources */,
+				31F9071AEE2F7FBEBD7D9A36 /* IdentityStatusView.swift in Sources */,
 				84565490131B06C520A4801A /* LLMService.swift in Sources */,
 				120436A0BDDDBF24C31F8D30 /* MainWindowView.swift in Sources */,
 				5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */,
 				9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */,
 				23885C7C1426DA781B5E460F /* NeuralGraphView.swift in Sources */,
 				9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */,
-				98D73663B2E3F863CCA36605 /* PressureGraphInteraction.swift in Sources */,
-				AF698F3CB60A8D9E2C986F96 /* PressureGraphSystem.swift in Sources */,
+				96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */,
 				442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */,
 				65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */,
 				E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */,
