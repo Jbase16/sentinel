@@ -30,25 +30,50 @@ INTEGRATION POINTS:
 - DecisionLedger: Logs which historical periods were queried
 - KnowledgeGraph: Stores temporal version of target structure
 
-DEPENDENCIES (Future):
-- waybackpack: For Wayback Machine API queries
-- requests: HTTP client for archive services
-- beautifulsoup4: HTML parsing for sitemap extraction
+DEPENDENCIES:
+- aiohttp: Async HTTP client for archive API queries
+- beautifulsoup4: HTML parsing for sitemap extraction (optional)
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlparse, urljoin, parse_qs, urlencode
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
+
+try:
+    from bs4 import BeautifulSoup
+    BS4_AVAILABLE = True
+except ImportError:
+    BS4_AVAILABLE = False
 
 # Safety fuse: prevents unsafe operations
 SAFE_MODE: bool = True
 
 logger = logging.getLogger(__name__)
+
+# Wayback Machine CDX API configuration
+WAYBACK_CDX_URL = "https://web.archive.org/cdx/search/cdx"
+WAYBACK_SNAPSHOT_URL = "https://web.archive.org/web"
+
+# CommonCrawl Index API
+COMMONCRAWL_INDEX_URL = "https://index.commoncrawl.org"
+
+# Rate limiting constants
+DEFAULT_RATE_LIMIT = 10  # requests per second
+DEFAULT_REQUEST_TIMEOUT = 30  # seconds
 
 
 class ArchiveSource(str, Enum):
@@ -161,6 +186,41 @@ class SnapshotResult:
         }
 
 
+class RateLimiter:
+    """
+    Token bucket rate limiter for archive API requests.
+
+    Ensures we don't overwhelm archive services with requests.
+    """
+
+    def __init__(self, rate: float = DEFAULT_RATE_LIMIT):
+        """
+        Initialize rate limiter.
+
+        Args:
+            rate: Maximum requests per second
+        """
+        self._rate = rate
+        self._tokens = rate
+        self._last_update = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """Wait until a token is available."""
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_update
+            self._tokens = min(self._rate, self._tokens + elapsed * self._rate)
+            self._last_update = now
+
+            if self._tokens < 1:
+                wait_time = (1 - self._tokens) / self._rate
+                await asyncio.sleep(wait_time)
+                self._tokens = 0
+            else:
+                self._tokens -= 1
+
+
 class TimeMachine:
     """
     Interface to historical archives for temporal security analysis.
@@ -173,13 +233,13 @@ class TimeMachine:
 
     EXAMPLE USAGE:
         ```python
-        machine = TimeMachine()
+        machine = TimeMachine(safe_mode=False)
         query = SnapshotQuery(
             target="example.com",
             timestamp_start=datetime(2023, 1, 1),
             timestamp_end=datetime(2023, 12, 31),
         )
-        results = await machine.query(query)
+        results = await machine.query_async(query)
         ```
     """
 
@@ -189,16 +249,27 @@ class TimeMachine:
     EVENT_QUERY_FAILED = "cronus_query_failed"
     EVENT_SNAPSHOT_FOUND = "cronus_snapshot_found"
 
-    def __init__(self, safe_mode: bool = SAFE_MODE):
+    def __init__(
+        self,
+        safe_mode: bool = SAFE_MODE,
+        rate_limit: float = DEFAULT_RATE_LIMIT,
+        request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
+    ):
         """
         Initialize TimeMachine interface.
 
         Args:
             safe_mode: If True, only allows queries to standard archives
+            rate_limit: Maximum requests per second to archive APIs
+            request_timeout: Timeout for individual requests in seconds
         """
         self._safe_mode = safe_mode
+        self._rate_limit = rate_limit
+        self._request_timeout = request_timeout
         self._query_count = 0
         self._last_query_time: Optional[datetime] = None
+        self._rate_limiter = RateLimiter(rate_limit)
+        self._cache: Dict[str, List[SnapshotResult]] = {}
 
         # Integration: These would be populated from real EventBus
         self._event_bus: Optional[Any] = None
@@ -213,6 +284,180 @@ class TimeMachine:
         """Get number of queries performed."""
         return self._query_count
 
+    async def query_wayback_async(
+        self,
+        target: str,
+        timestamp_start: datetime,
+        timestamp_end: datetime,
+        max_results: int = 100,
+        content_type: Optional[str] = None,
+    ) -> List[SnapshotResult]:
+        """
+        Query Wayback Machine CDX API for historical snapshots.
+
+        The CDX API returns metadata about archived URLs including:
+        - Timestamp when snapshot was taken
+        - Original URL
+        - MIME type
+        - HTTP status code
+        - Digest (for deduplication)
+
+        Args:
+            target: Domain or URL to query (e.g., "example.com" or "example.com/api/*")
+            timestamp_start: Start of time range (UTC)
+            timestamp_end: End of time range (UTC)
+            max_results: Maximum snapshots to return
+            content_type: Optional MIME type filter (e.g., "text/html")
+
+        Returns:
+            List of SnapshotResult objects with archive metadata
+
+        Raises:
+            RuntimeError: If aiohttp is not available
+            ValueError: If safe_mode blocks the query
+        """
+        if not AIOHTTP_AVAILABLE:
+            raise RuntimeError(
+                "aiohttp is required for TimeMachine queries. "
+                "Install with: pip install aiohttp"
+            )
+
+        if self._safe_mode:
+            logger.warning(f"[TimeMachine] SAFE_MODE: Blocking Wayback query to {target}")
+            raise ValueError("SAFE_MODE: Archive queries are disabled")
+
+        # Normalize target URL
+        if not target.startswith(("http://", "https://")):
+            target = f"https://{target}"
+
+        parsed = urlparse(target)
+        domain = parsed.netloc or parsed.path.split("/")[0]
+
+        # Build CDX API query parameters
+        # Format: YYYYMMDDHHMMSS
+        from_ts = timestamp_start.strftime("%Y%m%d%H%M%S")
+        to_ts = timestamp_end.strftime("%Y%m%d%H%M%S")
+
+        params = {
+            "url": f"{domain}/*",  # Wildcard to get all URLs under domain
+            "output": "json",
+            "from": from_ts,
+            "to": to_ts,
+            "limit": str(max_results),
+            "fl": "timestamp,original,mimetype,statuscode,digest,length",
+            "collapse": "urlkey",  # Deduplicate by URL
+        }
+
+        if content_type:
+            params["filter"] = f"mimetype:{content_type}"
+
+        logger.debug(f"[TimeMachine] Querying Wayback CDX: {domain}")
+
+        results: List[SnapshotResult] = []
+
+        await self._rate_limiter.acquire()
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=self._request_timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(WAYBACK_CDX_URL, params=params) as response:
+                    if response.status != 200:
+                        logger.error(
+                            f"[TimeMachine] Wayback CDX error: {response.status}"
+                        )
+                        return results
+
+                    data = await response.json()
+
+                    # First row is header
+                    if len(data) <= 1:
+                        logger.debug(f"[TimeMachine] No snapshots found for {domain}")
+                        return results
+
+                    # Parse CDX response (skip header row)
+                    for row in data[1:]:
+                        if len(row) < 6:
+                            continue
+
+                        timestamp_str, original_url, mimetype, status, digest, length = row[:6]
+
+                        try:
+                            snapshot_time = datetime.strptime(timestamp_str, "%Y%m%d%H%M%S")
+                            status_code = int(status) if status and status != "-" else 0
+                            size = int(length) if length and length != "-" else 0
+                        except (ValueError, TypeError):
+                            continue
+
+                        result = SnapshotResult(
+                            source=ArchiveSource.WAYBACK_MACHINE,
+                            timestamp=snapshot_time,
+                            url=original_url,
+                            content_type=mimetype or "unknown",
+                            status_code=status_code,
+                            content=None,  # Content not fetched in CDX query
+                            size_bytes=size,
+                        )
+                        results.append(result)
+
+                        logger.debug(
+                            f"[TimeMachine] {self.EVENT_SNAPSHOT_FOUND}: "
+                            f"{original_url} @ {snapshot_time}"
+                        )
+
+        except asyncio.TimeoutError:
+            logger.error(f"[TimeMachine] Wayback CDX timeout for {domain}")
+        except aiohttp.ClientError as e:
+            logger.error(f"[TimeMachine] Wayback CDX error: {e}")
+
+        return results
+
+    async def fetch_snapshot_content(
+        self,
+        snapshot: SnapshotResult,
+        max_size: int = 1_000_000,
+    ) -> Optional[str]:
+        """
+        Fetch the actual content of an archived snapshot.
+
+        Args:
+            snapshot: Snapshot metadata from CDX query
+            max_size: Maximum content size to fetch (bytes)
+
+        Returns:
+            Content string if successful, None otherwise
+        """
+        if not AIOHTTP_AVAILABLE:
+            raise RuntimeError("aiohttp is required for content fetching")
+
+        if self._safe_mode:
+            raise ValueError("SAFE_MODE: Content fetching is disabled")
+
+        if snapshot.size_bytes > max_size:
+            logger.warning(
+                f"[TimeMachine] Skipping large snapshot: {snapshot.size_bytes} bytes"
+            )
+            return None
+
+        # Build Wayback Machine URL
+        timestamp_str = snapshot.timestamp.strftime("%Y%m%d%H%M%S")
+        wayback_url = f"{WAYBACK_SNAPSHOT_URL}/{timestamp_str}id_/{snapshot.url}"
+
+        await self._rate_limiter.acquire()
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=self._request_timeout)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(wayback_url) as response:
+                    if response.status != 200:
+                        return None
+
+                    content = await response.text()
+                    return content
+
+        except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+            logger.error(f"[TimeMachine] Content fetch error: {e}")
+            return None
+
     def query_wayback(
         self,
         target: str,
@@ -221,10 +466,7 @@ class TimeMachine:
         max_results: int = 100
     ) -> List[SnapshotResult]:
         """
-        Query Wayback Machine for historical snapshots.
-
-        TODO: Implement actual Wayback Machine API integration.
-        Suggested dependency: waybackpack or direct API calls.
+        Synchronous wrapper for Wayback Machine queries.
 
         Args:
             target: Domain to query
@@ -234,43 +476,35 @@ class TimeMachine:
 
         Returns:
             List of historical snapshots
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
         """
-        if self._safe_mode:
-            logger.warning(f"[TimeMachine] SAFE_MODE: Blocking Wayback query to {target}")
+        if month:
+            start = datetime(year, month, 1)
+            if month == 12:
+                end = datetime(year + 1, 1, 1)
+            else:
+                end = datetime(year, month + 1, 1)
+        else:
+            start = datetime(year, 1, 1)
+            end = datetime(year + 1, 1, 1)
 
-        raise NotImplementedError(
-            "Wrapper-only: Wayback Machine query implementation deferred. "
-            "Future implementation should use waybackpack or direct API."
+        return asyncio.get_event_loop().run_until_complete(
+            self.query_wayback_async(target, start, end, max_results)
         )
 
-    def query(self, query: SnapshotQuery) -> List[SnapshotResult]:
+    async def query_async(self, query: SnapshotQuery) -> List[SnapshotResult]:
         """
-        Query historical archives based on provided parameters.
+        Query historical archives based on provided parameters (async).
 
         This is the primary interface for temporal mining. It validates
         the query, checks rate limits, and dispatches to appropriate
         archive sources.
-
-        TODO: Implement multi-source query orchestration.
-        TODO: Implement rate limiting (10 req/s max)
-        TODO: Implement caching to avoid duplicate queries
 
         Args:
             query: Query parameters defining target and time range
 
         Returns:
             List of snapshots from requested archives
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
-            ValueError: If query validation fails
         """
-        # Validate query
-        query.__post_init__()
-
         # Check safe mode constraints
         if self._safe_mode:
             custom_sources = [
@@ -281,48 +515,162 @@ class TimeMachine:
                 raise ValueError(
                     f"SAFE_MODE: Custom archives not allowed: {custom_sources}"
                 )
+            raise ValueError("SAFE_MODE: Archive queries are disabled")
+
+        # Check cache
+        cache_key = f"{query.target}:{query.timestamp_start}:{query.timestamp_end}"
+        if cache_key in self._cache:
+            logger.debug(f"[TimeMachine] Cache hit for {query.target}")
+            return self._cache[cache_key]
 
         # Update query statistics
         self._query_count += 1
         self._last_query_time = datetime.utcnow()
 
         # Emit event (integration point)
-        logger.debug(
+        logger.info(
             f"[TimeMachine] {self.EVENT_QUERY_STARTED}: "
             f"target={query.target}, sources={[s.value for s in query.sources]}"
         )
 
-        raise NotImplementedError(
-            "Wrapper-only: Multi-source query implementation deferred. "
-            "Future implementation should dispatch to source-specific handlers."
+        all_results: List[SnapshotResult] = []
+
+        # Query each requested source
+        for source in query.sources:
+            try:
+                if source == ArchiveSource.WAYBACK_MACHINE:
+                    results = await self.query_wayback_async(
+                        query.target,
+                        query.timestamp_start,
+                        query.timestamp_end,
+                        query.max_results,
+                        query.content_type,
+                    )
+                    all_results.extend(results)
+
+                elif source == ArchiveSource.COMMON_CRAWL:
+                    # CommonCrawl integration (future)
+                    logger.debug(f"[TimeMachine] CommonCrawl not yet implemented")
+
+                elif source == ArchiveSource.ALIEN_VAULT:
+                    # AlienVault OTX integration (future)
+                    logger.debug(f"[TimeMachine] AlienVault not yet implemented")
+
+                elif source == ArchiveSource.VIRUS_TOTAL:
+                    # VirusTotal integration (future)
+                    logger.debug(f"[TimeMachine] VirusTotal not yet implemented")
+
+            except Exception as e:
+                logger.error(f"[TimeMachine] Error querying {source.value}: {e}")
+
+        # Sort by timestamp (newest first)
+        all_results.sort(key=lambda x: x.timestamp, reverse=True)
+
+        # Cache results
+        self._cache[cache_key] = all_results
+
+        logger.info(
+            f"[TimeMachine] {self.EVENT_QUERY_COMPLETED}: "
+            f"found {len(all_results)} snapshots"
         )
+
+        return all_results
+
+    def query(self, query: SnapshotQuery) -> List[SnapshotResult]:
+        """
+        Synchronous wrapper for query_async.
+
+        Args:
+            query: Query parameters defining target and time range
+
+        Returns:
+            List of snapshots from requested archives
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        return loop.run_until_complete(self.query_async(query))
 
     def parse_sitemap(self, snapshot: SnapshotResult) -> List[str]:
         """
         Extract endpoint URLs from archived snapshot content.
 
-        TODO: Implement HTML/JSON parsing to extract:
+        Parses HTML content to extract:
         - <a> tag hrefs
-        - API endpoint definitions
-        - JavaScript route definitions
-        - Sitemap.xml content
+        - <link> tag hrefs
+        - URLs in JavaScript
+        - sitemap.xml entries
 
         Args:
-            snapshot: Historical snapshot to parse
+            snapshot: Historical snapshot to parse (must have content)
 
         Returns:
-            List of discovered endpoints
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
+            List of discovered endpoint paths
         """
         if snapshot.content is None:
             return []
 
-        raise NotImplementedError(
-            "Wrapper-only: Sitemap parsing implementation deferred. "
-            "Future implementation should use BeautifulSoup for HTML parsing."
+        endpoints: Set[str] = set()
+
+        # Get base URL for resolving relative paths
+        parsed_url = urlparse(snapshot.url)
+        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+        # Try BeautifulSoup parsing if available
+        if BS4_AVAILABLE:
+            try:
+                soup = BeautifulSoup(snapshot.content, "html.parser")
+
+                # Extract hrefs from <a> tags
+                for anchor in soup.find_all("a", href=True):
+                    href = anchor["href"]
+                    if href.startswith("/"):
+                        endpoints.add(href)
+                    elif href.startswith(base_url):
+                        endpoints.add(urlparse(href).path or "/")
+
+                # Extract hrefs from <link> tags
+                for link in soup.find_all("link", href=True):
+                    href = link["href"]
+                    if href.startswith("/"):
+                        endpoints.add(href)
+
+                # Extract action attributes from forms
+                for form in soup.find_all("form", action=True):
+                    action = form["action"]
+                    if action.startswith("/"):
+                        endpoints.add(action)
+
+            except Exception as e:
+                logger.warning(f"[TimeMachine] BeautifulSoup parsing error: {e}")
+
+        # Regex fallback for URL extraction
+        url_pattern = re.compile(
+            r'(?:href|src|action)=["\']([^"\']+)["\']',
+            re.IGNORECASE
         )
+
+        for match in url_pattern.finditer(snapshot.content):
+            url = match.group(1)
+            if url.startswith("/"):
+                endpoints.add(url)
+            elif url.startswith(base_url):
+                endpoints.add(urlparse(url).path or "/")
+
+        # Extract API-style paths from JavaScript
+        api_pattern = re.compile(
+            r'["\'](/api/[^"\']+)["\']|["\'](/v\d+/[^"\']+)["\']',
+            re.IGNORECASE
+        )
+        for match in api_pattern.finditer(snapshot.content):
+            for group in match.groups():
+                if group:
+                    endpoints.add(group)
+
+        return sorted(endpoints)
 
     def replay(self, recorded_query: Dict[str, Any]) -> List[SnapshotResult]:
         """
@@ -335,15 +683,28 @@ class TimeMachine:
             recorded_query: Serialized SnapshotQuery from to_dict()
 
         Returns:
-            List of snapshot results (would be loaded from storage)
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
+            List of snapshot results (reconstructed from storage)
         """
-        raise NotImplementedError(
-            "Wrapper-only: Query replay implementation deferred. "
-            "Future implementation should load results from evidence store."
-        )
+        # Reconstruct SnapshotResults from stored data
+        results: List[SnapshotResult] = []
+
+        stored_results = recorded_query.get("results", [])
+        for data in stored_results:
+            try:
+                result = SnapshotResult(
+                    source=ArchiveSource(data["source"]),
+                    timestamp=datetime.fromisoformat(data["timestamp"]),
+                    url=data["url"],
+                    content_type=data.get("content_type", "unknown"),
+                    status_code=data.get("status_code", 0),
+                    content=data.get("content"),
+                    size_bytes=data.get("size_bytes", 0),
+                )
+                results.append(result)
+            except (KeyError, ValueError) as e:
+                logger.warning(f"[TimeMachine] Failed to replay result: {e}")
+
+        return results
 
     def get_statistics(self) -> Dict[str, Any]:
         """
@@ -356,6 +717,8 @@ class TimeMachine:
             "query_count": self._query_count,
             "last_query_time": self._last_query_time.isoformat() if self._last_query_time else None,
             "safe_mode": self._safe_mode,
+            "rate_limit": self._rate_limit,
+            "cache_size": len(self._cache),
         }
 
 

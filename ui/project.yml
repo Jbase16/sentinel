@@ -30,7 +30,7 @@ targets:
       - framework: Metal.framework
       - framework: MetalKit.framework
       - framework: SwiftUI.framework
-      - framework: RealityKit.framework
+
     settings:
       base:
         PRODUCT_NAME: SentinelForge

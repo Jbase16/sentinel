@@ -29,7 +29,7 @@ INTEGRATION POINTS:
 - DecisionLedger: Logs probing decisions and confidence scores
 - KnowledgeGraph: Stores confirmed zombie endpoint nodes
 
-DEPENDENCIES (Future):
+DEPENDENCIES:
 - aiohttp: Async HTTP client for efficient probing
 - asyncio: For concurrent request handling
 """
@@ -38,16 +38,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse, urljoin
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 # Safety fuse: prevents unsafe operations
 SAFE_MODE: bool = True
 
 logger = logging.getLogger(__name__)
+
+# Default configuration
+DEFAULT_MAX_CONCURRENT = 5
+DEFAULT_RATE_LIMIT = 5  # requests per second
+DEFAULT_TIMEOUT = 10  # seconds
 
 
 class ActiveStatus(str, Enum):

@@ -214,6 +214,24 @@ class SitemapDiffer:
         """Get number of comparisons performed."""
         return self._comparison_count
 
+    def _build_signature_map(
+        self,
+        endpoints: List[Endpoint]
+    ) -> Dict[str, Endpoint]:
+        """
+        Build a map from endpoint signatures to endpoints.
+
+        The signature is "{method}:{path}" which uniquely identifies
+        an endpoint for comparison purposes.
+
+        Args:
+            endpoints: List of endpoints to map
+
+        Returns:
+            Dictionary mapping signatures to endpoints
+        """
+        return {ep.signature: ep for ep in endpoints}
+
     def compare_sets(
         self,
         old_sitemap: List[Endpoint],
@@ -225,9 +243,11 @@ class SitemapDiffer:
         """
         Compare historical and current sitemaps.
 
-        TODO: Implement set difference calculation.
-        TODO: Implement parameter change detection for "modified" status.
-        TODO: Implement confidence scoring based on sample size.
+        Performs set-based analysis to categorize endpoints as:
+        - Deleted: In old but not in new (zombie candidates)
+        - Stable: In both old and new
+        - Added: In new but not in old
+        - Modified: Same path but different parameters
 
         Args:
             old_sitemap: Endpoints from historical snapshot
@@ -238,9 +258,6 @@ class SitemapDiffer:
 
         Returns:
             DiffReport with categorized endpoints
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
         """
         # Validate target in safe mode
         if self._safe_mode:
@@ -254,15 +271,66 @@ class SitemapDiffer:
         self._comparison_count += 1
 
         # Emit event (integration point)
-        logger.debug(
+        logger.info(
             f"[SitemapDiffer] {self.EVENT_DIFF_STARTED}: "
             f"target={target}, old_count={len(old_sitemap)}, new_count={len(new_sitemap)}"
         )
 
-        raise NotImplementedError(
-            "Wrapper-only: Set comparison implementation deferred. "
-            "Future implementation should use set operations for O(n) complexity."
+        # Build signature maps for O(1) lookups
+        old_map = self._build_signature_map(old_sitemap)
+        new_map = self._build_signature_map(new_sitemap)
+
+        old_sigs = set(old_map.keys())
+        new_sigs = set(new_map.keys())
+
+        # Set operations for categorization
+        deleted_sigs = old_sigs - new_sigs
+        added_sigs = new_sigs - old_sigs
+        common_sigs = old_sigs & new_sigs
+
+        # Categorize endpoints
+        deleted: List[Endpoint] = [old_map[sig] for sig in deleted_sigs]
+        added: List[Endpoint] = [new_map[sig] for sig in added_sigs]
+        stable: List[Endpoint] = []
+        modified: List[Endpoint] = []
+
+        # Check common endpoints for parameter changes
+        for sig in common_sigs:
+            old_ep = old_map[sig]
+            new_ep = new_map[sig]
+
+            if self.detect_parameter_changes(old_ep, new_ep):
+                modified.append(new_ep)
+            else:
+                stable.append(new_ep)
+
+        # Calculate confidence
+        overlap_ratio = len(common_sigs) / max(len(old_sigs), 1)
+        confidence = self.calculate_confidence(
+            len(old_sitemap),
+            len(new_sitemap),
+            overlap_ratio
         )
+
+        # Build report
+        report = DiffReport(
+            target=target,
+            timestamp_past=timestamp_past or datetime.utcnow(),
+            timestamp_present=timestamp_present or datetime.utcnow(),
+            deleted=deleted,
+            stable=stable,
+            added=added,
+            modified=modified,
+            confidence=confidence,
+        )
+
+        logger.info(
+            f"[SitemapDiffer] {self.EVENT_DIFF_COMPLETED}: "
+            f"deleted={len(deleted)}, stable={len(stable)}, "
+            f"added={len(added)}, modified={len(modified)}"
+        )
+
+        return report
 
     def get_deleted_paths(
         self,
@@ -275,24 +343,21 @@ class SitemapDiffer:
         These are the "zombie" candidates - endpoints removed from
         documentation but potentially still active.
 
-        TODO: Implement A - B set difference.
-        TODO: Filter by method (GET vs POST matters).
-        TODO: Return sorted by risk score (if available).
-
         Args:
             old_sitemap: Historical endpoints
             new_sitemap: Current endpoints
 
         Returns:
-            List of deleted endpoints
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
+            List of deleted endpoints, sorted by path
         """
-        raise NotImplementedError(
-            "Wrapper-only: Deleted path extraction deferred. "
-            "Future implementation should use set(old_sitemap) - set(new_sitemap)."
-        )
+        old_map = self._build_signature_map(old_sitemap)
+        new_map = self._build_signature_map(new_sitemap)
+
+        deleted_sigs = set(old_map.keys()) - set(new_map.keys())
+        deleted = [old_map[sig] for sig in deleted_sigs]
+
+        # Sort by path for consistent ordering
+        return sorted(deleted, key=lambda ep: ep.path)
 
     def get_stable_paths(
         self,
@@ -304,22 +369,44 @@ class SitemapDiffer:
 
         These represent stable, maintained API surfaces.
 
-        TODO: Implement A & B set intersection.
+        Args:
+            old_sitemap: Historical endpoints
+            new_sitemap: Current endpoints
+
+        Returns:
+            List of stable endpoints, sorted by path
+        """
+        old_map = self._build_signature_map(old_sitemap)
+        new_map = self._build_signature_map(new_sitemap)
+
+        common_sigs = set(old_map.keys()) & set(new_map.keys())
+        stable = [new_map[sig] for sig in common_sigs]
+
+        # Sort by path for consistent ordering
+        return sorted(stable, key=lambda ep: ep.path)
+
+    def get_added_paths(
+        self,
+        old_sitemap: List[Endpoint],
+        new_sitemap: List[Endpoint]
+    ) -> List[Endpoint]:
+        """
+        Find endpoints that are new in the present.
 
         Args:
             old_sitemap: Historical endpoints
             new_sitemap: Current endpoints
 
         Returns:
-            List of stable endpoints
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
+            List of added endpoints, sorted by path
         """
-        raise NotImplementedError(
-            "Wrapper-only: Stable path extraction deferred. "
-            "Future implementation should use set(old_sitemap) & set(new_sitemap)."
-        )
+        old_map = self._build_signature_map(old_sitemap)
+        new_map = self._build_signature_map(new_sitemap)
+
+        added_sigs = set(new_map.keys()) - set(old_map.keys())
+        added = [new_map[sig] for sig in added_sigs]
+
+        return sorted(added, key=lambda ep: ep.path)
 
     def detect_parameter_changes(
         self,
@@ -332,24 +419,26 @@ class SitemapDiffer:
         This identifies cases where the path remains the same but
         the interface has evolved (e.g., added required parameters).
 
-        TODO: Implement parameter comparison logic.
-        TODO: Detect parameter type changes (string -> int).
-        TODO: Detect parameter requirement changes (optional -> required).
-
         Args:
             old_endpoint: Historical endpoint definition
             new_endpoint: Current endpoint definition
 
         Returns:
             True if parameters differ significantly
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Parameter change detection deferred. "
-            "Future implementation should compare parameter lists and metadata."
-        )
+        # Compare parameter lists
+        old_params = set(old_endpoint.parameters)
+        new_params = set(new_endpoint.parameters)
+
+        # Any difference in parameters counts as a change
+        if old_params != new_params:
+            return True
+
+        # Check for method changes (if somehow same signature but different method)
+        if old_endpoint.method != new_endpoint.method:
+            return True
+
+        return False
 
     def calculate_confidence(
         self,
@@ -364,8 +453,10 @@ class SitemapDiffer:
         - Large sample sizes (more endpoints = better comparison)
         - High overlap ratio (stable comparison baseline)
 
-        TODO: Implement confidence scoring algorithm.
-        TODO: Adjust based on source reliability (sitemap vs scraped).
+        The formula combines:
+        - Sample size factor: log10(min_size + 1) / 3 (scales 0-1 for 1-1000 endpoints)
+        - Overlap factor: sqrt(overlap_ratio) (rewards high overlap)
+        - Combined: 0.4 * sample_factor + 0.6 * overlap_factor
 
         Args:
             old_sample_size: Number of historical endpoints
@@ -374,14 +465,30 @@ class SitemapDiffer:
 
         Returns:
             Confidence score from 0.0 to 1.0
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Confidence calculation deferred. "
-            "Future implementation should use weighted sample size and overlap metrics."
-        )
+        import math
+
+        # Edge case: empty sitemaps
+        if old_sample_size == 0 and new_sample_size == 0:
+            return 0.0
+
+        if old_sample_size == 0 or new_sample_size == 0:
+            # Only one side has data - low confidence
+            return 0.2
+
+        # Sample size factor (logarithmic scaling)
+        # log10(1001) ≈ 3, so divide by 3 to normalize
+        min_size = min(old_sample_size, new_sample_size)
+        sample_factor = min(math.log10(min_size + 1) / 3, 1.0)
+
+        # Overlap factor (square root to reward high overlap)
+        overlap_factor = math.sqrt(overlap_ratio)
+
+        # Combined score (weighted average)
+        confidence = 0.4 * sample_factor + 0.6 * overlap_factor
+
+        # Clamp to [0, 1]
+        return max(0.0, min(1.0, confidence))
 
     def replay(self, recorded_diff: Dict[str, Any]) -> DiffReport:
         """
@@ -394,13 +501,27 @@ class SitemapDiffer:
 
         Returns:
             Reconstructed DiffReport
-
-        Raises:
-            NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Diff replay implementation deferred. "
-            "Future implementation should deserialize from evidence store."
+        def parse_endpoint(data: Dict[str, Any]) -> Endpoint:
+            """Parse endpoint from dict."""
+            return Endpoint(
+                path=data["path"],
+                method=data.get("method", "GET"),
+                parameters=data.get("parameters", []),
+                first_seen=datetime.fromisoformat(data["first_seen"]) if data.get("first_seen") else None,
+                last_seen=datetime.fromisoformat(data["last_seen"]) if data.get("last_seen") else None,
+                source=data.get("source", "unknown"),
+            )
+
+        return DiffReport(
+            target=recorded_diff["target"],
+            timestamp_past=datetime.fromisoformat(recorded_diff["timestamp_past"]),
+            timestamp_present=datetime.fromisoformat(recorded_diff["timestamp_present"]),
+            deleted=[parse_endpoint(ep) for ep in recorded_diff.get("deleted", [])],
+            stable=[parse_endpoint(ep) for ep in recorded_diff.get("stable", [])],
+            added=[parse_endpoint(ep) for ep in recorded_diff.get("added", [])],
+            modified=[parse_endpoint(ep) for ep in recorded_diff.get("modified", [])],
+            confidence=recorded_diff.get("confidence", 1.0),
         )
 
     def get_statistics(self) -> Dict[str, Any]:
