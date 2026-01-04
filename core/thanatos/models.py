@@ -28,6 +28,7 @@ class InvariantClass(str, Enum):
     AUTHZ_BOUNDARY = "AUTHZ_BOUNDARY"                        # caller cannot do admin-only action
     AUTHZ_EFFECT_SCOPE = "AUTHZ_EFFECT_SCOPE"                # authorized caller cannot affect out-of-scope entities
     TENANT_ISOLATION = "TENANT_ISOLATION"                    # cross-tenant access is impossible
+    DATA = "DATA"                                            # General data integrity (types, boundaries)
 
 
 class MutationOpType(str, Enum):
