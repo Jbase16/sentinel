@@ -261,7 +261,7 @@ public class EventStreamClient: ObservableObject {
     }
 
     private func consumeStream() async throws {
-        let url = baseURL.appendingPathComponent("/events/stream")
+        let url = baseURL.appendingPathComponent("/v1/events/stream")
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "since", value: "\(lastSequence)")]
 

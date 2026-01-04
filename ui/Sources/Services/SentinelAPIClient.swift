@@ -66,7 +66,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Health check - does not require authentication
     public func ping() async -> Bool {
-        guard let url = URL(string: "/ping", relativeTo: baseURL) else { return false }
+        guard let url = URL(string: "/v1/ping", relativeTo: baseURL) else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         do {
@@ -87,7 +87,7 @@ public struct SentinelAPIClient: Sendable {
     public func startScan(target: String, modules: [String] = [], mode: String = "standard")
         async throws
     {
-        guard let url = URL(string: "/scan", relativeTo: baseURL) else { return }
+        guard let url = URL(string: "/v1/scan", relativeTo: baseURL) else { return }
         var request = authenticatedRequest(url: url, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -104,7 +104,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Request best-effort scan cancellation.
     public func cancelScan() async throws {
-        guard let url = URL(string: "/cancel", relativeTo: baseURL) else { return }
+        guard let url = URL(string: "/v1/cancel", relativeTo: baseURL) else { return }
         let request = authenticatedRequest(url: url, method: "POST")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.badStatus }
@@ -119,7 +119,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Pull any buffered log lines from Python since the last call.
     public func fetchLogs() async throws -> [String] {
-        guard let url = URL(string: "/logs", relativeTo: baseURL) else { return [] }
+        guard let url = URL(string: "/v1/logs", relativeTo: baseURL) else { return [] }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -131,7 +131,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Fetch lightweight engine + AI status (model availability, running scan).
     public func fetchStatus() async throws -> EngineStatus? {
-        guard let url = URL(string: "/status", relativeTo: baseURL) else { return nil }
+        guard let url = URL(string: "/v1/status", relativeTo: baseURL) else { return nil }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -140,9 +140,23 @@ public struct SentinelAPIClient: Sendable {
         return try JSONDecoder().decode(EngineStatus.self, from: data)
     }
 
+    /// Fetch dedicated AI status (including Circuit Breaker)
+    /// NEW: Trinity of Hardening - Chapter 19
+    public func fetchAIStatus() async throws -> AIStatusResponse {
+        guard let url = URL(string: "/v1/ai/status", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
+        let request = authenticatedRequest(url: url, method: "GET")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw APIError.badStatus
+        }
+        return try JSONDecoder().decode(AIStatusResponse.self, from: data)
+    }
+
     /// Fetch the latest scan snapshot (findings/issues/killchain/phase_results).
     public func fetchResults() async throws -> SentinelResults? {
-        guard let url = URL(string: "/results", relativeTo: baseURL) else { return nil }
+        guard let url = URL(string: "/v1/results", relativeTo: baseURL) else { return nil }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { return nil }
@@ -156,7 +170,7 @@ public struct SentinelAPIClient: Sendable {
     /// Install selected tools
     public func installTools(_ tools: [String]) async throws -> [InstallResult] {
         struct InstallResponse: Decodable { let results: [InstallResult] }
-        guard let url = URL(string: "/tools/install", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/tools/install", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         var request = authenticatedRequest(url: url, method: "POST")
@@ -172,7 +186,7 @@ public struct SentinelAPIClient: Sendable {
     /// Uninstall selected tools
     public func uninstallTools(_ tools: [String]) async throws -> [InstallResult] {
         struct InstallResponse: Decodable { let results: [InstallResult] }
-        guard let url = URL(string: "/tools/uninstall", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/tools/uninstall", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         var request = authenticatedRequest(url: url, method: "POST")
@@ -199,7 +213,7 @@ public struct SentinelAPIClient: Sendable {
     /// Start the passive interception proxy (Ghost Protocol).
     /// - Returns: The listening port, if provided by the backend.
     public func startGhost(port: Int = 8080) async throws -> Int? {
-        guard let base = URL(string: "/ghost/start", relativeTo: baseURL),
+        guard let base = URL(string: "/v1/ghost/start", relativeTo: baseURL),
             var components = URLComponents(url: base, resolvingAgainstBaseURL: true)
         else { throw APIError.badStatus }
 
@@ -218,7 +232,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Stop the passive interception proxy (Ghost Protocol).
     public func stopGhost() async throws -> Bool {
-        guard let url = URL(string: "/ghost/stop", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/ghost/stop", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         let request = authenticatedRequest(url: url, method: "POST")
@@ -235,7 +249,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Record a user flow for Logic Fuzzing (FlowMapper).
     public func startGhostRecording(flowName: String) async throws -> Bool {
-        guard let url = URL(string: "/ghost/record/\(flowName)", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/ghost/record/\(flowName)", relativeTo: baseURL) else {
             return false
         }
         let request = authenticatedRequest(url: url, method: "POST")
@@ -251,7 +265,7 @@ public struct SentinelAPIClient: Sendable {
             let mission_id: String
         }
 
-        guard let base = URL(string: "/mission/start", relativeTo: baseURL),
+        guard let base = URL(string: "/v1/mission/start", relativeTo: baseURL),
             var components = URLComponents(url: base, resolvingAgainstBaseURL: true)
         else { throw APIError.badStatus }
         components.queryItems = [URLQueryItem(name: "target", value: target)]
@@ -266,7 +280,7 @@ public struct SentinelAPIClient: Sendable {
     // MARK: - Chat & AI
 
     public func chatQuery(question: String) async throws -> String {
-        guard let url = URL(string: "/chat/query", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/chat/query", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         var request = authenticatedRequest(url: url, method: "POST")
@@ -289,7 +303,7 @@ public struct SentinelAPIClient: Sendable {
         print("[Swift] Attempting to stream chat...")
         return AsyncThrowingStream { continuation in
             let task = Task {
-                guard let url = URL(string: "/chat", relativeTo: baseURL) else {
+                guard let url = URL(string: "/v1/chat", relativeTo: baseURL) else {
                     continuation.finish(throwing: APIError.badStatus)
                     return
                 }
@@ -326,7 +340,7 @@ public struct SentinelAPIClient: Sendable {
     // MARK: - Forge (Exploit Compilation)
 
     public func compileExploit(target: String, anomaly: String) async throws -> String {
-        guard let url = URL(string: "/forge/compile", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/forge/compile", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         var request = authenticatedRequest(url: url, method: "POST")
@@ -354,7 +368,7 @@ public struct SentinelAPIClient: Sendable {
     public func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                guard let url = URL(string: "/events", relativeTo: baseURL) else {
+                guard let url = URL(string: "/v1/events", relativeTo: baseURL) else {
                     continuation.finish(throwing: APIError.badStatus)
                     return
                 }
@@ -391,7 +405,9 @@ public struct SentinelAPIClient: Sendable {
 
     /// Approve a pending action
     public func approveAction(id: String) async throws {
-        guard let url = URL(string: "/actions/\(id)/approve", relativeTo: baseURL) else { return }
+        guard let url = URL(string: "/v1/actions/\(id)/approve", relativeTo: baseURL) else {
+            return
+        }
         let request = authenticatedRequest(url: url, method: "POST")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -401,7 +417,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Deny a pending action
     public func denyAction(id: String) async throws {
-        guard let url = URL(string: "/actions/\(id)/deny", relativeTo: baseURL) else { return }
+        guard let url = URL(string: "/v1/actions/\(id)/deny", relativeTo: baseURL) else { return }
         let request = authenticatedRequest(url: url, method: "POST")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -417,7 +433,7 @@ public struct SentinelAPIClient: Sendable {
             let task = Task {
                 guard
                     let url = URL(
-                        string: "/report/generate?section=\(section)", relativeTo: baseURL)
+                        string: "/v1/report/generate?section=\(section)", relativeTo: baseURL)
                 else {
                     continuation.finish(throwing: APIError.badStatus)
                     return
@@ -693,4 +709,18 @@ public enum APIError: Error {
     case badStatus
     case unauthorized
     case tokenNotFound
+}
+
+// MARK: - Dedicated Response Models
+
+public struct AIStatusResponse: Decodable {
+    public let provider: String
+    public let model: String
+    public let connected: Bool
+    public let circuitBreaker: CircuitBreakerState
+
+    enum CodingKeys: String, CodingKey {
+        case provider, model, connected
+        case circuitBreaker = "circuit_breaker"
+    }
 }
