@@ -2274,16 +2274,49 @@ async def ws_graph_endpoint(websocket: WebSocket):
         return  # Connection was closed by validator
 
     await websocket.accept()
-    from core.cortex.memory import KnowledgeGraph
+    await websocket.accept()
+    
+    from core.data.pressure_graph.manager import PressureGraphManager
+    from core.data.db import Database
+    
     # Error handling block.
     try:
+        # Determine session to stream
+        session_id = _scan_state.get("session_id")
+        
+        # If no active scan, find latest
+        if not session_id:
+            db = Database.instance()
+            if not db._initialized:
+                await db.init()
+            rows = await db.fetch_all("SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1")
+            if rows:
+                session_id = rows[0][0]
+                
+        if not session_id:
+            # Nothing to stream
+            while True:
+                await websocket.send_json({"nodes": [], "edges": []})
+                await asyncio.sleep(5)
+                
+        # Polling loop
+        manager = PressureGraphManager(session_id)
+        
         while True:
-            # Stream the graph state every 500ms
-            graph_data = KnowledgeGraph.instance().export_json()
+            # Reload from DB to capture scanner updates
+            await manager._load_state()
+            
+            graph_data = manager.to_dict()
             await websocket.send_json(graph_data)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         logger.info("Graph WS disconnected")
+    except Exception as e:
+        logger.error(f"Graph WS error: {e}")
+        try:
+            await websocket.close()
+        except:
+            pass
 
 @v1_router.websocket("/ws/terminal")
 @app.websocket("/ws/terminal")

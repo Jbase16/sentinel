@@ -105,6 +105,14 @@ class ScanSession:
         from core.wraith.automator import WraithAutomator
         self.wraith = WraithAutomator(self)
 
+        from core.data.pressure_graph.manager import PressureGraphManager
+        self.pressure_graph = PressureGraphManager(
+            session_id=self.id,
+            issues_store=self.issues,
+            killchain_store=self.killchain,
+            findings_store=self.findings
+        )
+
     @property
     def session_id(self) -> str:
         """Alias for self.id for compatibility with scanner_engine."""

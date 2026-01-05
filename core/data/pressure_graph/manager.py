@@ -49,16 +49,23 @@ class PressureGraphManager(Observable):
     
     graph_updated = Signal()
     
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: str, issues_store=None, killchain_store=None, findings_store=None):
         """
         Initialize pressure graph manager.
         
         Args:
             session_id: Sentinel session ID
+            issues_store: Optional specific issues store to watch
+            killchain_store: Optional specific killchain store to watch
+            findings_store: Optional specific findings store to watch
         """
         super().__init__()
         self.session_id = session_id
         self.db = Database.instance()
+        
+        self._issues_store = issues_store
+        self._killchain_store = killchain_store
+        self._findings_store = findings_store
         
         # Graph data
         self.nodes: Dict[str, PressureNode] = {}
@@ -179,16 +186,72 @@ class PressureGraphManager(Observable):
         
         await self.db.save_graph_snapshot(self.session_id, nodes_data, edges_data)
 
+    def to_dict(self) -> dict:
+        """Return graph state as DTO-compatible dict."""
+        return {
+            "session_id": self.session_id,
+            "nodes": [
+                {
+                    "id": n.id,
+                    "type": n.type,
+                    "label": f"{n.type}:{n.id}",
+                    "data": {
+                        "severity": n.severity,
+                        "exposure": n.exposure,
+                        "exploitability": n.exploitability,
+                        "privilege_gain": n.privilege_gain,
+                        "asset_value": n.asset_value,
+                        "tool_reliability": n.tool_reliability,
+                        "evidence_quality": n.evidence_quality,
+                        "corroboration_count": n.corroboration_count,
+                        "pressure_source": n.pressure_source.value,
+                        "remediation_state": n.remediation_state.value,
+                        "revision": n.revision
+                    }
+                }
+                for n in self.nodes.values()
+            ],
+            "edges": [
+                {
+                    "id": e.id,
+                    "source": e.source_id,
+                    "target": e.target_id,
+                    "type": e.type.value,
+                    "weight": e.transfer_factor,
+                    "data": {
+                        "confidence": e.confidence,
+                        "evidence_sources": e.evidence_sources,
+                        "created_at": e.created_at
+                    }
+                }
+                for e in self.edges.values()
+            ],
+            "count": {
+                "nodes": len(self.nodes),
+                "edges": len(self.edges)
+            }
+        }
+
 
     
     def _connect_stores(self):
         """Connect to Sentinel store change signals."""
-        if issues_store and hasattr(issues_store, 'issues_changed'):
-            issues_store.issues_changed.connect(self._on_issues_changed)
+        # Issues Store
+        store = self._issues_store if self._issues_store else issues_store
+        if store and hasattr(store, 'issues_changed'):
+            store.issues_changed.connect(self._on_issues_changed)
         
-        if killchain_store and hasattr(killchain_store, 'edges_changed'):
-            killchain_store.edges_changed.connect(self._on_killchain_changed)
+        # Killchain Store
+        k_store = self._killchain_store if self._killchain_store else killchain_store
+        if k_store and hasattr(k_store, 'edges_changed'):
+            k_store.edges_changed.connect(self._on_killchain_changed)
     
+        # Findings Store
+        f_store = self._findings_store if self._findings_store else None
+        # Note: we don't default to global findings_store to avoid noise from raw tools
+        if f_store and hasattr(f_store, 'findings_changed'):
+            f_store.findings_changed.connect(self._on_findings_changed)
+            
     def _initialize_engines(self):
         """Initialize sub-engines when graph has data."""
         if self._engines_initialized:
@@ -280,6 +343,37 @@ class PressureGraphManager(Observable):
         if self.crown_jewel_ids:
             self.recompute_pressure()
         
+        self.graph_updated.emit()
+    
+        self.graph_updated.emit()
+        
+    def _on_findings_changed(self):
+        """
+        Handle new findings from findings_store.
+        Converts findings to pressure nodes (treating them as potential issues).
+        """
+        store = self._findings_store
+        if not store:
+            return
+            
+        try:
+            findings = store.get_all()
+        except Exception:
+            return
+            
+        for finding in findings:
+            # Reusing issue conversion logic as structure is compatible
+            node = self._issue_to_pressure_node(finding)
+            self.nodes[node.id] = node
+            
+        self._initialize_engines()
+        
+        if self.crown_jewel_ids:
+            self.recompute_pressure()
+        else:
+            # Always persist structure even if no pressure computed
+            create_safe_task(self.save_snapshot(), name="graph_snapshot_findings")
+            
         self.graph_updated.emit()
     
     def _issue_to_pressure_node(self, issue: dict) -> PressureNode:
