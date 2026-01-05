@@ -1047,6 +1047,11 @@ async def get_status_v1(_: bool = Depends(verify_token)):
         },
     }
 
+@v1_router.get("/ai/status")
+async def get_ai_status_v1(_: bool = Depends(verify_token)):
+    """API v1: Get AI engine status."""
+    return _ai_status()
+
 @v1_router.get("/tools/status")
 async def tools_status_v1(_: bool = Depends(verify_token)):
     """API v1: Get installed tools status."""

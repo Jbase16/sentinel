@@ -52,6 +52,29 @@ class CircuitBreakerOpenError(Exception):
     pass
 
 
+def _extract_json_payload(text: str) -> str:
+    """Best-effort JSON extraction from model output."""
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 3:
+            cleaned = "\n".join(lines[1:-1]).strip()
+
+    start_positions = [pos for pos in (cleaned.find("{"), cleaned.find("[")) if pos != -1]
+    if not start_positions:
+        return cleaned
+
+    start = min(start_positions)
+    end_positions = [pos for pos in (cleaned.rfind("}"), cleaned.rfind("]")) if pos != -1]
+    if not end_positions:
+        return cleaned[start:].strip()
+
+    end = max(end_positions)
+    if end <= start:
+        return cleaned[start:].strip()
+    return cleaned[start:end + 1].strip()
+
+
 class CircuitBreaker:
     """
     Circuit breaker pattern to prevent cascading failures.
@@ -187,7 +210,10 @@ class OllamaClient:
                 resp = client.post(url, json=payload)
                 if resp.status_code == 200:
                     result = resp.json()
-                    return result.get('response')
+                    response = result.get('response')
+                    if force_json and response:
+                        return _extract_json_payload(response)
+                    return response
         except Exception as e:
             logger.error(f"Ollama API error: {e}")
             return None
@@ -324,6 +350,9 @@ class AIEngine:
         self.client = None
         # Circuit breaker to prevent cascading failures from unresponsive AI
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, timeout=60.0)
+        self._connect_lock = threading.Lock()
+        self._last_connect_attempt = 0.0
+        self._reconnect_interval = 5.0
 
         # Conditional branch.
         if AI_PROVIDER == "ollama":
@@ -335,10 +364,35 @@ class AIEngine:
                 # Wrap the client in the circuit breaker proxy
                 self.client = ProtectedOllamaClient(raw_client, self.circuit_breaker)
 
+    def ensure_client(self) -> None:
+        """Attempt to (re)connect to Ollama if the client is missing."""
+        if self.client is not None:
+            return
+        if AI_PROVIDER != "ollama":
+            return
+
+        now = time.time()
+        if now - self._last_connect_attempt < self._reconnect_interval:
+            return
+
+        with self._connect_lock:
+            now = time.time()
+            if now - self._last_connect_attempt < self._reconnect_interval:
+                return
+            self._last_connect_attempt = now
+
+            raw_client = OllamaClient(OLLAMA_URL, AI_MODEL)
+            if not raw_client.check_connection():
+                logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
+                return
+
+            self.client = ProtectedOllamaClient(raw_client, self.circuit_breaker)
+
     def deobfuscate_code(self, code_snippet: str) -> str:
         """
         Specialized pipeline for JS de-obfuscation.
         """
+        self.ensure_client()
         # Conditional branch.
         if not self.client:
             return ""
@@ -368,6 +422,7 @@ class AIEngine:
     # ---------------------------------------------------------
     def status(self) -> Dict[str, object]:
         """Function status."""
+        self.ensure_client()
         connected = self.client is not None
         status = {
             "provider": AI_PROVIDER,
@@ -411,6 +466,7 @@ class AIEngine:
         """
         Stream answer to a natural-language question based on stored evidence & findings.
         """
+        self.ensure_client()
         question = (question or "").strip()
         findings = findings_store.get_all()
         
@@ -480,6 +536,7 @@ class AIEngine:
         """
         Primary handler for all tool outputs.
         """
+        self.ensure_client()
 
         # Step 1: store raw evidence
         evidence_id = EvidenceStore.instance().add_evidence(
@@ -616,6 +673,7 @@ class AIEngine:
         """
         Generates a professional executive summary based on findings and issues.
         """
+        self.ensure_client()
         # Conditional branch.
         if not self.client:
             return self._generate_fallback_summary(findings, issues)
@@ -650,7 +708,7 @@ class AIEngine:
 
         # Error handling block.
         try:
-            result = self.client.generate(user_prompt, system_prompt)
+            result = self.client.generate_text(user_prompt, system_prompt)
             return result if result else self._generate_fallback_summary(findings, issues)
         except Exception as e:
             logger.error(f"Report generation failed: {e}")
@@ -815,6 +873,7 @@ class AIEngine:
         Answer a natural-language question based on stored evidence & findings.
         Uses LLM if available.
         """
+        self.ensure_client()
         question = (question or "").strip()
         evidence = EvidenceStore.instance().get_all()
         findings = findings_store.get_all()

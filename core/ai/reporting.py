@@ -91,6 +91,7 @@ class ReportComposer:
             return "Section not implemented."
 
         # Conditional branch.
+        self.ai.ensure_client()
         if not self.ai.client:
             return self._fallback_content(section_name, context)
 
@@ -102,7 +103,7 @@ class ReportComposer:
             "Use Markdown formatting."
         )
         
-        return self.ai.client.generate(user_prompt, system_prompt) or "AI Generation failed."
+        return self.ai.client.generate_text(user_prompt, system_prompt) or "AI Generation failed."
 
     def _gather_context(self) -> Dict:
         """Function _gather_context."""

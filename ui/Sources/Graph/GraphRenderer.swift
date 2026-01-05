@@ -310,6 +310,7 @@ class GraphRenderer: NSObject {
         // Color by severity
         let color = colorForSeverity(severity)
 
+        let newNode = Node(
             position: SIMD4<Float>(x, y, 0, 35.0),
             color: color,
             physics: SIMD4<Float>(50.0, 0.0, 0.0, 0.0) // Significant mass for findings
@@ -329,6 +330,7 @@ class GraphRenderer: NSObject {
         // Guard condition.
         guard let target = event.payload["target"]?.stringValue else { return }
 
+        let targetNode = Node(
             position: SIMD4<Float>(0, 0, 0, 50.0),
             color: SIMD4<Float>(1.0, 0.3, 0.3, 1.0),  // Red center
             physics: SIMD4<Float>(100.0, 0.0, 0.0, 1.0) // Massive Anchor
@@ -515,21 +517,10 @@ class GraphRenderer: NSObject {
             let z = node.z ?? Float.random(in: -0.5...0.5)
 
             // Use pre-computed color or fallback
-            // Ensure alpha is sufficient for visibility
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
 
-            // Physics from NodeModel (if available) -> assuming NodeModel has `data` dict or props
-            // Actually, we must update CortexStream.NodeModel first to expose these.
-            // For now, default to (1,0,0,0).
-            // UPDATE: Assuming CortexStream.NodeModel has `metadata` [String:AnyCodable]? 
-            // Or `data` which is `PressureNodeDataDTO`.
-            // Let's assume we will update CortexStream next.
-            let mass = node.mass ?? 1.0
-            let charge = node.charge ?? 0.0
-            let temp = node.temperature ?? 0.0
-            let structural = (node.structural ?? false) ? 1.0 : 0.0
-            
-            let physics = SIMD4<Float>(Float(mass), Float(charge), Float(temp), Float(structural))
+            // Default physics until NodeModel exposes more attributes
+            let physics = SIMD4<Float>(1.0, 0.0, 0.0, 0.0)
 
             // Pack size (30.0)
             return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color, physics: physics)

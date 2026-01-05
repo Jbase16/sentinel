@@ -38,6 +38,20 @@ def find_binary(binary: str) -> Optional[str]:
         venv_bin_alt = Path(sys.prefix) / "bin" / binary
         if venv_bin_alt.exists() and os.access(venv_bin_alt, os.X_OK):
             return str(venv_bin_alt)
+    
+    # Check Common System Paths (Homebrew, MacPorts, Linux)
+    # This covers cases where PATH might be stripped or weird in the subprocess
+    common_paths = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/sbin",
+    ]
+    for base in common_paths:
+        candidate = Path(base) / binary
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
 
     return None
 
@@ -158,8 +172,11 @@ TOOLS: Dict[str, Dict] = {
         "target_type": "domain",
     },
     "httpx": {
-        "label": "httpx (HTTP probing)",
-        "cmd": ["httpx", "{target}"],
+        "label": "httpx (Headed probing via curl)",
+        "cmd": [
+            "curl", "-s", "-I", "-L", "-m", "5",
+            "{target}"
+        ],
         "aggressive": False,
         "target_type": "url",
     },

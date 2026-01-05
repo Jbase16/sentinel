@@ -135,6 +135,7 @@ class StrategyEngine:
             return []
 
         # Try AI first, fall back to heuristics
+        self.ai.ensure_client()
         if self.ai.client:
             try:
                 vectors = await self._analyze_with_ai(flow_data)

@@ -44,6 +44,7 @@ class GraphAwareChat:
         """
         Answers user questions with full context of the current mission.
         """
+        self.ai.ensure_client()
         # 1. Gather Context
         context_data = self._gather_context()
         
@@ -65,7 +66,7 @@ class GraphAwareChat:
         
         # 3. Generate Answer
         if self.ai.client:
-            return self.ai.client.generate(user_prompt, system_prompt) or "My neural link is currently offline."
+            return self.ai.client.generate_text(user_prompt, system_prompt) or "My neural link is currently offline."
         
         return "AI Engine not connected."
 

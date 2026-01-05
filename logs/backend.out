@@ -1,0 +1,23 @@
+INFO:     Started server process [20928]
+INFO:     Waiting for application startup.
+2026-01-04 18:50:23,145 [INFO] core.server.api: SentinelForge API Starting on 127.0.0.1:8765
+2026-01-04 18:50:23,147 [INFO] core.data.migrations.migration_runner: [MigrationRunner] Initialized for /Users/jason/.sentinelforge/sentinel.db
+2026-01-04 18:50:23,147 [INFO] core.data.migrations.migration_runner: [MigrationRunner] Migrations directory: /Users/jason/Developer/sentinelforge/core/data/migrations
+2026-01-04 18:50:23,147 [INFO] core.data.migrations.migration_runner: [MigrationRunner] Current schema version: 2
+2026-01-04 18:50:23,148 [INFO] core.data.migrations.migration_runner: [MigrationRunner] Discovered 3 migrations
+2026-01-04 18:50:23,148 [INFO] core.data.migrations.migration_runner: [MigrationRunner] Applying migration 003_add_evidence_hashes
+2026-01-04 18:50:23,148 [ERROR] core.data.migrations.migration_runner: [MigrationRunner] ❌ Failed to apply 003_add_evidence_hashes: Cannot add a column with non-constant default
+2026-01-04 18:50:23,149 [WARNING] core.data.db: [Database] Migration runner failed (non-fatal): Cannot add a column with non-constant default
+2026-01-04 18:50:23,149 [INFO] core.data.blackbox: [BlackBox] Writer loop started.
+2026-01-04 18:50:23,149 [INFO] core.data.db: Database initialized at /Users/jason/.sentinelforge/sentinel.db (WAL mode)
+2026-01-04 18:50:23,155 [INFO] core.base.sequence: [SequenceAuthority] Loaded from database: 10195, next ID will be 10196
+2026-01-04 18:50:23,156 [INFO] core.cortex.policy_watcher: [PolicyWatcher] Started watching assets/laws
+2026-01-04 18:50:23,156 [INFO] core.server.api: [Startup] Policy file watcher started
+2026-01-04 18:50:23,156 [INFO] core.server.api: Session cleanup task started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
+2026-01-04 18:50:38,682 [INFO] httpx: HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+2026-01-04 18:50:38,694 [INFO] httpx: HTTP Request: GET http://localhost:11434/api/tags "HTTP/1.1 200 OK"
+INFO:     127.0.0.1:59522 - "GET /v1/ai/status HTTP/1.1" 200 OK
+2026-01-04 18:50:45,255 [INFO] core.ai.ai_engine: Ollama Request: http://localhost:11434/api/generate | Model: sentinel-9b-god-tier
+INFO:     127.0.0.1:59528 - "POST /v1/chat HTTP/1.1" 200 OK

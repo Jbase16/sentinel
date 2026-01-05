@@ -106,6 +106,7 @@ class AdversarialDebate:
         blue_arguments = []
         
         # Check if AI is available
+        self.ai.ensure_client()
         if not self.ai.client:
             logger.warning("[Debate] AI unavailable - using static analysis only")
             return self._static_debate(exploit_code, target_context)
