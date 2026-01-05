@@ -27,6 +27,7 @@ from .propagator import PressurePropagator
 from .counterfactual import CounterfactualEngine
 from .min_fix_set import MinimalFixSetEngine
 from .explanation import CausalExplainer
+from core.cortex.events import get_event_bus, GraphEventType, GraphEvent
 # ... imports continue ...
 
 
@@ -118,7 +119,11 @@ class PressureGraphManager(Observable):
                 evidence_quality=n["data"].get("evidence_quality", 0.8),
                 corroboration_count=n["data"].get("corroboration_count", 0),
                 pressure_source=PressureSource(n["data"].get("pressure_source", "engine")),
-                remediation_state=RemediationState(n["data"].get("remediation_state", "none"))
+                remediation_state=RemediationState(n["data"].get("remediation_state", "none")),
+                mass=n["data"].get("mass", 1.0),
+                charge=n["data"].get("charge", 0.0),
+                temperature=n["data"].get("temperature", 0.0),
+                structural=n["data"].get("structural", False)
             )
             self.nodes[node.id] = node
             
@@ -162,7 +167,11 @@ class PressureGraphManager(Observable):
                     "corroboration_count": n.corroboration_count,
                     "pressure_source": n.pressure_source.value,
                     "remediation_state": n.remediation_state.value,
-                    "revision": n.revision
+                    "revision": n.revision,
+                    "mass": n.mass,
+                    "charge": n.charge,
+                    "temperature": n.temperature,
+                    "structural": n.structural
                 }
             }
             for n in self.nodes.values()
@@ -206,7 +215,11 @@ class PressureGraphManager(Observable):
                         "corroboration_count": n.corroboration_count,
                         "pressure_source": n.pressure_source.value,
                         "remediation_state": n.remediation_state.value,
-                        "revision": n.revision
+                        "revision": n.revision,
+                        "mass": n.mass,
+                        "charge": n.charge,
+                        "temperature": n.temperature,
+                        "structural": n.structural
                     }
                 }
                 for n in self.nodes.values()
@@ -251,6 +264,12 @@ class PressureGraphManager(Observable):
         # Note: we don't default to global findings_store to avoid noise from raw tools
         if f_store and hasattr(f_store, 'findings_changed'):
             f_store.findings_changed.connect(self._on_findings_changed)
+            
+        # Wire EventBus for Physics (Friction/Dynamics)
+        try:
+            get_event_bus().subscribe(self._on_event)
+        except Exception:
+            pass
             
     def _initialize_engines(self):
         """Initialize sub-engines when graph has data."""
@@ -375,6 +394,114 @@ class PressureGraphManager(Observable):
             create_safe_task(self.save_snapshot(), name="graph_snapshot_findings")
             
         self.graph_updated.emit()
+        
+    def ingest_findings(self, findings: list[dict]):
+        """
+        Manually ingest a list of findings (e.g. from HTTP hydrator).
+        """
+        for finding in findings:
+            node = self._issue_to_pressure_node(finding)
+            self.nodes[node.id] = node
+            
+        self._initialize_engines()
+        
+        if self.crown_jewel_ids:
+            self.recompute_pressure()
+        else:
+            create_safe_task(self.save_snapshot(), name="graph_snapshot_ingested")
+            
+        self.graph_updated.emit()
+    
+    def _on_event(self, event: GraphEvent):
+        """
+        Handle real-time events for physics effects.
+        
+        Currently handles:
+        - TOOL_COMPLETED (Error) -> Friction Node
+        - SCAN_FAILED -> Catastrophic Friction
+        """
+        payload = event.payload
+        if payload.get("session_id") != self.session_id:
+            return
+            
+        if event.type == GraphEventType.TOOL_COMPLETED:
+            if payload.get("exit_code", 0) != 0:
+                self._create_friction_node(
+                    tool=payload.get("tool", "unknown"),
+                    # Target usually in payload or we infer from context
+                    target=payload.get("target") or "unknown_target"
+                )
+        
+        elif event.type == GraphEventType.SCAN_FAILED:
+            self._create_friction_node(
+                tool="scanner_engine",
+                target=payload.get("target", "system"),
+                is_catastrophic=True
+            )
+
+    def _create_friction_node(self, tool: str, target: str, is_catastrophic: bool = False):
+        """
+        Materialize a failure as a physical object in the graph.
+        
+        Physics:
+        - High Temperature (Vibration)
+        - High Mass (Drag)
+        - Connected via High Tension edge to Target
+        """
+        # Node ID unique to this failure instance
+        import time
+        node_id = f"friction_{tool}_{int(time.time()*1000)}"
+        
+        mass = 50.0 if is_catastrophic else 10.0
+        temp = 1.0 # Max vibration
+        
+        node = PressureNode(
+            id=node_id,
+            type="friction",
+            severity=5.0, # Semantic severity
+            exposure=1.0, # Visible
+            exploitability=0.0,
+            privilege_gain=0.0,
+            asset_value=0.0,
+            tool_reliability=1.0,
+            evidence_quality=1.0,
+            corroboration_count=0,
+            pressure_source=PressureSource.ENGINE, 
+            remediation_state=RemediationState.NONE,
+            revision=1,
+            mass=mass,
+            charge=0.0,
+            temperature=temp,
+            structural=False
+        )
+        self.nodes[node_id] = node
+        
+        # Link to target (Gravity Well)
+        # We need to find the node ID for the target.
+        # Simple heuristic: exact match or find asset node.
+        # If target node not found, attached to "unknown" anchor?
+        target_id = None
+        for nid, n in self.nodes.items():
+            if n.type == 'asset' or n.id == target:
+                target_id = nid
+                break
+        
+        if target_id:
+            edge_id = f"tension_{node_id}_{target_id}"
+            edge = PressureEdge(
+                id=edge_id,
+                source_id=target_id, # Anchor pulls on friction
+                target_id=node_id,
+                type=EdgeType.REQUIRES, # "Drag" relationship
+                transfer_factor=1.0,
+                confidence=1.0,
+                evidence_sources=["physics_engine"],
+                created_at=time.time()
+            )
+            self.edges[edge_id] = edge
+            
+        create_safe_task(self.save_snapshot(), name="graph_snapshot_friction")
+        self.graph_updated.emit()
     
     def _issue_to_pressure_node(self, issue: dict) -> PressureNode:
         """
@@ -435,6 +562,32 @@ class PressureGraphManager(Observable):
         
         # Asset value: default to medium
         asset_value = 5.0
+
+        # Calculate Mass/Charge/Temp based on semantics
+        mass = 1.0
+        charge = 0.0
+        temperature = 0.0
+        structural = False
+        
+        if severity >= 9.0: # Critical
+            mass = 50.0
+        elif severity >= 7.0: # High
+            mass = 25.0
+        elif severity >= 5.0: # Medium
+            mass = 10.0
+        else:
+            mass = 5.0
+            
+        if issue_type == 'asset':
+            mass = 100.0  # Gravity Well
+            charge = 10.0 # Slight attraction
+            
+        if issue_type == 'vulnerability':
+            charge = -5.0 # Slight repulsion (bad thing)
+            
+        if issue_type == 'trust':
+            structural = True
+            mass = 20.0
         
         # Evidence quality and tool reliability
         evidence_quality = 0.8  # Default
@@ -459,7 +612,11 @@ class PressureGraphManager(Observable):
             corroboration_count=corroboration_count,
             pressure_source=PressureSource.ENGINE, 
             remediation_state=RemediationState.NONE,
-            revision=1
+            revision=1,
+            mass=mass,
+            charge=charge,
+            temperature=temperature,
+            structural=structural
         )
     
     def _killchain_to_pressure_edge(self, edge: dict) -> PressureEdge:

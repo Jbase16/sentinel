@@ -66,6 +66,12 @@ class PressureNode:
     remediation_state: RemediationState = RemediationState.NONE
     revision: int = 1
     
+    # Physics Properties (Semantic Pressure Dynamics)
+    mass: float = 1.0        # Inertia/Weight (Target=100, Finding=10)
+    charge: float = 0.0      # Repulsion/Attraction (Veto=-50)
+    temperature: float = 0.0 # Instability/Vibration (Failed Tool=1.0)
+    structural: bool = False # Rigid support beam (Evidence)
+    
     # Computed Field (set once in __post_init__)
     base_pressure: float = field(init=False)
     

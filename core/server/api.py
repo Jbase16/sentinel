@@ -1175,6 +1175,18 @@ async def get_graph(
     db = Database.instance()
     nodes, edges = await db.load_graph_snapshot(sid)
 
+    # Hydration Fallback: If snapshot empty but findings exist, reconstruct graph
+    if not nodes:
+        findings = await db.get_findings(sid)
+        if findings:
+            from core.data.pressure_graph.manager import PressureGraphManager
+            # Reconstruct on the fly
+            # We don't need full FindingsStore object, just raw dicts for ingestion
+            manager = PressureGraphManager(session_id=sid)
+            manager.ingest_findings(findings)
+            # ingest_findings triggers save_snapshot() in background
+            return manager.to_dict()
+
     return {
         "session_id": sid,
         "nodes": nodes,
@@ -2278,6 +2290,7 @@ async def ws_graph_endpoint(websocket: WebSocket):
     
     from core.data.pressure_graph.manager import PressureGraphManager
     from core.data.db import Database
+    from core.data.findings_store import FindingsStore
     
     # Error handling block.
     try:
@@ -2299,16 +2312,21 @@ async def ws_graph_endpoint(websocket: WebSocket):
                 await websocket.send_json({"nodes": [], "edges": []})
                 await asyncio.sleep(5)
                 
-        # Polling loop
-        manager = PressureGraphManager(session_id)
+        # Initialize Graph Manager with FindingsStore for hydration
+        f_store = FindingsStore(session_id=session_id)
+        manager = PressureGraphManager(session_id=session_id, findings_store=f_store)
         
+        # Start streaming loop
         while True:
-            # Reload from DB to capture scanner updates
-            await manager._load_state()
+            # Poll for updates (Manager will self-update from stores) Or use signal?
+            # Existing logic uses manager.to_dict() which is populated.
             
-            graph_data = manager.to_dict()
-            await websocket.send_json(graph_data)
-            await asyncio.sleep(1.0)
+            # Since manager.load_state() is async in background, we might send empty first.
+            # But f_store will trigger update shortly.
+            
+            data = manager.to_dict()
+            await websocket.send_json(data)
+            await asyncio.sleep(1.0) # 1Hz refresh
     except WebSocketDisconnect:
         logger.info("Graph WS disconnected")
     except Exception as e:
