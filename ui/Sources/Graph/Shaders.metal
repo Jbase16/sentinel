@@ -10,6 +10,7 @@ using namespace metal;
 struct VertexIn {
     float4 position [[attribute(0)]]; // xyz = pos, w = size
     float4 color [[attribute(1)]];
+    float4 physics [[attribute(2)]];  // x=mass, y=charge, z=temp, w=structural
 };
 
 struct VertexOut {
@@ -35,16 +36,29 @@ vertex VertexOut vertex_main(
     
     // Animate Position (Subtle "Breathing" Data)
     float3 pos = in.position.xyz; // Unpack xyz
-    float size = in.position.w;   // Unpack size
+    float baseSize = in.position.w;   // Unpack size
     
-    float breath = sin(time * 1.5 + pos.x * 5.0 + pos.y * 3.0) * 0.05;
-    pos *= (1.0 + breath * 0.2);
+    // Physics Properties
+    float mass = in.physics.x;        // Gravity
+    float charge = in.physics.y;      // Polarity
+    float temperature = in.physics.z; // Friction/Heat
+    // float structural = in.physics.w;  // 1.0 = Rigid
+    
+    // VIBRATION (Temperature)
+    // High temperature (Friction) causes violent vibration
+    float vibration = 0.05 + (temperature * 0.5); // Baseline breath + Friction
+    float breath = sin(time * (1.5 + temperature * 10.0) + pos.x * 5.0 + pos.y * 3.0) * vibration;
+    pos += float3(breath * 0.5, breath * 0.5, 0.0);
+    
+    // GRAVITY (Mass)
+    // Heavier nodes are larger visually
+    float visualSize = baseSize + (mass * 0.5);
     
     // Project to Screen
     out.position = viewProjectionMatrix * float4(pos, 1.0);
     
     // Size attenuation based on depth
-    out.size = max(5.0, size * (100.0 / (out.position.w + 0.1)));
+    out.size = max(5.0, visualSize * (100.0 / (out.position.w + 0.1)));
     
     out.color = in.color;
     return out;

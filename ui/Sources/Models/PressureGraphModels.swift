@@ -44,12 +44,19 @@ public struct PressureNodeDataDTO: Decodable, Sendable {
     public let pressureSource: String
     public let revision: Int
 
+    // Physics Properties
+    public let mass: Double?
+    public let charge: Double?
+    public let temperature: Double?
+    public let structural: Bool?
+
     enum CodingKeys: String, CodingKey {
         case severity, exposure, exploitability
         case privilegeGain = "privilege_gain"
         case assetValue = "asset_value"
         case pressureSource = "pressure_source"
         case revision
+        case mass, charge, temperature, structural
     }
 }
 

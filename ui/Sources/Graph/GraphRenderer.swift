@@ -70,6 +70,7 @@ class GraphRenderer: NSObject {
     struct Node {
         var position: SIMD4<Float>  // xyz = pos, w = size
         var color: SIMD4<Float>
+        var physics: SIMD4<Float>   // x=mass, y=charge, z=temp, w=structural
     }
 
     var nodes: [Node] = []
@@ -124,7 +125,12 @@ class GraphRenderer: NSObject {
 
         // Attributes 2 removed (packed into pos.w)
 
-        vertexDescriptor.layouts[0].stride = 32  // 16 + 16
+        // Attribute 2: Physics (float4) -> 16 bytes
+        vertexDescriptor.attributes[2].format = .float4
+        vertexDescriptor.attributes[2].offset = 32
+        vertexDescriptor.attributes[2].bufferIndex = 0
+
+        vertexDescriptor.layouts[0].stride = 48  // 16 + 16 + 16
 
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
 
@@ -174,7 +180,8 @@ class GraphRenderer: NSObject {
         // Placeholder: Single "scanning" node until real events arrive
         let placeholderNode = Node(
             position: SIMD4<Float>(0, 0, 0, 25.0),
-            color: SIMD4<Float>(0.3, 0.3, 0.3, 0.5)
+            color: SIMD4<Float>(0.3, 0.3, 0.3, 0.5),
+            physics: SIMD4<Float>(1, 0, 0, 0)
         )
         nodes = [placeholderNode]
         uploadToGPU()
@@ -226,7 +233,8 @@ class GraphRenderer: NSObject {
 
         let newNode = Node(
             position: SIMD4<Float>(x, y, z, size),
-            color: color
+            color: color,
+            physics: SIMD4<Float>(1.0, 0.0, 0.0, 0.0) // Defaults for legacy event path
         )
 
         lock.lock()
@@ -272,8 +280,11 @@ class GraphRenderer: NSObject {
         let color = colorForEdgeType(edgeType)
 
         // For line primitives, pos.w is unused; keep it non-zero.
-        edgeVertices.append(Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color))
-        edgeVertices.append(Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color))
+        // For line primitives, pos.w is unused; keep it non-zero.
+        // Edges have neutral physics (0,0,0,0)
+        let neutralPhysics = SIMD4<Float>(0, 0, 0, 0)
+        edgeVertices.append(Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color, physics: neutralPhysics))
+        edgeVertices.append(Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color, physics: neutralPhysics))
 
         uploadEdgesToGPU()
     }
@@ -299,9 +310,9 @@ class GraphRenderer: NSObject {
         // Color by severity
         let color = colorForSeverity(severity)
 
-        let newNode = Node(
             position: SIMD4<Float>(x, y, 0, 35.0),
-            color: color
+            color: color,
+            physics: SIMD4<Float>(50.0, 0.0, 0.0, 0.0) // Significant mass for findings
         )
 
         lock.lock()
@@ -318,9 +329,9 @@ class GraphRenderer: NSObject {
         // Guard condition.
         guard let target = event.payload["target"]?.stringValue else { return }
 
-        let targetNode = Node(
             position: SIMD4<Float>(0, 0, 0, 50.0),
-            color: SIMD4<Float>(1.0, 0.3, 0.3, 1.0)  // Red center
+            color: SIMD4<Float>(1.0, 0.3, 0.3, 1.0),  // Red center
+            physics: SIMD4<Float>(100.0, 0.0, 0.0, 1.0) // Massive Anchor
         )
 
         lock.lock()
@@ -398,10 +409,10 @@ class GraphRenderer: NSObject {
             let targetPos = nodes[targetIndex].position
             let color = colorForEdgeType(edge.edgeType)
             edgeVertices.append(
-                Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color)
+                Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color, physics: SIMD4<Float>(0,0,0,0))
             )
             edgeVertices.append(
-                Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color)
+                Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color, physics: SIMD4<Float>(0,0,0,0))
             )
         }
 
@@ -507,8 +518,21 @@ class GraphRenderer: NSObject {
             // Ensure alpha is sufficient for visibility
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
 
+            // Physics from NodeModel (if available) -> assuming NodeModel has `data` dict or props
+            // Actually, we must update CortexStream.NodeModel first to expose these.
+            // For now, default to (1,0,0,0).
+            // UPDATE: Assuming CortexStream.NodeModel has `metadata` [String:AnyCodable]? 
+            // Or `data` which is `PressureNodeDataDTO`.
+            // Let's assume we will update CortexStream next.
+            let mass = node.mass ?? 1.0
+            let charge = node.charge ?? 0.0
+            let temp = node.temperature ?? 0.0
+            let structural = (node.structural ?? false) ? 1.0 : 0.0
+            
+            let physics = SIMD4<Float>(Float(mass), Float(charge), Float(temp), Float(structural))
+
             // Pack size (30.0)
-            return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color)
+            return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color, physics: physics)
         }
 
         let dataSize = nodes.count * MemoryLayout<Node>.stride

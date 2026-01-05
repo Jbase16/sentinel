@@ -38,6 +38,12 @@ class CortexStream: ObservableObject {
         var y: Float?
         var z: Float?  // Added for 3D
         var color: SIMD4<Float>?  // Computable
+
+        // Physics
+        var mass: Float?
+        var charge: Float?
+        var temperature: Float?
+        var structural: Bool?
     }
 
     /// Struct GraphData.
@@ -217,7 +223,11 @@ class CortexStream: ObservableObject {
                 x: base.x,
                 y: base.y,
                 z: base.z,
-                color: color
+                color: color,
+                mass: Float(node.data.mass ?? 1.0),
+                charge: Float(node.data.charge ?? 0.0),
+                temperature: Float(node.data.temperature ?? 0.0),
+                structural: node.data.structural
             )
         }
 
