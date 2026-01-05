@@ -260,38 +260,50 @@ class EventBus:
 
     # --- Convenience Methods ---
 
-    def emit_decision_made(self, intent: str, reason: str, context: Dict, source: str = "strategos"):
+    def emit_decision_made(self, intent: str, reason: str, context: Dict, source: str = "strategos", session_id: Optional[str] = None):
         """Function emit_decision_made."""
+        payload = {
+            "intent": intent,
+            "reason": reason,
+            "context": context,
+            "source": source
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
         self.emit(GraphEvent(
             type=GraphEventType.DECISION_MADE,
-            payload={
-                "intent": intent,
-                "reason": reason,
-                "context": context,
-                "source": source
-            }
+            payload=payload
         ))
 
-    def emit_narrative_emitted(self, narrative: str, decision_id: str, decision_type: str, context: Dict):
+    def emit_narrative_emitted(self, narrative: str, decision_id: str, decision_type: str, context: Dict, session_id: Optional[str] = None):
         """Function emit_narrative_emitted."""
+        payload = {
+            "narrative": narrative,
+            "decision_id": decision_id,
+            "decision_type": decision_type,
+            "context": context
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
         self.emit(GraphEvent(
             type=GraphEventType.NARRATIVE_EMITTED,
-            payload={
-                "narrative": narrative,
-                "decision_id": decision_id,
-                "decision_type": decision_type,
-                "context": context
-            }
+            payload=payload
         ))
 
-    def emit_scan_phase_changed(self, phase: str, previous_phase: Optional[str] = None):
+    def emit_scan_phase_changed(self, phase: str, previous_phase: Optional[str] = None, session_id: Optional[str] = None):
         """Function emit_scan_phase_changed."""
+        payload = {
+            "phase": phase,
+            "previous_phase": previous_phase
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
         self.emit(GraphEvent(
             type=GraphEventType.SCAN_PHASE_CHANGED,
-            payload={
-                "phase": phase,
-                "previous_phase": previous_phase
-            }
+            payload=payload
         ))
 
     def emit_scan_started(self, target: str, allowed_tools: List[str], session_id: str):
@@ -305,37 +317,49 @@ class EventBus:
             }
         ))
 
-    def emit_scan_completed(self, status: str, findings_count: int, duration: float):
+    def emit_scan_completed(self, status: str, findings_count: int, duration: float, session_id: Optional[str] = None):
         """Function emit_scan_completed."""
+        payload = {
+            "status": status,
+            "findings_count": findings_count,
+            "duration_seconds": duration
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
         self.emit(GraphEvent(
             type=GraphEventType.SCAN_COMPLETED,
-            payload={
-                "status": status,
-                "findings_count": findings_count,
-                "duration_seconds": duration
-            }
+            payload=payload
         ))
 
-    def emit_tool_invoked(self, tool: str, target: str, args: List[str]):
+    def emit_tool_invoked(self, tool: str, target: str, args: List[str], session_id: Optional[str] = None):
         """Function emit_tool_invoked."""
+        payload = {
+            "tool": tool,
+            "target": target,
+            "args": args
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
         self.emit(GraphEvent(
             type=GraphEventType.TOOL_STARTED,
-            payload={
-                "tool": tool,
-                "target": target,
-                "args": args
-            }
+            payload=payload
         ))
 
-    def emit_tool_completed(self, tool: str, exit_code: int, findings_count: int):
+    def emit_tool_completed(self, tool: str, exit_code: int, findings_count: int, session_id: Optional[str] = None):
         """Function emit_tool_completed."""
+        payload = {
+            "tool": tool,
+            "exit_code": exit_code,
+            "findings_count": findings_count
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
         self.emit(GraphEvent(
             type=GraphEventType.TOOL_COMPLETED,
-            payload={
-                "tool": tool,
-                "exit_code": exit_code,
-                "findings_count": findings_count
-            }
+            payload=payload
         ))
 
     # --- CRONUS Event Convenience Methods ---

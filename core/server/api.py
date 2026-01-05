@@ -359,7 +359,7 @@ async def _begin_scan(req: ScanRequest) -> str:
 
                     # Error handling block.
                     try:
-                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[])
+                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], session_id=session.id)
 
                         if _cancel_requested.is_set():
                             exit_code = 130
@@ -392,7 +392,7 @@ async def _begin_scan(req: ScanRequest) -> str:
                     finally:
                         try:
                             event_bus.emit_tool_completed(
-                                tool=tool, exit_code=exit_code, findings_count=len(findings)
+                                tool=tool, exit_code=exit_code, findings_count=len(findings), session_id=session.id
                             )
                         except Exception as emit_exc:
                             logger.error(
@@ -414,14 +414,14 @@ async def _begin_scan(req: ScanRequest) -> str:
                 _scan_state["summary"] = session.to_dict()
 
                 duration = time.time() - start_time
-                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration)
+                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, session_id=session.id)
 
             except asyncio.CancelledError:
                 _scan_state["status"] = "cancelled"
                 _scan_state["summary"] = session.to_dict()
 
                 duration = time.time() - start_time
-                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration)
+                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, session_id=session.id)
 
             except Exception as e:
                 _scan_state["status"] = "error"
@@ -433,7 +433,7 @@ async def _begin_scan(req: ScanRequest) -> str:
                 try:
                     event_bus.emit(GraphEvent(
                         type=GraphEventType.SCAN_FAILED,
-                        payload={"error": str(e), "target": req.target}
+                        payload={"error": str(e), "target": req.target, "session_id": session.id}
                     ))
                 except Exception:
                     pass
@@ -2462,6 +2462,7 @@ async def events(request: Request, _: bool = Depends(verify_token)):
 async def events_stream(
     request: Request,
     since: int = Query(default=0, description="Sequence number to replay from"),
+    session_id: Optional[str] = Query(default=None, description="Filter events by session ID"),
     _: bool = Depends(verify_token),
 ):
     """
@@ -2495,12 +2496,18 @@ async def events_stream(
             for stored in missed_events:
                 if await request.is_disconnected():
                     return
+                # Filter by session_id if provided
+                if session_id and stored.event.payload.get("session_id") != session_id:
+                    continue
                 yield f"event: {stored.event.type.value}\ndata: {stored.to_json()}\n\n"
             
             # Phase 2: Stream live events
             async for stored in event_store.subscribe():
                 if await request.is_disconnected():
                     break
+                # Filter by session_id if provided
+                if session_id and stored.event.payload.get("session_id") != session_id:
+                    continue
                 yield f"event: {stored.event.type.value}\ndata: {stored.to_json()}\n\n"
                 
         except asyncio.CancelledError:
