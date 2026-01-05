@@ -1,4 +1,4 @@
-FROM /Volumes/ByteMe/SentinelForge/models/sentinel-9b-god-tier.gguf
+FROM /Volumes/ByteMe/SentinelForge/models/sentinel-9b-god-tier-Q4_K_M.gguf
 
 # PARAMETERS
 PARAMETER temperature 0.2
