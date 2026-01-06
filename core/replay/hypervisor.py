@@ -238,10 +238,23 @@ class ReplayEngine:
             action = block.payload.get("action")
             
             if action == "promote":
+                # Rehydrate Citation objects
+                raw_citations = block.payload.get("citations", [])
+                citations = []
+                # Import here to avoid circular dependencies if any, or assume imported
+                # We need Citation class. Check imports.
+                from core.epistemic.ledger import Citation
+                
+                for c in raw_citations:
+                    if isinstance(c, dict):
+                         citations.append(Citation(**c))
+                    else:
+                        citations.append(c)
+
                 ledger.promote_finding(
                     title=block.payload.get("title"),
                     severity=block.payload.get("severity"),
-                    citations=block.payload.get("citations", []), # Need to rehydrate Citation objects?
+                    citations=citations,
                     description=block.payload.get("description"),
                     timestamp_override=timestamp,
                     **block.payload.get("metadata", {})
