@@ -269,66 +269,7 @@ class OllamaClient:
         except Exception:
             return False
 
-class ProtectedOllamaClient:
-    """
-    Proxy wrapper for OllamaClient that enforces CircuitBreaker logic.
 
-    Interferes in all calls to 'generate' and 'stream_generate' to ensure
-    cascading failures are stopped, even if the client is accessed directly.
-    """
-    def __init__(self, client: OllamaClient, breaker: CircuitBreaker):
-        self._client = client
-        self._breaker = breaker
-
-    def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
-        """Wrapper for generate with circuit breaker."""
-        if self._breaker.is_open():
-            logger.warning("[AI] Circuit breaker open - blocking generate()")
-            return None
-        
-        try:
-            # We don't use breaker.call() here because OllamaClient swallows exceptions
-            # and returns None on error. We need to manually check that return value.
-            result = self._client.generate(prompt, system, force_json)
-            if result is None:
-                self._breaker.on_failure()
-            else:
-                self._breaker.on_success()
-            return result
-        except Exception:
-            self._breaker.on_failure()
-            # OllamaClient usually swallows exceptions, but if it leaks, we catch it.
-            return None
-
-    def generate_text(self, prompt: str, system: str = "") -> Optional[str]:
-        """Wrapper for generate_text."""
-        return self.generate(prompt, system, force_json=False)
-
-    async def stream_generate(self, prompt: str, system: str = "") -> AsyncGenerator[str, None]:
-        """wrapper for stream_generate with circuit breaker."""
-        if self._breaker.is_open():
-            yield "[AI unavailable - circuit breaker open]"
-            return
-
-        # We assume connection creation is the main failure point
-        try:
-            # Note: The generator itself is lazy. The real work happens during iteration.
-            # Ideally we'd wrap the iterator, but simple wrapping catches connection errors.
-            async for chunk in self._client.stream_generate(prompt, system):
-                # Basic heuristic: if chunk looks like our hardcoded error, count as fail
-                if isinstance(chunk, str) and chunk.startswith("[Error:"):
-                     self._breaker.on_failure()
-                else:
-                    self._breaker.on_success() # Reset on *any* successful chunk? Or just once?
-                    # Let's reset on success to allow recovery.
-                yield chunk
-        except Exception:
-            self._breaker.on_failure()
-            yield "[AI unavailable - stream error]"
-
-    def __getattr__(self, name):
-        """Delegate other attributes (like 'model', 'base_url') to the underlying client."""
-        return getattr(self._client, name)
 class AIEngine:
     """
     Central analysis engine.
@@ -361,8 +302,7 @@ class AIEngine:
                 logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
                 self.client = None
             else:
-                # Wrap the client in the circuit breaker proxy
-                self.client = ProtectedOllamaClient(raw_client, self.circuit_breaker)
+                self.client = raw_client
 
     def ensure_client(self) -> None:
         """Attempt to (re)connect to Ollama if the client is missing."""
@@ -386,17 +326,48 @@ class AIEngine:
                 logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
                 return
 
-            self.client = ProtectedOllamaClient(raw_client, self.circuit_breaker)
+            self.client = raw_client
+
+    def safe_generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
+        """
+        Unified, safe point of entry for all LLM generation.
+        Enforces:
+        1. Circuit Breaker (Fast failure when system is unstable)
+        2. Connection Liveness
+        3. Standard Error Handling
+        """
+        self.ensure_client()
+        
+        if not self.client:
+            return None
+            
+        if self.circuit_breaker.is_open():
+            logger.warning("[AI] Circuit breaker open - blocking generation request")
+            return None
+            
+        try:
+            # Execute generation
+            result = self.client.generate(prompt, system, force_json)
+            
+            # Update circuit breaker state based on result
+            if result is None:
+                self.circuit_breaker.on_failure()
+                logger.warning("[AI] Generation failed (returned None)")
+            else:
+                self.circuit_breaker.on_success()
+                
+            return result
+            
+        except Exception as e:
+            self.circuit_breaker.on_failure()
+            logger.error(f"[AI] Safe generation error: {e}")
+            return None
 
     def deobfuscate_code(self, code_snippet: str) -> str:
         """
         Specialized pipeline for JS de-obfuscation.
         """
-        self.ensure_client()
-        # Conditional branch.
-        if not self.client:
-            return ""
-
+        # Call safe_generate directly
         system_prompt = (
             "You are a Reverse Engineering Expert. "
             "Your task is to de-obfuscate JavaScript code. "
@@ -405,17 +376,10 @@ class AIEngine:
             "3. Format the code with proper indentation. "
             "Return ONLY the clean code. No markdown blocks, no preamble."
         )
-
         user_prompt = f"Code:\n{code_snippet}"
 
-        try:
-            result = self.circuit_breaker.call(
-                self.client.generate_text, user_prompt, system_prompt
-            )
-            return result or ""
-        except CircuitBreakerOpenError:
-            logger.warning("Circuit breaker open - deobfuscation unavailable")
-            return "[AI unavailable - circuit breaker open]"
+        result = self.safe_generate(user_prompt, system_prompt, force_json=False)
+        return result or "[AI unavailable]"
 
     # ---------------------------------------------------------
     # Status helpers for UI/IPC
@@ -424,9 +388,12 @@ class AIEngine:
         """Function status."""
         self.ensure_client()
         connected = self.client is not None
+        # model attribute might be direct now if client is standard OllamaClient
+        model_name = getattr(self.client, "model", AI_MODEL) if self.client else AI_MODEL
+        
         status = {
             "provider": AI_PROVIDER,
-            "model": getattr(self.client, "model", AI_MODEL),
+            "model": model_name,
             "connected": connected,
             "fallback_enabled": AI_FALLBACK_ENABLED,
             "circuit_breaker": self.circuit_breaker.get_state(),
@@ -638,7 +605,7 @@ class AIEngine:
             "Analyze this output. Provide findings and recommended next steps."
         )
 
-        response_json = self.client.generate(user_prompt, system_prompt)
+        response_json = self.safe_generate(user_prompt, system_prompt, force_json=True)
         if not response_json:
             return {"proposals": [], "next_steps": []}
 
@@ -721,15 +688,9 @@ class AIEngine:
         """
         Generates a professional executive summary based on findings and issues.
         """
-        self.ensure_client()
-        # Conditional branch.
-        if not self.client:
-            return self._generate_fallback_summary(findings, issues)
-
         # Summarize data to fit context window
         summary_text = f"Total Findings: {len(findings)}\nTotal Issues: {len(issues)}\n\n"
         
-        # Conditional branch.
         if issues:
             summary_text += "Key Issues:\n"
             for i in issues[:10]:  # Top 10 issues
@@ -741,6 +702,7 @@ class AIEngine:
         else:
             return "No significant findings to report."
 
+        # Try safe generation first
         system_prompt = (
             "You are a lead penetration tester writing an executive summary for a client. "
             "Write a professional, concise narrative summarizing the security posture based on the findings provided. "
@@ -753,14 +715,10 @@ class AIEngine:
             f"Assessment Data:\n{summary_text}\n\n"
             "Write the Executive Summary:"
         )
-
-        # Error handling block.
-        try:
-            result = self.client.generate_text(user_prompt, system_prompt)
-            return result if result else self._generate_fallback_summary(findings, issues)
-        except Exception as e:
-            logger.error(f"Report generation failed: {e}")
-            return self._generate_fallback_summary(findings, issues)
+        
+        # Call safe_generate
+        result = self.safe_generate(user_prompt, system_prompt, force_json=False)
+        return result if result else self._generate_fallback_summary(findings, issues)
     
     def _generate_fallback_summary(self, findings: List[Dict], issues: List[Dict]) -> str:
         """Generate a basic summary when AI is unavailable"""
