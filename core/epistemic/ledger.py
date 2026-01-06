@@ -30,6 +30,7 @@ class LifecycleState(str, Enum):
     REJECTED = "rejected"       # Proven false (e.g. sensor glitch)
 
 
+
 @dataclass(frozen=True)
 class ToolContext:
     name: str
@@ -43,15 +44,13 @@ class Observation:
     """
     Atomic, immutable capture of raw tool output.
     Identified by a deterministic hash of its content.
+    NO MUTABLE STATE IN THIS CLASS.
     """
     id: str  # Deterministic hash (e.g. sha256 of tool+args+blob)
     timestamp: float
     tool: ToolContext
     target: str
     blob_hash: str  # Pointer to CAS content
-    
-    # Metadata for quick filtering
-    lifecycle: LifecycleState = field(default=LifecycleState.OBSERVED)
 
 
 @dataclass
@@ -80,10 +79,24 @@ class Finding:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class StateRecord:
+    """
+    Mutable state wrapper for any epistemic entity (Observation or Finding).
+    """
+    entity_id: str
+    state: LifecycleState
+    reason: Optional[str] = None
+    decider: str = "system"
+    timestamp: float = field(default_factory=time.time)
+
+from core.epistemic.events import EpistemicConflict
+
 @dataclass
 class WhyNot:
     """
     Explanation for why an Observation was NOT promoted to a Finding.
+    Now just a specialized view of a 'SUPPRESSED' state record.
     """
     id: str
     related_id: str  # Observation ID or Finding ID
@@ -96,16 +109,24 @@ class WhyNot:
 class EvidenceLedger:
     """
     Authoritative store for Sentinel's epistemic state.
+    Manages:
+    1. Immutable Evidence (CAS + Observations)
+    2. Mutable Beliefs (StateTable)
+    3. Epistemic Conflicts (Disagreements)
     """
 
     def __init__(self, config: Optional[SentinelConfig] = None):
         self.config = config or SentinelConfig.from_env()
         self.cas = ContentAddressableStorage(self.config)
         
-        # In-memory indices (backed by DB in production, currently simplistic)
+        # 1. Immutable Stores
         self._observations: Dict[str, Observation] = {}
         self._findings: Dict[str, Finding] = {}
-        self._whynots: Dict[str, WhyNot] = {}
+        self._conflicts: List[EpistemicConflict] = []
+        
+        # 2. Mutable State Table (The Belief System)
+        # Maps entity_id -> StateRecord
+        self._state_table: Dict[str, StateRecord] = {}
 
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
                           raw_output: bytes, exit_code: int = 0) -> Observation:
@@ -114,28 +135,28 @@ class EvidenceLedger:
         1. Store raw data in CAS -> Get blob_hash
         2. Create Observation record
         3. Index it locally
+        4. Initialize State as OBSERVED
         """
         # 1. Store in CAS
         blob_hash = self.cas.store(raw_output)
         
         # 2. Generate Deterministic ID
-        # Hashing stable fields ensures idempotency
-        # If we run same tool on same target and get same output -> Same Obs ID
         unique_string = f"{tool_name}:{target}:{blob_hash}"
         obs_id = f"obs-{uuid.uuid5(uuid.NAMESPACE_DNS, unique_string).hex[:12]}"
         
+        # 3. Create Immutable Record
         obs = Observation(
             id=obs_id,
             timestamp=time.time(),
             tool=ToolContext(name=tool_name, args=tool_args, exit_code=exit_code),
             target=target,
-            blob_hash=blob_hash,
-            lifecycle=LifecycleState.OBSERVED
+            blob_hash=blob_hash
         )
         
-        # 3. Index
+        # 4. Index & Initialize State
         if obs_id not in self._observations:
             self._observations[obs_id] = obs
+            self._set_state(obs_id, LifecycleState.OBSERVED, reason="Initial ingestion")
             logger.info(f"[EvidenceLedger] Recorded Observation {obs_id}: {tool_name} -> {blob_hash[:8]}")
         else:
             logger.debug(f"[EvidenceLedger] Idempotent observation seen: {obs_id}")
@@ -145,16 +166,15 @@ class EvidenceLedger:
     def promote_finding(self, title: str, severity: str, citations: List[Citation], 
                        description: str, **kwargs) -> Finding:
         """
-        Create a valid finding.
-        Enforces: Must have citations.
+        Create a finding (PROMOTED state).
         """
         if not citations:
             raise ValueError(f"CRITICAL: Finding '{title}' rejected. No citations provided.")
             
-        # Verify valid citations
+        # Verify citations exist in Ledger
         for c in citations:
             if c.observation_id not in self._observations:
-                logger.warning(f"[EvidenceLedger] Cite check warning: Observation {c.observation_id} not found in this runtime.")
+                logger.warning(f"[EvidenceLedger] Cite check warning: Observation {c.observation_id} not found.")
         
         find_id = f"find-{uuid.uuid4().hex[:8]}"
         finding = Finding(
@@ -167,32 +187,58 @@ class EvidenceLedger:
         )
         
         self._findings[find_id] = finding
-        logger.info(f"[EvidenceLedger] Promoted Finding {find_id}: {title} (Cited {len(citations)} sources)")
+        self._set_state(find_id, LifecycleState.PROMOTED, reason="AI/Human promotion")
+        
+        # Also update state of cited observations? 
+        # Ideally yes, but one observation can support multiple findings.
+        # For now, we leave observation state as OBSERVED unless explicitly suppressed.
+        
+        logger.info(f"[EvidenceLedger] Promoted Finding {find_id}: {title}")
         return finding
 
-    def suppress(self, related_id: str, reason_code: str, notes: str) -> WhyNot:
+    def suppress(self, related_id: str, reason_code: str, notes: str) -> StateRecord:
         """
-        Record a decision to ignore/deprioritize something.
+        Move an entity to SUPPRESSED state.
+        This provides the "WhyNot" reasoning.
         """
-        # Updates lifecycle state if it's an observation
-        if related_id in self._observations:
-            # We treat Observation as immutable, but we can update a separate "State Table"
-            # For now, simplistic override (real implementation needs DB updates)
-            # obj = self._observations[related_id]
-            # object.__setattr__(obj, 'lifecycle', LifecycleState.SUPPRESSED) 
-            pass # Keep it immutable for now
-            
-        wn_id = f"wn-{uuid.uuid4().hex[:8]}"
-        whynot = WhyNot(
-            id=wn_id,
-            related_id=related_id,
-            decision="suppressed",
-            reason_code=reason_code,
-            notes=notes
+        if related_id not in self._observations and related_id not in self._findings:
+            logger.warning(f"[EvidenceLedger] Suppressing unknown entity {related_id}")
+
+        # Update the State Table
+        reason = f"{reason_code}: {notes}"
+        return self._set_state(related_id, LifecycleState.SUPPRESSED, reason=reason)
+
+    def register_conflict(self, source_a_id: str, source_b_id: str, 
+                         description: str, conflict_type: str = "direct_contradiction"):
+        """
+        Record an epistemic conflict between two observations.
+        """
+        conflict_id = f"conflict-{uuid.uuid4().hex[:8]}"
+        conflict = EpistemicConflict(
+            id=conflict_id,
+            source_a_id=source_a_id,
+            source_b_id=source_b_id,
+            conflict_type=conflict_type,
+            description=description
         )
-        self._whynots[wn_id] = whynot
-        logger.info(f"[EvidenceLedger] Suppressed {related_id}: {reason_code} - {notes}")
-        return whynot
+        self._conflicts.append(conflict)
+        logger.warning(f"[EvidenceLedger] Conflict Registered: {source_a_id} vs {source_b_id} ({description})")
+        return conflict
+
+    def _set_state(self, entity_id: str, state: LifecycleState, reason: Optional[str] = None) -> StateRecord:
+        """Internal helper to update state table."""
+        record = StateRecord(
+            entity_id=entity_id,
+            state=state,
+            reason=reason,
+            timestamp=time.time()
+        )
+        self._state_table[entity_id] = record
+        return record
+
+    def get_state(self, entity_id: str) -> Optional[StateRecord]:
+        """Retrieve the current belief state of an entity."""
+        return self._state_table.get(entity_id)
 
     def get_observation(self, obs_id: str) -> Optional[Observation]:
         return self._observations.get(obs_id)
