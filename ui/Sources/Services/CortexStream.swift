@@ -68,6 +68,18 @@ class CortexStream: ObservableObject {
     private var retryAttempt = 0
     private let maxRetries = 5
 
+    /// Path to the token file (mirrors SentinelAPIClient)
+    private static let tokenPath: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("api_token")
+    }()
+
+    private static func readToken() -> String? {
+        try? String(contentsOf: tokenPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// Function connect.
     func connect(url: URL) {
         self.targetURL = url
@@ -77,8 +89,13 @@ class CortexStream: ObservableObject {
             configuration: config, delegate: nil, delegateQueue: OperationQueue.main)
         self.session = session
 
-        print("[CortexStream] Connecting to \(url)...")
-        webSocketTask = session.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        if let token = Self.readToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        print("[CortexStream] Connecting to \(url) (Auth: \(Self.readToken() != nil))...")
+        webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
         self.isConnected = true
 
