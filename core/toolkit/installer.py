@@ -142,10 +142,16 @@ class CommandValidator:
         Ensure no shell operators are present in arguments.
         Used when executing a single tool that should not chain.
         """
-        BANNED = CommandValidator.OPERATORS.union({";", "|", "&"})
+        # Banned characters that have special meaning in shell
+        # We also ban redirection >, < and backticks ` and $() just in case.
+        BANNED_CHARS = {";", "|", "&", ">", "<", "`", "$", "(", ")"}
+        
         for tok in tokens:
-            if tok in BANNED:
-                raise ValueError(f"Shell operator '{tok}' not allowed in safe arguments")
+            for char in tok:
+                if char in BANNED_CHARS:
+                    # Allow logical grouping if strictly controlled? No, ban all for now.
+                    # This is heavy-handed but safe.
+                    raise ValueError(f"Shell operator '{char}' not allowed in safe arguments: {tok}")
 
     @staticmethod
     def validate_segments(segments: List['CommandSegment'], allow_missing: Optional[set] = None) -> None:

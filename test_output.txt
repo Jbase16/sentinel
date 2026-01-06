@@ -1,0 +1,110 @@
+[Database] Failed to load graph snapshot: 'NoneType' object has no attribute 'execute'
+/Users/jason/Developer/sentinelforge/core/data/blackbox.py:68: DeprecationWarning: 'asyncio.iscoroutinefunction' is deprecated and slated for removal in Python 3.16; use inspect.iscoroutinefunction() instead
+  if asyncio.iscoroutinefunction(func):
+F[gobuster] Missing wordlists.
+[Vanguard] Tool BLOCKED: gobuster
+[feroxbuster] Missing wordlists.
+[Vanguard] Tool BLOCKED: feroxbuster
+[sslyze] Incompatible with Python 3.14.2 (main, Dec  5 2025, 16:49:16) [Clang 17.0.0 (clang-1700.4.4.1)].x (nassl issue).
+[Vanguard] Tool BLOCKED: sslyze
+[EventBus] Failed to emit tool_completed for dnsx: GlobalSequenceAuthority not initialized. Call await GlobalSequenceAuthority.initialize_from_db() during startup.
+Traceback (most recent call last):
+  File "/Users/jason/Developer/sentinelforge/core/server/api.py", line 394, in dispatch_tool
+    event_bus.emit_tool_completed(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        tool=tool, exit_code=exit_code, findings_count=len(findings), session_id=session.id
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/jason/Developer/sentinelforge/core/cortex/events.py", line 360, in emit_tool_completed
+    self.emit(GraphEvent(
+              ~~~~~~~~~~^
+        type=GraphEventType.TOOL_COMPLETED,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        payload=payload
+        ^^^^^^^^^^^^^^^
+    ))
+    ^
+  File "<string>", line 6, in __init__
+  File "/Users/jason/Developer/sentinelforge/core/cortex/events.py", line 155, in get_next_sequence
+    return GlobalSequenceAuthority.instance().next_id()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/jason/Developer/sentinelforge/core/base/sequence.py", line 105, in instance
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: GlobalSequenceAuthority not initialized. Call await GlobalSequenceAuthority.initialize_from_db() during startup.
+unhandled exception during asyncio.run() shutdown
+task: <Task finished name='Task-3' coro=<_begin_scan.<locals>._runner() done, defined at /Users/jason/Developer/sentinelforge/core/server/api.py:347> exception=RuntimeError('GlobalSequenceAuthority not initialized. Call await GlobalSequenceAuthority.initialize_from_db() during startup.') created at /opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py:395>
+Traceback (most recent call last):
+  File "/Users/jason/Developer/sentinelforge/core/server/api.py", line 403, in _runner
+    mission = await reasoning_engine.start_scan(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/Users/jason/Developer/sentinelforge/core/cortex/reasoning.py", line 197, in start_scan
+    return await self.strategos.run_mission(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<5 lines>...
+    )
+    ^
+  File "/Users/jason/Developer/sentinelforge/core/scheduler/strategos.py", line 341, in run_mission
+    await self._wait_for_intent_completion()
+  File "/Users/jason/Developer/sentinelforge/core/scheduler/strategos.py", line 530, in _wait_for_intent_completion
+    await asyncio.sleep(0.1)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/tasks.py", line 702, in sleep
+    return await future
+           ^^^^^^^^^^^^
+asyncio.exceptions.CancelledError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/jason/Developer/sentinelforge/core/server/api.py", line 424, in _runner
+    event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, session_id=session.id)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/jason/Developer/sentinelforge/core/cortex/events.py", line 330, in emit_scan_completed
+    self.emit(GraphEvent(
+              ~~~~~~~~~~^
+        type=GraphEventType.SCAN_COMPLETED,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        payload=payload
+        ^^^^^^^^^^^^^^^
+    ))
+    ^
+  File "<string>", line 6, in __init__
+  File "/Users/jason/Developer/sentinelforge/core/cortex/events.py", line 155, in get_next_sequence
+    return GlobalSequenceAuthority.instance().next_id()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/jason/Developer/sentinelforge/core/base/sequence.py", line 105, in instance
+    raise RuntimeError(
+    ...<2 lines>...
+    )
+RuntimeError: GlobalSequenceAuthority not initialized. Call await GlobalSequenceAuthority.initialize_from_db() during startup.
+
+======================================================================
+FAIL: test_scan_exception_handling (__main__.TestScanFailure.test_scan_exception_handling)
+Verify that exceptions during scan start emit a scan_failed event.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/Users/jason/Developer/sentinelforge/tests/integration/test_scan_failure.py", line 49, in test_scan_exception_handling
+    mock_router.emit_ui_event.assert_called_once()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py", line 964, in assert_called_once
+    raise AssertionError(msg)
+AssertionError: Expected 'emit_ui_event' to have been called once. Called 0 times.
+
+----------------------------------------------------------------------
+Ran 1 test in 0.058s
+
+FAILED (failures=1)
+
+--- Testing Scan Failure Emission ---
+❌ Logger error NOT called. start_scan exception handler not reached?

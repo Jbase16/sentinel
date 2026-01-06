@@ -26,7 +26,7 @@ class TestPTYInteraction(unittest.IsolatedAsyncioTestCase):
             mock_get_config.return_value = mock_config
             
             with patch('core.server.api.validate_websocket_connection', return_value=True), \
-                 patch('core.engine.pty_manager.PTYManager') as mock_manager_cls:
+                 patch('core.server.api.PTYManager') as mock_manager_cls:
                 
                 # Mock PTY Session
                 mock_session = MagicMock()
@@ -68,11 +68,15 @@ class TestPTYInteraction(unittest.IsolatedAsyncioTestCase):
                 ]
                 
                 async def side_effect():
+                    print("DEBUG: receive_text called")
                     if responses:
                         r = responses.pop(0)
                         if isinstance(r, BaseException):
+                            print("DEBUG: Raising exception")
                             raise r
+                        print(f"DEBUG: Returning {r}")
                         return r
+                    # Default if list empty
                     # Default if list empty
                     raise asyncio.CancelledError("List Empty")
                     

@@ -38,6 +38,7 @@ class ErrorCode(Enum):
     SCAN_CANCELLED = "SCAN_004"
     SCAN_SESSION_NOT_FOUND = "SCAN_005"
     SCAN_NO_TOOLS_AVAILABLE = "SCAN_006"
+    SCAN_INITIALIZATION_ERROR = "SCAN_007"
 
     # Tool Errors
     TOOL_NOT_INSTALLED = "TOOL_001"
@@ -126,6 +127,7 @@ class SentinelError(Exception):
         ErrorCode.SCAN_CANCELLED: 499,        # Client Closed Request
         ErrorCode.SCAN_SESSION_NOT_FOUND: 404, # Not Found
         ErrorCode.SCAN_NO_TOOLS_AVAILABLE: 503, # Service Unavailable
+        ErrorCode.SCAN_INITIALIZATION_ERROR: 500, # Internal Server Error
         
         # Tool errors
         ErrorCode.TOOL_NOT_INSTALLED: 503,    # Service Unavailable

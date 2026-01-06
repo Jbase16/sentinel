@@ -354,6 +354,12 @@ async def _begin_scan(req: ScanRequest) -> str:
                     """AsyncFunction dispatch_tool."""
                     findings: List[Dict] = []
                     exit_code = 0
+                    
+                    if tool not in allowed_tools:
+                        logger.warning(f"BLOCKED: Attempted to run unauthorized tool '{tool}'")
+                        session.log(f"⚠️ [Security] Tool '{tool}' blocked (not in allowlist)")
+                        return []
+                        
                     session.log(f"[Strategos] Dispatching tool: {tool}")
                     engine = ScannerEngine(session=session)
 

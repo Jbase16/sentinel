@@ -55,7 +55,7 @@ def get_installed_tools() -> Dict[str, Dict[str, Any]]:
     installed = {}
     for name, config in TOOLS.items():
         # Check if binary (or cmd[0]) exists in PATH or venv
-        binary = config.get("binary") or config["cmd"][0]
+        binary = config.binary_name or config.cmd_template[0]
         if find_binary(binary):
             installed[name] = config
     return installed

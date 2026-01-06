@@ -50,6 +50,10 @@ jobs:
         python -m pip install --upgrade pip
         pip install .[dev]
 
+    - name: Sanity Check - Interpreter Imports
+      run: |
+        python -c "from core.ai.ai_engine import AIEngine; print('✅ Core AI Engine import successful')"
+
     - name: Lint with Ruff
       run: |
         # Stop the build if there are Python syntax errors or undefined names
