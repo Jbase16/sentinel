@@ -1,0 +1,2173 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SentinelForge API",
+    "description": "AI-augmented offensive security platform",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/ping": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Ping V1",
+        "description": "API v1: Health check endpoint.",
+        "operationId": "ping_v1_v1_ping_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Status V1",
+        "description": "API v1: Get system status including scan state, AI health, and tool installation.",
+        "operationId": "get_status_v1_v1_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/ai/status": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Ai Status V1",
+        "description": "API v1: Get AI engine status.",
+        "operationId": "get_ai_status_v1_v1_ai_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tools/status": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Tools Status V1",
+        "description": "API v1: Get installed tools status.",
+        "operationId": "tools_status_v1_v1_tools_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/logs": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Logs V1",
+        "description": "API v1: Get scan logs.",
+        "operationId": "get_logs_v1_v1_logs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/results": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Results",
+        "description": "Get scan results (findings, issues, killchain, evidence).\nIf session_id is not provided, returns results for the currently active (or last finished) scan.",
+        "operationId": "get_results_v1_results_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/graph": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Graph",
+        "description": "Get the PressureGraph snapshot (Nodes & Edges).\nVisualization of the system's \"belief state\".",
+        "operationId": "get_graph_v1_graph_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capsule/create": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Create Replay Capsule",
+        "description": "Create a deterministic replay capsule for a completed scan session.\n\nArgs:\n    session_id: UUID of the scan session\n    sanitize: If True, remove sensitive data (API keys, tokens, private IPs, etc.)\n\nReturns:\n    Dict with capsule_path and checksum",
+        "operationId": "create_replay_capsule_v1_capsule_create_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "sanitize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Sanitize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capsule/{session_id}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Replay Capsule",
+        "description": "Retrieve a replay capsule for a session.\n\nArgs:\n    session_id: UUID of the scan session (with optional _sanitized suffix)\n\nReturns:\n    The complete capsule as JSON",
+        "operationId": "get_replay_capsule_v1_capsule__session_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/capsules/list": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "List Replay Capsules",
+        "description": "List all available replay capsules.\n\nReturns:\n    List of capsule metadata",
+        "operationId": "list_replay_capsules_v1_capsules_list_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/causal-graph/{session_id}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Causal Attack Graph",
+        "description": "Build and analyze causal dependency graph for a scan session.\n\nReturns:\n    Graph summary with pressure points and attack chains",
+        "operationId": "get_causal_attack_graph_v1_causal_graph__session_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/causal-graph/{session_id}/graphviz": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Causal Graph Graphviz",
+        "description": "Get Graphviz DOT representation of causal graph for visualization.\n\nReturns:\n    DOT format string",
+        "operationId": "get_causal_graph_graphviz_v1_causal_graph__session_id__graphviz_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/monitor/baseline": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Set Monitoring Baseline",
+        "description": "Set baseline scan state for continuous monitoring.\n\nArgs:\n    target: Target being monitored\n    session_id: Session ID to use as baseline\n    alert_threshold: Alert threshold (0.0-1.0, default 0.7)\n\nReturns:\n    Baseline summary",
+        "operationId": "set_monitoring_baseline_v1_monitor_baseline_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "alert_threshold",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.7,
+              "title": "Alert Threshold"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/monitor/check": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Check For Changes",
+        "description": "Check for changes between baseline and current scan.\n\nArgs:\n    target: Target being monitored\n    current_session_id: Current scan session to compare\n\nReturns:\n    Delta summary with new/resolved findings",
+        "operationId": "check_for_changes_v1_monitor_check_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target"
+            }
+          },
+          {
+            "name": "current_session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Current Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/monitor/compare": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Compare Scans",
+        "description": "Compare two scan sessions (one-time comparison without setting baseline).\n\nArgs:\n    baseline_session_id: Baseline scan\n    current_session_id: Current scan\n    alert_threshold: Alert threshold\n\nReturns:\n    Delta summary",
+        "operationId": "compare_scans_v1_monitor_compare_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "baseline_session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Baseline Session Id"
+            }
+          },
+          {
+            "name": "current_session_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Current Session Id"
+            }
+          },
+          {
+            "name": "alert_threshold",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "default": 0.7,
+              "title": "Alert Threshold"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/debug/{session_id}/timeline": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Scan Timeline",
+        "description": "Get complete timeline for a scan session.\n\nReturns:\n    List of (sequence, type, description) tuples",
+        "operationId": "get_scan_timeline_v1_debug__session_id__timeline_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/debug/{session_id}/state/{sequence}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get State At Sequence",
+        "description": "Get scan state at a specific sequence number.\n\nArgs:\n    session_id: Session UUID\n    sequence: Sequence number to seek to\n\nReturns:\n    Snapshot of scan state at that point",
+        "operationId": "get_state_at_sequence_v1_debug__session_id__state__sequence__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "sequence",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Sequence"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/migrations/history": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Migration History",
+        "description": "Get history of applied schema migrations.\n\nReturns:\n    List of applied migrations with versions and timestamps",
+        "operationId": "get_migration_history_v1_migrations_history_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/policies": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "List Policies",
+        "description": "List all policies (both database-persisted and runtime-loaded).\n\nReturns:\n    List of policies with metadata and active status",
+        "operationId": "list_policies_v1_policies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Upload Policy",
+        "description": "Upload a new CAL policy and register it with the ArbitrationEngine.\n\nArgs:\n    request: Policy upload request with name, cal_source, enabled\n\nReturns:\n    Success status and loaded policy details",
+        "operationId": "upload_policy_v1_policies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/policies/{policy_name}": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Policy",
+        "description": "Get detailed information about a specific policy.\n\nArgs:\n    policy_name: Name of the policy to retrieve\n\nReturns:\n    Policy details including source code and metadata",
+        "operationId": "get_policy_v1_policies__policy_name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "policy_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Policy Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Delete Policy",
+        "description": "Delete a policy from database and unload from ArbitrationEngine.\n\nArgs:\n    policy_name: Name of the policy to delete\n\nReturns:\n    Success status",
+        "operationId": "delete_policy_v1_policies__policy_name__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "policy_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Policy Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/policies/reload": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Reload Policies",
+        "description": "Reload all enabled policies from database into ArbitrationEngine.\n\nUseful for hot-reloading after database changes or constitution.cal updates.\n\nReturns:\n    Count of policies reloaded",
+        "operationId": "reload_policies_v1_policies_reload_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/policies/watcher/status": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Watcher Status",
+        "description": "Get status of the policy file watcher.\n\nReturns:\n    Watcher running status and watched files",
+        "operationId": "get_watcher_status_v1_policies_watcher_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/cortex/graph": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Cortex Graph",
+        "description": "AsyncFunction get_cortex_graph.",
+        "operationId": "get_cortex_graph_v1_cortex_graph_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/cortex/reasoning": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Cortex Reasoning",
+        "description": "AsyncFunction get_cortex_reasoning.",
+        "operationId": "get_cortex_reasoning_v1_cortex_reasoning_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/wraith/evade": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Wraith Evade",
+        "description": "Trigger the Autonomous Evasion Loop.",
+        "operationId": "wraith_evade_v1_wraith_evade_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target"
+            }
+          },
+          {
+            "name": "payload",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Payload"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ghost/record/{flow_name}": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Ghost Record",
+        "description": "Start recording a user flow for Logic Fuzzing.",
+        "operationId": "ghost_record_v1_ghost_record__flow_name__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "flow_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Flow Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ghost/start": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Ghost Start",
+        "description": "Start the passive interception proxy (Lazarus Engine enabled).",
+        "operationId": "ghost_start_v1_ghost_start_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "port",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 8080,
+              "title": "Port"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ghost/stop": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Ghost Stop",
+        "description": "Stop the passive interception proxy.",
+        "operationId": "ghost_stop_v1_ghost_stop_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/forge/compile": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Forge Compile",
+        "description": "Trigger the JIT Exploit Compiler.\n\nSECURITY: This endpoint compiles exploit code and is protected by\nverify_sensitive_token which ALWAYS requires auth when network-exposed.",
+        "operationId": "forge_compile_v1_forge_compile_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target"
+            }
+          },
+          {
+            "name": "anomaly",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Anomaly"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/forge/execute": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Forge Execute",
+        "description": "Execute a compiled exploit in the sandbox.\n\nSECURITY: This endpoint executes exploit code and is protected by\nverify_sensitive_token which ALWAYS requires auth when network-exposed.",
+        "operationId": "forge_execute_v1_forge_execute_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "script_path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Script Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/tools/install": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Tools Install",
+        "description": "Install selected tools using Homebrew or pip (best-effort).\nReturns per-tool status. The process output tail is included for diagnostics.\n\nSECURITY: This endpoint installs system packages and is protected by\nverify_sensitive_token which ALWAYS requires auth when network-exposed.",
+        "operationId": "tools_install_v1_tools_install_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/tools/uninstall": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Tools Uninstall",
+        "description": "Uninstall selected tools using Homebrew or pip (best-effort).\n\nSECURITY: This endpoint removes system packages and is protected by\nverify_sensitive_token which ALWAYS requires auth when network-exposed.",
+        "operationId": "tools_uninstall_v1_tools_uninstall_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/chat/query": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Chat Query",
+        "description": "Context-Aware RAG Chat.",
+        "operationId": "chat_query_v1_chat_query_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "question",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Question"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/mission/start": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Mission Start",
+        "description": "The ONE-CLICK Button. Starts the full autonomous loop.\n\nSECURITY: This endpoint launches security scans against targets and is\nprotected by verify_sensitive_token which ALWAYS requires auth when\nnetwork-exposed. Prevents unauthorized reconnaissance operations.",
+        "operationId": "mission_start_v1_mission_start_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Target"
+            }
+          },
+          {
+            "name": "mode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "standard",
+              "title": "Mode"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Force"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/scan": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Start Scan",
+        "description": "AsyncFunction start_scan.",
+        "operationId": "start_scan_v1_scan_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/cancel": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Cancel Scan",
+        "description": "AsyncFunction cancel_scan.",
+        "operationId": "cancel_scan_v1_cancel_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/chat": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Chat",
+        "description": "AsyncFunction chat.",
+        "operationId": "chat_v1_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Events",
+        "description": "Unified SSE stream (Legacy Alias).\nDelegates to the same logic as /events/stream but without history replay (since=0).",
+        "operationId": "events_v1_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/events/stream": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Events Stream",
+        "description": "Unified SSE stream for all graph events.\n\nThis is the primary real-time API for the UI. It:\n1. Replays missed events from `since` sequence\n2. Streams new events as they occur\n3. Sends keepalives every 15s to maintain connection\n\nEvent format:\n    event: <event_type>\n    data: {\"sequence\": N, \"type\": \"...\", \"payload\": {...}, \"timestamp\": ...}\n\nThe client should track the highest `sequence` received and use it\nas the `since` parameter on reconnection.",
+        "operationId": "events_stream_v1_events_stream_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Sequence number to replay from",
+              "default": 0,
+              "title": "Since"
+            },
+            "description": "Sequence number to replay from"
+          },
+          {
+            "name": "session_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter events by session ID",
+              "title": "Session Id"
+            },
+            "description": "Filter events by session ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/events/stats": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Events Stats",
+        "description": "Return diagnostic stats about the event store.",
+        "operationId": "events_stats_v1_events_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/report/generate": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Generate Report",
+        "description": "AsyncFunction generate_report.",
+        "operationId": "generate_report_v1_report_generate_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "section",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z_]+$",
+              "default": "executive_summary",
+              "title": "Section"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/clipboard": {
+      "get": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Get Clipboard",
+        "description": "AsyncFunction get_clipboard.",
+        "operationId": "get_clipboard_v1_clipboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/v1/actions/{action_id}/{verb}": {
+      "post": {
+        "tags": [
+          "v1"
+        ],
+        "summary": "Handle Action",
+        "description": "AsyncFunction handle_action.",
+        "operationId": "handle_action_v1_actions__action_id___verb__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "action_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Action Id"
+            }
+          },
+          {
+            "name": "verb",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Verb"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ChatRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 32000,
+            "minLength": 1,
+            "title": "Prompt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "ChatRequest",
+        "description": "Class ChatRequest."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InstallRequest": {
+        "properties": {
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tools"
+        ],
+        "title": "InstallRequest",
+        "description": "Class InstallRequest."
+      },
+      "PolicyUploadRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Unique policy name"
+          },
+          "cal_source": {
+            "type": "string",
+            "title": "Cal Source",
+            "description": "CAL DSL source code"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether policy is active",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "cal_source"
+        ],
+        "title": "PolicyUploadRequest",
+        "description": "Request to upload a new CAL policy."
+      },
+      "ScanRequest": {
+        "properties": {
+          "target": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Target"
+          },
+          "modules": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modules"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "default": false
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "standard"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target"
+        ],
+        "title": "ScanRequest",
+        "description": "Class ScanRequest."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

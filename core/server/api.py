@@ -1229,7 +1229,7 @@ async def get_graph(
 # - v2.0: Legacy routes removed
 # ============================================================================
 
-@app.get("/ping")
+
 async def ping():
     """
     DEPRECATED: Use /v1/ping instead.
@@ -1237,7 +1237,7 @@ async def ping():
     """
     return await ping_v1()
 
-@app.get("/status")
+
 async def get_status(_: bool = Depends(verify_token)):
     """
     DEPRECATED: Use /v1/status instead.
@@ -1245,7 +1245,7 @@ async def get_status(_: bool = Depends(verify_token)):
     """
     return await get_status_v1(_)
 
-@app.get("/tools/status")
+
 async def tools_status(_: bool = Depends(verify_token)):
     """
     DEPRECATED: Use /v1/tools/status instead.
@@ -1253,7 +1253,7 @@ async def tools_status(_: bool = Depends(verify_token)):
     """
     return await tools_status_v1(_)
 
-@app.get("/logs")
+
 async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
     """
     DEPRECATED: Use /v1/logs instead.
@@ -1261,7 +1261,7 @@ async def get_logs(limit: int = 100, _: bool = Depends(verify_token)):
     """
     return await get_logs_v1(limit, _)
 
-@app.get("/results")
+
 async def get_results(_: bool = Depends(verify_token)):
     """
     DEPRECATED: Use /v1/results instead.
@@ -1274,7 +1274,7 @@ async def get_results(_: bool = Depends(verify_token)):
 # ============================================================================
 
 @v1_router.post("/capsule/create")
-@app.post("/capsule/create")
+
 async def create_replay_capsule(
     session_id: str,
     sanitize: bool = False,
@@ -1317,7 +1317,7 @@ async def create_replay_capsule(
 
 
 @v1_router.get("/capsule/{session_id}")
-@app.get("/capsule/{session_id}")
+
 async def get_replay_capsule(
     session_id: str,
     _: bool = Depends(verify_token)
@@ -1359,7 +1359,7 @@ async def get_replay_capsule(
 
 
 @v1_router.get("/capsules/list")
-@app.get("/capsules/list")
+
 async def list_replay_capsules(_: bool = Depends(verify_token)):
     """
     List all available replay capsules.
@@ -1399,7 +1399,7 @@ async def list_replay_capsules(_: bool = Depends(verify_token)):
 # ============================================================================
 
 @v1_router.get("/causal-graph/{session_id}")
-@app.get("/causal-graph/{session_id}")
+
 async def get_causal_attack_graph(
     session_id: str,
     _: bool = Depends(verify_token)
@@ -1425,7 +1425,7 @@ async def get_causal_attack_graph(
 
 
 @v1_router.get("/causal-graph/{session_id}/graphviz")
-@app.get("/causal-graph/{session_id}/graphviz")
+
 async def get_causal_graph_graphviz(
     session_id: str,
     _: bool = Depends(verify_token)
@@ -1464,7 +1464,7 @@ async def get_causal_graph_graphviz(
 # ============================================================================
 
 @v1_router.post("/monitor/baseline")
-@app.post("/monitor/baseline")
+
 async def set_monitoring_baseline(
     target: str,
     session_id: str,
@@ -1505,7 +1505,7 @@ async def set_monitoring_baseline(
 
 
 @v1_router.get("/monitor/check")
-@app.get("/monitor/check")
+
 async def check_for_changes(
     target: str,
     current_session_id: str,
@@ -1561,7 +1561,7 @@ async def check_for_changes(
 
 
 @v1_router.post("/monitor/compare")
-@app.post("/monitor/compare")
+
 async def compare_scans(
     baseline_session_id: str,
     current_session_id: str,
@@ -1617,7 +1617,7 @@ async def compare_scans(
 # ============================================================================
 
 @v1_router.get("/debug/{session_id}/timeline")
-@app.get("/debug/{session_id}/timeline")
+
 async def get_scan_timeline(
     session_id: str,
     _: bool = Depends(verify_token)
@@ -1649,7 +1649,7 @@ async def get_scan_timeline(
 
 
 @v1_router.get("/debug/{session_id}/state/{sequence}")
-@app.get("/debug/{session_id}/state/{sequence}")
+
 async def get_state_at_sequence(
     session_id: str,
     sequence: int,
@@ -1699,7 +1699,7 @@ async def get_state_at_sequence(
 # ============================================================================
 
 @v1_router.get("/migrations/history")
-@app.get("/migrations/history")
+
 async def get_migration_history(_: bool = Depends(verify_token)):
     """
     Get history of applied schema migrations.
@@ -1740,7 +1740,7 @@ class PolicyUploadRequest(BaseModel):
     enabled: bool = Field(True, description="Whether policy is active")
 
 @v1_router.post("/policies")
-@app.post("/policies")
+
 async def upload_policy(request: PolicyUploadRequest, _: bool = Depends(verify_token)):
     """
     Upload a new CAL policy and register it with the ArbitrationEngine.
@@ -1804,7 +1804,7 @@ async def upload_policy(request: PolicyUploadRequest, _: bool = Depends(verify_t
 
 
 @v1_router.get("/policies")
-@app.get("/policies")
+
 async def list_policies(_: bool = Depends(verify_token)):
     """
     List all policies (both database-persisted and runtime-loaded).
@@ -1861,7 +1861,7 @@ async def list_policies(_: bool = Depends(verify_token)):
 
 
 @v1_router.get("/policies/{policy_name}")
-@app.get("/policies/{policy_name}")
+
 async def get_policy(policy_name: str, _: bool = Depends(verify_token)):
     """
     Get detailed information about a specific policy.
@@ -1905,7 +1905,7 @@ async def get_policy(policy_name: str, _: bool = Depends(verify_token)):
 
 
 @v1_router.delete("/policies/{policy_name}")
-@app.delete("/policies/{policy_name}")
+
 async def delete_policy(policy_name: str, _: bool = Depends(verify_token)):
     """
     Delete a policy from database and unload from ArbitrationEngine.
@@ -1949,7 +1949,7 @@ async def delete_policy(policy_name: str, _: bool = Depends(verify_token)):
 
 
 @v1_router.post("/policies/reload")
-@app.post("/policies/reload")
+
 async def reload_policies(_: bool = Depends(verify_token)):
     """
     Reload all enabled policies from database into ArbitrationEngine.
@@ -1999,7 +1999,7 @@ async def reload_policies(_: bool = Depends(verify_token)):
 
 
 @v1_router.get("/policies/watcher/status")
-@app.get("/policies/watcher/status")
+
 async def get_watcher_status(_: bool = Depends(verify_token)):
     """
     Get status of the policy file watcher.
@@ -2032,14 +2032,14 @@ async def get_watcher_status(_: bool = Depends(verify_token)):
 # ============================================================================
 
 @v1_router.get("/cortex/graph")
-@app.get("/cortex/graph")
+
 async def get_cortex_graph(_: bool = Depends(verify_token)):
     """AsyncFunction get_cortex_graph."""
     from core.cortex.memory import KnowledgeGraph
     return KnowledgeGraph.instance().export_json()
 
 @v1_router.get("/cortex/reasoning")
-@app.get("/cortex/reasoning")
+
 async def get_cortex_reasoning(_: bool = Depends(verify_token)):
     """AsyncFunction get_cortex_reasoning."""
     return reasoning_engine.analyze()
@@ -2047,7 +2047,7 @@ async def get_cortex_reasoning(_: bool = Depends(verify_token)):
 # --- God-Tier Endpoints ---
 
 @v1_router.post("/wraith/evade")
-@app.post("/wraith/evade")
+
 async def wraith_evade(
     target: str, 
     payload: str, 
@@ -2061,7 +2061,7 @@ async def wraith_evade(
         return await WraithEngine.instance().stealth_send(client, target, "GET", payload)
 
 @v1_router.post("/ghost/record/{flow_name}")
-@app.post("/ghost/record/{flow_name}")
+
 async def ghost_record(flow_name: str, _: bool = Depends(verify_token)):
     """
     Start recording a user flow for Logic Fuzzing.
@@ -2072,7 +2072,7 @@ async def ghost_record(flow_name: str, _: bool = Depends(verify_token)):
 # --- Ghost Protocol Control ---
 
 @v1_router.post("/ghost/start")
-@app.post("/ghost/start")
+
 async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
     """Start the passive interception proxy (Lazarus Engine enabled)."""
     from core.ghost.proxy import GhostInterceptor
@@ -2100,7 +2100,7 @@ async def ghost_start(port: int = 8080, _: bool = Depends(verify_token)):
         return {"status": "already_running", "port": app.state.ghost.port}
 
 @v1_router.post("/ghost/stop")
-@app.post("/ghost/stop")
+
 async def ghost_stop(_: bool = Depends(verify_token)):
     """Stop the passive interception proxy."""
     # Conditional branch.
@@ -2111,7 +2111,7 @@ async def ghost_stop(_: bool = Depends(verify_token)):
     return {"status": "not_running"}
 
 @v1_router.post("/forge/compile")
-@app.post("/forge/compile")
+
 async def forge_compile(
     target: str,
     anomaly: str,
@@ -2131,7 +2131,7 @@ async def forge_compile(
         return {"status": "error", "message": str(e)}
 
 @v1_router.post("/forge/execute")
-@app.post("/forge/execute")
+
 async def forge_execute(
     script_path: str,
     _: bool = Depends(verify_sensitive_token)  # SENSITIVE: Always requires auth when exposed
@@ -2162,7 +2162,7 @@ class InstallRequest(BaseModel):
         return v
 
 @v1_router.post("/tools/install")
-@app.post("/tools/install")
+
 async def tools_install(req: InstallRequest, _: bool = Depends(verify_sensitive_token)):
     """
     Install selected tools using Homebrew or pip (best-effort).
@@ -2201,7 +2201,7 @@ async def tools_install(req: InstallRequest, _: bool = Depends(verify_sensitive_
     return {"results": results, "tools": status_payload}
 
 @v1_router.post("/tools/uninstall")
-@app.post("/tools/uninstall")
+
 async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_sensitive_token)):
     """
     Uninstall selected tools using Homebrew or pip (best-effort).
@@ -2233,7 +2233,7 @@ async def tools_uninstall(req: InstallRequest, _: bool = Depends(verify_sensitiv
     return {"results": results, "tools": status_payload}
 
 @v1_router.post("/chat/query")
-@app.post("/chat/query")
+
 async def chat_query(
     question: str,
     _: bool = Depends(verify_token)
@@ -2245,7 +2245,7 @@ async def chat_query(
     return {"response": answer}
 
 @v1_router.post("/mission/start")
-@app.post("/mission/start")
+
 async def mission_start(
     target: str,
     mode: str = "standard",
@@ -2390,7 +2390,7 @@ async def ws_terminal_endpoint(
         pass
 
 @v1_router.post("/scan")
-@app.post("/scan")
+
 async def start_scan(
     req: ScanRequest,
     _: bool = Depends(verify_token),
@@ -2418,7 +2418,7 @@ async def start_scan(
         )
 
 @v1_router.post("/cancel")
-@app.post("/cancel")
+
 async def cancel_scan(_: bool = Depends(verify_token)):
     """AsyncFunction cancel_scan."""
     # Conditional branch.
@@ -2433,7 +2433,7 @@ async def cancel_scan(_: bool = Depends(verify_token)):
     )
 
 @v1_router.post("/chat")
-@app.post("/chat")
+
 async def chat(
     req: ChatRequest,
     request: Request,
@@ -2480,7 +2480,7 @@ async def chat(
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
 @v1_router.get("/events")
-@app.get("/events")
+
 async def events(request: Request, _: bool = Depends(verify_token)):
     """
     Unified SSE stream (Legacy Alias).
@@ -2495,7 +2495,7 @@ async def events(request: Request, _: bool = Depends(verify_token)):
 # ============================================================================
 
 @v1_router.get("/events/stream")
-@app.get("/events/stream")
+
 async def events_stream(
     request: Request,
     since: int = Query(default=0, description="Sequence number to replay from"),
@@ -2565,13 +2565,13 @@ async def events_stream(
 
 
 @v1_router.get("/events/stats")
-@app.get("/events/stats")
+
 async def events_stats(_: bool = Depends(verify_token)):
     """Return diagnostic stats about the event store."""
     return get_event_store().stats()
 
 @v1_router.get("/report/generate")
-@app.get("/report/generate")
+
 async def generate_report(
     request: Request,
     section: str = Query(default="executive_summary", pattern="^[a-z_]+$"),
@@ -2599,13 +2599,13 @@ async def generate_report(
     return StreamingResponse(_stream(), media_type="text/event-stream")
 
 @v1_router.get("/clipboard")
-@app.get("/clipboard")
+
 async def get_clipboard(_: bool = Depends(verify_token)):
     """AsyncFunction get_clipboard."""
     return {"content": "Clipboard unavailable in container environment"}
 
 @v1_router.post("/actions/{action_id}/{verb}")
-@app.post("/actions/{action_id}/{verb}")
+
 async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_token)):
     """AsyncFunction handle_action."""
     dispatcher = ActionDispatcher.instance()

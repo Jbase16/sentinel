@@ -290,12 +290,11 @@ async def install_tool(name: str) -> Dict[str, str]:
         return {"tool": name, "status": "error", "message": f"No installer defined for '{name}'"}
     
     tool_def = TOOLS.get(name)
-    # Conditional branch.
     if not tool_def:
         _emit_ui_event(name, "error")
         return {"tool": name, "status": "error", "message": f"Tool '{name}' not in registry"}
     
-    expected_binary = tool_def.get("binary") or tool_def["cmd"][0]
+    expected_binary = tool_def.binary_name or tool_def.cmd_template[0]
     strategies = spec.get("strategies", [])
     
     if not strategies:

@@ -8,6 +8,12 @@ from pathlib import Path
 
 from core.toolkit.normalizer import normalize_target
 
+from typing import Dict, List, Optional, Any
+from pathlib import Path
+from pydantic import BaseModel, Field
+
+from core.toolkit.normalizer import normalize_target
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,10 +62,6 @@ def find_binary(binary: str) -> Optional[str]:
     return None
 
 # Navigate to repository root (sentinelforge/)
-# __file__ = core/toolkit/registry.py
-# parents[0] = core/toolkit
-# parents[1] = core
-# parents[2] = sentinelforge/ (repo root)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORDLIST_DIR = REPO_ROOT / "assets" / "wordlists"
 DEFAULT_WORDLIST = WORDLIST_DIR / "common.txt"
@@ -136,8 +138,6 @@ class WordlistManager:
             return str(target_file.resolve())
         except Exception as e:
             logger.error(f"Failed to synthesize wordlist: {e}")
-            # Absolute fallback: return /dev/null-like behavior or a temp file
-            # Ideally we shouldn't reach here unless FS is RO.
             import tempfile
             fd, path = tempfile.mkstemp(prefix="sentinel_emergency_", text=True)
             with os.fdopen(fd, 'w') as f:
@@ -148,136 +148,192 @@ class WordlistManager:
 COMMON_WORDLIST = WordlistManager.get_path("common.txt")
 
 
-# Each tool is defined as a dictionary with:
-# - label: Human-readable description (shown in UI)
-# - cmd: Command-line arguments as a list (with {target} placeholder)
-# - aggressive: Boolean flag (if True, requires user approval before running)
-# - target_type: How to normalize the target ("host", "domain", "ip", "url")
-# - binary: (optional) Override for executable name (if different from command)
+# --------------------------------------------------------------------------
+# Tool Registry Definition
+# --------------------------------------------------------------------------
 
-TOOLS: Dict[str, Dict] = {
-    "nmap": {
-        "label": "Nmap (fast service/port scan)",
-        "cmd": [
+class ToolDefinition(BaseModel):
+    """
+    Defines the capabilities and execution requirements of a security tool.
+    """
+    name: str = Field(..., description="Unique identifier for the tool")
+    label: str = Field(..., description="Human-readable description")
+    cmd_template: List[str] = Field(..., description="Command template with {target} placeholder")
+    aggressive: bool = Field(False, description="If True, requires explicit user approval")
+    target_type: str = Field("url", description="Type of target input: host, domain, ip, url")
+    binary_name: Optional[str] = Field(None, description="Expected binary name if different from first cmd arg")
+    stdin_input: bool = Field(False, description="If True, target is passed via stdin")
+
+
+class ToolRegistry:
+    """
+    Central registry for all available security tools.
+    """
+    def __init__(self):
+        self._tools: Dict[str, ToolDefinition] = {}
+
+    def register(self, tool: ToolDefinition):
+        self._tools[tool.name] = tool
+
+    def get(self, name: str) -> Optional[ToolDefinition]:
+        return self._tools.get(name)
+
+    def list_tools(self) -> List[ToolDefinition]:
+        return list(self._tools.values())
+    
+    def items(self):
+        """Compatibility helper for dict-like iteration."""
+        return self._tools.items()
+
+
+# Instantiate the registry
+TOOLS = ToolRegistry()
+
+# Populate Registry
+_tool_data = [
+    ToolDefinition(
+        name="nmap",
+        label="Nmap (fast service/port scan)",
+        cmd_template=[
             "nmap", "-sV", "-T4", "-F", "--open",
             "--host-timeout", "60s", "-n", "{target}",
         ],
-        "aggressive": False,
-        "target_type": "host",
-    },
-    "subfinder": {
-        "label": "subfinder (subdomain discovery)",
-        "cmd": ["subfinder", "-silent", "-d", "{target}"],
-        "aggressive": False,
-        "target_type": "domain",
-    },
-    "httpx": {
-        "label": "httpx (Headed probing via curl)",
-        "cmd": [
+        aggressive=False,
+        target_type="host"
+    ),
+    ToolDefinition(
+        name="subfinder",
+        label="subfinder (subdomain discovery)",
+        cmd_template=["subfinder", "-silent", "-d", "{target}"],
+        aggressive=False,
+        target_type="domain"
+    ),
+    ToolDefinition(
+        name="httpx",
+        label="httpx (Headed probing via curl)",
+        cmd_template=[
             "curl", "-s", "-I", "-L", "-m", "5",
             "{target}"
         ],
-        "aggressive": False,
-        "target_type": "url",
-    },
-    "wafw00f": {
-        "label": "wafw00f (WAF detection)",
-        "cmd": ["wafw00f", "{target}"],
-        "aggressive": False,
-        "target_type": "url",
-    },
-    "dirsearch": {
-        "label": "dirsearch (content discovery)",
-        "cmd": ["dirsearch", "-u", "{target}", "-w", COMMON_WORDLIST, "-q"],
-        "aggressive": True,
-        "target_type": "url",
-    },
-    "testssl": {
-        "label": "testssl.sh (TLS/SSL config)",
-        "cmd": ["testssl.sh", "{target}"],
-        "aggressive": False,
-        "target_type": "host",
-    },
-    "whatweb": {
-        "label": "whatweb (fingerprint tech stack)",
-        "cmd": ["whatweb", "{target}"],
-        "aggressive": False,
-        "target_type": "url",
-    },
-    "nuclei": {
-        "label": "nuclei (vulnerability templates)",
-        "cmd": ["nuclei", "-target", "{target}", "-severity", "low,medium,high,critical"],
-        "aggressive": True,
-        "target_type": "url",
-    },
-    "nikto": {
-        "label": "Nikto (web vulnerability scanner)",
-        "cmd": ["nikto", "-h", "{target}"],
-        "aggressive": True,
-        "target_type": "url",
-    },
-    "gobuster": {
-        "label": "Gobuster (directory brute force)",
-        "cmd": ["gobuster", "dir", "-u", "{target}", "-w", COMMON_WORDLIST],
-        "aggressive": True,
-        "target_type": "url",
-    },
-    "feroxbuster": {
-        "label": "Feroxbuster (recursive discovery)",
-        "cmd": ["feroxbuster", "-u", "{target}", "-w", COMMON_WORDLIST, "-n"],
-        "aggressive": True,
-        "target_type": "url",
-    },
-    "naabu": {
-        "label": "naabu (fast port scan)",
-        "cmd": ["naabu", "-host", "{target}"],
-        "aggressive": False,
-        "target_type": "host",
-    },
-    "dnsx": {
-        "label": "dnsx (DNS resolver)",
-        "cmd": ["dnsx", "-silent", "-resp", "-a", "-aaaa"],
-        "aggressive": False,
-        "target_type": "domain",
-        "binary": "dnsx",
-        "stdin": True,
-    },
-    "masscan": {
-        "label": "masscan (very fast port scan)",
-        "cmd": ["masscan", "{target}", "-p1-65535", "--max-rate", "5000"],
-        "aggressive": True,
-        "target_type": "ip",
-    },
-    "amass": {
-        "label": "amass (in-depth enumeration)",
-        "cmd": ["amass", "enum", "-d", "{target}"],
-        "aggressive": False,
-        "target_type": "domain",
-    },
-    "sslyze": {
-        "label": "sslyze (TLS scanner)",
-        "cmd": ["sslyze", "{target}"],
-        "aggressive": False,
-        "target_type": "host",
-    },
-    "httprobe": {
-        "label": "httprobe (HTTP availability)",
-        "cmd": ["httprobe"],
-        "aggressive": False,
-        "target_type": "host",
-        "binary": "httprobe",
-        "stdin": True,
-    },
-    "pshtt": {
-        "label": "pshtt (HTTPS observatory)",
-        "cmd": ["pshtt", "{target}"],
-        "aggressive": False,
-        "target_type": "domain",
-    },
-}
+        aggressive=False,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="wafw00f",
+        label="wafw00f (WAF detection)",
+        cmd_template=["wafw00f", "{target}"],
+        aggressive=False,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="dirsearch",
+        label="dirsearch (content discovery)",
+        cmd_template=["dirsearch", "-u", "{target}", "-w", COMMON_WORDLIST, "-q"],
+        aggressive=True,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="testssl",
+        label="testssl.sh (TLS/SSL config)",
+        cmd_template=["testssl.sh", "{target}"],
+        aggressive=False,
+        target_type="host"
+    ),
+    ToolDefinition(
+        name="whatweb",
+        label="whatweb (fingerprint tech stack)",
+        cmd_template=["whatweb", "{target}"],
+        aggressive=False,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="nuclei",
+        label="nuclei (vulnerability templates)",
+        cmd_template=["nuclei", "-target", "{target}", "-severity", "low,medium,high,critical"],
+        aggressive=True,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="nikto",
+        label="Nikto (web vulnerability scanner)",
+        cmd_template=["nikto", "-h", "{target}"],
+        aggressive=True,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="gobuster",
+        label="Gobuster (directory brute force)",
+        cmd_template=["gobuster", "dir", "-u", "{target}", "-w", COMMON_WORDLIST],
+        aggressive=True,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="feroxbuster",
+        label="Feroxbuster (recursive discovery)",
+        cmd_template=["feroxbuster", "-u", "{target}", "-w", COMMON_WORDLIST, "-n"],
+        aggressive=True,
+        target_type="url"
+    ),
+    ToolDefinition(
+        name="naabu",
+        label="naabu (fast port scan)",
+        cmd_template=["naabu", "-host", "{target}"],
+        aggressive=False,
+        target_type="host"
+    ),
+    ToolDefinition(
+        name="dnsx",
+        label="dnsx (DNS resolver)",
+        cmd_template=["dnsx", "-silent", "-resp", "-a", "-aaaa"],
+        aggressive=False,
+        target_type="domain",
+        binary_name="dnsx",
+        stdin_input=True
+    ),
+    ToolDefinition(
+        name="masscan",
+        label="masscan (very fast port scan)",
+        cmd_template=["masscan", "{target}", "-p1-65535", "--max-rate", "5000"],
+        aggressive=True,
+        target_type="ip"
+    ),
+    ToolDefinition(
+        name="amass",
+        label="amass (in-depth enumeration)",
+        cmd_template=["amass", "enum", "-d", "{target}"],
+        aggressive=False,
+        target_type="domain"
+    ),
+    ToolDefinition(
+        name="sslyze",
+        label="sslyze (TLS scanner)",
+        cmd_template=["sslyze", "{target}"],
+        aggressive=False,
+        target_type="host"
+    ),
+    ToolDefinition(
+        name="httprobe",
+        label="httprobe (HTTP availability)",
+        cmd_template=["httprobe"],
+        aggressive=False,
+        target_type="host",
+        binary_name="httprobe",
+        stdin_input=True
+    ),
+    ToolDefinition(
+        name="pshtt",
+        label="pshtt (HTTPS observatory)",
+        cmd_template=["pshtt", "{target}"],
+        aggressive=False,
+        target_type="domain"
+    ),
+]
+
+for tool in _tool_data:
+    TOOLS.register(tool)
 
 
-def get_tool_command(name: str, target: str, override: Dict | None = None) -> tuple[List[str], str | None]:
+def get_tool_command(name: str, target: str, override: Optional[ToolDefinition] = None) -> tuple[List[str], str | None]:
     """
     Generate the full command-line arguments for a tool.
 
@@ -291,18 +347,21 @@ def get_tool_command(name: str, target: str, override: Dict | None = None) -> tu
         - command_list: List of command-line arguments ready for execution
         - stdin_input: String to pipe to stdin, or None if tool doesn't use stdin
     """
-    tdef = override or TOOLS[name]
-    normalized = normalize_target(target, tdef.get("target_type", "url"))
+    tdef = override or TOOLS.get(name)
+    if not tdef:
+        raise ValueError(f"Tool not found: {name}")
+
+    normalized = normalize_target(target, tdef.target_type)
 
     cmd: List[str] = []
-    # Loop over items.
-    for part in tdef["cmd"]:
+    # Loop over items using the new object attribute
+    for part in tdef.cmd_template:
         if "{target}" in part:
             cmd.append(part.replace("{target}", normalized))
-        elif part is not None:  # Filter out None values (e.g., missing wordlist)
+        elif part is not None:  # Filter out None values
             cmd.append(part)
 
     # If tool uses stdin, the normalized target is piped via stdin
-    stdin_input = normalized if tdef.get("stdin") else None
+    stdin_input = normalized if tdef.stdin_input else None
 
     return cmd, stdin_input
