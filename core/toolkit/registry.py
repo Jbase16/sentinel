@@ -185,6 +185,24 @@ class ToolRegistry:
         """Compatibility helper for dict-like iteration."""
         return self._tools.items()
 
+    def keys(self):
+        return self._tools.keys()
+
+    def values(self):
+        return self._tools.values()
+
+    def __iter__(self):
+        return iter(self._tools)
+
+    def __getitem__(self, key: str) -> ToolDefinition:
+        return self._tools[key]
+    
+    def __contains__(self, key: str) -> bool:
+        return key in self._tools
+
+    def __len__(self) -> int:
+        return len(self._tools)
+
 
 # Instantiate the registry
 TOOLS = ToolRegistry()
