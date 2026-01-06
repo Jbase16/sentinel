@@ -41,3 +41,35 @@ class FactRederived:
     diff_summary: str
     parser_version: str
     timestamp: float = field(default_factory=time.time)
+
+
+class EventType(str, Enum):
+    OBSERVED = "observed"
+    PROMOTED = "promoted"
+    SUPPRESSED = "suppressed"
+    INVALIDATED = "invalidated"
+    CONFLICT = "conflict"
+    FACT_REDERIVED = "fact_rederived"
+
+
+@dataclass(frozen=True)
+class EpistemicEvent:
+    """
+    Immutable record of an epistemic change.
+    The primary source of truth for the system history.
+    """
+    id: str
+    event_type: EventType
+    entity_id: str
+    payload: Dict[str, Any]
+    timestamp: float = field(default_factory=time.time)
+    
+@dataclass
+class ConflictResolution:
+    """
+    Resolution of a specific conflict.
+    """
+    conflict_id: str
+    resolution_observation_id: str
+    outcome: str  # CONFIRMED_A | CONFIRMED_B | BOTH_INVALID
+    timestamp: float = field(default_factory=time.time)

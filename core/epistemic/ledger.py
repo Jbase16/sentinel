@@ -28,6 +28,7 @@ class LifecycleState(str, Enum):
     PROMOTED = "promoted"       # Became a Finding
     SUPPRESSED = "suppressed"   # Ignored (with WhyNot)
     REJECTED = "rejected"       # Proven false (e.g. sensor glitch)
+    INVALIDATED = "invalidated" # Was Promoted, now false (Time travel)
 
 
 
@@ -90,7 +91,9 @@ class StateRecord:
     decider: str = "system"
     timestamp: float = field(default_factory=time.time)
 
-from core.epistemic.events import EpistemicConflict
+
+from core.epistemic.events import EpistemicConflict, EpistemicEvent, EventType, ConflictType
+
 
 @dataclass
 class WhyNot:
@@ -104,7 +107,6 @@ class WhyNot:
     reason_code: str # "NO_EXPLOIT_PATH", "WAF_BLOCK"
     notes: str
     timestamp: float = field(default_factory=time.time)
-
 
 
 @dataclass
@@ -126,40 +128,38 @@ class EvidenceLedger:
     Authoritative store for Sentinel's epistemic state.
     Manages:
     1. Immutable Evidence (CAS + Observations)
-    2. Mutable Beliefs (StateTable)
-    3. Epistemic Conflicts (Disagreements)
+    2. Event Log (The Source of Truth)
+    3. Derived View (StateTable, Findings)
     """
 
     def __init__(self, config: Optional[SentinelConfig] = None):
         self.config = config or SentinelConfig.from_env()
         self.cas = ContentAddressableStorage(self.config)
         
-        # 1. Immutable Stores
+        # 1. Immutable Stores (The "What")
         self._observations: Dict[str, Observation] = {}
+        # Technically 'findings' map is also a view now, but we keep it for fast lookup
         self._findings: Dict[str, Finding] = {}
         self._conflicts: List[EpistemicConflict] = []
         
-        # 2. Mutable State Table (The Belief System)
-        # Maps entity_id -> StateRecord
+        # 2. Event Log (The "When" and "Why")
+        self._event_log: List[EpistemicEvent] = []
+        
+        # 3. Derived Views (The "Now")
         self._state_table: Dict[str, StateRecord] = {}
 
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
                           raw_output: bytes, exit_code: int = 0) -> Observation:
         """
         Ingest raw tool output.
-        1. Store raw data in CAS -> Get blob_hash
-        2. Create Observation record
-        3. Index it locally
-        4. Initialize State as OBSERVED
         """
         # 1. Store in CAS
         blob_hash = self.cas.store(raw_output)
         
-        # 2. Generate Deterministic ID
         unique_string = f"{tool_name}:{target}:{blob_hash}"
         obs_id = f"obs-{uuid.uuid5(uuid.NAMESPACE_DNS, unique_string).hex[:12]}"
         
-        # 3. Create Immutable Record
+        # 2. Create Immutable Record
         obs = Observation(
             id=obs_id,
             timestamp=time.time(),
@@ -168,10 +168,17 @@ class EvidenceLedger:
             blob_hash=blob_hash
         )
         
-        # 4. Index & Initialize State
+        # 3. Index locally (Optimization: Don't need event for existence of blob/obs definition)
         if obs_id not in self._observations:
             self._observations[obs_id] = obs
-            self._set_state(obs_id, LifecycleState.OBSERVED, reason="Initial ingestion")
+            
+            # Emit OBSERVED event
+            self._emit_event(
+                event_type=EventType.OBSERVED,
+                entity_id=obs_id,
+                payload={"tool": tool_name, "target": target, "blob_hash": blob_hash}
+            )
+            
             logger.info(f"[EvidenceLedger] Recorded Observation {obs_id}: {tool_name} -> {blob_hash[:8]}")
         else:
             logger.debug(f"[EvidenceLedger] Idempotent observation seen: {obs_id}")
@@ -181,17 +188,10 @@ class EvidenceLedger:
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
         """
         Gatekeeper Logic: Validates a proposal and promotes it to a Finding.
-        Enforces:
-        1. Must have citations.
-        2. Citations must point to known observations.
-        3. Citations must not be SUPPRESSED (unless override?).
-        
-        Returns promoted Finding or None if rejected.
         """
         # 1. Check Citations Existence
         if not proposal.citations:
             logger.warning(f"[EvidenceLedger] Rejected proposal '{proposal.title}': No citations.")
-            # We could record a 'REJECTED' state record for the *proposal* if we had IDs for them.
             return None
             
         valid_citations = []
@@ -200,6 +200,10 @@ class EvidenceLedger:
                 obs_state = self.get_state(c.observation_id)
                 if obs_state and obs_state.state == LifecycleState.SUPPRESSED:
                     logger.info(f"[EvidenceLedger] Proposal cites SUPPRESSED evidence {c.observation_id}. Proceeding with caution.")
+                elif obs_state and obs_state.state in [LifecycleState.INVALIDATED, LifecycleState.REJECTED]:
+                    logger.warning(f"[EvidenceLedger] Proposal cites INVALIDATED evidence {c.observation_id}.")
+                    continue # Skip invalid evidence
+                    
                 valid_citations.append(c)
             else:
                 logger.warning(f"[EvidenceLedger] Proposal cites unknown observation {c.observation_id}.")
@@ -209,7 +213,6 @@ class EvidenceLedger:
             return None
             
         # 2. Promote
-        # Note: We use valid_citations, effectively filtering out hallucinations
         return self.promote_finding(
             title=proposal.title,
             severity=proposal.severity,
@@ -234,40 +237,61 @@ class EvidenceLedger:
         )
         
         self._findings[find_id] = finding
-        self._set_state(find_id, LifecycleState.PROMOTED, reason="AI/Human promotion")
+        
+        # Emit PROMOTED event
+        self._emit_event(
+            event_type=EventType.PROMOTED,
+            entity_id=find_id,
+            payload={
+                "title": title,
+                "severity": severity,
+                "citations": [asdict(c) for c in citations],
+                "description": description,
+                "metadata": kwargs
+            }
+        )
+        
+        # Push to findings_store (Read Model)
+        self._update_findings_store(finding)
         
         logger.info(f"[EvidenceLedger] Promoted Finding {find_id}: {title}")
-        
-        # PROJECTION: Update global findings store (Read-model)
-        # Ideally this would be an event listener, but for now we push.
-        from core.data.findings_store import findings_store
-        
-        # Convert to dict format expected by findings_store
-        finding_dict = {
-            "id": finding.id,
-            "title": finding.title, # Store expects 'type' or 'title' usually? Check legacy schema.
-            "type": kwargs.get("type", "General"), # Legacy field
-            "severity": finding.severity,
-            "value": finding.description, # Legacy field mapping
-            "description": finding.description,
-            "citations": [asdict(c) for c in citations],
-            "metadata": kwargs
-        }
-        findings_store.add_finding(finding_dict)
-        
         return finding
 
     def suppress(self, related_id: str, reason_code: str, notes: str) -> StateRecord:
         """
         Move an entity to SUPPRESSED state.
-        This provides the "WhyNot" reasoning.
         """
         if related_id not in self._observations and related_id not in self._findings:
             logger.warning(f"[EvidenceLedger] Suppressing unknown entity {related_id}")
+            
+        # Emit SUPPRESSED event
+        event = self._emit_event(
+            event_type=EventType.SUPPRESSED,
+            entity_id=related_id,
+            payload={
+                "reason_code": reason_code,
+                "notes": notes
+            }
+        )
+        
+        # Return the new state record
+        return self.get_state(related_id)
 
-        # Update the State Table
-        reason = f"{reason_code}: {notes}"
-        return self._set_state(related_id, LifecycleState.SUPPRESSED, reason=reason)
+    def invalidate_finding(self, finding_id: str, reason: str):
+        """
+        Transition a finding to INVALIDATED state.
+        Triggered by conflicting evidence or manual review.
+        """
+        if finding_id not in self._findings:
+            logger.error(f"[EvidenceLedger] Cannot invalidate unknown finding {finding_id}")
+            return
+            
+        self._emit_event(
+            event_type=EventType.INVALIDATED,
+            entity_id=finding_id,
+            payload={"reason": reason}
+        )
+        logger.info(f"[EvidenceLedger] Invalidated Finding {finding_id}: {reason}")
 
     def register_conflict(self, source_a_id: str, source_b_id: str, 
                          description: str, conflict_type: str = "direct_contradiction"):
@@ -275,6 +299,19 @@ class EvidenceLedger:
         Record an epistemic conflict between two observations.
         """
         conflict_id = f"conflict-{uuid.uuid4().hex[:8]}"
+        
+        # Emit CONFLICT event
+        self._emit_event(
+            event_type=EventType.CONFLICT,
+            entity_id=conflict_id, # Conflict is an entity itself? Or just an event?
+            payload={
+                "source_a_id": source_a_id,
+                "source_b_id": source_b_id,
+                "conflict_type": conflict_type,
+                "description": description
+            }
+        )
+        
         conflict = EpistemicConflict(
             id=conflict_id,
             source_a_id=source_a_id,
@@ -282,12 +319,58 @@ class EvidenceLedger:
             conflict_type=conflict_type,
             description=description
         )
-        self._conflicts.append(conflict)
+        self._conflicts.append(conflict) # We still keep this list for easy access, or rebuild it?
+        
         logger.warning(f"[EvidenceLedger] Conflict Registered: {source_a_id} vs {source_b_id} ({description})")
         return conflict
 
+    # ------------------------------------------------------------------
+    # Event Sourcing Core
+    # ------------------------------------------------------------------
+
+    def _emit_event(self, event_type: EventType, entity_id: str, payload: Dict[str, Any]) -> EpistemicEvent:
+        """
+        Create, Log, and Apply an event.
+        """
+        event_id = f"evt-{uuid.uuid1().hex}" # Type 1 UUID for time-based sortability
+        event = EpistemicEvent(
+            id=event_id,
+            event_type=event_type,
+            entity_id=entity_id,
+            payload=payload,
+            timestamp=time.time()
+        )
+        
+        self._event_log.append(event)
+        self._apply_event(event) # Update in-memory view
+        return event
+
+    def _apply_event(self, event: EpistemicEvent):
+        """
+        The Reducer. Updates derived state based on event.
+        """
+        if event.event_type == EventType.OBSERVED:
+            self._set_state(event.entity_id, LifecycleState.OBSERVED, reason="Observed")
+            
+        elif event.event_type == EventType.PROMOTED:
+            self._set_state(event.entity_id, LifecycleState.PROMOTED, reason="Promoted")
+            
+        elif event.event_type == EventType.SUPPRESSED:
+            reason = f"{event.payload.get('reason_code')}: {event.payload.get('notes')}"
+            self._set_state(event.entity_id, LifecycleState.SUPPRESSED, reason=reason)
+            
+        elif event.event_type == EventType.INVALIDATED:
+            reason = event.payload.get("reason", "Invalidated")
+            self._set_state(event.entity_id, LifecycleState.INVALIDATED, reason=reason)
+            
+            # If finding is invalidated, maybe remove from findings_store view?
+            # Or update its status there? 
+            # Current findings_store doesn't support 'update status' well, but we can assume
+            # the UI handles it if we had a proper sync mechanism. 
+            pass
+
     def _set_state(self, entity_id: str, state: LifecycleState, reason: Optional[str] = None) -> StateRecord:
-        """Internal helper to update state table."""
+        """Internal helper to update state table view."""
         record = StateRecord(
             entity_id=entity_id,
             state=state,
@@ -297,6 +380,47 @@ class EvidenceLedger:
         self._state_table[entity_id] = record
         return record
 
+    def replay(self, until_timestamp: float) -> Tuple[Dict[str, StateRecord], List[EpistemicEvent]]:
+        """
+        Reconstruct the state table as it was at `until_timestamp`.
+        Returns: (Constructed State Table, List of Events up to T)
+        """
+        reconstructed_state = {}
+        relevant_events = []
+        
+        # Simple helper for the reducer used within replay
+        def apply(table, ev):
+            reason = None
+            new_state = None
+            
+            if ev.event_type == EventType.OBSERVED:
+                new_state = LifecycleState.OBSERVED
+            elif ev.event_type == EventType.PROMOTED:
+                new_state = LifecycleState.PROMOTED
+            elif ev.event_type == EventType.SUPPRESSED:
+                new_state = LifecycleState.SUPPRESSED
+                reason = f"{ev.payload.get('reason_code')}: {ev.payload.get('notes')}"
+            elif ev.event_type == EventType.INVALIDATED:
+                new_state = LifecycleState.INVALIDATED
+                reason = ev.payload.get("reason")
+            
+            if new_state:
+                table[ev.entity_id] = StateRecord(
+                    entity_id=ev.entity_id,
+                    state=new_state,
+                    reason=reason or ev.payload.get("reason"),
+                    timestamp=ev.timestamp
+                )
+
+        for event in self._event_log:
+            if event.timestamp <= until_timestamp:
+                relevant_events.append(event)
+                apply(reconstructed_state, event)
+            else:
+                break # Assumes log is sorted by time (append-only)
+                
+        return reconstructed_state, relevant_events
+
     def get_state(self, entity_id: str) -> Optional[StateRecord]:
         """Retrieve the current belief state of an entity."""
         return self._state_table.get(entity_id)
@@ -305,8 +429,21 @@ class EvidenceLedger:
         return self._observations.get(obs_id)
         
     def get_blob(self, obs_id: str) -> Optional[bytes]:
-        """Retrieve raw content for an observation."""
-        obs = self.get_observation(obs_id)
-        if not obs:
-            return None
-        return self.cas.load(obs.blob_hash)
+        return self.get_observation(obs_id) and self.cas.load(self.get_observation(obs_id).blob_hash)
+
+    def _update_findings_store(self, finding: Finding):
+        """Push finding to the read-model store."""
+        from core.data.findings_store import findings_store
+        
+        # Convert to dict format expected by findings_store
+        finding_dict = {
+            "id": finding.id,
+            "title": finding.title, 
+            "type": finding.metadata.get("type", "General"), 
+            "severity": finding.severity,
+            "value": finding.description, 
+            "description": finding.description,
+            "citations": [asdict(c) for c in finding.citations],
+            "metadata": finding.metadata
+        }
+        findings_store.add_finding(finding_dict)
