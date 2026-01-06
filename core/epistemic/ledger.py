@@ -149,7 +149,8 @@ class EvidenceLedger:
         self._state_table: Dict[str, StateRecord] = {}
 
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
-                          raw_output: bytes, exit_code: int = 0) -> Observation:
+                          raw_output: bytes, exit_code: int = 0, 
+                          timestamp_override: Optional[float] = None) -> Observation:
         """
         Ingest raw tool output.
         """
@@ -162,7 +163,7 @@ class EvidenceLedger:
         # 2. Create Immutable Record
         obs = Observation(
             id=obs_id,
-            timestamp=time.time(),
+            timestamp=timestamp_override or time.time(),
             tool=ToolContext(name=tool_name, args=tool_args, exit_code=exit_code),
             target=target,
             blob_hash=blob_hash
@@ -176,7 +177,8 @@ class EvidenceLedger:
             self._emit_event(
                 event_type=EventType.OBSERVED,
                 entity_id=obs_id,
-                payload={"tool": tool_name, "target": target, "blob_hash": blob_hash}
+                payload={"tool": tool_name, "target": target, "blob_hash": blob_hash},
+                timestamp_override=timestamp_override
             )
             
             logger.info(f"[EvidenceLedger] Recorded Observation {obs_id}: {tool_name} -> {blob_hash[:8]}")
@@ -222,7 +224,7 @@ class EvidenceLedger:
         )
 
     def promote_finding(self, title: str, severity: str, citations: List[Citation], 
-                       description: str, **kwargs) -> Finding:
+                       description: str, timestamp_override: Optional[float] = None, **kwargs) -> Finding:
         """
         Internal promotion logic.
         """
@@ -248,7 +250,8 @@ class EvidenceLedger:
                 "citations": [asdict(c) for c in citations],
                 "description": description,
                 "metadata": kwargs
-            }
+            },
+            timestamp_override=timestamp_override
         )
         
         # Push to findings_store (Read Model)
@@ -257,7 +260,8 @@ class EvidenceLedger:
         logger.info(f"[EvidenceLedger] Promoted Finding {find_id}: {title}")
         return finding
 
-    def suppress(self, related_id: str, reason_code: str, notes: str) -> StateRecord:
+    def suppress(self, related_id: str, reason_code: str, notes: str, 
+                 timestamp_override: Optional[float] = None) -> StateRecord:
         """
         Move an entity to SUPPRESSED state.
         """
@@ -271,13 +275,14 @@ class EvidenceLedger:
             payload={
                 "reason_code": reason_code,
                 "notes": notes
-            }
+            },
+            timestamp_override=timestamp_override
         )
         
         # Return the new state record
         return self.get_state(related_id)
 
-    def invalidate_finding(self, finding_id: str, reason: str):
+    def invalidate_finding(self, finding_id: str, reason: str, timestamp_override: Optional[float] = None):
         """
         Transition a finding to INVALIDATED state.
         Triggered by conflicting evidence or manual review.
@@ -289,12 +294,14 @@ class EvidenceLedger:
         self._emit_event(
             event_type=EventType.INVALIDATED,
             entity_id=finding_id,
-            payload={"reason": reason}
+            payload={"reason": reason},
+            timestamp_override=timestamp_override
         )
         logger.info(f"[EvidenceLedger] Invalidated Finding {finding_id}: {reason}")
 
     def register_conflict(self, source_a_id: str, source_b_id: str, 
-                         description: str, conflict_type: str = "direct_contradiction"):
+                         description: str, conflict_type: str = "direct_contradiction",
+                         timestamp_override: Optional[float] = None):
         """
         Record an epistemic conflict between two observations.
         """
@@ -304,12 +311,7 @@ class EvidenceLedger:
         self._emit_event(
             event_type=EventType.CONFLICT,
             entity_id=conflict_id, # Conflict is an entity itself? Or just an event?
-            payload={
-                "source_a_id": source_a_id,
-                "source_b_id": source_b_id,
-                "conflict_type": conflict_type,
-                "description": description
-            }
+            timestamp_override=timestamp_override
         )
         
         conflict = EpistemicConflict(
@@ -328,7 +330,8 @@ class EvidenceLedger:
     # Event Sourcing Core
     # ------------------------------------------------------------------
 
-    def _emit_event(self, event_type: EventType, entity_id: str, payload: Dict[str, Any]) -> EpistemicEvent:
+    def _emit_event(self, event_type: EventType, entity_id: str, payload: Dict[str, Any], 
+                   timestamp_override: Optional[float] = None) -> EpistemicEvent:
         """
         Create, Log, and Apply an event.
         """
@@ -339,7 +342,7 @@ class EvidenceLedger:
             event_type=event_type,
             entity_id=entity_id,
             payload=payload,
-            timestamp=time.time(),
+            timestamp=timestamp_override or time.time(),
             run_id=GlobalSequenceAuthority.instance().run_id
         )
         

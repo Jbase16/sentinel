@@ -195,12 +195,64 @@ class ReplayEngine:
         Apply the block's payload to the ledger state.
         This is where the "Simulation" happens.
         """
+        ledger = context.ledger
+        # Ensure we have a valid ledger object. In Phase 1 we mocked it as a dict.
+        # Now we need the real EvidenceLedger or a duck-typed equivalent.
+        # For this step, we assume context.ledger is an instance of EvidenceLedger.
+
+        timestamp = block.meta.get("timestamp")
+        
         if block.kind == "observed":
-            # context.ledger.record_observation(block.payload)
-            pass
+            # Map payload back to record_observation args
+            # Payload schema expected: { "tool": str, "args": List[str], "target": str, "blob": str(base64) ... }
+            # Note: We aren't storing the full blob in the block payload usually (too large).
+            # But for Phase 0 we assumed payload contains the data.
+            # In a real system, the block might contain the CAS hash, and we fetch the blob from CAS.
+            # For this implementation, let's assume payload HAS the data needed.
+            
+            tool = block.payload.get("tool")
+            args = block.payload.get("args", [])
+            target = block.payload.get("target")
+            raw_output = block.payload.get("blob", b"") # Should be bytes or base64 string
+            
+            # If it's a string (from JSON), encode to bytes
+            if isinstance(raw_output, str):
+                import base64
+                try:
+                    # Try de-base64 if it looks like it
+                    raw_output = base64.b64decode(raw_output)
+                except Exception:
+                    raw_output = raw_output.encode('utf-8')
+            
+            if tool and target:
+                ledger.record_observation(
+                    tool_name=tool,
+                    tool_args=args,
+                    target=target,
+                    raw_output=raw_output,
+                    timestamp_override=timestamp
+                )
+
         elif block.kind == "decision":
-            # context.ledger.record_decision(block.payload)
-            pass
+            # Map payload to promote/suppress
+            action = block.payload.get("action")
+            
+            if action == "promote":
+                ledger.promote_finding(
+                    title=block.payload.get("title"),
+                    severity=block.payload.get("severity"),
+                    citations=block.payload.get("citations", []), # Need to rehydrate Citation objects?
+                    description=block.payload.get("description"),
+                    timestamp_override=timestamp,
+                    **block.payload.get("metadata", {})
+                )
+            elif action == "suppress":
+                ledger.suppress(
+                    related_id=block.payload.get("related_id"),
+                    reason_code=block.payload.get("reason_code"),
+                    notes=block.payload.get("notes"),
+                    timestamp_override=timestamp
+                )
         
         # For now, we just log it
-        logger.debug(f"Applied block {block.id} ({block.kind})")
+        logger.debug(f"Applied block {block.id} ({block.kind}) to Ledger.")
