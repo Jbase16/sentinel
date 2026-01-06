@@ -5,7 +5,10 @@
 # Swift Package Manager (if unused)
 # Xcode Generation
 # macOS cruft
+# Logs and temporary files
 *.log
+*.out
+logs/
 *.pyc
 *.tmp
 # Keep xcodeproj but ignore user-specific data inside it
