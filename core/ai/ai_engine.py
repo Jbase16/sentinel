@@ -532,6 +532,7 @@ class AIEngine:
         stderr: str,
         rc: int,
         metadata: Dict,
+        observation_id: Optional[str] = None,
     ):
         """
         Primary handler for all tool outputs.
@@ -556,7 +557,9 @@ class AIEngine:
         # Try AI first
         if self.client:
             try:
-                analysis_result = self._analyze_with_llm(tool_name, stdout, stderr, rc)
+                analysis_result = self._analyze_with_llm(
+                    tool_name, stdout, stderr, rc, observation_id
+                )
                 findings = analysis_result.get("findings", [])
                 next_steps = analysis_result.get("next_steps", [])
             except Exception as e:
@@ -603,7 +606,14 @@ class AIEngine:
             "live_comment": live_comment,
         }
 
-    def _analyze_with_llm(self, tool: str, stdout: str, stderr: str, rc: int) -> Dict:
+    def _analyze_with_llm(
+        self, 
+        tool: str, 
+        stdout: str, 
+        stderr: str, 
+        rc: int,
+        observation_id: Optional[str] = None
+    ) -> Dict:
         """
         Send tool output to LLM for semantic analysis and next step generation.
         """
@@ -614,13 +624,18 @@ class AIEngine:
             "Return ONLY a JSON object with two keys: 'findings' (list) and 'next_steps' (list). "
             "Each finding must have: 'type', 'severity' (LOW, MEDIUM, HIGH, CRITICAL), 'value' (description), and 'technical_details'. "
             "Each next_step must have: 'tool' (e.g., 'nikto', 'sqlmap', 'nmap'), 'args' (list of string flags), and 'reason'. "
-            "Example next_step: {'tool': 'nikto', 'args': ['-h', 'target_ip'], 'reason': 'Found open port 80'}"
+            "Example next_step: {'tool': 'nikto', 'args': ['-h', 'target_ip'], 'reason': 'Found open port 80'}\n\n"
+            "EPISTEMIC GROUNDING RULE (CRITICAL):\n"
+            "You are processing a specific Evidence Observation. "
+            "If an 'observation_id' is provided in the input, you MUST cite it in the 'technical_details' of every finding. "
+            "Format: '... (Ref: <observation_id>)'."
         )
 
         # Truncate output to avoid context window limits (simple approach)
         combined_output = (stdout + "\n" + stderr)[:8000]
 
         user_prompt = (
+            f"Observation ID: {observation_id or 'NONE'}\n"
             f"Tool: {tool}\n"
             f"Exit Code: {rc}\n"
             f"Output:\n{combined_output}\n\n"

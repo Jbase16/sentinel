@@ -89,7 +89,10 @@ class TaskRouter(Observable):
         # EvidenceStore might import modules that depend on TaskRouter
         # By importing here (not at module level), we break the cycle
         from core.data.evidence_store import EvidenceStore
+        from core.epistemic.ledger import EvidenceLedger
+        
         self.evidence = EvidenceStore.instance()
+        self.ledger = EvidenceLedger()
 
         # Registry for UI callbacks (currently unused, kept for backward compatibility)
         # Modern code uses signals instead of direct callbacks
@@ -183,6 +186,15 @@ class TaskRouter(Observable):
         
         # Error handling block.
         try:
+            # STEP 0: Record immutable observation in Epistemic Ledger (The Truth Engine)
+            observation = self.ledger.record_observation(
+                tool_name=tool_name,
+                tool_args=metadata.get("args", []),
+                target=metadata.get("target", "unknown"),
+                raw_output=stdout.encode("utf-8", errors="replace"), # Store bytes
+                exit_code=rc
+            )
+            
             # STEP 1: Send output to AIEngine for semantic analysis
             # AIEngine will:
             # - Generate a human-readable summary
@@ -195,6 +207,7 @@ class TaskRouter(Observable):
                 stderr=stderr,
                 rc=rc,
                 metadata=metadata,
+                observation_id=observation.id, # Cite the evidence
             )
             
         except Exception as e:
