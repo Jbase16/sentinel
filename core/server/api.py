@@ -890,9 +890,9 @@ async def validate_websocket_connection(
 
     # Step 1: Validate Origin (CSRF protection)
     # WebSockets bypass CORS, so we must check manually
-    # Skip origin validation in dev mode (require_auth=False) for convenience
+    # We ALWAYS check origin if present, even in dev mode, to prevent CSRF.
     origin = websocket.headers.get("origin")
-    if config.security.require_auth and origin and not is_origin_allowed(origin, config.security.allowed_origins):
+    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
         logger.warning(
             f"[WebSocket] {endpoint_name} denied origin: {origin} "
             f"(allowed: {config.security.allowed_origins})"
