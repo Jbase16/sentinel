@@ -68,12 +68,16 @@ struct TerminalView: NSViewRepresentable {
             });
 
             window.addEventListener('resize', () => {
-              fitAddon.fit();
-              window.webkit.messageHandlers.pty.postMessage({
-                  type: "resize",
-                  cols: term.cols,
-                  rows: term.rows
-              });
+              // Debounce resize events
+              clearTimeout(window.resizeTimer);
+              window.resizeTimer = setTimeout(() => {
+                 fitAddon.fit();
+                 window.webkit.messageHandlers.pty.postMessage({
+                     type: "resize",
+                     cols: term.cols,
+                     rows: term.rows
+                 });
+              }, 100);
             });
 
             // Bridge: Receive Output from Swift
@@ -138,16 +142,15 @@ struct TerminalView: NSViewRepresentable {
     // PTYDelegate Methods
 
     func onOutputReceived(_ text: String) {
-      // Escape backslashes and double quotes for JS string
-      let escaped =
-        text
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-        .replacingOccurrences(of: "\n", with: "\\n")
-        .replacingOccurrences(of: "\r", with: "\\r")
-
-      let js = "window.receiveOutput(\"\(escaped)\");"
-      webView?.evaluateJavaScript(js)
+      // Use JSONSerialization for safe JS string injection
+      // avoid manual escaping fragility
+      if let data = try? JSONSerialization.data(withJSONObject: [text]),
+        let arg = String(data: data, encoding: .utf8)
+      {
+        // data is array ["text"], so access [0] in JS
+        let js = "window.receiveOutput(\(arg)[0]);"
+        webView?.evaluateJavaScript(js)
+      }
     }
 
     func onConnectionStateChanged(isConnected: Bool) {

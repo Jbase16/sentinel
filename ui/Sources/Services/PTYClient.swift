@@ -32,6 +32,7 @@ class PTYClient: ObservableObject {
     private var webSocketTask: URLSessionWebSocketTask?
     weak var delegate: PTYClientDelegate?
     @Published var isConnected: Bool = false
+    private var hasConfirmedConnection: Bool = false
 
     /// Path to the token file
     private static let tokenPath: URL = {
@@ -60,8 +61,8 @@ class PTYClient: ObservableObject {
         webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
 
-        self.isConnected = true
-        self.delegate?.onConnectionStateChanged(isConnected: true)
+        // Removed optimistic connection state - wait for first message
+        self.hasConfirmedConnection = false
 
         receiveMessage()
     }
@@ -106,25 +107,48 @@ class PTYClient: ObservableObject {
                 }
 
             case .success(let message):
+                // Confirm connection on first successful receive
+                if !self.hasConfirmedConnection {
+                    DispatchQueue.main.async {
+                        self.hasConfirmedConnection = true
+                        self.isConnected = true
+                        self.delegate?.onConnectionStateChanged(isConnected: true)
+                    }
+                }
+
                 switch message {
                 case .string(let text):
-                    // Direct string message (could be legacy or JSON)
-                    // Currently backend API fallback sends raw output text, OR JSON?
-                    // api.py: "socket.send_text(data)" -> This is raw text.
-                    DispatchQueue.main.async {
-                        self.delegate?.onOutputReceived(text)
-                    }
+                    self.handleIncomingText(text)
 
                 case .data(let data):
                     if let text = String(data: data, encoding: .utf8) {
-                        DispatchQueue.main.async {
-                            self.delegate?.onOutputReceived(text)
-                        }
+                        self.handleIncomingText(text)
                     }
                 @unknown default: break
                 }
                 self.receiveMessage()
             }
+        }
+    }
+
+    private func handleIncomingText(_ text: String) {
+        // Try to parse structured JSON output first
+        if let data = text.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = json["type"] as? String,
+            type == "output",
+            let payload = json["data"] as? String
+        {
+
+            DispatchQueue.main.async {
+                self.delegate?.onOutputReceived(payload)
+            }
+            return
+        }
+
+        // Fallback: Raw text
+        DispatchQueue.main.async {
+            self.delegate?.onOutputReceived(text)
         }
     }
 
