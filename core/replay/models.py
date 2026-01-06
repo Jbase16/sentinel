@@ -8,8 +8,10 @@ These models are the "Atoms" of the Infinite Replay system.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import List, Dict, Optional, Any, Union
+import json
 
+CAPSULE_VERSION = "0.1.0"
 
 @dataclass(frozen=True)
 class MerkleBlock:
