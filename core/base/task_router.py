@@ -128,6 +128,11 @@ class TaskRouter(Observable):
         """
         # Error handling block.
         try:
+            # Inject run_id for epoch tracking
+            from core.base.sequence import GlobalSequenceAuthority
+            if isinstance(payload, dict) and "run_id" not in payload:
+                payload["run_id"] = GlobalSequenceAuthority.instance().run_id
+
             # Emit the signal to all connected subscribers
             # The Signal class handles calling each subscriber's callback function
             self.ui_event.emit(event_type, payload)

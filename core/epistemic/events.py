@@ -63,6 +63,7 @@ class EpistemicEvent:
     entity_id: str
     payload: Dict[str, Any]
     timestamp: float = field(default_factory=time.time)
+    run_id: Optional[str] = None
     
 @dataclass
 class ConflictResolution:

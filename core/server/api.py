@@ -2397,11 +2397,25 @@ async def start_scan(
     __: None = Depends(check_rate_limit),
 ):
     """AsyncFunction start_scan."""
-    session_id = await _begin_scan(req)
-    return JSONResponse(
-        {"status": "started", "target": req.target, "session_id": session_id},
-        status_code=202,
-    )
+    try:
+        session_id = await _begin_scan(req)
+        return JSONResponse(
+            {"status": "started", "target": req.target, "session_id": session_id},
+            status_code=202,
+        )
+    except Exception as e:
+        logger.error(f"Failed to start scan: {e}")
+        # Emit failure event
+        from core.base.task_router import TaskRouter
+        TaskRouter.instance().emit_ui_event(
+            "scan_failed",
+            {"target": req.target, "error": str(e)}
+        )
+        raise SentinelError(
+            ErrorCode.SCAN_INITIALIZATION_ERROR,
+            f"Failed to initialize scan: {e}",
+            details={"target": req.target}
+        )
 
 @v1_router.post("/cancel")
 @app.post("/cancel")

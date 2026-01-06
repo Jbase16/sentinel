@@ -137,6 +137,17 @@ class CommandValidator:
             raise ValueError("Command cannot end with operator")
 
     @staticmethod
+    def validate_safe_args(tokens: List[str]) -> None:
+        """
+        Ensure no shell operators are present in arguments.
+        Used when executing a single tool that should not chain.
+        """
+        BANNED = CommandValidator.OPERATORS.union({";", "|", "&"})
+        for tok in tokens:
+            if tok in BANNED:
+                raise ValueError(f"Shell operator '{tok}' not allowed in safe arguments")
+
+    @staticmethod
     def validate_segments(segments: List['CommandSegment'], allow_missing: Optional[set] = None) -> None:
         allow_missing = allow_missing or set()
         

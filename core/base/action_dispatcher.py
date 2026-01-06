@@ -26,6 +26,7 @@ import uuid
 from typing import List, Dict, Optional
 from core.utils.observer import Observable, Signal
 from core.base.config import get_config
+from core.toolkit.installer import CommandValidator
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,17 @@ class ActionDispatcher(Observable):
 
         # Decision 1: Is this a safe tool? (passive reconnaissance)
         if tool in config.scan.safe_tools:
+            # VALIDATION: Even safe tools must have safe arguments
+            try:
+                # Validate the "virtual" command chain: tool + args
+                # We pretend it's a list like ["tool", "arg1", ...]
+                validation_tokens = [tool] + list(args)
+                CommandValidator.validate_safe_args(validation_tokens)
+                # Stricter check: bans shell operators completely in args
+            except ValueError as e:
+                logger.warning(f"Action rejected by validator: {e}")
+                return "DROPPED"
+
             # Auto-approve and immediately emit for execution
             self.action_approved.emit(full_action)
             return "AUTO_APPROVED"

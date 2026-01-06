@@ -45,6 +45,7 @@ from __future__ import annotations
 import logging
 import threading
 from itertools import count
+import uuid
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -158,6 +159,7 @@ class GlobalSequenceAuthority:
             instance = cls()
             instance._counter = count(start=persisted + 1)
             instance._last_issued = persisted
+            instance._run_id = str(uuid.uuid4())
             cls._initialized = True
 
             if persisted > 0:
@@ -226,6 +228,11 @@ class GlobalSequenceAuthority:
         """Get the last issued sequence number (for diagnostics)."""
         return self._last_issued
 
+    @property
+    def run_id(self) -> Optional[str]:
+        """Get the unique run ID (epoch) for this process lifecycle."""
+        return self._run_id
+
     @classmethod
     async def persist_to_db(cls) -> None:
         """
@@ -275,6 +282,7 @@ class GlobalSequenceAuthority:
         with cls._lock:
             instance._counter = count(start=start)
             instance._last_issued = start - 1
+            instance._run_id = str(uuid.uuid4())
             cls._initialized = True
 
 
