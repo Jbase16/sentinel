@@ -1058,6 +1058,31 @@ async def get_ai_status_v1(_: bool = Depends(verify_token)):
     """API v1: Get AI engine status."""
     return _ai_status()
 
+@v1_router.post("/tools/check")
+async def check_tools(
+    tools: Optional[List[str]] = Body(default=None), 
+    _ = Depends(verify_token)
+):
+    """
+    Check for missing tools and return diagnostics.
+    
+    Args:
+        tools: Optional list of tool names to check. If None, checks all.
+        
+    Returns:
+        List of issues found (missing binaries, etc). Empty list if all good.
+    """
+    from core.toolkit.diagnostics import check_missing_tools, DiagnosticIssue
+    
+    # Run check
+    issues = check_missing_tools(tools)
+    
+    return {
+        "issues": [issue.dict() for issue in issues],
+        "status": "ok" if not issues else "issues_found"
+    }
+
+
 @v1_router.get("/tools/status")
 async def tools_status_v1(_: bool = Depends(verify_token)):
     """API v1: Get installed tools status."""
