@@ -37,7 +37,7 @@ class ErrorClassifier:
         # TODO: Load this from a configurable policy file
         pass
 
-    def diagnose(self, error: Exception, context: Dict[str, Any] = None) -> Diagnosis:
+    def diagnose(self, error: Exception, context: Optional[Dict[str, Any]] = None) -> Diagnosis:
         """
         Analyze an exception and return a diagnosis.
         """

@@ -15,7 +15,7 @@ FEATURES:
 import asyncio
 import logging
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Callable, Awaitable
 import time
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,9 @@ class PolicyFileWatcher:
         self._file_mtimes: dict[Path, float] = {}
         self._debounce_delay = 0.5  # Wait 500ms after last change before reloading
         self._pending_reloads: Set[Path] = set()
-        self._reload_callback: Optional[callable] = None
+        self._reload_callback: Optional[Callable[[], Awaitable[None]]] = None
 
-    def set_reload_callback(self, callback: callable):
+    def set_reload_callback(self, callback: Callable[[], Awaitable[None]]):
         """
         Set callback function to invoke when policies need reloading.
 

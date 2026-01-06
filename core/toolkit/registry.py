@@ -161,8 +161,8 @@ class ToolDefinition(BaseModel):
     cmd_template: List[str] = Field(..., description="Command template with {target} placeholder")
     aggressive: bool = Field(False, description="If True, requires explicit user approval")
     target_type: str = Field("url", description="Type of target input: host, domain, ip, url")
-    binary_name: Optional[str] = Field(None, description="Expected binary name if different from first cmd arg")
-    stdin_input: bool = Field(False, description="If True, target is passed via stdin")
+    binary_name: Optional[str] = Field(default=None, description="Expected binary name if different from first cmd arg")
+    stdin_input: bool = Field(default=False, description="If True, target is passed via stdin")
 
 
 class ToolRegistry:

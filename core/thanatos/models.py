@@ -82,6 +82,15 @@ class BreachHypothesis:
 
 
 @dataclass(frozen=True)
+class HereticMutation:
+    """
+    A low-level, raw mutation ready for wire transmission.
+    Used by AnomalyClient for socket-level fuzzing.
+    """
+    raw_payload: bytes
+    description: str
+
+@dataclass(frozen=True)
 class TargetHandle:
     """
     Pointer into the BusinessModelGraph (Aegis), not a direct network locator.

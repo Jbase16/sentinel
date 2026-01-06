@@ -2,7 +2,7 @@ import socket
 import ssl
 import logging
 from typing import Tuple, Optional
-from core.thanatos.ontology_breaker import HereticMutation
+from core.thanatos.models import HereticMutation
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class AnomalyClient:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(self.timeout)
             
+            conn: socket.socket
             if use_ssl:
                 conn = context.wrap_socket(sock, server_hostname=host)
             else:

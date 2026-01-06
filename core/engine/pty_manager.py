@@ -26,6 +26,8 @@ import uuid
 import logging
 import select
 from typing import Dict, Optional, Tuple, List
+from collections import deque
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +47,10 @@ class PTYSession:
         self.created_at = time.time()
         self.last_accessed = time.time()
         
-        # Buffer for output history
+        # Buffer for output history (capped)
         # We store chunks of bytes. Readers join what they need.
-        self.history: List[bytes] = [] 
+        self.history: deque = deque(maxlen=1000) 
+        self.write_counter: int = 0
         self.history_lock = threading.Lock()
         
         self.running = True
@@ -113,6 +116,7 @@ class PTYSession:
                 # Store in history
                 with self.history_lock:
                     self.history.append(data)
+                    self.write_counter += 1
                     
             except Exception as e:
                 logger.error(f"Error in PTY reader loop {self.session_id}: {e}")
@@ -136,23 +140,35 @@ class PTYSession:
     def read_from_offset(self, offset: int) -> Tuple[str, int]:
         """
         Return all new data since the given offset.
-        
-        Returns:
-            (data_str, new_offset)
+        Offset logic handles rolling buffer (deque) scenarios.
         """
         self.last_accessed = time.time()
         with self.history_lock:
-            current_len = len(self.history)
+            total_written = self.write_counter
+            current_buffer_len = len(self.history)
             
-            if offset >= current_len:
-                return "", current_len
+            # If client is ahead of us (impossible?), return nothing
+            if offset >= total_written:
+                return "", total_written
+                
+            # Calculate where the client's offset maps to in our current deque
+            # Formula: deque_index = client_offset - (total_written - current_buffer_len)
+            base_index = total_written - current_buffer_len
+            deque_index = offset - base_index
             
-            # Join all chunks from offset to end
-            # This reconstructs the stream cleanly
-            raw_data = b"".join(self.history[offset:])
-            new_offset = current_len
+            if deque_index < 0:
+                # Client is asking for history we already dropped.
+                # Give them everything we have effectively "resetting" them to the start of the window.
+                deque_index = 0
             
-            # Decode safely
+            # Slice the deque from deque_index to end
+            # Deque doesn't support slicing, so we iterate
+            # Optimization: list(islice) would be better but simple list conversion is fine for 1000 items
+            relevant_chunks = list(self.history)[deque_index:]
+            
+            raw_data = b"".join(relevant_chunks)
+            new_offset = total_written # The client is now caught up to the end
+            
             try:
                 text = raw_data.decode("utf-8", errors="replace")
                 return text, new_offset
@@ -252,4 +268,32 @@ class PTYManager:
             if session_id in self.sessions:
                 self.sessions[session_id].close()
                 del self.sessions[session_id]
+
+    async def cleanup_stale_sessions(self, max_age: float = 3600):
+        """Close sessions inactive for longer than max_age."""
+        now = time.time()
+        to_remove = []
+        
+        with self.sessions_lock:
+            for sid, session in self.sessions.items():
+                if now - session.last_accessed > max_age:
+                    to_remove.append(sid)
+        
+        if to_remove:
+            logger.info(f"[PTYManager] Cleaning up {len(to_remove)} stale sessions: {to_remove}")
+            for sid in to_remove:
+                self.close_session(sid)
+                
+    async def start_cleanup_loop(self):
+        """Background task to run cleanup periodically."""
+        logger.info("[PTYManager] Cleanup loop started")
+        while True:
+            try:
+                await asyncio.sleep(600) # Run every 10 minutes
+                await self.cleanup_stale_sessions()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[PTYManager] Cleanup loop error: {e}")
+                await asyncio.sleep(60)
 
