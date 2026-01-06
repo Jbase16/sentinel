@@ -2613,7 +2613,6 @@ async def handle_action(action_id: str, verb: str, _: bool = Depends(verify_toke
 
 # Terminal WebSocket endpoint with config check
 @v1_router.websocket("/ws/pty")
-@app.websocket("/ws/pty")
 async def terminal_websocket_pty(websocket: WebSocket, session_id: Optional[str] = Query(None)):
     """
     WebSocket endpoint for Bidirectional PTY access (Terminal Virtual Session).
