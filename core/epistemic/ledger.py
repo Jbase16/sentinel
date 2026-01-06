@@ -333,12 +333,14 @@ class EvidenceLedger:
         Create, Log, and Apply an event.
         """
         event_id = f"evt-{uuid.uuid1().hex}" # Type 1 UUID for time-based sortability
+        from core.base.sequence import GlobalSequenceAuthority
         event = EpistemicEvent(
             id=event_id,
             event_type=event_type,
             entity_id=entity_id,
             payload=payload,
-            timestamp=time.time()
+            timestamp=time.time(),
+            run_id=GlobalSequenceAuthority.instance().run_id
         )
         
         self._event_log.append(event)
