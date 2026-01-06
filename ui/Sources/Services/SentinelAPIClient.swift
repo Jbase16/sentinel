@@ -376,37 +376,64 @@ public struct SentinelAPIClient: Sendable {
     // MARK: - Server-Sent Events
 
     /// Stream server-sent events (logs, findings, etc.)
+    /// Automatically reconnects with exponential backoff on failure.
     public func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                guard let url = URL(string: "/v1/events", relativeTo: baseURL) else {
-                    continuation.finish(throwing: APIError.badStatus)
-                    return
-                }
-                let request = authenticatedRequest(url: url, method: "GET")
-                do {
-                    let (bytes, _) = try await session.bytes(for: request)
-                    var currentEvent = ""
-                    var currentData = ""
-
-                    for try await line in bytes.lines {
-                        if line.hasPrefix("event: ") {
-                            currentEvent = String(line.dropFirst(7)).trimmingCharacters(
-                                in: .whitespaces)
-                        } else if line.hasPrefix("data: ") {
-                            currentData = String(line.dropFirst(6))
-                        } else if line.isEmpty {
-                            if !currentEvent.isEmpty && !currentData.isEmpty {
-                                continuation.yield(SSEEvent(type: currentEvent, data: currentData))
-                            }
-                            currentEvent = ""
-                            currentData = ""
-                        }
+                var attempt = 0
+                let maxRetries = 5
+                
+                while !Task.isCancelled {
+                    guard let url = URL(string: "/v1/events", relativeTo: baseURL) else {
+                        continuation.finish(throwing: APIError.badStatus)
+                        return
                     }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+                    
+                    let request = authenticatedRequest(url: url, method: "GET")
+                    
+                    do {
+                        let (bytes, _) = try await session.bytes(for: request)
+                        // Reset attempt counter on successful connection
+                        attempt = 0
+                        
+                        var currentEvent = ""
+                        var currentData = ""
+
+                        for try await line in bytes.lines {
+                            if line.hasPrefix("event: ") {
+                                currentEvent = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                            } else if line.hasPrefix("data: ") {
+                                currentData = String(line.dropFirst(6))
+                            } else if line.isEmpty {
+                                if !currentEvent.isEmpty && !currentData.isEmpty {
+                                    continuation.yield(SSEEvent(type: currentEvent, data: currentData))
+                                }
+                                currentEvent = ""
+                                currentData = ""
+                            }
+                        }
+                        
+                        // If stream ends normally (server closed), we might want to reconnect or finish.
+                        // For SSE, server close usually means we should reconnect unless specific condition met.
+                        // But if we want to stop, we break. For now, assume persistent stream.
+                        print("[SSE] Sync stream ended, reconnecting...")
+                    } catch {
+                        print("[SSE] Connection lost: \(error). Reconnecting...")
+                    }
+                    
+                    attempt += 1
+                    if attempt > maxRetries {
+                        print("[SSE] Max retries reached. Giving up.")
+                        continuation.finish(throwing: APIError.badStatus) // Or specific timeout error
+                        return
+                    }
+                    
+                    // Exponential backoff: 1, 2, 4, 8, 16 seconds
+                    let delay = UInt64(pow(2.0, Double(attempt - 1)) * 1_000_000_000)
+                    try? await Task.sleep(nanoseconds: delay)
                 }
+                
+                continuation.finish()
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }

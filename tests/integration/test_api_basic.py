@@ -27,7 +27,6 @@ from core.server.api import serve
 
 class TestCoreAPI(unittest.TestCase):
     @classmethod
-    @classmethod
     def setUpClass(cls):
         """Function setUpClass."""
         # Start API in a separate thread

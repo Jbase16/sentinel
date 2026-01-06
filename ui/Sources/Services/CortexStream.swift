@@ -64,18 +64,43 @@ class CortexStream: ObservableObject {
         }
     }
 
+    private var targetURL: URL?
+    private var retryAttempt = 0
+    private let maxRetries = 5
+
     /// Function connect.
     func connect(url: URL) {
+        self.targetURL = url
+
         let config = URLSessionConfiguration.default
         let session = URLSession(
             configuration: config, delegate: nil, delegateQueue: OperationQueue.main)
         self.session = session
 
+        print("[CortexStream] Connecting to \(url)...")
         webSocketTask = session.webSocketTask(with: url)
         webSocketTask?.resume()
         self.isConnected = true
 
         receiveMessage()
+    }
+
+    private func scheduleReconnect() {
+        guard retryAttempt < maxRetries else {
+            print("[CortexStream] Max retries reached. Giving up.")
+            return
+        }
+
+        let delay = Double(pow(2.0, Double(retryAttempt)))
+        print(
+            "[CortexStream] Disconnected. Reconnecting in \(delay)s (Attempt \(retryAttempt+1))...")
+
+        retryAttempt += 1
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self = self, let url = self.targetURL else { return }
+            self.connect(url: url)
+        }
     }
 
     private func receiveMessage() {
@@ -89,8 +114,14 @@ class CortexStream: ObservableObject {
                 print("WS Error: \(error)")
                 DispatchQueue.main.async {
                     self.isConnected = false
+                    self.scheduleReconnect()
                 }
             case .success(let message):
+                // Reset retry count on successful message receipt (implies connection is healthy)
+                if self.retryAttempt > 0 {
+                    self.retryAttempt = 0
+                }
+
                 // Switch over value.
                 switch message {
                 case .string(let text):
