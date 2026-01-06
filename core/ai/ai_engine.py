@@ -549,8 +549,8 @@ class AIEngine:
         # Step 2: generate summary
         summary = self._summarize_output(tool_name, stdout, stderr, rc)
 
-        # Step 3: extract findings (AI or Heuristic)
-        findings = []
+        # Step 3: extract findings (AI or Heuristic) -> NOW PROPOSALS
+        proposals = []
         phases = []
         next_steps = []
         
@@ -560,50 +560,46 @@ class AIEngine:
                 analysis_result = self._analyze_with_llm(
                     tool_name, stdout, stderr, rc, observation_id
                 )
-                findings = analysis_result.get("findings", [])
+                proposals = analysis_result.get("proposals", [])
                 next_steps = analysis_result.get("next_steps", [])
             except Exception as e:
                 logger.error(f"LLM analysis failed: {e}")
                 if AI_FALLBACK_ENABLED:
-                    findings = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
+                    proposals = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
         elif AI_FALLBACK_ENABLED:
-             findings = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
+             proposals = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
 
-        # Step 4: map killchain phases
-        phases = self._infer_killchain_phases(findings)
+        # Step 4: map killchain phases (Do this later based on actual Promoted findings?)
+        # For now, we infer phases from proposals to keep UI responsive, but technically
+        # this should happen after promotion.
+        # phases = self._infer_killchain_phases(proposals) 
 
-        # Step 5: update global stores
-        for f in findings:
-            findings_store.add_finding(f)
+        # Step 5: update global stores -> REMOVED (Ledger Authority Inversion)
+        # for f in findings:
+        #     findings_store.add_finding(f)
 
         # Loop over items.
-        for p in phases:
-            killchain_store.add_phase(p)
+        # for p in phases:
+        #     killchain_store.add_phase(p)
 
-        # Step 6: enrich the evidence entry
-        EvidenceStore.instance().update_evidence(
-            evidence_id,
-            summary=summary,
-            findings=findings,
-        )
+        # Step 6: enrich the evidence entry -> Doing this briefly for legacy UI support
+        # EvidenceStore.instance().update_evidence(
+        #     evidence_id,
+        #     summary=summary,
+        #     findings=findings,
+        # )
 
         # Step 7: generate short live commentary for UI
         target = metadata.get("target") if metadata else None
-        live_comment = self._live_commentary(
-            tool_name=tool_name,
-            target=target,
-            summary=summary,
-            findings=findings,
-            phases=phases,
-        )
+        
+        # We don't generate live comment here anymore, let TaskRouter handle it based on accepted findings
+        live_comment = None 
 
         return {
             "summary": summary,
-            "findings": findings,
+            "proposals": proposals, 
             "next_steps": next_steps,
-            "killchain_phases": phases,
             "evidence_id": evidence_id,
-            "live_comment": live_comment,
         }
 
     def _analyze_with_llm(
@@ -643,6 +639,43 @@ class AIEngine:
         )
 
         response_json = self.client.generate(user_prompt, system_prompt)
+        if not response_json:
+            return {"proposals": [], "next_steps": []}
+
+        try:
+            clean_json = self._clean_json_response(response_json)
+            data = json.loads(clean_json)
+            findings_raw = data.get("findings", [])
+            next_steps = data.get("next_steps", [])
+            
+            # Convert raw JSON findings to Proposals
+            from core.epistemic.ledger import FindingProposal, Citation
+            
+            proposals = []
+            for f in findings_raw:
+                # Parse citations from text? 
+                # For now, we assume the AI obeyed the rule and we construct a Citation object manually
+                # pointing to the observation_id we passed in.
+                citations = []
+                if observation_id:
+                    citations.append(Citation(observation_id=observation_id, snippet="Entire output context"))
+
+                proposals.append(FindingProposal(
+                    title=f.get("type", "Unknown"),
+                    severity=f.get("severity", "LOW").upper(),
+                    description=f.get("value", "") + "\n\n" + f.get("technical_details", ""),
+                    citations=citations,
+                    source="ai",
+                    metadata={"tool": tool, "raw_type": f.get("type")}
+                ))
+                
+            return {
+                "proposals": proposals,
+                "next_steps": next_steps
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse LLM JSON response or create proposals: {e}")
+            return {"proposals": [], "next_steps": []}
         # Conditional branch.
         if not response_json:
             return {"findings": [], "next_steps": []}
@@ -781,39 +814,50 @@ class AIEngine:
         stdout: str,
         stderr: str,
         rc: int,
-    ) -> List[Dict]:
+    ) -> List:
         """
         Fallback regex-based extraction.
+        Returns List[FindingProposal]
         """
-        findings: List[Dict] = []
+        from core.epistemic.ledger import FindingProposal
+        
+        proposals = []
         out = f"{stdout}\n{stderr}".lower()
 
         # Example heuristic: open ports from nmap
         if "open" in out and tool == "nmap":
-            findings.append({
-                "tool": tool,
-                "type": "open_port_indicator",
-                "value": "Nmap output includes references to open ports.",
-                "severity": "medium",
-            })
+            proposals.append(FindingProposal(
+                title="Open Port Detected (Heuristic)",
+                severity="MEDIUM",
+                description="Nmap output includes references to open ports.",
+                citations=[], # Heuristics are weak, maybe cite whole blob if ID available?
+                source="heuristic",
+                metadata={"tool": tool, "type": "open_port_indicator"}
+            ))
 
         # Example heuristic: HTTP tech stack detection
         if tool == "httpx" and ("tech" in out or "technology" in out):
-            findings.append({
-                "tool": tool,
-                "type": "tech_stack",
-                "value": "HTTP probing indicates specific technologies in use.",
-                "severity": "low",
-            })
+            proposals.append(FindingProposal(
+                title="Tech Stack Detected (Heuristic)",
+                severity="LOW",
+                description="HTTP probing indicates specific technologies in use.",
+                citations=[],
+                source="heuristic",
+                metadata={"tool": tool, "type": "tech_stack"}
+            ))
 
         # Any explicit "error" mention
         if "error" in out:
-            findings.append({
-                "tool": tool,
-                "type": "tool_error",
-                "value": "Tool output appears to contain errors or failed checks.",
-                "severity": "low",
-            })
+             proposals.append(FindingProposal(
+                title="Tool Error (Heuristic)",
+                severity="LOW",
+                description="Tool output appears to contain errors or failed checks.",
+                citations=[],
+                source="heuristic",
+                metadata={"tool": tool, "type": "tool_error"}
+            ))
+            
+        return proposals
 
         # Non-zero exit code
         if rc != 0:

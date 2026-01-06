@@ -196,11 +196,7 @@ class TaskRouter(Observable):
             )
             
             # STEP 1: Send output to AIEngine for semantic analysis
-            # AIEngine will:
-            # - Generate a human-readable summary
-            # - Extract structured findings (ports, vulnerabilities, etc.)
-            # - Suggest next steps (which tools to run next)
-            # - Map findings to kill chain phases (recon, exploitation, etc.)
+            # AIEngine return PROPOSALS, not final findings.
             result = self.ai.process_tool_output(
                 tool_name=tool_name,
                 stdout=stdout,
@@ -210,6 +206,18 @@ class TaskRouter(Observable):
                 observation_id=observation.id, # Cite the evidence
             )
             
+            proposals = result.get("proposals", [])
+            promoted_findings = []
+            
+            # STEP 2: Epistemic Gatekeeping (The Inversion)
+            # Pass proposals to Ledger for validation and promotion
+            for proposal in proposals:
+                finding = self.ledger.evaluate_and_promote(proposal)
+                if finding:
+                    promoted_findings.append(finding)
+                else:
+                    logger.info(f"[TaskRouter] Logic Refusal: Proposal '{proposal.title}' rejected by Ledger.")
+            
         except Exception as e:
             # AIEngine analysis failed (LLM offline, parsing error, etc.)
             # Log the full error with stack trace for debugging
@@ -218,16 +226,13 @@ class TaskRouter(Observable):
                 exc_info=True
             )
             
-            # Create a fallback result so the rest of the pipeline can continue
-            # At minimum, we can still show the raw output to the user
+            # Create a fallback/error state
             result = {
                 "summary": f"Analysis failed: {str(e)}",
-                "findings": [],
+                "proposals": [],
                 "next_steps": [],
-                "killchain_phases": [],
-                "evidence_id": None,
-                "live_comment": f"⚠️ {tool_name} completed but analysis failed: {str(e)}"
             }
+            promoted_findings = []
             
             # Emit error event to UI so the user knows something went wrong
             try:
@@ -237,10 +242,9 @@ class TaskRouter(Observable):
                     "target": metadata.get("target") if metadata else None
                 })
             except Exception:
-                pass  # If even error emission fails, just log and continue
+                pass
 
-        # STEP 2: Emit events to UI for real-time updates
-        # Even if analysis failed, we can still show evidence of tool execution
+        # STEP 3: Emit events to UI for real-time updates
         
         # Emit evidence update (raw tool output stored in database)
         try:
@@ -248,20 +252,28 @@ class TaskRouter(Observable):
                 "tool": tool_name,
                 "summary": result.get("summary", "No summary available"),
                 "evidence_id": result.get("evidence_id"),
-                # Include return code so UI can highlight failed tools
                 "return_code": rc,
                 "success": rc == 0,
             })
         except Exception as e:
             logger.warning(f"[TaskRouter] Failed to emit evidence_update: {e}")
 
-        # Emit findings update (structured vulnerabilities/discoveries)
+        # Emit findings update (ONLY show PROMOTED findings)
         try:
+            # We need to construct a serializable representation of findings for the UI
+            findings_payload = []
+            for f in promoted_findings:
+                findings_payload.append({
+                    "title": f.title,
+                    "severity": f.severity,
+                    "description": f.description,
+                    "citations": [c.observation_id for c in f.citations]
+                })
+
             self.emit_ui_event("findings_update", {
                 "tool": tool_name,
-                "findings": result.get("findings", []),
+                "findings": findings_payload,
                 "next_steps": result.get("next_steps", []),
-                "killchain_phases": result.get("killchain_phases", []),
                 # Include metadata so UI can filter by target/session
                 "metadata": metadata,
             })

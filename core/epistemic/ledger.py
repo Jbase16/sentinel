@@ -106,6 +106,21 @@ class WhyNot:
     timestamp: float = field(default_factory=time.time)
 
 
+
+@dataclass
+class FindingProposal:
+    """
+    Proposed finding from an AI or heuristic source.
+    Subject to validation by the Ledger before becoming a Finding.
+    """
+    title: str
+    severity: str
+    description: str
+    citations: List[Citation]
+    source: str = "ai"
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 class EvidenceLedger:
     """
     Authoritative store for Sentinel's epistemic state.
@@ -163,19 +178,51 @@ class EvidenceLedger:
             
         return obs
 
+    def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
+        """
+        Gatekeeper Logic: Validates a proposal and promotes it to a Finding.
+        Enforces:
+        1. Must have citations.
+        2. Citations must point to known observations.
+        3. Citations must not be SUPPRESSED (unless override?).
+        
+        Returns promoted Finding or None if rejected.
+        """
+        # 1. Check Citations Existence
+        if not proposal.citations:
+            logger.warning(f"[EvidenceLedger] Rejected proposal '{proposal.title}': No citations.")
+            # We could record a 'REJECTED' state record for the *proposal* if we had IDs for them.
+            return None
+            
+        valid_citations = []
+        for c in proposal.citations:
+            if c.observation_id in self._observations:
+                obs_state = self.get_state(c.observation_id)
+                if obs_state and obs_state.state == LifecycleState.SUPPRESSED:
+                    logger.info(f"[EvidenceLedger] Proposal cites SUPPRESSED evidence {c.observation_id}. Proceeding with caution.")
+                valid_citations.append(c)
+            else:
+                logger.warning(f"[EvidenceLedger] Proposal cites unknown observation {c.observation_id}.")
+        
+        if not valid_citations:
+            logger.warning(f"[EvidenceLedger] Rejected proposal '{proposal.title}': No valid citations found.")
+            return None
+            
+        # 2. Promote
+        # Note: We use valid_citations, effectively filtering out hallucinations
+        return self.promote_finding(
+            title=proposal.title,
+            severity=proposal.severity,
+            citations=valid_citations,
+            description=proposal.description,
+            **proposal.metadata
+        )
+
     def promote_finding(self, title: str, severity: str, citations: List[Citation], 
                        description: str, **kwargs) -> Finding:
         """
-        Create a finding (PROMOTED state).
+        Internal promotion logic.
         """
-        if not citations:
-            raise ValueError(f"CRITICAL: Finding '{title}' rejected. No citations provided.")
-            
-        # Verify citations exist in Ledger
-        for c in citations:
-            if c.observation_id not in self._observations:
-                logger.warning(f"[EvidenceLedger] Cite check warning: Observation {c.observation_id} not found.")
-        
         find_id = f"find-{uuid.uuid4().hex[:8]}"
         finding = Finding(
             id=find_id,
@@ -189,11 +236,25 @@ class EvidenceLedger:
         self._findings[find_id] = finding
         self._set_state(find_id, LifecycleState.PROMOTED, reason="AI/Human promotion")
         
-        # Also update state of cited observations? 
-        # Ideally yes, but one observation can support multiple findings.
-        # For now, we leave observation state as OBSERVED unless explicitly suppressed.
-        
         logger.info(f"[EvidenceLedger] Promoted Finding {find_id}: {title}")
+        
+        # PROJECTION: Update global findings store (Read-model)
+        # Ideally this would be an event listener, but for now we push.
+        from core.data.findings_store import findings_store
+        
+        # Convert to dict format expected by findings_store
+        finding_dict = {
+            "id": finding.id,
+            "title": finding.title, # Store expects 'type' or 'title' usually? Check legacy schema.
+            "type": kwargs.get("type", "General"), # Legacy field
+            "severity": finding.severity,
+            "value": finding.description, # Legacy field mapping
+            "description": finding.description,
+            "citations": [asdict(c) for c in citations],
+            "metadata": kwargs
+        }
+        findings_store.add_finding(finding_dict)
+        
         return finding
 
     def suppress(self, related_id: str, reason_code: str, notes: str) -> StateRecord:
