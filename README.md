@@ -1,185 +1,112 @@
+# Sentinel
 
+## The Reasoning Engine for Offensive Security
 
-Sentinel
+**Sentinel is not a vulnerability scanner.** 
+It is a strictly deterministic **Reasoning Virtual Machine** designed to model the cognition of an elite security researcher.
 
-An Autonomous Synthetic Analyst for Offensive Security
+Traditional scanners are **Stateless**: independent requests, flat findings, and instant amnesia.
+Sentinel is **Cognitive**: it maintains a cryptographic memory, builds a causal graph of the target, and makes evidence-backed decisions.
 
-Sentinel is not a traditional vulnerability scanner.
-It is a stateful reasoning system designed to model how an elite security researcher investigates, understands, and exploits complex targets.
+> *"The goal is not volume—it is understanding."*
 
-Rather than firing static payloads at endpoints, Sentinel maintains memory, builds relationships, and adapts its behavior based on what it learns. Its goal is not volume—it is understanding.
+## Capability Maturity
 
-⸻
+Some components described here are fully implemented, others are partial or under active development. This README describes Sentinel’s intended architecture; specific implementation status is documented in code and tracking artifacts.
 
-Core Philosophy
+---
 
-Most security tools are stateless. Each request is isolated, every finding is flat, and the system forgets what it learned moments ago.
+## The "Time Machine" Architecture
 
-Sentinel is stateful and cognitive.
+Sentinel's core innovation is the **ScanCapsule**—a Merkle-DAG based flight recorder that captures not just *what* happened, but *why*.
 
-It incrementally constructs a model of the target—its infrastructure, interfaces, trust boundaries, and behaviors—and uses that evolving context to decide what to do next. Each action is informed by prior observations, not by a predefined script.
+### 1. Cryptographic Causality
+Every observation, thought, and decision is a content-addressed block (`BlockID = SHA256(Content + ParentHashes)`). This forms an immutable chain of custody for every finding.
 
-This enables classes of analysis that traditional scanners cannot perform:
-	•	Business-logic reasoning
-	•	Cross-surface correlation
-	•	Multi-step exploit chaining
-	•	Replayable forensic analysis
+### 2. The Butterfly Effect (Verified)
+Because the history is a Merkle DAG, Sentinel can perform **Counterfactual Analysis**.
+* **Fork History**: Clone the memory state at any point in the past.
+* **Inject Facts**: "What if Port 80 was closed?"
+* **Observe Divergence**: The engine enforces causal integrity. If you remove the evidence, the downstream finding automatically evaporates.
 
-⸻
+### 3. Deterministic Replay
+The **Hypervisor** can replay any session (`RUN_ID`) with bit-perfect fidelity, restoring the exact memory state of the AI at any moment in time. This enables forensic auditing of *reasoning failures*, not just code failures.
 
-Architecture Overview: The Centaur Model
+---
 
-Sentinel is composed of three tightly integrated systems:
-	•	Helix (SwiftUI)
-A native macOS cockpit for orchestration, visualization, and real-time introspection.
-	•	AraUltra (Python)
-The execution engine responsible for reconnaissance, analysis, tool control, and AI-assisted reasoning.
-	•	Cortex
-A shared event and memory layer that synchronizes state across the system.
+## Architecture: The Centaur Model
 
-Each component is independently testable and loosely coupled, but all communication flows through Cortex to ensure consistency and traceability.
+Sentinel fuses three distinct systems into a unified intelligence:
 
-⸻
+### 🧠 Cortex (The Mind)
+* **Epistemic Ledger**: A double-entry accounting system for Truth. The AI cannot "hallucinate" a finding; it must *promote* a `FindingProposal` by citing specific, immutable `ObservationID`s from the Ledger. *Enforcement provided at the data model and promotion layer.*
+* **Knowledge Graph**: A reactive breakdown of the target (`Subdomain -> IP -> Service -> vulnerability`).
 
-System Components
+### 🏛️ AraUltra (The Hand)
+* **Merkle-Causal Hypervisor**: The runtime that executes the reasoning loop. *(Refers to logical control of reasoning state, not OS-level virtualization.)*
+* **ScannerEngine**: A transactional, crash-proof execution layer. If the process dies, the **JSONL Flight Recorder** ensures zero data loss.
+* **Command Validator**: A rigid security boundary that mathematically prevents command injection.
 
-1. Cortex — Memory, State, and Forensics
+### 👁️ Helix (The Eye)
+* **Native SwiftUI Cockpit**: Real-time visualization of the Knowledge Graph.
+* **Bidirectional PTY**: A fully interactive terminal bridged directly into the engine's secure context.
 
-Cortex functions as Sentinel’s nervous system.
-	•	Event-Sourced Execution
-Every meaningful action—tool invocation, discovery, decision, or failure—is recorded as an immutable event.
-	•	Knowledge Graph
-A continuously updated graph (NetworkX + SQLite) models relationships such as
-Subdomain → IP → Port → Service → Credential → Identity.
-	•	Run Replayability
-Each execution is assigned a RUN_ID. Entire attack chains can be replayed, audited, or analyzed post-hoc without rerunning scans.
+---
 
-This architecture enables both real-time reasoning and post-incident forensics without state corruption.
+## Research Roadmap
 
-⸻
+Sentinel drives the state of the art in automated reasoning. *These initiatives do not expand Sentinel’s core scope; they are explorations built atop existing principles.*
 
-2. Strategos — The Reasoning Layer
+### CRONUS (Temporal Surface Mining)
+* **State**: In Development
+* **Goal**: Weaponizing the 4th Dimension. Finding vulnerabilities in "Zombie Routes" (deprecated APIs, historic endpoints) that modern scanners ignore.
 
-Strategos is the decision-making layer that sits above raw tooling.
-	•	Policy-Driven Control Loop
-Strategos consumes deltas from the Knowledge Graph and emits constrained action plans rather than linear scripts.
-	•	AI Circuit Breaker
-All LLM interactions pass through a hardened client that enforces rate limits, output validation, and failure isolation.
-	•	Context Awareness
-Decisions are made relative to discovered structure. For example, discovering an authentication boundary alters subsequent enumeration and testing strategy.
+### MIMIC (Grey-Box Reconstruction)
+* **State**: In Design
+* **Goal**: Inferring server-side logic from client-side artifacts (Sourcemaps, Webpack bundles) to construct a "Shadow Map" of the application.
 
-Strategos is designed to guide execution, not replace deterministic tooling.
+### SENTIENT (Multi-Persona Logic)
+* **State**: Planned
+* **Goal**: Simulating authorized vs. unauthorized users to mathematically prove IDOR and Privilege Escalation flaws.
 
-⸻
+### NEXUS (Exploit Chain Synthesis)
+* **State**: Planned
+* **Goal**: Transforms low-severity primitives into higher-impact findings by reasoning across relationships and attack paths.
 
-3. ScannerEngine — Safe, Transactional Execution
+---
 
-AraUltra’s execution layer is built to be resilient under failure.
-	•	Transactional Persistence
-Scan state and events are committed atomically. Interrupted or failed runs leave the system in a consistent, replayable state.
-	•	Resource Guardrails
-Strict limits on memory, disk usage, and subprocess behavior prevent host degradation.
-	•	Argument-Validated Subprocesses
-All external tools execute with rigorous validation to eliminate command injection and unsafe invocation.
+## Quick Start
 
-The engine prioritizes correctness and stability over raw speed.
+### Prerequisites
+* Python 3.11+
+* Ollama (`localhost:11434`)
+* specific tools (`nmap`, `httpx`, `subfinder`)
 
-⸻
-
-Research Roadmap
-
-Sentinel includes an active research track focused on vulnerability classes that evade pattern-based tooling.
-
-CRONUS — Temporal Surface Mining
-
-Status: In Development
-
-Identifies latent attack surfaces by analyzing historical artifacts such as archived routes, deprecated APIs, and legacy client code that may still be reachable.
-
-⸻
-
-MIMIC — Grey-Box Structural Reconstruction
-
-Status: In Design
-
-Reconstructs client-side application structure by analyzing JavaScript bundles, source maps, and runtime artifacts to infer routing, privilege boundaries, and hidden functionality.
-
-⸻
-
-SENTIENT — Multi-Persona Logic Analysis
-
-Status: Planned
-
-Simulates multiple identities (e.g., unauthenticated user, standard user, administrator) to detect authorization inconsistencies such as IDOR and privilege leakage through comparative access modeling.
-
-⸻
-
-NEXUS — Exploit Chain Synthesis
-
-Status: Planned
-
-Transforms low-severity primitives into higher-impact findings by reasoning across relationships and attack paths (e.g., Open Redirect → Token Exposure → Account Takeover).
-
-⸻
-
-Project Maturity
-
-Component	Status
-Cortex	Implemented
-Strategos	Implemented (iterating)
-ScannerEngine	Implemented
-Helix UI	Active Development
-Research Modules	Prototyping / Planned
-
-
-⸻
-
-Developer Guide
-
-Prerequisites
-	•	Python 3.11+
-	•	Ollama (local, port 11434)
-	•	SQLite
-	•	Optional: Redis (high-concurrency setups)
-	•	External Tools: nmap, httpx, subfinder (Homebrew)
-
-⸻
-
-Setup
-
+### Installation
+```bash
 git clone https://github.com/your-org/sentinelforge.git
 cd sentinelforge
 
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-Database schema initialization and migrations occur automatically on first run.
-
-⸻
-
-Running SentinelForge
-
-# Start the API server
+### Running the Engine
+```bash
+# Start the API & Hypervisor
 python3 -m uvicorn core.server.api:app --reload --port 8000
 
-# Run a scan via CLI
-python3 -m core.cli scan --target example.com --mode fast
+# Launch a Scan Session
+python3 -m core.cli scan --target example.com --mode comprehensive
+```
 
+---
 
-⸻
+## Safety & Ethics
 
-Legal & Ethical Use
+**Sentinel is a weapon of analysis.**
+It is designed for authorized security testing only. The **Epistemic Ledger** creates an immutable audit trail of every action taken. You are responsible for your usage.
 
-SentinelForge is intended for authorized security testing only.
+> *Built to extend human capability, not automate recklessness.*
 
-Use against systems without explicit permission is illegal and unethical.
-Users are responsible for complying with all applicable laws and regulations.
-
-⸻
-
-Final note
-
-SentinelForge is built to explore how machines can reason about security, not to replace human judgment. Its purpose is to extend analyst capability—not automate recklessness.
-
-⸻
