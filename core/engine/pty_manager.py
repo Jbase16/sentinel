@@ -96,7 +96,13 @@ class PTYSession:
             try:
                 # Use select to wait for data (blocking with timeout)
                 # This prevents busy-waiting
-                r, w, x = select.select([self.fd], [], [], 1.0)
+                try:
+                    if self.fd is None: break
+                    r, w, x = select.select([self.fd], [], [], 1.0)
+                except (ValueError, OSError):
+                     # FD closed or invalid
+                     break
+
                 if not r:
                     # Check if process is still alive
                     if self._check_process_dead():
@@ -202,17 +208,28 @@ class PTYSession:
     def close(self):
         """Terminate the session and cleanup."""
         self.running = False
-        try:
-            os.close(self.fd)
-        except OSError:
-            pass
+        
+        # 1. Close the Master FD (interrupts reader)
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None # Prevent double close
             
+        # 2. Terminate Child Process
         try:
             os.kill(self.pid, 15)  # SIGTERM
             time.sleep(0.1)
-            os.kill(self.pid, 9)   # SIGKILL
+            # Check if dead yet
+            pid, status = os.waitpid(self.pid, os.WNOHANG)
+            if pid == 0:
+                # Still alive, force kill
+                os.kill(self.pid, 9)   # SIGKILL
+                # Blocking wait to ensure reaping (prevent zombie)
+                os.waitpid(self.pid, 0)
         except OSError:
-            pass
+            pass # Process already dead/gone
 
 class PTYManager:
     """

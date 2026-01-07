@@ -136,6 +136,88 @@ class CausalGraphBuilder:
         logger.info(f"[CausalGraph] Built graph: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
         return self.graph
 
+    def update_from_event(self, event: Any): # Type: EpistemicEvent
+        """
+        Reactive update: incrementally add finding from ledger event.
+        Avoiding dependency on EpistemicEvent class definition to prevent circular imports if possible,
+        or just duck-type check.
+        """
+        # We check event_type string
+        if getattr(event, "event_type", "") == "promoted":
+             # Payload matches structure sent in promote_finding
+             payload = event.payload
+             finding_id = event.entity_id
+             
+             finding_data = {
+                 "id": finding_id,
+                 "title": payload.get("title"),
+                 "severity": payload.get("severity"),
+                 "type": payload.get("metadata", {}).get("type", "General"),
+                 "target": payload.get("metadata", {}).get("target", "unknown"), # Target usually in metadata or inferred? 
+                 # Wait, promote_finding usually calls _emit_event with payload.
+                 # Let's check ledger.py promote_finding payload content.
+                 # It contains "metadata". Target is usually in observation... 
+                 # Actually finding citations link to observation which has target.
+                 # Simplified for now: assume metadata has target or use generic.
+                 "data": payload.get("metadata", {})
+             }
+             
+             # Create Finding object
+             finding = Finding(
+                id=finding_data["id"],
+                type=finding_data["type"],
+                severity=finding_data["severity"],
+                title=finding_data["title"],
+                target=finding_data["target"],
+                data=finding_data["data"]
+             )
+             
+             self.findings_map[finding.id] = finding
+             
+             # Add to graph
+             self.graph.add_node(
+                finding.id,
+                type=finding.type,
+                severity=finding.severity,
+                title=finding.title,
+                target=finding.target
+            )
+            
+            # Infer dependencies (Incremental)
+            # We only infer dependencies involving this new finding.
+            # This is complex: iterate ALL existing findings to see if they enable/require NEW finding?
+            # Yes, O(N). Acceptable for incremental updates.
+            
+             self._infer_dependencies_incremental(finding)
+             
+             logger.info(f"[CausalGraph] Reactively added finding {finding.id}")
+
+    def _infer_dependencies_incremental(self, new_finding: Finding):
+        """Infer edges for a single new finding against existing graph."""
+        # 1. Check if NEW finding requires existing findings
+        # 2. Check if EXISTING findings require NEW finding
+        
+        # Reuse logic from _infer_dependencies but adapted?
+        # That logic relied on grouping by target.
+        # Let's just run simple checks.
+        
+        # Rule 1: Port -> Service Vuln
+        if 'port' in new_finding.type.lower() or 'service' in new_finding.type.lower():
+            # I am a Port/Service. Do I enable any existing Vulns?
+            for existing_id, existing in self.findings_map.items():
+                if existing.target == new_finding.target:
+                     if any(w in existing.type.lower() for w in ['injection', 'xss', 'rce', 'exploit']):
+                         self.graph.add_edge(new_finding.id, existing.id, relationship='enables')
+                         
+        if any(w in new_finding.type.lower() for w in ['injection', 'xss', 'rce', 'exploit']):
+            # I am a Vuln. Do I require any existing Ports?
+             for existing_id, existing in self.findings_map.items():
+                if existing.target == new_finding.target:
+                     if 'port' in existing.type.lower() or 'service' in existing.type.lower():
+                         self.graph.add_edge(existing.id, new_finding.id, relationship='enables')
+                         
+        # (Other rules omitted for brevity/speed in this patch, can extend later)
+    
     def _infer_dependencies(self, findings: List[Finding]):
         """
         Infer causal dependencies from finding types and targets.

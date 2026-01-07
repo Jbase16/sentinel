@@ -152,6 +152,11 @@ class EvidenceLedger:
         if not self._audit_path.exists():
             with open(self._audit_path, "a") as f:
                 f.write(json.dumps({"type": "header", "version": "1.0", "created": time.time()}) + "\n")
+        
+        # 2c. Reactive Listeners
+        self._listeners: List[Callable[[EpistemicEvent], None]] = []
+
+        # 3. Derived Views (The "Now")
 
         
         # 3. Derived Views (The "Now")
@@ -162,6 +167,13 @@ class EvidenceLedger:
         # Use first 12 chars of SHA256 (48 bits of entropy is enough for local collision resistance)
         # We rely on MerkleEngine for canonicalization.
         return f"{prefix}-{MerkleEngine.compute_hash(content)[:12]}"
+
+    # ------------------------------------------------------------------
+    # Reactivity
+    # ------------------------------------------------------------------
+    def subscribe(self, callback): # Type: Callable[[EpistemicEvent], None]
+        """Register a listener for ledger events."""
+        self._listeners.append(callback)
 
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
                           raw_output: bytes, exit_code: int = 0, 
@@ -399,6 +411,14 @@ class EvidenceLedger:
             logger.error(f"[EvidenceLedger] Failed to persist event {event_id}: {e}")
             
         self._apply_event(event) # Update in-memory view
+        
+        # Notify Listeners (Reactive Graph etc)
+        for listener in self._listeners:
+            try:
+                listener(event)
+            except Exception as e:
+                logger.error(f"[EvidenceLedger] Listener exception: {e}")
+                
         return event
 
     def _apply_event(self, event: EpistemicEvent):
