@@ -30,3 +30,23 @@ tests/test_aegis_phase1.py
 tests/test_thanatos_phase1.py
 tests/test_thanatos_phase2.py
 .claude/agents/senior-engineer.md
+
+# Ad-hoc Verification Scripts
+verify_*.py
+
+# Internal Documentation & Scratchpads
+AGENTS.md
+CODE_REVIEW_*.md
+COMPLETED_TODOS_SUMMARY*
+GITHUB_ACTIONS_SETUP.md
+MoreTODO.md
+TODO_*.md
+TRIAD.md
+WARP.md
+sentinel-update.md
+work.md
+test_output.txt
+*.zip
+conflict.log
+ollama.log
+server.log
