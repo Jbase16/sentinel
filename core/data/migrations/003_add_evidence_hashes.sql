@@ -8,4 +8,6 @@
 -- CREATE INDEX idx_evidence_hash ON evidence(content_hash);
 
 -- Add created_at column (previously only had timestamp)
-ALTER TABLE evidence ADD COLUMN created_at TEXT DEFAULT (datetime('now'));
+-- Note: SQLite requires constant defaults for ALTER TABLE ADD COLUMN
+-- Using NULL default; application layer handles timestamp assignment
+ALTER TABLE evidence ADD COLUMN created_at TEXT DEFAULT NULL;

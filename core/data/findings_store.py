@@ -98,18 +98,17 @@ class FindingsStore(Observable):
             logger.error(f"[FindingsStore] Failed to load findings: {e}")
 
     async def refresh(self):
-        """AsyncFunction refresh."""
-        # Conditional branch.
+        """Reload findings from database and emit signal."""
         if not self.db._initialized:
             await self.db.init()
-        # Conditional branch.
         if self.session_id:
             loaded = await self.db.get_findings(self.session_id)
         else:
             loaded = await self.db.get_all_findings()
-        # Context-managed operation.
         with self._lock:
             self._findings = loaded
+        # Emit signal so listeners (e.g., PressureGraphManager) update
+        self.findings_changed.emit()
 
     def add_finding(self, finding: dict, persist: bool = True):
         """Function add_finding."""

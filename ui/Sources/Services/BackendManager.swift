@@ -101,7 +101,9 @@ class BackendManager: ObservableObject {
         status = "Core Stopped"
     }
 
-    private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async -> Bool {
+    private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async
+        -> Bool
+    {
         let requestURL = url ?? healthCheckURL
         var request = URLRequest(url: requestURL)
         request.timeoutInterval = timeoutInterval  // Allow more time for slow responses
@@ -179,7 +181,8 @@ class BackendManager: ObservableObject {
 
         guard
             let repoPath = possiblePaths.first(where: { path in
-                fileManager.fileExists(atPath: path.appendingPathComponent("core/server/api.py").path)
+                fileManager.fileExists(
+                    atPath: path.appendingPathComponent("core/server/api.py").path)
             })
         else {
             await MainActor.run { self.status = "Error: Repository not found" }
@@ -207,7 +210,9 @@ class BackendManager: ObservableObject {
         let p = Process()
         p.executableURL = python
         p.currentDirectoryURL = repoPath
-        p.arguments = ["-m", "uvicorn", "core.server.api:app", "--host", "127.0.0.1", "--port", "8765"]
+        p.arguments = [
+            "-m", "uvicorn", "core.server.api:app", "--host", "127.0.0.1", "--port", "8765",
+        ]
 
         // Inherit PYTHONPATH so imports work
         var env = ProcessInfo.processInfo.environment
@@ -230,7 +235,8 @@ class BackendManager: ObservableObject {
         }
 
         // Provide a boot manifest path for deterministic readiness diagnostics.
-        let manifestDir = home
+        let manifestDir =
+            home
             .appendingPathComponent(".sentinelforge")
             .appendingPathComponent("run")
         let manifestPath = manifestDir.appendingPathComponent("boot_manifest.json")
@@ -305,11 +311,12 @@ class BackendManager: ObservableObject {
         }
 
         // Wait for the server to become healthy
-        await waitForServerReady()
+        await waitForServerReady(launchTime: Date())
     }
 
     /// Polls the health endpoint until the server is ready
-    private func waitForServerReady() async {
+    /// - Parameter launchTime: The time the process was started (used to verify token freshness)
+    private func waitForServerReady(launchTime: Date) async {
         let deadline = Date().addingTimeInterval(maxStartupDuration)
         var attempt = 0
         var backoff = startupInitialBackoff
@@ -325,14 +332,22 @@ class BackendManager: ObservableObject {
 
             // Conditional branch.
             if await checkBackendHealth(timeoutInterval: requestTimeout) {
-                await MainActor.run {
-                    self.status = "Core Online"
-                    self.isRunning = true
-                    NotificationCenter.default.post(name: .backendReady, object: nil)
+                // TOKEN FRESHNESS CHECK:
+                // Ensure the token file has been updated SINCE we launched the process.
+                // This prevents race conditions where we connect using an old stale token
+                // before the new backend has overwritten it.
+                if isTokenFileFresh(since: launchTime) {
+                    await MainActor.run {
+                        self.status = "Core Online"
+                        self.isRunning = true
+                        NotificationCenter.default.post(name: .backendReady, object: nil)
+                    }
+                    print("[BackendManager] Server ready after \(attempt) attempt(s)")
+                    startHealthMonitor()
+                    return
+                } else {
+                    print("[BackendManager] Health OK but Token Stale. Waiting for token write...")
                 }
-                print("[BackendManager] Server ready after \(attempt) attempt(s)")
-                startHealthMonitor()
-                return
             }
 
             if shouldAbortStartup() {
@@ -467,5 +482,18 @@ class BackendManager: ObservableObject {
         else { return nil }
         return json
     }
-}
 
+    private func isTokenFileFresh(since launchTime: Date) -> Bool {
+        let tokenPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("api_token")
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tokenPath.path),
+            let modDate = attrs[.modificationDate] as? Date
+        else { return false }
+
+        // Allow a small buffer (0.5s) for file system clock skews, but generally
+        // the file modification must be AFTER the launch time.
+        return modDate >= launchTime.addingTimeInterval(-0.5)
+    }
+}

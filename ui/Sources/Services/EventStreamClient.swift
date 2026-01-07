@@ -199,6 +199,18 @@ public class EventStreamClient: ObservableObject {
     private let maxReconnectAttempts = 10
     private let reconnectBaseDelay: TimeInterval = 1.0
 
+    /// Path to the token file (mirrors SentinelAPIClient)
+    private static let tokenPath: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("api_token")
+    }()
+
+    private static func readToken() -> String? {
+        try? String(contentsOf: tokenPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Initialization
 
     init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!) {
@@ -276,7 +288,12 @@ public class EventStreamClient: ObservableObject {
 
         var request = URLRequest(url: finalURL)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer dev-token", forHTTPHeaderField: "Authorization")
+
+        // Read auth token from standard location
+        if let token = Self.readToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
         request.timeoutInterval = 60 * 60  // 1 hour timeout
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)

@@ -1341,19 +1341,19 @@ class ScannerEngine:
                 logger.warning(f"[{exec_id}] {e}")
                 return []
 
-            # Legacy global TaskRouter side effects only if no session
-            if self.session is None:
-                try:
-                    router = TaskRouter.instance()
-                    router.handle_tool_output(
-                        tool_name=tool,
-                        stdout=output_text,
-                        stderr="",
-                        rc=exit_code,
-                        metadata={"target": target, "findings_count": len(findings), "exec_id": exec_id},
-                    )
-                except Exception as router_err:
-                    logger.warning(f"[{exec_id}] TaskRouter processing error: {router_err}")
+            # Always record observation in Epistemic Ledger for audit trail
+            # This ensures the Audit Feed shows all tool executions
+            try:
+                router = TaskRouter.instance()
+                router.handle_tool_output(
+                    tool_name=tool,
+                    stdout=output_text,
+                    stderr="",
+                    rc=exit_code,
+                    metadata={"target": target, "findings_count": len(findings), "exec_id": exec_id},
+                )
+            except Exception as router_err:
+                logger.warning(f"[{exec_id}] TaskRouter processing error: {router_err}")
 
             return findings
         except Exception as exc:

@@ -906,7 +906,13 @@ async def validate_websocket_connection(
     should_enforce_auth = require_token or config.security.require_auth
 
     if should_enforce_auth:
+        # Accept token from query param OR Authorization header (Bearer token)
         token = websocket.query_params.get("token")
+        if not token:
+            # Check Authorization header as fallback (Swift clients use this)
+            auth_header = websocket.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                token = auth_header[7:]  # Strip "Bearer " prefix
         if not token or token != config.security.api_token:
             logger.warning(
                 f"[WebSocket] {endpoint_name} denied: invalid or missing token "
@@ -2322,7 +2328,6 @@ async def ws_graph_endpoint(websocket: WebSocket):
         return  # Connection was closed by validator
 
     await websocket.accept()
-    await websocket.accept()
     
     from core.data.pressure_graph.manager import PressureGraphManager
     from core.data.db import Database
@@ -2348,18 +2353,18 @@ async def ws_graph_endpoint(websocket: WebSocket):
                 await websocket.send_json({"nodes": [], "edges": []})
                 await asyncio.sleep(5)
                 
-        # Initialize Graph Manager with FindingsStore for hydration
+        # Initialize FindingsStore and hydrate from database BEFORE creating manager
         f_store = FindingsStore(session_id=session_id)
+        await f_store.refresh()  # Ensure findings are loaded from DB
+        
+        # Initialize Graph Manager with hydrated FindingsStore
         manager = PressureGraphManager(session_id=session_id, findings_store=f_store)
+        
+        # Give the manager a moment to process the findings signal
+        await asyncio.sleep(0.1)
         
         # Start streaming loop
         while True:
-            # Poll for updates (Manager will self-update from stores) Or use signal?
-            # Existing logic uses manager.to_dict() which is populated.
-            
-            # Since manager.load_state() is async in background, we might send empty first.
-            # But f_store will trigger update shortly.
-            
             data = manager.to_dict()
             await websocket.send_json(data)
             await asyncio.sleep(1.0) # 1Hz refresh

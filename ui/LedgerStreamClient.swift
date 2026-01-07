@@ -82,15 +82,26 @@ public class LedgerStreamClient: ObservableObject {
             case .success(let message):
                 switch message {
                 case .string(let text):
-                    self.handleMessage(text)
+                    Task { @MainActor in
+                        self.handleMessage(text)
+                        self.receiveMessage()
+                    }
                 case .data(let data):
                     if let text = String(data: data, encoding: .utf8) {
-                        self.handleMessage(text)
+                        Task { @MainActor in
+                            self.handleMessage(text)
+                            self.receiveMessage()
+                        }
+                    } else {
+                        Task { @MainActor in
+                            self.receiveMessage()
+                        }
                     }
                 @unknown default:
-                    break
+                    Task { @MainActor in
+                        self.receiveMessage()
+                    }
                 }
-                self.receiveMessage()  // Loop
             }
         }
     }
