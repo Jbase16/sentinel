@@ -48,5 +48,16 @@ work.md
 test_output.txt
 *.zip
 conflict.log
+sentinel-update.md
+work.md
+test_output.txt
+*.zip
+conflict.log
 ollama.log
 server.log
+
+# Private / Local Config
+live_fuzz_campaign.py
+TODO.md
+CLAUDE.md
+sentinel.code-workspace
