@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -23,6 +23,8 @@
 		84565490131B06C520A4801A /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */; };
 		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
 		96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */; };
+		9648C15E2F0E00E60088A303 /* LedgerStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C15D2F0E00E50088A303 /* LedgerStreamClient.swift */; };
+		9648C1612F0E01160088A303 /* AuditFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C15F2F0E01160088A303 /* AuditFeedView.swift */; };
 		9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */; };
 		9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C910B6EF70385F75EC7BA /* PTYClient.swift */; };
 		A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */; };
@@ -64,6 +66,8 @@
 		7D47C9AABA588CA41003B700 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelAPIClient.swift; sourceTree = "<group>"; };
 		8318D0791A1940E626D7A7ED /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
+		9648C15D2F0E00E50088A303 /* LedgerStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerStreamClient.swift; sourceTree = "<group>"; };
+		9648C15F2F0E01160088A303 /* AuditFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditFeedView.swift; sourceTree = "<group>"; };
 		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
 		AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamClient.swift; sourceTree = "<group>"; };
 		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
@@ -106,6 +110,8 @@
 				F69478BB4593A2ED44797763 /* Core (Python) */,
 				A39ECB073AF93C27FA90F973 /* Sources */,
 				73F5367697371FAE0E7DD69E /* Products */,
+				9648C15D2F0E00E50088A303 /* LedgerStreamClient.swift */,
+				9648C1602F0E01160088A303 /* Audit */,
 			);
 			sourceTree = "<group>";
 		};
@@ -175,6 +181,14 @@
 				CA1FB66EC2747EC1973D336E /* DashboardView.swift */,
 			);
 			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		9648C1602F0E01160088A303 /* Audit */ = {
+			isa = PBXGroup;
+			children = (
+				9648C15F2F0E01160088A303 /* AuditFeedView.swift */,
+			);
+			path = Audit;
 			sourceTree = "<group>";
 		};
 		9F4A1567420A88A2907C77A7 /* Pressure */ = {
@@ -303,7 +317,6 @@
 			);
 			mainGroup = 2BE62123C101D1A0E78E9AC3;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -334,6 +347,7 @@
 				250D8E25220B3AB535717493 /* ChatBubbleView.swift in Sources */,
 				C4EDBDE9C6812EFA33977B44 /* ChatView.swift in Sources */,
 				B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */,
+				9648C15E2F0E00E60088A303 /* LedgerStreamClient.swift in Sources */,
 				4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */,
 				A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */,
 				C94EFAA35A0D3B712FC57FB6 /* GenerateModels.swift in Sources */,
@@ -351,6 +365,7 @@
 				96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */,
 				442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */,
 				65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */,
+				9648C1612F0E01160088A303 /* AuditFeedView.swift in Sources */,
 				E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */,
 				AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */,
 				14F802FA073267C118AFB865 /* SentinelAPIClient.swift in Sources */,

@@ -40,7 +40,7 @@ vertex VertexOut vertex_main(
     
     // Physics Properties
     float mass = in.physics.x;        // Gravity
-    float charge = in.physics.y;      // Polarity
+    // float charge = in.physics.y;      // Polarity (Unused for now)
     float temperature = in.physics.z; // Friction/Heat
     // float structural = in.physics.w;  // 1.0 = Rigid
     
