@@ -109,6 +109,28 @@ class PTYSession:
                         break
                     continue
                 
+                # FENCE: Verify we still own this FD
+                # This prevents "Ghost Reader" attacks where we read from a recycled FD
+                # belonging to a new session.
+                # Lazy import to avoid circular dependency if any (usually safe with singleton)
+                # But PTYSession is defined in same file as PTYManager... wait.
+                # PTYManager is below PTYSession.
+                # We need to access the singleton instance.
+                # We can't import PTYManager here easily if it's not defined yet?
+                # Actually they are in same file. PTYManager is defined AFTER PTYSession.
+                # So we can use PTYManager.instance() inside the method, as PTYManager will be defined at runtime.
+                try:
+                    manager = PTYManager.instance()
+                    if not manager.verify_fd_ownership(self.fd, self.session_id):
+                        logger.warning(f"FD Ownership Fence failure for session {self.session_id} on fd {self.fd}")
+                        break
+                except NameError:
+                    # Logic safety: If PTYManager class isn't bound yet? Unlikely in runtime.
+                    pass 
+                except Exception as e:
+                    logger.error(f"Fence check error: {e}")
+                    break
+                
                 # Read data
                 try:
                     data = os.read(self.fd, buf_size)
@@ -249,6 +271,16 @@ class PTYManager:
     def __init__(self):
         self.sessions: Dict[str, PTYSession] = {}
         self.sessions_lock = threading.Lock()
+        
+        # FD Fencing Registry: map fd -> session_id
+        # Prevents race conditions where an FD is recycled by OS and read by stale thread
+        self._fd_registry: Dict[int, str] = {}
+        self._registry_lock = threading.Lock()
+
+    def verify_fd_ownership(self, fd: int, session_id: str) -> bool:
+        """Threade-safe check if FD belongs to specific session."""
+        with self._registry_lock:
+            return self._fd_registry.get(fd) == session_id
 
     def create_session(self, session_id: Optional[str] = None) -> PTYSession:
         """Create a new session, optionally with a specific ID."""
@@ -266,6 +298,11 @@ class PTYManager:
             
             session = PTYSession(sid)
             self.sessions[sid] = session
+            
+            # Register FD ownership immediately
+            with self._registry_lock:
+                self._fd_registry[session.fd] = sid
+                
             return session
 
     def get_session(self, session_id: str) -> Optional[PTYSession]:
@@ -283,8 +320,22 @@ class PTYManager:
     def close_session(self, session_id: str):
         with self.sessions_lock:
             if session_id in self.sessions:
-                self.sessions[session_id].close()
+                session = self.sessions[session_id]
+                fd_to_clear = session.fd
+                
+                # Close the session (closes FD)
+                session.close()
+                
+                # Remove from session map
                 del self.sessions[session_id]
+                
+                # Cleanup Registry
+                if fd_to_clear is not None:
+                     with self._registry_lock:
+                         # Only delete if it still points to this session 
+                         # (Extreme paranoia check, though lock prevents reuse)
+                         if self._fd_registry.get(fd_to_clear) == session_id:
+                             del self._fd_registry[fd_to_clear]
 
     async def cleanup_stale_sessions(self, max_age: float = 3600):
         """Close sessions inactive for longer than max_age."""
