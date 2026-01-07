@@ -224,12 +224,33 @@ class ReplayEngine:
                 except Exception:
                     raw_output = raw_output.encode('utf-8')
             
+            # Check for Injections (Counterfactuals)
+            # If an injection matches this tool/target, we use the injected payload instead.
+            # This is the "Butterfly Effect" trigger.
+            effective_output = raw_output
+            
+            for injection in context.injections:
+                # We interpret the injection.data dictionary.
+                # Simplest matching rule: Tool + Target equality.
+                if (injection.fact_type == "observed_override" and 
+                    injection.data.get("tool") == tool and
+                    injection.data.get("target") == target):
+                    
+                    logger.warning(f"[Hypervisor] INJECTION TRIGGERED: Overriding {tool} output for {target}")
+                    effective_output = injection.data.get("blob", b"")
+                    # If blob is string in injection, encode it
+                    if isinstance(effective_output, str):
+                        effective_output = effective_output.encode('utf-8')
+                        
+                    # We only apply the first match for now
+                    break
+
             if tool and target:
                 ledger.record_observation(
                     tool_name=tool,
                     tool_args=args,
                     target=target,
-                    raw_output=raw_output,
+                    raw_output=effective_output,
                     timestamp_override=timestamp
                 )
 

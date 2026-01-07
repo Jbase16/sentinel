@@ -146,6 +146,14 @@ class EvidenceLedger:
         # 2. Event Log (The "When" and "Why")
         self._event_log: List[EpistemicEvent] = []
         
+        # 2b. Audit Persistence
+        self._audit_path = self.config.storage.base_dir / "audit.jsonl"
+        # Ensure header exists
+        if not self._audit_path.exists():
+            with open(self._audit_path, "a") as f:
+                f.write(json.dumps({"type": "header", "version": "1.0", "created": time.time()}) + "\n")
+
+        
         # 3. Derived Views (The "Now")
         self._state_table: Dict[str, StateRecord] = {}
 
@@ -382,6 +390,14 @@ class EvidenceLedger:
         )
         
         self._event_log.append(event)
+        
+        # Persist to Audit Log
+        try:
+            with open(self._audit_path, "a") as f:
+                f.write(json.dumps(asdict(event)) + "\n")
+        except Exception as e:
+            logger.error(f"[EvidenceLedger] Failed to persist event {event_id}: {e}")
+            
         self._apply_event(event) # Update in-memory view
         return event
 
