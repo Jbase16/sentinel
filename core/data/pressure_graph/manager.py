@@ -522,11 +522,17 @@ class PressureGraphManager(Observable):
             "INFO": 1.0
         }
         
-        severity_str = str(issue.get("severity", "INFO")).upper()
-        severity = severity_map.get(severity_str, 1.0)
+        # Handle various severity formats (int, str, float)
+        raw_sev = issue.get("severity", "INFO")
+        if isinstance(raw_sev, (int, float)):
+             # Convert numeric 0-10 to float
+             severity = float(raw_sev)
+        else:
+             severity_str = str(raw_sev).upper()
+             severity = severity_map.get(severity_str, 1.0)
         
-        # Determine node type
-        issue_type = issue.get("type", "unknown")
+        # Determine node type with robust fallbacks
+        issue_type = issue.get("type", "unknown").lower()
         if issue_type in ["open_port", "exposed_service"]:
             node_type = "exposure"
         elif issue_type == "vulnerability":
@@ -536,26 +542,37 @@ class PressureGraphManager(Observable):
         elif issue_type in ["trust_relationship", "excessive_trust"]:
             node_type = "trust"
         else:
-            node_type = "asset"
+            # Check title/description if type is generic
+            title = str(issue.get("title", "")).lower()
+            if "port" in title:
+                node_type = "exposure"
+            elif "cve" in title or "vuln" in title:
+                node_type = "vulnerability"
+            else:
+                node_type = "asset"
         
         # Exposure: how accessible?
         exposure = 0.5  # Default
-        if issue_type == "open_port":
+        target = str(issue.get("target", "")).lower()
+        if node_type == "exposure" or issue_type == "open_port":
             exposure = 0.9  # Highly accessible
-        elif "internal" in str(issue.get("target", "")).lower():
+        elif "internal" in target or "127.0.0.1" in target or "localhost" in target:
             exposure = 0.3  # Less accessible
         
         # Exploitability: from CVSS if available
         cvss_data = issue.get("cvss", {})
         if isinstance(cvss_data, dict):
-            exploitability = cvss_data.get("exploitability", 5.0) / 10.0
+            exploitability = float(cvss_data.get("exploitability", 5.0)) / 10.0
+        elif isinstance(cvss_data, (int, float)):
+             exploitability = float(cvss_data) / 10.0
         else:
             exploitability = 0.5
         
         # Privilege gain: what access does this provide?
         privilege_gain = 0.3  # Default
         proof = str(issue.get("proof", "")).lower()
-        if "root" in proof or "admin" in proof:
+        description = str(issue.get("description", "")).lower()
+        if "root" in proof or "admin" in proof or "root" in description:
             privilege_gain = 1.0
         elif "user" in proof or "account" in proof:
             privilege_gain = 0.5
@@ -578,14 +595,14 @@ class PressureGraphManager(Observable):
         else:
             mass = 5.0
             
-        if issue_type == 'asset':
+        if node_type == 'asset':
             mass = 100.0  # Gravity Well
             charge = 10.0 # Slight attraction
             
-        if issue_type == 'vulnerability':
+        if node_type == 'vulnerability':
             charge = -5.0 # Slight repulsion (bad thing)
             
-        if issue_type == 'trust':
+        if node_type == 'trust':
             structural = True
             mass = 20.0
         
@@ -596,8 +613,15 @@ class PressureGraphManager(Observable):
         # Corroboration count (from issue metadata if available)
         corroboration_count = 0
         
-        # Node ID
-        node_id = issue.get("id", f"issue_{hash(str(issue))}")
+        # Node ID - Robust generation
+        raw_id = issue.get("id")
+        if raw_id:
+             node_id = str(raw_id)
+        else:
+             # Create deterministic ID from content if missing
+             import hashlib
+             content_str = f"{issue.get('title')}{issue.get('target')}{issue.get('type')}"
+             node_id = f"issue_{hashlib.md5(content_str.encode()).hexdigest()[:8]}"
         
         return PressureNode(
             id=node_id,

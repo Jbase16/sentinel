@@ -2382,41 +2382,43 @@ async def ws_events_endpoint(websocket: WebSocket):
     """
     Stream raw Epistemic Events from the Ledger (Audit Feed).
     """
+    token = websocket.query_params.get("token")
     if not await validate_websocket_connection(websocket, "/ws/events"):
          return
 
     await websocket.accept()
     
-    from core.base.task_router import TaskRouter
-    from dataclasses import asdict
+    from core.cortex.event_store import get_event_store
     
-    loop = asyncio.get_running_loop()
-    msg_queue = asyncio.Queue()
-    
-    def on_event(event):
-        try:
-            loop.call_soon_threadsafe(msg_queue.put_nowait, event)
-        except Exception as e:
-            logger.error(f"Event bridge error: {e}")
-
-    unsubscribe = None
+    # 1. Parse 'since' parameter for replay
+    since_str = websocket.query_params.get("since", "0")
     try:
-        # Subscribe to global ledger
-        router = TaskRouter.instance()
-        unsubscribe = router.ledger.subscribe(on_event)
+        last_sequence = int(since_str)
+    except ValueError:
+        last_sequence = 0
         
-        while True:
-            event = await msg_queue.get()
-            payload = asdict(event)
-            await websocket.send_json(payload)
-            
+    store = get_event_store()
+    
+    # 2. Replay missed events
+    missed_events, truncated = store.get_since(last_sequence)
+    if truncated:
+        logger.warning(f"[WS] Client requested sequence {last_sequence} but log truncated. Sending all available.")
+        
+    for stored_event in missed_events:
+        await websocket.send_text(stored_event.to_json())
+        
+    # 3. Subscribe to live events
+    # We iterate the async generator directly which handles the queue logic for us
+    try:
+        async for stored_event in store.subscribe():
+            # Only send if new (in case a race condition added it during replay)
+            if stored_event.sequence > (missed_events[-1].sequence if missed_events else last_sequence):
+                await websocket.send_text(stored_event.to_json())
+                
     except WebSocketDisconnect:
-        pass
+        logger.info(f"Event stream disconnected (client request since={last_sequence})")
     except Exception as e:
-        logger.error(f"Events WS Error: {e}")
-    finally:
-        if unsubscribe:
-            unsubscribe()
+        logger.error(f"Event stream error: {e}")
 
 @v1_router.websocket("/ws/terminal")
 @app.websocket("/ws/terminal")
