@@ -2372,6 +2372,47 @@ async def ws_graph_endpoint(websocket: WebSocket):
         except:
             pass
 
+@v1_router.websocket("/ws/events")
+async def ws_events_endpoint(websocket: WebSocket):
+    """
+    Stream raw Epistemic Events from the Ledger (Audit Feed).
+    """
+    if not await validate_websocket_connection(websocket, "/ws/events"):
+         return
+
+    await websocket.accept()
+    
+    from core.base.task_router import TaskRouter
+    from dataclasses import asdict
+    
+    loop = asyncio.get_running_loop()
+    msg_queue = asyncio.Queue()
+    
+    def on_event(event):
+        try:
+            loop.call_soon_threadsafe(msg_queue.put_nowait, event)
+        except Exception as e:
+            logger.error(f"Event bridge error: {e}")
+
+    unsubscribe = None
+    try:
+        # Subscribe to global ledger
+        router = TaskRouter.instance()
+        unsubscribe = router.ledger.subscribe(on_event)
+        
+        while True:
+            event = await msg_queue.get()
+            payload = asdict(event)
+            await websocket.send_json(payload)
+            
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"Events WS Error: {e}")
+    finally:
+        if unsubscribe:
+            unsubscribe()
+
 @v1_router.websocket("/ws/terminal")
 @app.websocket("/ws/terminal")
 async def ws_terminal_endpoint(

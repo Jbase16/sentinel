@@ -26,6 +26,7 @@ struct MainWindowView: View {
         case terminal = "System Console"
         case report = "Report Composer"
         case tools = "Tool Bank"
+        case audit = "Audit Feed"
         case chat = "AI Assistant"
 
         var id: String { rawValue }
@@ -38,6 +39,7 @@ struct MainWindowView: View {
             case .terminal: return "command.square.fill"
             case .report: return "doc.text.fill"
             case .tools: return "wrench.and.screwdriver.fill"
+            case .audit: return "list.bullet.rectangle.portrait.fill"
             case .chat: return "bubble.left.and.bubble.right.fill"
             }
         }
@@ -106,6 +108,7 @@ struct MainWindowView: View {
                     case .terminal: TerminalView()
                     case .report: ReportComposerView()
                     case .tools: ToolsBankView()
+                    case .audit: AuditFeedView()
                     case .chat: ChatView()
                     case .none: Text("Offline")
                     }

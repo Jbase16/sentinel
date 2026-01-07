@@ -171,9 +171,17 @@ class EvidenceLedger:
     # ------------------------------------------------------------------
     # Reactivity
     # ------------------------------------------------------------------
-    def subscribe(self, callback): # Type: Callable[[EpistemicEvent], None]
-        """Register a listener for ledger events."""
+    def subscribe(self, callback) -> Callable[[], None]:
+        """
+        Register a listener for ledger events.
+        Returns: A callable that removes the subscription when invoked.
+        """
         self._listeners.append(callback)
+        
+        def unsubscribe():
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+        return unsubscribe
 
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
                           raw_output: bytes, exit_code: int = 0, 
