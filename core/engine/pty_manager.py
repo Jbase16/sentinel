@@ -122,10 +122,14 @@ class PTYSession:
                 try:
                     manager = PTYManager.instance()
                     if not manager.verify_fd_ownership(self.fd, self.session_id):
-                        logger.warning(f"FD Ownership Fence failure for session {self.session_id} on fd {self.fd}")
+                        current_owner = manager._fd_registry.get(self.fd, "None")
+                        logger.warning(
+                            f"FD FAIL: Ghost Read prevented. "
+                            f"Me={self.session_id} FD={self.fd} "
+                            f"Owner={current_owner}"
+                        )
                         break
                 except NameError:
-                    # Logic safety: If PTYManager class isn't bound yet? Unlikely in runtime.
                     pass 
                 except Exception as e:
                     logger.error(f"Fence check error: {e}")
