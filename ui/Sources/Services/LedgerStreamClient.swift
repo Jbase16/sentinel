@@ -39,8 +39,21 @@ public class LedgerStreamClient: ObservableObject {
     }
 
     public func connect() {
+        var request = URLRequest(url: url)
+
+        // Read auth token from standard location
+        let tokenUrl = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("api_token")
+
+        if let token = try? String(contentsOf: tokenUrl, encoding: .utf8).trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
         let session = URLSession(configuration: .default)
-        webSocketTask = session.webSocketTask(with: url)
+        webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
         self.isConnected = true
 
