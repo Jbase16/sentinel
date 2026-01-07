@@ -19,6 +19,7 @@ from enum import Enum
 
 from core.epistemic.cas import ContentAddressableStorage
 from core.base.config import SentinelConfig
+from core.replay.merkle import MerkleEngine
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,12 @@ class EvidenceLedger:
         # 3. Derived Views (The "Now")
         self._state_table: Dict[str, StateRecord] = {}
 
+    def _generate_deterministic_id(self, prefix: str, content: Any) -> str:
+        """Generate a deterministic ID based on content hash."""
+        # Use first 12 chars of SHA256 (48 bits of entropy is enough for local collision resistance)
+        # We rely on MerkleEngine for canonicalization.
+        return f"{prefix}-{MerkleEngine.compute_hash(content)[:12]}"
+
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
                           raw_output: bytes, exit_code: int = 0, 
                           timestamp_override: Optional[float] = None) -> Observation:
@@ -228,7 +235,18 @@ class EvidenceLedger:
         """
         Internal promotion logic.
         """
-        find_id = f"find-{uuid.uuid4().hex[:8]}"
+        # Deterministic ID generation based on immutable attributes
+        content_hash_input = {
+            "title": title,
+            "severity": severity,
+            "description": description,
+            "citations": [asdict(c) for c in citations],
+            # Metadata might contain timestamps, so be careful. 
+            # But Finding ID should be content-based.
+            "metadata": kwargs
+        }
+        find_id = self._generate_deterministic_id("find", content_hash_input)
+        
         finding = Finding(
             id=find_id,
             title=title,
@@ -305,7 +323,13 @@ class EvidenceLedger:
         """
         Record an epistemic conflict between two observations.
         """
-        conflict_id = f"conflict-{uuid.uuid4().hex[:8]}"
+        content_hash_input = {
+            "source_a": source_a_id,
+            "source_b": source_b_id,
+            "type": conflict_type,
+            "desc": description
+        }
+        conflict_id = self._generate_deterministic_id("conflict", content_hash_input)
         
         # Emit CONFLICT event
         self._emit_event(
@@ -335,14 +359,25 @@ class EvidenceLedger:
         """
         Create, Log, and Apply an event.
         """
-        event_id = f"evt-{uuid.uuid1().hex}" # Type 1 UUID for time-based sortability
+        # Event ID should be deterministic based on its contents + timestamp
+        # This ensures that replaying the same actions at the same time yields same Event IDs
+        timestamp = timestamp_override or time.time()
+        
+        event_content = {
+            "type": event_type,
+            "entity": entity_id,
+            "payload": payload,
+            "time": timestamp
+        }
+        event_id = self._generate_deterministic_id("evt", event_content)
+        
         from core.base.sequence import GlobalSequenceAuthority
         event = EpistemicEvent(
             id=event_id,
             event_type=event_type,
             entity_id=entity_id,
             payload=payload,
-            timestamp=timestamp_override or time.time(),
+            timestamp=timestamp,
             run_id=GlobalSequenceAuthority.instance().run_id
         )
         

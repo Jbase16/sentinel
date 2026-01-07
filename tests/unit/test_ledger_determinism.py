@@ -101,8 +101,10 @@ class TestLedgerDeterminism(unittest.TestCase):
         # Get the event from the log
         evt1 = self.ledger._event_log[-1]
         
-        # Clear log and repeat
+        # Clear log AND observations (ledger enforces idempotency, so it won't re-emit if obs is known)
         self.ledger._event_log = []
+        self.ledger._observations = {}
+        
         obs2 = self.ledger.record_observation(
             tool_name="tool", 
             tool_args=["a"], 
