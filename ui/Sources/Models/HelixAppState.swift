@@ -505,40 +505,43 @@ public class HelixAppState: ObservableObject {
         cortexStream.reset()
         apiLogs.removeAll()
         apiLogItems.removeAll()
+        isScanRunning = false
+        activeBreachTarget = nil
+        pendingActions.removeAll()
         // Note: We don't reset `allEvents`, that's our source of truth!
 
         // 2. Re-apply events up to cursor
-        let eventsToReplay = allEvents.prefix(through: safeIndex)
+        let eventsToReplay = Array(allEvents.prefix(through: safeIndex))
         print("[TimeTravel] Replaying \(eventsToReplay.count) events (Target: \(safeIndex))...")
 
+        // Batch Graph Update (Performance critical)
+        cortexStream.processBatch(eventsToReplay)
+
+        // Batch Log/Lifecycle Update
+        var newLogs: [LogItem] = []
+
         for event in eventsToReplay {
-            // Manually drive the state update logic
-            // We need to refactor the giant sink closure into a method we can call directly.
-            processEvent(event)
+            // 1. Logs
+            if let rendered = renderLiveLogLine(event: event) {
+                newLogs.append(LogItem(id: UUID(), text: rendered))
+            }
+            // 2. Lifecycle
+            processLifecycleEvent(event)
         }
+
+        self.apiLogItems = newLogs
 
         // 3. Force UI Refresh
         // (Published properties update automatically)
     }
 
-    /// extracted from the sink closure to allow reuse during replay
-    private func processEvent(_ event: GraphEvent) {
-        // 1. Logs
-        if let rendered = renderLiveLogLine(event: event) {
-            apiLogItems.append(LogItem(id: UUID(), text: rendered))
-        }
-
-        // 2. Graph (Manual Drive)
-        cortexStream.processEvent(event)
-
-        // 3. Scan Lifecycle (Optional UI updates)
+    private func processLifecycleEvent(_ event: GraphEvent) {
         switch event.eventType {
         case .scanStarted:
             isScanRunning = true
         case .scanCompleted, .scanFailed:
             isScanRunning = false
         case .breachDetected:
-            // Replay breach effects
             let target = event.payload["target_node_id"]?.stringValue ?? "unknown"
             self.activeBreachTarget = target
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
@@ -548,6 +551,15 @@ public class HelixAppState: ObservableObject {
             }
         default: break
         }
+    }
+
+    // Legacy single-event processor (can be removed if unused, or kept for fine-grained steps)
+    private func processEvent(_ event: GraphEvent) {
+        if let rendered = renderLiveLogLine(event: event) {
+            apiLogItems.append(LogItem(id: UUID(), text: rendered))
+        }
+        cortexStream.processEvent(event)
+        processLifecycleEvent(event)
     }
 }
 

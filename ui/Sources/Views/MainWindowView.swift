@@ -99,21 +99,26 @@ struct MainWindowView: View {
                 )
 
                 // Main Content Area
-                ZStack {
-                    // Switch over value.
-                    switch selection {
-                    case .dashboard: DashboardView()
-                    case .scan: ScanControlView()
-                    case .graph: NetworkGraphView()  // Metal 3D
-                    case .terminal: TerminalView()
-                    case .report: ReportComposerView()
-                    case .tools: ToolsBankView()
-                    case .audit: AuditFeedView()
-                    case .chat: ChatView()
-                    case .none: Text("Offline")
+                VStack(spacing: 0) {
+                    ZStack {
+                        // Switch over value.
+                        switch selection {
+                        case .dashboard: DashboardView()
+                        case .scan: ScanControlView()
+                        case .graph: NetworkGraphView()  // Metal 3D
+                        case .terminal: TerminalView()
+                        case .report: ReportComposerView()
+                        case .tools: ToolsBankView()
+                        case .audit: AuditFeedView()
+                        case .chat: ChatView()
+                        case .none: Text("Offline")
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Time Travel Scrubber
+                    TimelineView()
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 800, idealWidth: 1000, minHeight: 500, idealHeight: 700)

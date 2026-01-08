@@ -138,71 +138,81 @@ class CortexStream: ObservableObject {
         }
     }
 
-    /// Process a raw GraphEvent (Client-Side Reducer)
-    func processEvent(_ event: GraphEvent) {
-        // Reducer Logic
+    /// Process a batch of events (optimized for Replay)
+    func processBatch(_ events: [GraphEvent]) {
         DispatchQueue.main.async {
-            switch event.eventType {
-            case .nodeAdded, .nodeUpdated:
-                guard let id = event.payload["id"]?.stringValue,
-                    let type = event.payload["type"]?.stringValue
-                else { return }
+            // Temporary buffers
+            var newNodes = self.nodes
+            var newEdges = self.edges
 
-                // Construct NodeModel from loose payload
-                // Note: Payload might be flat or nested "data".
-                // Adapting to both styles for robustness.
-                let data = event.payload["data"]?.dictValue ?? event.payload
-
-                // Position Stability
-                let base = self.positionCache[id] ?? self.stablePosition(for: id)
-                self.positionCache[id] = base
-
-                let newNode = NodeModel(
-                    id: id,
-                    type: type,
-                    x: base.x,
-                    y: base.y,
-                    z: base.z,
-                    color: self.colorForType(type, severity: data["severity"] as? Double),
-                    mass: Float((data["mass"] as? Double) ?? 1.0),
-                    charge: Float((data["charge"] as? Double) ?? 0.0),
-                    temperature: Float((data["temperature"] as? Double) ?? 0.0),
-                    structural: data["structural"] as? Bool,
-                    description: data["description"] as? String,
-                    pressure: Float((data["severity"] as? Double ?? 0.0) / 10.0),
-                    severity: (data["severity"] as? Double ?? 0.0) > 7 ? "HIGH" : "INFO"
-                )
-
-                // Upsert
-                if let idx = self.nodes.firstIndex(where: { $0.id == id }) {
-                    self.nodes[idx] = newNode
-                } else {
-                    self.nodes.append(newNode)
-                }
-
-            case .edgeAdded:
-                guard let id = event.payload["id"]?.stringValue,
-                    let source = event.payload["source"]?.stringValue,
-                    let target = event.payload["target"]?.stringValue
-                else { return }
-
-                let newEdge = EdgeModel(
-                    id: id,
-                    source: source,
-                    target: target,
-                    type: event.payload["type"]?.stringValue ?? "unknown"
-                )
-                self.edges.append(newEdge)
-
-            case .scanStarted:
-                // Auto-reset on new scan?
-                // self.reset()
-                // Typically scan start implies a fresh graph context
-                break
-
-            default:
-                break
+            for event in events {
+                self.applyEvent(event, nodes: &newNodes, edges: &newEdges)
             }
+
+            // Single commit to published properties
+            self.nodes = newNodes
+            self.edges = newEdges
+        }
+    }
+
+    /// Process a single event (Live)
+    func processEvent(_ event: GraphEvent) {
+        DispatchQueue.main.async {
+            self.applyEvent(event, nodes: &self.nodes, edges: &self.edges)
+        }
+    }
+
+    private func applyEvent(_ event: GraphEvent, nodes: inout [NodeModel], edges: inout [EdgeModel])
+    {
+        switch event.eventType {
+        case .nodeAdded, .nodeUpdated:
+            guard let id = event.payload["id"]?.stringValue,
+                let type = event.payload["type"]?.stringValue
+            else { return }
+
+            let data = event.payload["data"]?.dictValue ?? event.payload
+
+            let base = self.positionCache[id] ?? self.stablePosition(for: id)
+            self.positionCache[id] = base
+
+            let newNode = NodeModel(
+                id: id,
+                type: type,
+                x: base.x,
+                y: base.y,
+                z: base.z,
+                color: self.colorForType(type, severity: data["severity"] as? Double),
+                mass: Float((data["mass"] as? Double) ?? 1.0),
+                charge: Float((data["charge"] as? Double) ?? 0.0),
+                temperature: Float((data["temperature"] as? Double) ?? 0.0),
+                structural: data["structural"] as? Bool,
+                description: data["description"] as? String,
+                pressure: Float((data["severity"] as? Double ?? 0.0) / 10.0),
+                severity: (data["severity"] as? Double ?? 0.0) > 7 ? "HIGH" : "INFO"
+            )
+
+            if let idx = nodes.firstIndex(where: { $0.id == id }) {
+                nodes[idx] = newNode
+            } else {
+                nodes.append(newNode)
+            }
+
+        case .edgeAdded:
+            guard let id = event.payload["id"]?.stringValue,
+                let source = event.payload["source"]?.stringValue,
+                let target = event.payload["target"]?.stringValue
+            else { return }
+
+            let newEdge = EdgeModel(
+                id: id,
+                source: source,
+                target: target,
+                type: event.payload["type"]?.stringValue ?? "unknown"
+            )
+            edges.append(newEdge)
+
+        default:
+            break
         }
     }
 

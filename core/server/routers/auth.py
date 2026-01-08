@@ -105,3 +105,46 @@ async def check_ai_rate_limit(request: Request) -> None:
             "AI rate limit exceeded",
             details={"endpoint": str(request.url.path), "client_ip": get_client_ip(request)}
         )
+
+def is_origin_allowed(origin: str, allowed_patterns: Iterable[str]) -> bool:
+    """
+    Check if an origin matches any of the allowed patterns.
+
+    Patterns support:
+    - Exact matches: "https://example.com"
+    - Wildcard ports: "http://localhost:*" matches any port on localhost
+
+    Args:
+        origin: The Origin header value to validate
+        allowed_patterns: Iterable of allowed origin patterns (tuple, list, etc.)
+
+    Returns:
+        True if origin matches any pattern, False otherwise
+    """
+    from urllib.parse import urlparse
+    
+    if not allowed_patterns:
+        return False
+
+    for pattern in allowed_patterns:
+        if pattern == "*":
+            return True
+        if pattern == origin:
+            return True
+        
+        # Wildcard port logic (e.g., http://localhost:*)
+        if ":*" in pattern:
+            base_pattern = pattern.split(":*")[0]
+            if origin.startswith(base_pattern):
+                try:
+                    # Verify structure matches (scheme://host:port)
+                    origin_parsed = urlparse(origin)
+                    pattern_parsed = urlparse(base_pattern)
+                    
+                    if origin_parsed.scheme == pattern_parsed.scheme and \
+                       origin_parsed.hostname == pattern_parsed.hostname:
+                        return True
+                except Exception:
+                    continue
+                    
+    return False
