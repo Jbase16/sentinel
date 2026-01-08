@@ -120,6 +120,103 @@ class CortexStream: ObservableObject {
         receiveMessage()
     }
 
+    /// Function disconnect.
+    func disconnect() {
+        webSocketTask?.cancel(with: .normalClosure, reason: nil)
+        webSocketTask = nil
+        isConnected = false
+        print("[CortexStream] Disconnected.")
+    }
+
+    /// Reset internal state (for Replay)
+    func reset() {
+        DispatchQueue.main.async {
+            self.nodes = []
+            self.edges = []
+            self.positionCache = [:]
+            self.retryAttempt = 0  // Reset interactions
+        }
+    }
+
+    /// Process a raw GraphEvent (Client-Side Reducer)
+    func processEvent(_ event: GraphEvent) {
+        // Reducer Logic
+        DispatchQueue.main.async {
+            switch event.eventType {
+            case .nodeAdded, .nodeUpdated:
+                guard let id = event.payload["id"]?.stringValue,
+                    let type = event.payload["type"]?.stringValue
+                else { return }
+
+                // Construct NodeModel from loose payload
+                // Note: Payload might be flat or nested "data".
+                // Adapting to both styles for robustness.
+                let data = event.payload["data"]?.dictValue ?? event.payload
+
+                // Position Stability
+                let base = self.positionCache[id] ?? self.stablePosition(for: id)
+                self.positionCache[id] = base
+
+                let newNode = NodeModel(
+                    id: id,
+                    type: type,
+                    x: base.x,
+                    y: base.y,
+                    z: base.z,
+                    color: self.colorForType(type, severity: data["severity"] as? Double),
+                    mass: Float((data["mass"] as? Double) ?? 1.0),
+                    charge: Float((data["charge"] as? Double) ?? 0.0),
+                    temperature: Float((data["temperature"] as? Double) ?? 0.0),
+                    structural: data["structural"] as? Bool,
+                    description: data["description"] as? String,
+                    pressure: Float((data["severity"] as? Double ?? 0.0) / 10.0),
+                    severity: (data["severity"] as? Double ?? 0.0) > 7 ? "HIGH" : "INFO"
+                )
+
+                // Upsert
+                if let idx = self.nodes.firstIndex(where: { $0.id == id }) {
+                    self.nodes[idx] = newNode
+                } else {
+                    self.nodes.append(newNode)
+                }
+
+            case .edgeAdded:
+                guard let id = event.payload["id"]?.stringValue,
+                    let source = event.payload["source"]?.stringValue,
+                    let target = event.payload["target"]?.stringValue
+                else { return }
+
+                let newEdge = EdgeModel(
+                    id: id,
+                    source: source,
+                    target: target,
+                    type: event.payload["type"]?.stringValue ?? "unknown"
+                )
+                self.edges.append(newEdge)
+
+            case .scanStarted:
+                // Auto-reset on new scan?
+                // self.reset()
+                // Typically scan start implies a fresh graph context
+                break
+
+            default:
+                break
+            }
+        }
+    }
+
+    private func colorForType(_ type: String, severity: Double?) -> SIMD4<Float> {
+        if let sev = severity, sev >= 8.0 { return SIMD4<Float>(1.0, 0.0, 0.0, 1.0) }
+        switch type {
+        case "service": return SIMD4<Float>(0, 1, 0, 1)
+        case "vulnerability": return SIMD4<Float>(1, 0, 0, 0.8)
+        case "exposure": return SIMD4<Float>(1, 0.5, 0, 0.8)
+        case "trust": return SIMD4<Float>(0, 0.5, 1, 0.8)
+        default: return SIMD4<Float>(0.5, 0.5, 0.5, 0.8)
+        }
+    }
+
     private func scheduleReconnect() {
         guard retryAttempt < maxRetries else {
             print("[CortexStream] Max retries reached. Giving up.")

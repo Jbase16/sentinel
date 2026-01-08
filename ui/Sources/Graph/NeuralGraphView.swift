@@ -157,6 +157,13 @@ struct NeuralGraphView: NSViewRepresentable {
 
         func updateSelection(_ id: String?) {
             renderer?.setSelected(id)
+
+            // Force immediate overlay update to avoid lag
+            if let id = id, let point = renderer?.projectNode(id: id) {
+                parent.selectedNodePoint = point
+            } else {
+                parent.selectedNodePoint = nil
+            }
         }
 
         @MainActor

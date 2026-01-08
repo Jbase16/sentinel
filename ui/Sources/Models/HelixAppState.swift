@@ -59,7 +59,14 @@ public class HelixAppState: ObservableObject {
 
     private var cancellables = Set<AnyCancellable>()
     private var didSetupEventStreamSubscriptions = false
+    private var cancellables = Set<AnyCancellable>()
+    private var didSetupEventStreamSubscriptions = false
     private var seenEventIDs: Set<String> = []
+
+    // MARK: - Replay State (Time Travel)
+    @Published var allEvents: [GraphEvent] = []  // The Tape
+    @Published var replayCursor: Int? = nil  // nil = Live, Int = Replay Index
+    @Published var isReplaying: Bool = false
     // Sequence tracking moved to AppStore
     // private var eventSequenceEpoch: Int = 1
     // private var lastEventSequence: Int = 0
@@ -222,6 +229,19 @@ public class HelixAppState: ObservableObject {
                     guard let rendered else { return }
 
                     self.apiLogItems.append(LogItem(id: UUID(), text: rendered))
+                }
+                .store(in: &cancellables)
+
+            // Replay Buffer Subscription
+            // Capture ALL events for time travel
+            eventClient.eventPublisher
+                .receive(on: RunLoop.main)
+                .sink { [weak self] event in
+                    self?.allEvents.append(event)
+
+                    // If we are LIVE, processed events flow normally.
+                    // If we are REPLAYING, we capture them but do NOT process them into the view
+                    // until the user returns to live mode (or scrubs forward).
                 }
                 .store(in: &cancellables)
         }
@@ -444,6 +464,90 @@ public class HelixAppState: ObservableObject {
     func clearLogs() {
         apiLogs.removeAll()
         apiLogItems.removeAll()
+    }
+
+    // MARK: - Time Travel / Replay Logic
+
+    func enterReplayMode() {
+        guard !isReplaying else { return }
+        isReplaying = true
+        replayCursor = allEvents.count - 1
+
+        // Disconnect legacy socket to prevent interference
+        cortexStream.disconnect()
+
+        print("[TimeTravel] Entered Replay Mode. Cursor: \(replayCursor ?? 0)")
+    }
+
+    func exitReplayMode() {
+        guard isReplaying else { return }
+        isReplaying = false
+        replayCursor = nil
+
+        // Restore Live Connection
+        if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
+            cortexStream.connect(url: wsURL)
+        }
+
+        // Force refresh to sync with backend state
+        refreshGraph()
+
+        print("[TimeTravel] Exited Replay Mode. Resuming Live Stream.")
+    }
+
+    /// Seek to a specific index in the event tape.
+    /// This rebuilds the entire application state (Graph + Logs) from the filtered stream.
+    func seek(to index: Int) {
+        let safeIndex = max(0, min(index, allEvents.count - 1))
+        replayCursor = safeIndex
+
+        // 1. Reset State
+        cortexStream.reset()
+        apiLogs.removeAll()
+        apiLogItems.removeAll()
+        // Note: We don't reset `allEvents`, that's our source of truth!
+
+        // 2. Re-apply events up to cursor
+        let eventsToReplay = allEvents.prefix(through: safeIndex)
+        print("[TimeTravel] Replaying \(eventsToReplay.count) events (Target: \(safeIndex))...")
+
+        for event in eventsToReplay {
+            // Manually drive the state update logic
+            // We need to refactor the giant sink closure into a method we can call directly.
+            processEvent(event)
+        }
+
+        // 3. Force UI Refresh
+        // (Published properties update automatically)
+    }
+
+    /// extracted from the sink closure to allow reuse during replay
+    private func processEvent(_ event: GraphEvent) {
+        // 1. Logs
+        if let rendered = renderLiveLogLine(event: event) {
+            apiLogItems.append(LogItem(id: UUID(), text: rendered))
+        }
+
+        // 2. Graph (Manual Drive)
+        cortexStream.processEvent(event)
+
+        // 3. Scan Lifecycle (Optional UI updates)
+        switch event.eventType {
+        case .scanStarted:
+            isScanRunning = true
+        case .scanCompleted, .scanFailed:
+            isScanRunning = false
+        case .breachDetected:
+            // Replay breach effects
+            let target = event.payload["target_node_id"]?.stringValue ?? "unknown"
+            self.activeBreachTarget = target
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                if self.activeBreachTarget == target {
+                    self.activeBreachTarget = nil
+                }
+            }
+        default: break
+        }
     }
 }
 

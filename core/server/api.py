@@ -106,11 +106,9 @@ from contextlib import asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     FastAPI lifespan context manager for startup and shutdown.
-    
-    Replaces deprecated @app.on_event("startup") and @app.on_event("shutdown").
     """
     # === STARTUP ===
-    global _api_loop, _session_cleanup_task
+    state = get_state()
     config = get_config()
 
     setup_logging(config)
@@ -128,9 +126,9 @@ async def lifespan(app: FastAPI):
     )
 
     try:
-        _api_loop = asyncio.get_running_loop()
+        state.api_loop = asyncio.get_running_loop()
     except RuntimeError:
-        _api_loop = None
+        state.api_loop = None
 
     # Async DB Init
     db = Database.instance()
@@ -181,7 +179,19 @@ async def lifespan(app: FastAPI):
         logger.error(f"[Startup] Failed to start policy watcher: {e}")
 
     # Start session cleanup task
-    _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
+    async def session_cleanup_loop():
+        while True:
+            try:
+                await asyncio.sleep(86400)
+                removed = await state.cleanup_old_sessions()
+                if removed > 0:
+                    logger.info(f"Session cleanup: removed {removed} old sessions")
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"Session cleanup error: {e}")
+
+    state.session_cleanup_task = asyncio.create_task(session_cleanup_loop())
     logger.info("Session cleanup task started")
     _write_boot_manifest("ready")
 
@@ -192,10 +202,10 @@ async def lifespan(app: FastAPI):
     _write_boot_manifest("stopping")
 
     # Cancel session cleanup task
-    if _session_cleanup_task and not _session_cleanup_task.done():
-        _session_cleanup_task.cancel()
+    if state.session_cleanup_task and not state.session_cleanup_task.done():
+        state.session_cleanup_task.cancel()
         try:
-            await _session_cleanup_task
+            await state.session_cleanup_task
         except asyncio.CancelledError:
             pass
 
@@ -274,13 +284,11 @@ class RateLimiter:
 _rate_limiter = RateLimiter()
 _ai_rate_limiter = RateLimiter(requests_per_minute=10)
 
+from core.server.state import get_state
+
 # --- State ---
-
-_log_queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
-_api_loop: Optional[asyncio.AbstractEventLoop] = None
-_scan_state: Dict[str, Any] = {}
-_cancel_requested = threading.Event()
-
+# Global state moved to core.server.state.ApplicationState
+state = get_state()
 
 def _boot_manifest_path() -> Optional[str]:
     path = os.getenv("SENTINEL_BOOT_MANIFEST")
@@ -313,261 +321,8 @@ _scan_lock = asyncio.Lock()
 # Initialize Store (which auto-subscribes to Bus)
 _ = get_event_store()
 
-# --- Session Manager ---
-
-_session_manager: Dict[str, Any] = {}
-_session_manager_lock = asyncio.Lock()
-_session_cleanup_task: Optional[asyncio.Task] = None
-
-async def register_session(session_id: str, session) -> None:
-    """Register a session for tracking."""
-    async with _session_manager_lock:
-        _session_manager[session_id] = session
-
-async def get_session(session_id: str):
-    """Get a session by ID."""
-    async with _session_manager_lock:
-        return _session_manager.get(session_id)
-
-async def unregister_session(session_id: str) -> None:
-    """Unregister a session."""
-    async with _session_manager_lock:
-        if session_id in _session_manager:
-            del _session_manager[session_id]
-
-async def cleanup_old_sessions(max_age: timedelta = timedelta(days=1)) -> int:
-    """
-    Remove sessions older than max_age from the session manager.
-
-    Args:
-        max_age: Maximum age of a session before it's cleaned up (default 1 day)
-
-    Returns:
-        Number of sessions removed
-    """
-    now = datetime.now(timezone.utc)
-    to_remove = []
-
-    async with _session_manager_lock:
-        for session_id, session in _session_manager.items():
-            # Check if session has start_time attribute
-            session_start = getattr(session, "start_time", None)
-            if session_start:
-                # Calculate age based on session start time
-                if isinstance(session_start, (int, float)):
-                    # Unix timestamp - convert to datetime
-                    session_time = datetime.fromtimestamp(session_start, tz=timezone.utc)
-                elif isinstance(session_start, datetime):
-                    session_time = session_start
-                else:
-                    # Unknown format, skip this session
-                    continue
-
-                age = now - session_time
-                if age > max_age:
-                    to_remove.append(session_id)
-
-        # Remove old sessions
-        for session_id in to_remove:
-            del _session_manager[session_id]
-
-    return len(to_remove)
-
-async def _session_cleanup_loop():
-    """Background task that periodically cleans up old sessions."""
-    while True:
-        try:
-            # Run cleanup every 24 hours
-            await asyncio.sleep(86400)  # 24 hours in seconds
-            removed = await cleanup_old_sessions()
-            if removed > 0:
-                logger.info(f"Session cleanup: removed {removed} old sessions")
-        except asyncio.CancelledError:
-            logger.info("Session cleanup task cancelled")
-            break
-        except Exception as e:
-            logger.error(f"Session cleanup error: {e}")
-
-
-async def _begin_scan(req: ScanRequest) -> str:
-    """Start a scan using the single canonical, event-emitting path.
-
-    Returns the created session id.
-    """
-    global _active_scan_task, _scan_state
-
-    from core.base.session import ScanSession
-    from core.cortex.events import get_event_bus
-    from core.engine.scanner_engine import ScannerEngine
-    from core.toolkit.tools import get_installed_tools
-
-    async with _scan_lock:
-        if _active_scan_task and not _active_scan_task.done():
-            if req.force:
-                logger.info("Force-killing active scan...")
-                _cancel_requested.set()
-                _active_scan_task.cancel()
-                try:
-                    await _active_scan_task
-                except asyncio.CancelledError:
-                    pass
-                _active_scan_task = None
-            else:
-                raise SentinelError(
-                    ErrorCode.SCAN_ALREADY_RUNNING,
-                    "Cannot start scan while another is active",
-                    details={"active_target": _scan_state.get("target")}
-                )
-
-        # Ensure any previous session is no longer addressable via /results.
-        previous_session_id = _scan_state.get("session_id")
-        if previous_session_id:
-            try:
-                await unregister_session(previous_session_id)
-            except Exception:
-                pass
-
-        _cancel_requested.clear()
-
-        session = ScanSession(req.target)
-        session.set_external_log_sink(_log_sink_sync)
-        await register_session(session.id, session)
-
-        # Persist session to DB to satisfy foreign key constraints in findings/evidence tables
-        # Note: save_session() is fire-and-forget (synchronous), no await needed
-        Database.instance().save_session(session.to_dict())
-
-        # Compute tool allowlist up-front so the UI can trust SCAN_STARTED payload immediately.
-        installed_tools = list(get_installed_tools().keys())
-        requested_tools = list(dict.fromkeys(req.modules or []))
-        allowed_tools = (
-            [t for t in requested_tools if t in installed_tools]
-            if requested_tools
-            else installed_tools
-        )
-        missing_tools = [t for t in requested_tools if t not in installed_tools]
-
-        _scan_state = {
-            "target": req.target,
-            "modules": req.modules,
-            "mode": req.mode,  # Strategos mode
-            "status": "running",
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "session_id": session.id,
-        }
-
-        event_bus = get_event_bus()
-
-        session.log(f"[Strategos] Installed tools: {len(installed_tools)}")
-        if requested_tools:
-            session.log(f"[Strategos] Custom tool whitelist: {', '.join(allowed_tools) or '(none)'}")
-        if missing_tools:
-            session.log(f"[Strategos] ⚠️ Requested tools not installed: {', '.join(missing_tools)}")
-
-        event_bus.emit_scan_started(req.target, allowed_tools, session.id)
-
-        async def _runner() -> None:
-            """AsyncFunction _runner."""
-            start_time = time.time()
-            # Error handling block.
-            try:
-
-                async def dispatch_tool(tool: str) -> List[Dict]:
-                    """AsyncFunction dispatch_tool."""
-                    findings: List[Dict] = []
-                    exit_code = 0
-                    
-                    if tool not in allowed_tools:
-                        logger.warning(f"BLOCKED: Attempted to run unauthorized tool '{tool}'")
-                        session.log(f"⚠️ [Security] Tool '{tool}' blocked (not in allowlist)")
-                        return []
-                        
-                    session.log(f"[Strategos] Dispatching tool: {tool}")
-                    engine = ScannerEngine(session=session)
-
-                    # Error handling block.
-                    try:
-                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], session_id=session.id)
-
-                        if _cancel_requested.is_set():
-                            exit_code = 130
-                            return []
-
-                        async for log_line in engine.scan(
-                            req.target, selected_tools=[tool], cancel_flag=_cancel_requested
-                        ):
-                            session.log(log_line)
-
-                        findings = engine.get_last_results() or []
-                        exit_code = 130 if _cancel_requested.is_set() else 0
-                        return findings
-                    except asyncio.CancelledError:
-                        _cancel_requested.set()
-                        exit_code = 130
-                        try:
-                            await engine.shutdown(reason="cancelled")
-                        except Exception:
-                            pass
-                        raise
-                    except Exception as exc:
-                        exit_code = 1
-                        session.log(f"[Strategos] Tool failed ({tool}): {exc}")
-                        try:
-                            await engine.shutdown(reason="error")
-                        except Exception:
-                            pass
-                        return []
-                    finally:
-                        try:
-                            event_bus.emit_tool_completed(
-                                tool=tool, exit_code=exit_code, findings_count=len(findings), session_id=session.id
-                            )
-                        except Exception as emit_exc:
-                            logger.error(
-                                f"[EventBus] Failed to emit tool_completed for {tool}: {emit_exc}",
-                                exc_info=True,
-                            )
-
-                mission = await reasoning_engine.start_scan(
-                    target=req.target,
-                    available_tools=allowed_tools,
-                    mode=req.mode,
-                    dispatch_tool=dispatch_tool,
-                    log_fn=session.log
-                )
-                session.log(f"[Strategos] {mission.reason}")
-
-                _scan_state["status"] = "completed"
-                _scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-                _scan_state["summary"] = session.to_dict()
-
-                duration = time.time() - start_time
-                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, session_id=session.id)
-
-            except asyncio.CancelledError:
-                _scan_state["status"] = "cancelled"
-                _scan_state["summary"] = session.to_dict()
-
-                duration = time.time() - start_time
-                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, session_id=session.id)
-
-            except Exception as e:
-                _scan_state["status"] = "error"
-                _scan_state["error"] = str(e)
-                _scan_state["summary"] = session.to_dict()
-                logger.error(f"Scan error: {e}", exc_info=True)
-
-                # Emit SCAN_FAILED event to notify UI and DecisionLedger
-                try:
-                    event_bus.emit(GraphEvent(
-                        type=GraphEventType.SCAN_FAILED,
-                        payload={"error": str(e), "target": req.target, "session_id": session.id}
-                    ))
-                except Exception:
-                    pass
-
-        _active_scan_task = asyncio.create_task(_runner())
-        return session.id
+# --- Session Manager & Scan Orchestration ---
+# Moved to core.server.state.ApplicationState and core.server.routers.scans.py
 
 # --- Middleware & Auth ---
 

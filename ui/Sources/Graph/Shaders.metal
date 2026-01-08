@@ -162,9 +162,29 @@ fragment float4 fragment_main(
 
 // --- Line Fragment Shader (for edges) ---
 fragment float4 fragment_line(
-    VertexOut in [[stage_in]]
+    VertexOut in [[stage_in]],
+    constant Uniforms &uniforms [[buffer(1)]]
 ) {
     // Fade edges with depth so they don't form a flat spiderweb
+    // Fade edges with depth
     float fade = clamp(1.0 - (in.depth / 600.0), 0.05, 1.0);
-    return float4(in.color.rgb, in.color.a * fade);
+    
+    // Pressure Visualization (Data Flow)
+    // 1. Base Intensity from pressure
+    float flowIntensity = 0.5 + (in.pressure * 1.5); // 0.5 to 2.0
+    
+    // 2. Pulse Animation (simulating data transfer)
+    // Higher pressure = faster pulse
+    float pulseSpeed = 2.0 + (in.pressure * 8.0);
+    float pulse = 0.8 + 0.4 * sin(uniforms.time * pulseSpeed);
+    
+    // 3. Color Logic
+    float3 color = in.color.rgb;
+    
+    // If high pressure, shift slightly towards white/hot
+    if (in.pressure > 0.5) {
+        color = mix(color, float3(1.0, 1.0, 1.0), in.pressure * 0.3);
+    }
+    
+    return float4(color * pulse, in.color.a * fade * flowIntensity);
 }

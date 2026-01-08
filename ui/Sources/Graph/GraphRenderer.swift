@@ -98,11 +98,12 @@ final class GraphRenderer: NSObject {
     private var edgeKeys: Set<String> = []
 
     // Stores edge definitions (source, target, type) for rebuilding.
-    // This is the source of truth for edges.
+    // This is the SINGLE SOURCE OF TRUTH for edges.
     private var edgeDefinitions: [(sourceId: String, targetId: String, edgeType: String)] = []
 
-    // Truly pending edges from live events that haven't been resolved to nodes yet.
-    private var pendingLiveEdges: [(sourceId: String, targetId: String, edgeType: String)] = []
+    // Dirty Flags for Optimization
+    private var isNodesDirty: Bool = false
+    private var isEdgesDirty: Bool = false
 
     private var edgeVertices: [Node] = []
 
@@ -296,10 +297,9 @@ final class GraphRenderer: NSObject {
         nodePositions[nodeId] = nodes.count
         nodes.append(newNode)
         nodeCount += 1
+        isNodesDirty = true
+        isEdgesDirty = true  // New node might resolve pending edges
         lock.unlock()
-
-        uploadToGPU()
-        resolvePendingEdges()
     }
 
     private func addEdgeFromEvent(_ event: Event) {
@@ -315,32 +315,22 @@ final class GraphRenderer: NSObject {
         let key = "\(sourceId)->\(targetId):\(edgeType)"
         if edgeKeys.contains(key) { return }
 
+        // Always append to definitions (Live Truth)
+        edgeDefinitions.append((sourceId: sourceId, targetId: targetId, edgeType: edgeType))
+        isEdgesDirty = true
+
         guard let sourceIndex = nodePositions[sourceId],
             let targetIndex = nodePositions[targetId]
         else {
-            // Store in pending live edges if nodes are missing
-            pendingLiveEdges.append((sourceId: sourceId, targetId: targetId, edgeType: edgeType))
+            // Processing deferred until next rebuild/dirty check
             return
         }
 
         edgeKeys.insert(key)
 
-        let sourcePos = nodes[sourceIndex].position
-        let targetPos = nodes[targetIndex].position
-        let color = colorForEdgeType(edgeType)
-
-        let neutralPhysics = SIMD4<Float>(0, 0, 0, 0)
-
-        edgeVertices.append(
-            Node(
-                position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color,
-                physics: neutralPhysics))
-        edgeVertices.append(
-            Node(
-                position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color,
-                physics: neutralPhysics))
-
-        uploadEdgesToGPU()
+        // We do NOT add to edgeVertices here anymore.
+        // We rely on 'isEdgesDirty = true' to trigger a full rebuild at the start of the next frame.
+        // This prevents the "disappearing edges" bug when mixing live + snapshot.
     }
 
     private func addFindingNode(_ event: Event) {
@@ -368,9 +358,8 @@ final class GraphRenderer: NSObject {
         nodePositions[findingId] = nodes.count
         nodes.append(newNode)
         nodeCount += 1
+        isNodesDirty = true
         lock.unlock()
-
-        uploadToGPU()
     }
 
     private func addScanTargetNode(_ event: Event) {
@@ -388,12 +377,10 @@ final class GraphRenderer: NSObject {
         nodeCount = 1
         edgeKeys.removeAll()
         edgeDefinitions.removeAll()
-        pendingLiveEdges.removeAll()
         edgeVertices.removeAll()
-        edgeVertexBuffer = nil
+        isNodesDirty = true
+        isEdgesDirty = true
         lock.unlock()
-
-        uploadToGPU()
     }
 
     func resetGraph() {
@@ -403,70 +390,10 @@ final class GraphRenderer: NSObject {
         nodeCount = 0
         edgeKeys.removeAll()
         edgeDefinitions.removeAll()
-        pendingLiveEdges.removeAll()
         edgeVertices.removeAll()
-        vertexBuffer = nil
-        edgeVertexBuffer = nil
+        isNodesDirty = true
+        isEdgesDirty = true
         lock.unlock()
-    }
-
-    // MARK: - GPU Upload
-
-    private func uploadToGPU() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard !nodes.isEmpty else { return }
-        let dataSize = nodes.count * MemoryLayout<Node>.stride
-        vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
-    }
-
-    private func uploadEdgesToGPU() {
-        guard !edgeVertices.isEmpty else { return }
-        let dataSize = edgeVertices.count * MemoryLayout<Node>.stride
-        edgeVertexBuffer = device.makeBuffer(bytes: edgeVertices, length: dataSize, options: [])
-    }
-
-    private func resolvePendingEdges() {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard !pendingLiveEdges.isEmpty else { return }
-
-        var remaining: [(sourceId: String, targetId: String, edgeType: String)] = []
-
-        for edge in pendingLiveEdges {
-            let key = "\(edge.sourceId)->\(edge.targetId):\(edge.edgeType)"
-            if edgeKeys.contains(key) { continue }
-
-            guard let sourceIndex = nodePositions[edge.sourceId],
-                let targetIndex = nodePositions[edge.targetId]
-            else {
-                remaining.append(edge)
-                continue
-            }
-
-            edgeKeys.insert(key)
-
-            let sourcePos = nodes[sourceIndex].position
-            let targetPos = nodes[targetIndex].position
-            let color = colorForEdgeType(edge.edgeType)
-
-            // Edges must have their own semantics and zero physics
-            let physics = SIMD4<Float>(0, 0, 0, 0)
-
-            edgeVertices.append(
-                Node(
-                    position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0),
-                    color: color, physics: physics))
-            edgeVertices.append(
-                Node(
-                    position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0),
-                    color: color, physics: physics))
-        }
-
-        pendingLiveEdges = remaining
-        uploadEdgesToGPU()
     }
 
     // MARK: - Visual Mapping
@@ -544,10 +471,8 @@ final class GraphRenderer: NSObject {
         nodePositions.removeAll(keepingCapacity: true)
 
         self.nodes = newNodes.enumerated().map { (index, node) in
-            // Rebuild Map
-            if let id = node.id {
-                nodePositions[id] = index
-            }
+            // Rebuild Map (Direct Assignment, 'id' is non-optional)
+            nodePositions[node.id] = index
 
             let x = node.x ?? Float.random(in: -40...40)
             let y = node.y ?? Float.random(in: -40...40)
@@ -573,14 +498,7 @@ final class GraphRenderer: NSObject {
         }
 
         nodeCount = nodes.count
-
-        // 2. Upload to GPU
-        let dataSize = nodes.count * MemoryLayout<Node>.stride
-        if dataSize > 0 {
-            vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
-        } else {
-            vertexBuffer = nil
-        }
+        isNodesDirty = true
 
         // 3. Validate Selection (Authoritative Check)
         // If the selected node no longer exists, clear the selection.
@@ -589,18 +507,9 @@ final class GraphRenderer: NSObject {
             selectedNodeIndex = -1
         }
 
-        // 4. Rebuild Edges (Keep them in sync with new node positions)
-        // 4. Rebuild Edges (Keep them in sync with new node positions)
+        // 4. Trigger Edge Rebuild
         if !edgeDefinitions.isEmpty {
-            rebuildEdges()
-
-            let edgeSize = edgeVertices.count * MemoryLayout<Node>.stride
-            if edgeSize > 0 {
-                edgeVertexBuffer = device.makeBuffer(
-                    bytes: edgeVertices, length: edgeSize, options: [])
-            } else {
-                edgeVertexBuffer = nil
-            }
+            isEdgesDirty = true
         }
     }
 
@@ -617,25 +526,19 @@ final class GraphRenderer: NSObject {
         lock.lock()
         defer { lock.unlock() }
 
-        // Store edge definitions
-        // We accumulate them but typically this receives the full snapshot
+        // Store edge definitions (Single Source of Truth)
         self.edgeDefinitions = newEdges.map {
             (sourceId: $0.source, targetId: $0.target, edgeType: $0.type)
         }
 
-        // Rebuild Edges immediately
-        rebuildEdges()
-
-        // Update GPU Buffer for edges
-        // Note: GraphRenderer needs 'edgeVertexBuffer' management.
-        // Existing code likely has edgeVertices but maybe not logic to upload them?
-        // Let's add upload logic here.
-        let dataSize = edgeVertices.count * MemoryLayout<Node>.stride
-        if dataSize > 0 {
-            edgeVertexBuffer = device.makeBuffer(bytes: edgeVertices, length: dataSize, options: [])
-        } else {
-            edgeVertexBuffer = nil
+        // Rebuild Edge Keys from scratch to match definitions
+        edgeKeys.removeAll()
+        for edge in edgeDefinitions {
+            let key = "\(edge.sourceId)->\(edge.targetId):\(edge.edgeType)"
+            edgeKeys.insert(key)
         }
+
+        isEdgesDirty = true
     }
 
     private func rebuildEdges() {
@@ -659,8 +562,11 @@ final class GraphRenderer: NSObject {
             // Use semantic edge color, do not inherit node color!
             let edgeColor = colorForEdgeType(edge.edgeType)
 
-            // Physics should be zeroed out for edges to avoid unexpected behavior in shader
-            let edgePhysics = SIMD4<Float>(0, 0, 0, 0)
+            // Physics:
+            // Inherit pressure (w) from nodes to allow flow visualization in shader.
+            // Zero out mass/charge/temp (xyz) to avoid displacement artifacts.
+            let sPhysics = SIMD4<Float>(0, 0, 0, sourceNode.physics.w)
+            let tPhysics = SIMD4<Float>(0, 0, 0, targetNode.physics.w)
 
             var s = sourceNode
             var t = targetNode
@@ -668,8 +574,8 @@ final class GraphRenderer: NSObject {
             // Overwrite visual properties for the edge
             s.color = edgeColor
             t.color = edgeColor
-            s.physics = edgePhysics
-            t.physics = edgePhysics
+            s.physics = sPhysics
+            t.physics = tPhysics
 
             // Reset w (size) to default for lines (often unused but good for hygiene)
             s.position.w = 1.0
@@ -698,8 +604,6 @@ final class GraphRenderer: NSObject {
             selectedNodeId = id
             selectedNodeIndex = Int32(idx)
         } else {
-            // If requested node doesn't exist, ignore or clear?
-            // Clearing avoids "phantom state" where UI thinks something is selected but renderer doesn't.
             selectedNodeId = nil
             selectedNodeIndex = -1
         }
@@ -712,6 +616,29 @@ final class GraphRenderer: NSObject {
     func draw(in view: MTKView) {
         // 1. Snapshot State (Minimizing Lock Time)
         lock.lock()
+
+        // Lazy Rebuild / Upload Logic
+        if isNodesDirty {
+            let dataSize = nodes.count * MemoryLayout<Node>.stride
+            if dataSize > 0 {
+                vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
+            } else {
+                vertexBuffer = nil
+            }
+            isNodesDirty = false
+        }
+
+        if isEdgesDirty {
+            rebuildEdges()
+            let edgeSize = edgeVertices.count * MemoryLayout<Node>.stride
+            if edgeSize > 0 {
+                edgeVertexBuffer = device.makeBuffer(
+                    bytes: edgeVertices, length: edgeSize, options: [])
+            } else {
+                edgeVertexBuffer = nil
+            }
+            isEdgesDirty = false
+        }
 
         // Update Time safely
         let localTime = self.time + 0.015
