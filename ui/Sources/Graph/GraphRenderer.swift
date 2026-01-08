@@ -52,7 +52,7 @@ class GraphRenderer: NSObject {
             self.payload = payload
         }
     }
-    
+
     var device: MTLDevice
     var commandQueue: MTLCommandQueue?  // Changed from ! to ? for safety
     var pipelineState: MTLRenderPipelineState?  // Changed from ! to ?
@@ -70,7 +70,7 @@ class GraphRenderer: NSObject {
     struct Node {
         var position: SIMD4<Float>  // xyz = pos, w = size
         var color: SIMD4<Float>
-        var physics: SIMD4<Float>   // x=mass, y=charge, z=temp, w=structural
+        var physics: SIMD4<Float>  // x=mass, y=charge, z=temp, w=structural
     }
 
     var nodes: [Node] = []
@@ -234,7 +234,7 @@ class GraphRenderer: NSObject {
         let newNode = Node(
             position: SIMD4<Float>(x, y, z, size),
             color: color,
-            physics: SIMD4<Float>(1.0, 0.0, 0.0, 0.0) // Defaults for legacy event path
+            physics: SIMD4<Float>(1.0, 0.0, 0.0, 0.0)  // Defaults for legacy event path
         )
 
         lock.lock()
@@ -283,8 +283,14 @@ class GraphRenderer: NSObject {
         // For line primitives, pos.w is unused; keep it non-zero.
         // Edges have neutral physics (0,0,0,0)
         let neutralPhysics = SIMD4<Float>(0, 0, 0, 0)
-        edgeVertices.append(Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color, physics: neutralPhysics))
-        edgeVertices.append(Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color, physics: neutralPhysics))
+        edgeVertices.append(
+            Node(
+                position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color,
+                physics: neutralPhysics))
+        edgeVertices.append(
+            Node(
+                position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color,
+                physics: neutralPhysics))
 
         uploadEdgesToGPU()
     }
@@ -313,7 +319,7 @@ class GraphRenderer: NSObject {
         let newNode = Node(
             position: SIMD4<Float>(x, y, 0, 35.0),
             color: color,
-            physics: SIMD4<Float>(50.0, 0.0, 0.0, 0.0) // Significant mass for findings
+            physics: SIMD4<Float>(50.0, 0.0, 0.0, 0.0)  // Significant mass for findings
         )
 
         lock.lock()
@@ -333,7 +339,7 @@ class GraphRenderer: NSObject {
         let targetNode = Node(
             position: SIMD4<Float>(0, 0, 0, 50.0),
             color: SIMD4<Float>(1.0, 0.3, 0.3, 1.0),  // Red center
-            physics: SIMD4<Float>(100.0, 0.0, 0.0, 1.0) // Massive Anchor
+            physics: SIMD4<Float>(100.0, 0.0, 0.0, 1.0)  // Massive Anchor
         )
 
         lock.lock()
@@ -411,10 +417,14 @@ class GraphRenderer: NSObject {
             let targetPos = nodes[targetIndex].position
             let color = colorForEdgeType(edge.edgeType)
             edgeVertices.append(
-                Node(position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0), color: color, physics: SIMD4<Float>(0,0,0,0))
+                Node(
+                    position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0),
+                    color: color, physics: SIMD4<Float>(0, 0, 0, 0))
             )
             edgeVertices.append(
-                Node(position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0), color: color, physics: SIMD4<Float>(0,0,0,0))
+                Node(
+                    position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0),
+                    color: color, physics: SIMD4<Float>(0, 0, 0, 0))
             )
         }
 
@@ -487,11 +497,11 @@ class GraphRenderer: NSObject {
     private func stableFloat(seed: String, min: Float, max: Float) -> Float {
         // Guard condition.
         guard min < max else { return min }
-        var hash: UInt64 = 1469598103934665603  // FNV-1a offset basis
+        var hash: UInt64 = 1_469_598_103_934_665_603  // FNV-1a offset basis
         // Loop over items.
         for byte in seed.utf8 {
             hash ^= UInt64(byte)
-            hash &*= 1099511628211
+            hash &*= 1_099_511_628_211
         }
         let unit = Float(hash % 10_000) / 10_000.0
         return min + (max - min) * unit
@@ -511,10 +521,11 @@ class GraphRenderer: NSObject {
         defer { lock.unlock() }
 
         self.nodes = newNodes.map { node in
-            // Use server coords or fallback to random
-            let x = node.x ?? Float.random(in: -1...1)
-            let y = node.y ?? Float.random(in: -1...1)
-            let z = node.z ?? Float.random(in: -0.5...0.5)
+            // Use server coords or fallback to random volume
+            // Scale up significantly to fill the view (Camera is at Z=-200)
+            let x = node.x ?? Float.random(in: -40...40)
+            let y = node.y ?? Float.random(in: -40...40)
+            let z = node.z ?? Float.random(in: -40...40)
 
             // Use pre-computed color or fallback
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
@@ -645,7 +656,8 @@ class GraphRenderer: NSObject {
 
         encoder.setRenderPipelineState(pipelineState)
         encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
-        encoder.drawPrimitives(type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
+        encoder.drawPrimitives(
+            type: MTLPrimitiveType.point, vertexStart: 0, vertexCount: nodes.count)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
