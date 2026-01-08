@@ -164,18 +164,25 @@ class ReasoningEngine:
         
     def analyze(self) -> dict:
         """
-        Return a summary of the reasoning state (Decision Ledger + CAL).
-        Used by /cortex/reasoning API endpoint.
+        Return a summary of the reasoning state (Decision Ledger + CAL + Nexus).
+        Used by /cortex/reasoning API endpoint and Report Engine.
         """
+        from core.aegis.nexus.context import NexusContext
+        
         ledger_stats = {}
         if self.strategos._decision_ledger:
             ledger_stats = self.strategos._decision_ledger.stats()
+            
+        # Get synthesized context from Nexus
+        nexus_context = NexusContext.instance().analyze_context()
             
         return {
             "status": "ok",
             "scope": "global",
             "decision_ledger": ledger_stats,
             "cal": self.cal_stats(),
+            "attack_paths": nexus_context.get("attack_paths", []),
+            "recommended_phases": nexus_context.get("recommended_phases", [])
         }
         
     async def start_scan(self, 
