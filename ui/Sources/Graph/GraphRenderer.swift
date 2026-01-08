@@ -74,7 +74,7 @@ final class GraphRenderer: NSObject {
     struct Node {
         var position: SIMD4<Float>  // xyz = pos, w = size
         var color: SIMD4<Float>
-        var physics: SIMD4<Float>  // x=mass, y=charge, z=temp, w=structural
+        var physics: SIMD4<Float>  // x=mass, y=charge, z=temperature, w=pressure
     }
 
     private var nodes: [Node] = []
@@ -96,7 +96,14 @@ final class GraphRenderer: NSObject {
     private var nodeCount: Int = 0
 
     private var edgeKeys: Set<String> = []
-    private var pendingEdges: [(sourceId: String, targetId: String, edgeType: String)] = []
+
+    // Stores edge definitions (source, target, type) for rebuilding.
+    // This is the source of truth for edges.
+    private var edgeDefinitions: [(sourceId: String, targetId: String, edgeType: String)] = []
+
+    // Truly pending edges from live events that haven't been resolved to nodes yet.
+    private var pendingLiveEdges: [(sourceId: String, targetId: String, edgeType: String)] = []
+
     private var edgeVertices: [Node] = []
 
     // MARK: - Init
@@ -311,7 +318,8 @@ final class GraphRenderer: NSObject {
         guard let sourceIndex = nodePositions[sourceId],
             let targetIndex = nodePositions[targetId]
         else {
-            pendingEdges.append((sourceId: sourceId, targetId: targetId, edgeType: edgeType))
+            // Store in pending live edges if nodes are missing
+            pendingLiveEdges.append((sourceId: sourceId, targetId: targetId, edgeType: edgeType))
             return
         }
 
@@ -379,7 +387,8 @@ final class GraphRenderer: NSObject {
         nodes = [targetNode]
         nodeCount = 1
         edgeKeys.removeAll()
-        pendingEdges.removeAll()
+        edgeDefinitions.removeAll()
+        pendingLiveEdges.removeAll()
         edgeVertices.removeAll()
         edgeVertexBuffer = nil
         lock.unlock()
@@ -393,7 +402,8 @@ final class GraphRenderer: NSObject {
         nodePositions.removeAll()
         nodeCount = 0
         edgeKeys.removeAll()
-        pendingEdges.removeAll()
+        edgeDefinitions.removeAll()
+        pendingLiveEdges.removeAll()
         edgeVertices.removeAll()
         vertexBuffer = nil
         edgeVertexBuffer = nil
@@ -421,11 +431,11 @@ final class GraphRenderer: NSObject {
         lock.lock()
         defer { lock.unlock() }
 
-        guard !pendingEdges.isEmpty else { return }
+        guard !pendingLiveEdges.isEmpty else { return }
 
         var remaining: [(sourceId: String, targetId: String, edgeType: String)] = []
 
-        for edge in pendingEdges {
+        for edge in pendingLiveEdges {
             let key = "\(edge.sourceId)->\(edge.targetId):\(edge.edgeType)"
             if edgeKeys.contains(key) { continue }
 
@@ -442,17 +452,20 @@ final class GraphRenderer: NSObject {
             let targetPos = nodes[targetIndex].position
             let color = colorForEdgeType(edge.edgeType)
 
+            // Edges must have their own semantics and zero physics
+            let physics = SIMD4<Float>(0, 0, 0, 0)
+
             edgeVertices.append(
                 Node(
                     position: SIMD4<Float>(sourcePos.x, sourcePos.y, sourcePos.z, 1.0),
-                    color: color, physics: SIMD4<Float>(0, 0, 0, 0)))
+                    color: color, physics: physics))
             edgeVertices.append(
                 Node(
                     position: SIMD4<Float>(targetPos.x, targetPos.y, targetPos.z, 1.0),
-                    color: color, physics: SIMD4<Float>(0, 0, 0, 0)))
+                    color: color, physics: physics))
         }
 
-        pendingEdges = remaining
+        pendingLiveEdges = remaining
         uploadEdgesToGPU()
     }
 
@@ -549,7 +562,13 @@ final class GraphRenderer: NSObject {
                 return 0.1
             }()
 
-            let physics = SIMD4<Float>(1.0, 0.0, 0.0, pressure)
+            // Physics mapping: (mass, charge, temperature, pressure)
+            let physics = SIMD4<Float>(
+                node.mass ?? 1.0,
+                node.charge ?? 0.0,
+                node.temperature ?? 0.0,
+                pressure
+            )
             return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color, physics: physics)
         }
 
@@ -566,6 +585,121 @@ final class GraphRenderer: NSObject {
         // 3. Validate Selection (Authoritative Check)
         // If the selected node no longer exists, clear the selection.
         if let id = selectedNodeId, nodePositions[id] == nil {
+            selectedNodeId = nil
+            selectedNodeIndex = -1
+        }
+
+        // 4. Rebuild Edges (Keep them in sync with new node positions)
+        // 4. Rebuild Edges (Keep them in sync with new node positions)
+        if !edgeDefinitions.isEmpty {
+            rebuildEdges()
+
+            let edgeSize = edgeVertices.count * MemoryLayout<Node>.stride
+            if edgeSize > 0 {
+                edgeVertexBuffer = device.makeBuffer(
+                    bytes: edgeVertices, length: edgeSize, options: [])
+            } else {
+                edgeVertexBuffer = nil
+            }
+        }
+    }
+
+    // MARK: - Edge Update
+
+    // Simple Edge Definition for Renderer
+    struct EdgeData {
+        let source: String
+        let target: String
+        let type: String
+    }
+
+    func updateEdges(_ newEdges: [EdgeData]) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Store edge definitions
+        // We accumulate them but typically this receives the full snapshot
+        self.edgeDefinitions = newEdges.map {
+            (sourceId: $0.source, targetId: $0.target, edgeType: $0.type)
+        }
+
+        // Rebuild Edges immediately
+        rebuildEdges()
+
+        // Update GPU Buffer for edges
+        // Note: GraphRenderer needs 'edgeVertexBuffer' management.
+        // Existing code likely has edgeVertices but maybe not logic to upload them?
+        // Let's add upload logic here.
+        let dataSize = edgeVertices.count * MemoryLayout<Node>.stride
+        if dataSize > 0 {
+            edgeVertexBuffer = device.makeBuffer(bytes: edgeVertices, length: dataSize, options: [])
+        } else {
+            edgeVertexBuffer = nil
+        }
+    }
+
+    private func rebuildEdges() {
+        // Must be called inside lock or thread-safe context
+        edgeVertices.removeAll(keepingCapacity: true)
+
+        // Iterate over all pending edges and generate geometry
+        for edge in edgeDefinitions {
+            guard let sourceIndex = nodePositions[edge.sourceId],
+                let targetIndex = nodePositions[edge.targetId],
+                sourceIndex < nodes.count,
+                targetIndex < nodes.count
+            else {
+                continue
+            }
+
+            let sourceNode = nodes[sourceIndex]
+            let targetNode = nodes[targetIndex]
+
+            // Generate Line Segment
+            // Use semantic edge color, do not inherit node color!
+            let edgeColor = colorForEdgeType(edge.edgeType)
+
+            // Physics should be zeroed out for edges to avoid unexpected behavior in shader
+            let edgePhysics = SIMD4<Float>(0, 0, 0, 0)
+
+            var s = sourceNode
+            var t = targetNode
+
+            // Overwrite visual properties for the edge
+            s.color = edgeColor
+            t.color = edgeColor
+            s.physics = edgePhysics
+            t.physics = edgePhysics
+
+            // Reset w (size) to default for lines (often unused but good for hygiene)
+            s.position.w = 1.0
+            t.position.w = 1.0
+
+            edgeVertices.append(s)
+            edgeVertices.append(t)
+        }
+    }
+
+    // MARK: - Selection Authority
+
+    func setSelected(_ id: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // If ID is nil, just clear
+        guard let id = id else {
+            selectedNodeId = nil
+            selectedNodeIndex = -1
+            return
+        }
+
+        // Check if node exists
+        if let idx = nodePositions[id] {
+            selectedNodeId = id
+            selectedNodeIndex = Int32(idx)
+        } else {
+            // If requested node doesn't exist, ignore or clear?
+            // Clearing avoids "phantom state" where UI thinks something is selected but renderer doesn't.
             selectedNodeId = nil
             selectedNodeIndex = -1
         }

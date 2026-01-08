@@ -34,6 +34,7 @@ struct GraphLabel: Identifiable, Equatable {
 struct NeuralGraphView: NSViewRepresentable {
     let eventClient: EventStreamClient
     let nodes: [CortexStream.NodeModel]
+    let edges: [CortexStream.EdgeModel]
     @Binding var selectedNodeId: String?
     @Binding var selectedNodePoint: CGPoint?  // For Overlay
     @Binding var labels: [GraphLabel]  // Layer 1: Persistent Labels
@@ -68,6 +69,7 @@ struct NeuralGraphView: NSViewRepresentable {
 
         context.coordinator.bindEventStream(view: mtkView)
         context.coordinator.updateNodes(nodes)
+        context.coordinator.updateEdges(edges)
 
         return mtkView
     }
@@ -76,9 +78,10 @@ struct NeuralGraphView: NSViewRepresentable {
     func updateNSView(_ nsView: MTKView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.updateNodes(nodes)
+        context.coordinator.updateEdges(edges)
 
-        // Update selection in renderer if changed externally (optional)
-        // context.coordinator.renderer?.setSelected(selectedNodeId)
+        // Update selection in renderer if changed externally
+        context.coordinator.updateSelection(selectedNodeId)
     }
 
     class Coordinator: NSObject, MTKViewDelegate {
@@ -142,6 +145,18 @@ struct NeuralGraphView: NSViewRepresentable {
             if let id = parent.selectedNodeId, let point = renderer?.projectNode(id: id) {
                 parent.selectedNodePoint = point
             }
+        }
+
+        func updateEdges(_ edges: [CortexStream.EdgeModel]) {
+            let rendererEdges = edges.map {
+                GraphRenderer.EdgeData(
+                    source: $0.source, target: $0.target, type: $0.type ?? "unknown")
+            }
+            renderer?.updateEdges(rendererEdges)
+        }
+
+        func updateSelection(_ id: String?) {
+            renderer?.setSelected(id)
         }
 
         @MainActor
@@ -224,6 +239,7 @@ struct InteractiveGraphContainer: View {
             NeuralGraphView(
                 eventClient: appState.eventClient,
                 nodes: appState.cortexStream.nodes,
+                edges: appState.cortexStream.edges,
                 selectedNodeId: $selectedNodeId,
                 selectedNodePoint: $selectedOverlayPos,
                 labels: $labels

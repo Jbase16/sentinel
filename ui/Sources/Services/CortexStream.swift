@@ -28,6 +28,7 @@ class CortexStream: ObservableObject {
     private var positionCache: [String: SIMD3<Float>] = [:]
 
     @Published var nodes: [NodeModel] = []
+    @Published var edges: [EdgeModel] = []
     @Published var isConnected: Bool = false
 
     /// Struct NodeModel.
@@ -45,23 +46,39 @@ class CortexStream: ObservableObject {
         var temperature: Float?
         var structural: Bool?
         var description: String?  // Semantic Analysis
+        var pressure: Float?  // 0.0-1.0
+        var severity: String?  // "HIGH", "CRITICAL", etc.
+    }
+
+    /// Struct EdgeModel.
+    struct EdgeModel: Decodable, Identifiable {
+        let id: String
+        let source: String
+        let target: String
+        let type: String?
     }
 
     /// Struct GraphData.
     struct GraphData: Decodable {
         let nodes: [NodeModel]
-        // networkx format uses 'links', some formats use 'edges'
-        // Use AnyCodable-like approach to handle both
+        let edges: [EdgeModel]?
 
-        /// Enum CodingKeys.
         enum CodingKeys: String, CodingKey {
             case nodes, links, edges, directed, multigraph, graph
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            // Nodes might be empty array
             self.nodes = (try? container.decode([NodeModel].self, forKey: .nodes)) ?? []
+
+            // Decodes edges if key exists (supports 'edges' or 'links')
+            if let edgesDecoded = try? container.decode([EdgeModel].self, forKey: .edges) {
+                self.edges = edgesDecoded
+            } else if let linksDecoded = try? container.decode([EdgeModel].self, forKey: .links) {
+                self.edges = linksDecoded
+            } else {
+                self.edges = []
+            }
         }
     }
 
@@ -277,12 +294,35 @@ class CortexStream: ObservableObject {
                 charge: Float(node.data.charge ?? 0.0),
                 temperature: Float(node.data.temperature ?? 0.0),
                 structural: node.data.structural,
-                description: node.data.description
+                description: node.data.description,
+                pressure: {
+                    // Normalize severity (0-10) to pressure (0.0-1.0)
+                    // If severity > 10, clamp to 1.0
+                    return Float(min(10.0, max(0.0, node.data.severity))) / 10.0
+                }(),
+                severity: {
+                    if node.data.severity >= 9.0 { return "CRITICAL" }
+                    if node.data.severity >= 7.0 { return "HIGH" }
+                    if node.data.severity >= 4.0 { return "MEDIUM" }
+                    if node.data.severity >= 1.0 { return "LOW" }
+                    return "INFO"
+                }()
+            )
+        }
+
+        // Map DTO -> EdgeModel
+        let mappedEdges = graph.edges.map { edge in
+            EdgeModel(
+                id: edge.id,
+                source: edge.source,
+                target: edge.target,
+                type: edge.type
             )
         }
 
         DispatchQueue.main.async {
             self.nodes = mappedNodes
+            self.edges = mappedEdges
         }
     }
 }
