@@ -219,7 +219,8 @@ class PressureGraphManager(Observable):
                         "mass": n.mass,
                         "charge": n.charge,
                         "temperature": n.temperature,
-                        "structural": n.structural
+                        "structural": n.structural,
+                        "description": n.description
                     }
                 }
                 for n in self.nodes.values()
@@ -642,7 +643,8 @@ class PressureGraphManager(Observable):
             mass=mass,
             charge=charge,
             temperature=temperature,
-            structural=structural
+            structural=structural,
+            description=issue.get("description", "") or ""
         )
     
     def _killchain_to_pressure_edge(self, edge: dict) -> PressureEdge:

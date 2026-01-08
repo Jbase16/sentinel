@@ -24,11 +24,19 @@ import MetalKit
 import SwiftUI
 
 /// Struct NeuralGraphView.
+struct GraphLabel: Identifiable, Equatable {
+    let id: String
+    let pos: CGPoint
+    let text: String
+    let intensity: Float
+}
+
 struct NeuralGraphView: NSViewRepresentable {
     let eventClient: EventStreamClient
     let nodes: [CortexStream.NodeModel]
     @Binding var selectedNodeId: String?
     @Binding var selectedNodePoint: CGPoint?  // For Overlay
+    @Binding var labels: [GraphLabel]  // Layer 1: Persistent Labels
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -178,8 +186,27 @@ struct NeuralGraphView: NSViewRepresentable {
 
         func draw(in view: MTKView) {
             renderer?.draw(in: view)
-            // Ideally we check overlay position here too but `draw` is high freq.
-            // Can use a separate timer or just rely on events/input.
+
+            // Sync Labels
+            // Throttle: Update labels every 2 frames to reduce SwiftUI churn, or just direct update.
+            // Since we are on the main thread (MTKViewDelegate), we can update bindings directly.
+            // Check if we actually have visible labels to avoid empty updates.
+
+            if let visible = renderer?.getVisibleLabels() {
+                let newLabels = visible.map {
+                    GraphLabel(id: $0.id, pos: $0.pos, text: $0.label, intensity: $0.pressure)
+                }
+
+                // Direct update (No async dispatch) = No frame lag
+                self.parent.labels = newLabels
+
+                // Sync Selection Overlay position
+                if let id = self.parent.selectedNodeId,
+                    let point = self.renderer?.projectNode(id: id)
+                {
+                    self.parent.selectedNodePoint = point
+                }
+            }
         }
     }
 }
@@ -190,6 +217,7 @@ struct InteractiveGraphContainer: View {
     @State private var lastDrag = CGSize.zero
     @State private var selectedNodeId: String? = nil
     @State private var selectedOverlayPos: CGPoint? = nil
+    @State private var labels: [GraphLabel] = []  // Layer 1 Labels
 
     var body: some View {
         ZStack {
@@ -197,7 +225,8 @@ struct InteractiveGraphContainer: View {
                 eventClient: appState.eventClient,
                 nodes: appState.cortexStream.nodes,
                 selectedNodeId: $selectedNodeId,
-                selectedNodePoint: $selectedOverlayPos
+                selectedNodePoint: $selectedOverlayPos,
+                labels: $labels
             )
             .gesture(
                 DragGesture()
@@ -217,13 +246,24 @@ struct InteractiveGraphContainer: View {
                     .onEnded { _ in lastDrag = .zero }
             )
 
+            // LAYER 1: PERSISTENT LABELS (Contextual Density)
+            ForEach(labels) { label in
+                Text(label.text)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(Color.white.opacity(Double(0.4 + label.intensity * 0.6)))
+                    .position(x: label.pos.x, y: label.pos.y + 16)  // Offset below node
+                    .allowsHitTesting(false)
+            }
+
             // OVERLAY LAYER
             if let id = selectedNodeId, let pos = selectedOverlayPos {
+                let selectedNode = appState.cortexStream.nodes.first { $0.id == id }
+
                 VStack(alignment: .leading, spacing: 4) {
                     Text(id)
                         .font(.system(size: 12, weight: .bold, design: .monospaced))
                         .foregroundColor(.cyan)
-                    Text("Analysis Pending...")
+                    Text(selectedNode?.description ?? "Analysis Pending...")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.white.opacity(0.8))
                 }

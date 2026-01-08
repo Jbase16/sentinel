@@ -146,7 +146,7 @@ class TaskRouter(Observable):
     # Primary Tool Output Handler
     # ============================================================================
     
-    def handle_tool_output(
+    async def handle_tool_output(
         self,
         tool_name: str,
         stdout: str,
@@ -172,7 +172,7 @@ class TaskRouter(Observable):
             metadata: Additional context (target, session_id, timestamp, etc.)
         
         Example:
-            router.handle_tool_output(
+            await router.handle_tool_output(
                 tool_name="nmap",
                 stdout="PORT    STATE SERVICE\\n22/tcp  open  ssh\\n80/tcp  open  http",
                 stderr="",
@@ -202,7 +202,7 @@ class TaskRouter(Observable):
             
             # STEP 1: Send output to AIEngine for semantic analysis
             # AIEngine return PROPOSALS, not final findings.
-            result = self.ai.process_tool_output(
+            result = await self.ai.process_tool_output(
                 tool_name=tool_name,
                 stdout=stdout,
                 stderr=stderr,

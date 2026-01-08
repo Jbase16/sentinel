@@ -191,7 +191,7 @@ class OllamaClient:
         # Store which model to load (Ollama can host multiple models)
         self.model = model
 
-    def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
+    async def generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
         """Function generate."""
         url = f"{self.base_url}/api/generate"
         payload = {
@@ -206,8 +206,8 @@ class OllamaClient:
         
         # Error handling block.
         try:
-            with httpx.Client(timeout=300.0) as client:
-                resp = client.post(url, json=payload)
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                resp = await client.post(url, json=payload)
                 if resp.status_code == 200:
                     result = resp.json()
                     response = result.get('response')
@@ -219,9 +219,9 @@ class OllamaClient:
             return None
         return None
 
-    def generate_text(self, prompt: str, system: str = "") -> Optional[str]:
+    async def generate_text(self, prompt: str, system: str = "") -> Optional[str]:
         """Generate plain text response without JSON formatting."""
-        return self.generate(prompt, system, force_json=False)
+        return await self.generate(prompt, system, force_json=False)
 
     async def stream_generate(self, prompt: str, system: str = "") -> AsyncGenerator[str, None]:
         """Function stream_generate."""
@@ -328,7 +328,7 @@ class AIEngine:
 
             self.client = raw_client
 
-    def safe_generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
+    async def safe_generate(self, prompt: str, system: str = "", force_json: bool = True) -> Optional[str]:
         """
         Unified, safe point of entry for all LLM generation.
         Enforces:
@@ -347,7 +347,7 @@ class AIEngine:
             
         try:
             # Execute generation
-            result = self.client.generate(prompt, system, force_json)
+            result = await self.client.generate(prompt, system, force_json)
             
             # Update circuit breaker state based on result
             if result is None:
@@ -363,7 +363,7 @@ class AIEngine:
             logger.error(f"[AI] Safe generation error: {e}")
             return None
 
-    def deobfuscate_code(self, code_snippet: str) -> str:
+    async def deobfuscate_code(self, code_snippet: str) -> str:
         """
         Specialized pipeline for JS de-obfuscation.
         """
@@ -378,7 +378,7 @@ class AIEngine:
         )
         user_prompt = f"Code:\n{code_snippet}"
 
-        result = self.safe_generate(user_prompt, system_prompt, force_json=False)
+        result = await self.safe_generate(user_prompt, system_prompt, force_json=False)
         return result or "[AI unavailable]"
 
     # ---------------------------------------------------------
@@ -492,7 +492,7 @@ class AIEngine:
 
         yield "AI Chat unavailable (Ollama offline). Please check connection."
 
-    def process_tool_output(
+    async def process_tool_output(
         self,
         tool_name: str,
         stdout: str,
@@ -525,7 +525,7 @@ class AIEngine:
         # Try AI first
         if self.client:
             try:
-                analysis_result = self._analyze_with_llm(
+                analysis_result = await self._analyze_with_llm(
                     tool_name, stdout, stderr, rc, observation_id
                 )
                 proposals = analysis_result.get("proposals", [])
@@ -570,7 +570,7 @@ class AIEngine:
             "evidence_id": evidence_id,
         }
 
-    def _analyze_with_llm(
+    async def _analyze_with_llm(
         self, 
         tool: str, 
         stdout: str, 
@@ -606,7 +606,7 @@ class AIEngine:
             "Analyze this output. Provide findings and recommended next steps."
         )
 
-        response_json = self.safe_generate(user_prompt, system_prompt, force_json=True)
+        response_json = await self.safe_generate(user_prompt, system_prompt, force_json=True)
         if not response_json:
             return {"proposals": [], "next_steps": []}
 

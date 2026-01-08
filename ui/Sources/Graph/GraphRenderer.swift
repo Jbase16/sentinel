@@ -526,7 +526,16 @@ final class GraphRenderer: NSObject {
         lock.lock()
         defer { lock.unlock() }
 
-        self.nodes = newNodes.map { node in
+        // 1. Rebuild Nodes and Index Map together
+        // This ensures nodePositions is always in sync with the nodes array.
+        nodePositions.removeAll(keepingCapacity: true)
+
+        self.nodes = newNodes.enumerated().map { (index, node) in
+            // Rebuild Map
+            if let id = node.id {
+                nodePositions[id] = index
+            }
+
             let x = node.x ?? Float.random(in: -40...40)
             let y = node.y ?? Float.random(in: -40...40)
             let z = node.z ?? Float.random(in: -120...120)
@@ -534,23 +543,31 @@ final class GraphRenderer: NSObject {
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
 
             // Pressure mapping:
-            // 1) If NodeModel provides pressure, use it.
-            // 2) Else fall back to a safe baseline.
             let pressure: Float = {
                 if let p = node.pressure { return max(0.0, min(1.0, p)) }
                 if let sev = node.severity { return pressureForSeverity(sev) }
                 return 0.1
             }()
 
-            // physics: x=mass, y=charge, z=temp, w=pressure
             let physics = SIMD4<Float>(1.0, 0.0, 0.0, pressure)
-
             return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color, physics: physics)
         }
 
+        nodeCount = nodes.count
+
+        // 2. Upload to GPU
         let dataSize = nodes.count * MemoryLayout<Node>.stride
         if dataSize > 0 {
             vertexBuffer = device.makeBuffer(bytes: nodes, length: dataSize, options: [])
+        } else {
+            vertexBuffer = nil
+        }
+
+        // 3. Validate Selection (Authoritative Check)
+        // If the selected node no longer exists, clear the selection.
+        if let id = selectedNodeId, nodePositions[id] == nil {
+            selectedNodeId = nil
+            selectedNodeIndex = -1
         }
     }
 
@@ -679,6 +696,15 @@ final class GraphRenderer: NSObject {
 
     // MARK: - Hit Testing
 
+    /// Updates the GPU index based on the authoritative ID.
+    private func syncSelection() {
+        if let id = selectedNodeId, let idx = nodePositions[id] {
+            selectedNodeIndex = Int32(idx)
+        } else {
+            selectedNodeIndex = -1
+        }
+    }
+
     func selectNode(at location: CGPoint) -> String? {
         lock.lock()
         defer { lock.unlock() }
@@ -755,6 +781,7 @@ final class GraphRenderer: NSObject {
             }
         }
 
+        self.selectedNodeId = foundNodeId
         self.selectedNodeIndex = bestNodeIndex
         return foundNodeId
     }
@@ -800,6 +827,64 @@ final class GraphRenderer: NSObject {
         let screenY = CGFloat((1.0 - ndc.y) * 0.5) * viewportSize.height
 
         return CGPoint(x: screenX, y: screenY)
+    }
+
+    func getVisibleLabels() -> [(id: String, pos: CGPoint, label: String, pressure: Float)] {
+        lock.lock()
+        defer { lock.unlock() }
+
+        var results: [(String, CGPoint, String, Float)] = []
+
+        // Matrix setup (reusing local logic for safety)
+        let aspect = Float(viewportSize.width / max(1.0, viewportSize.height))
+        let projectionMatrix = matrix_perspective_right_hand(
+            fovyRadians: Float.pi / 4.0,
+            aspectRatio: aspect,
+            nearZ: 1.0,
+            farZ: 1000.0
+        )
+
+        let viewMatrix =
+            matrix_identity_float4x4
+            .translated(x: 0, y: 0, z: zoom)
+            .rotated(angle: rotationX, axis: SIMD3<Float>(1, 0, 0))
+            .rotated(angle: rotationY, axis: SIMD3<Float>(0, 1, 0))
+
+        let modelMatrix =
+            matrix_identity_float4x4
+            .rotated(angle: time * 0.12, axis: SIMD3<Float>(0, 1, 0))
+            .rotated(angle: time * 0.07, axis: SIMD3<Float>(1, 0, 0))
+
+        let viewProj = projectionMatrix * viewMatrix
+
+        for (id, index) in nodePositions {
+            if index >= nodes.count { continue }
+            let node = nodes[index]
+
+            // Contextual Density Logic:
+            // High Pressure OR High Mass OR Selected
+            let pressure = node.physics.w
+            let mass = node.physics.x
+
+            if pressure < 0.4 && mass < 50.0 && selectedNodeId != id { continue }
+
+            let worldPos =
+                modelMatrix * SIMD4<Float>(node.position.x, node.position.y, node.position.z, 1.0)
+            let clipPos = viewProj * worldPos
+
+            if clipPos.w <= 0 { continue }
+
+            let ndc = SIMD3<Float>(
+                clipPos.x / clipPos.w, clipPos.y / clipPos.w, clipPos.z / clipPos.w)
+            let screenX = CGFloat((ndc.x + 1.0) * 0.5) * viewportSize.width
+            let screenY = CGFloat((1.0 - ndc.y) * 0.5) * viewportSize.height
+
+            let label = id.contains("_") ? (id.components(separatedBy: "_").last ?? id) : id
+
+            results.append((id, CGPoint(x: screenX, y: screenY), label, pressure))
+        }
+
+        return results
     }
 }
 

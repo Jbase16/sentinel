@@ -49,6 +49,7 @@ public struct PressureNodeDataDTO: Decodable, Sendable {
     public let charge: Double?
     public let temperature: Double?
     public let structural: Bool?
+    public let description: String?
 
     enum CodingKeys: String, CodingKey {
         case severity, exposure, exploitability
@@ -57,6 +58,7 @@ public struct PressureNodeDataDTO: Decodable, Sendable {
         case pressureSource = "pressure_source"
         case revision
         case mass, charge, temperature, structural
+        case description
     }
 }
 

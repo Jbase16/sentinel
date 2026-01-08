@@ -44,6 +44,7 @@ class CortexStream: ObservableObject {
         var charge: Float?
         var temperature: Float?
         var structural: Bool?
+        var description: String?  // Semantic Analysis
     }
 
     /// Struct GraphData.
@@ -275,7 +276,8 @@ class CortexStream: ObservableObject {
                 mass: Float(node.data.mass ?? 1.0),
                 charge: Float(node.data.charge ?? 0.0),
                 temperature: Float(node.data.temperature ?? 0.0),
-                structural: node.data.structural
+                structural: node.data.structural,
+                description: node.data.description
             )
         }
 

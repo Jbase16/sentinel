@@ -1345,7 +1345,7 @@ class ScannerEngine:
             # This ensures the Audit Feed shows all tool executions
             try:
                 router = TaskRouter.instance()
-                router.handle_tool_output(
+                await router.handle_tool_output(
                     tool_name=tool,
                     stdout=output_text,
                     stderr="",

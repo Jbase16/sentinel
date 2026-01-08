@@ -60,6 +60,7 @@ class PressureNode:
     tool_reliability: float = 1.0
     evidence_quality: float = 1.0
     corroboration_count: int = 0
+    description: str = ""  # Human-readable summary
     
     # V2: State & Audit
     pressure_source: PressureSource = PressureSource.ENGINE
