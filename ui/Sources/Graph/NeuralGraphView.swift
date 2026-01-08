@@ -35,6 +35,7 @@ struct NeuralGraphView: NSViewRepresentable {
     let eventClient: EventStreamClient
     let nodes: [CortexStream.NodeModel]
     let edges: [CortexStream.EdgeModel]
+    let analysis: TopologyResponse?  // Phase 11
     @Binding var selectedNodeId: String?
     @Binding var selectedNodePoint: CGPoint?  // For Overlay
     @Binding var labels: [GraphLabel]  // Layer 1: Persistent Labels
@@ -80,6 +81,13 @@ struct NeuralGraphView: NSViewRepresentable {
         context.coordinator.updateNodes(nodes)
         context.coordinator.updateEdges(edges)
 
+        // Phase 11: Critical Paths
+        if let paths = analysis?.critical_paths {
+            context.coordinator.updateCriticalPaths(paths.map { $0.path })
+        } else {
+            context.coordinator.updateCriticalPaths([])
+        }
+
         // Update selection in renderer if changed externally
         context.coordinator.updateSelection(selectedNodeId)
     }
@@ -93,6 +101,11 @@ struct NeuralGraphView: NSViewRepresentable {
         init(_ parent: NeuralGraphView) {
             self.parent = parent
             super.init()
+        }
+
+        func updateCriticalPaths(_ paths: [[String]]) {
+            renderer?.setCriticalPaths(paths)
+            mtkView?.setNeedsDisplay(mtkView?.bounds ?? .zero)
         }
 
         @objc func handleClick(_ gesture: NSClickGestureRecognizer) {
@@ -234,6 +247,7 @@ struct NeuralGraphView: NSViewRepresentable {
 }
 
 // MARK: - Interactive Wrapper
+// MARK: - Interactive Wrapper
 struct InteractiveGraphContainer: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var lastDrag = CGSize.zero
@@ -247,6 +261,7 @@ struct InteractiveGraphContainer: View {
                 eventClient: appState.eventClient,
                 nodes: appState.cortexStream.nodes,
                 edges: appState.cortexStream.edges,
+                analysis: appState.graphAnalysis,
                 selectedNodeId: $selectedNodeId,
                 selectedNodePoint: $selectedOverlayPos,
                 labels: $labels
@@ -268,6 +283,18 @@ struct InteractiveGraphContainer: View {
                     }
                     .onEnded { _ in lastDrag = .zero }
             )
+            .onChange(of: selectedNodeId) { newId in
+                if let id = newId {
+                    // Trigger Analysis (Phase 11)
+                    appState.fetchInsights(for: id)
+                }
+            }
+            .onChange(of: appState.isScanRunning) { isRunning in
+                if !isRunning {
+                    // Refresh Analysis when scan completes
+                    appState.fetchAnalysis()
+                }
+            }
 
             // LAYER 1: PERSISTENT LABELS (Contextual Density)
             ForEach(labels) { label in
@@ -281,6 +308,7 @@ struct InteractiveGraphContainer: View {
             // OVERLAY LAYER
             if let id = selectedNodeId, let pos = selectedOverlayPos {
                 let selectedNode = appState.cortexStream.nodes.first { $0.id == id }
+                let insights = appState.insightsByNode[id] ?? []
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(id)
@@ -289,15 +317,31 @@ struct InteractiveGraphContainer: View {
                     Text(selectedNode?.description ?? "Analysis Pending...")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.white.opacity(0.8))
+
+                    if !insights.isEmpty {
+                        Divider().background(Color.white.opacity(0.3))
+                        ForEach(insights.prefix(3)) { insight in
+                            HStack(alignment: .top, spacing: 4) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 8))
+                                    .foregroundColor(.purple)
+                                Text(insight.claim)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
                 }
                 .padding(8)
-                .background(Color.black.opacity(0.8))
+                .background(Color.black.opacity(0.85))
                 .cornerRadius(6)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.cyan.opacity(0.5), lineWidth: 1)
                 )
-                .position(x: pos.x, y: pos.y - 40)  // Offset above node
+                .frame(maxWidth: 220)  // Limit width for readability
+                .position(x: pos.x, y: pos.y - 60)  // Offset above node
                 .allowsHitTesting(false)  // Pass touches through
             }
         }

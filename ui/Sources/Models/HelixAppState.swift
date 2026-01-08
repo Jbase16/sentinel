@@ -56,12 +56,15 @@ public class HelixAppState: ObservableObject {
     let apiClient: SentinelAPIClient
     let cortexStream: CortexStream
     let ptyClient: PTYClient
+    let cortexClient: CortexClient
 
     private var cancellables = Set<AnyCancellable>()
     private var didSetupEventStreamSubscriptions = false
-    private var cancellables = Set<AnyCancellable>()
-    private var didSetupEventStreamSubscriptions = false
     private var seenEventIDs: Set<String> = []
+
+    // MARK: - Analysis State (Phase 11)
+    @Published var graphAnalysis: TopologyResponse? = nil
+    @Published var insightsByNode: [String: [InsightClaim]] = [:]
 
     // MARK: - Replay State (Time Travel)
     @Published var allEvents: [GraphEvent] = []  // The Tape
@@ -103,6 +106,7 @@ public class HelixAppState: ObservableObject {
         self.apiClient = SentinelAPIClient()
         self.cortexStream = CortexStream()
         self.ptyClient = PTYClient()
+        self.cortexClient = CortexClient()
 
         self.thread = ChatThread(title: "Main Chat", messages: [])
         self.availableModels = llm.availableModels
@@ -560,6 +564,114 @@ public class HelixAppState: ObservableObject {
         }
         cortexStream.processEvent(event)
         processLifecycleEvent(event)
+    }
+
+    // MARK: - Semantic Analysis (Phase 11)
+
+    func fetchAnalysis() {
+        Task {
+            // Snapshot current graph state
+            let nodes = cortexStream.nodes
+            let edges = cortexStream.edges
+
+            // Map to DTOs
+            let nodeDTOs = nodes.map { node in
+                NodeDTO(
+                    id: node.id,
+                    type: node.type,
+                    attributes: [
+                        "severity": node.severity ?? "",
+                        "pressure": String(node.pressure ?? 0),
+                    ]
+                )
+            }
+
+            let edgeDTOs = edges.map { edge in
+                EdgeDTO(
+                    source: edge.source,
+                    target: edge.target,
+                    type: edge.type ?? "unknown",
+                    weight: 1.0
+                )
+            }
+
+            let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
+
+            // Determine entry/critical nodes?
+            // For now, let's say "internet" -> "high value" or just analyze everything if specific nodes aren't set.
+            // Strategos usually defines the Entry.
+            // Let's assume Entry = "The Internet" or any node with type="entry_point" logic.
+            // For now, empty lists rely on backend defaults or we can pass some if we know them.
+            // Let's pass entry_nodes = [] to let backend decide or error?
+            // Backend GraphAnalyzer requires entry_nodes to find paths.
+            // Let's use nodes with type="entry" or hardcoded "INTERNET" if it exists.
+
+            let entryNodes = nodes.filter { $0.type == "entry" || $0.id == "INTERNET" }.map {
+                $0.id
+            }
+            let criticalNodes = nodes.filter { ($0.pressure ?? 0) > 0.8 }.map { $0.id }  // High pressure nodes
+
+            do {
+                let analysis = try await cortexClient.fetchTopology(
+                    graph: graphDTO,
+                    entryNodes: entryNodes,
+                    criticalAssets: criticalNodes
+                )
+
+                await MainActor.run {
+                    self.graphAnalysis = analysis
+                    print(
+                        "[Analysis] Received topology: \(analysis.critical_paths?.count ?? 0) paths"
+                    )
+                }
+            } catch {
+                print("[Analysis] Topology fetch failed: \(error)")
+            }
+        }
+    }
+
+    func fetchInsights(for nodeID: String) {
+        Task {
+            // Snapshot current graph state (Similar to above, could refactor into helper)
+            let nodes = cortexStream.nodes
+            let edges = cortexStream.edges
+
+            let nodeDTOs = nodes.map { node in
+                NodeDTO(
+                    id: node.id,
+                    type: node.type,
+                    attributes: [
+                        "severity": node.severity ?? "",
+                        "pressure": String(node.pressure ?? 0),
+                    ]
+                )
+            }
+            let edgeDTOs = edges.map { edge in
+                EdgeDTO(
+                    source: edge.source, target: edge.target, type: edge.type ?? "unknown",
+                    weight: 1.0)
+            }
+            let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
+
+            // If we have a cached analysis hash, use it.
+            let hash = graphAnalysis?.graph_hash ?? "live-\(Date().timeIntervalSince1970)"
+
+            do {
+                let response = try await cortexClient.fetchInsights(
+                    graph: graphDTO,
+                    hash: hash,
+                    nodes: [nodeID],
+                    type: "cluster_summary"  // Default type
+                )
+
+                await MainActor.run {
+                    self.insightsByNode[nodeID] = response.insights
+                    print("[Analysis] Received \(response.insights.count) insights for \(nodeID)")
+                }
+            } catch {
+                print("[Analysis] Insights fetch failed: \(error)")
+            }
+        }
     }
 }
 

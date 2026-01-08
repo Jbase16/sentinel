@@ -541,6 +541,25 @@ final class GraphRenderer: NSObject {
         isEdgesDirty = true
     }
 
+    // Critical Path State
+    private var criticalEdges: Set<String> = []  // "sourceId->targetId"
+
+    func setCriticalPaths(_ paths: [[String]]) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        criticalEdges.removeAll()
+        for path in paths {
+            if path.count < 2 { continue }
+            for i in 0..<(path.count - 1) {
+                let key = "\(path[i])->\(path[i+1])"
+                criticalEdges.insert(key)
+            }
+        }
+
+        isEdgesDirty = true
+    }
+
     private func rebuildEdges() {
         // Must be called inside lock or thread-safe context
         edgeVertices.removeAll(keepingCapacity: true)
@@ -558,15 +577,26 @@ final class GraphRenderer: NSObject {
             let sourceNode = nodes[sourceIndex]
             let targetNode = nodes[targetIndex]
 
+            // Check for Critical Path
+            let simpleKey = "\(edge.sourceId)->\(edge.targetId)"
+            let isCritical = criticalEdges.contains(simpleKey)
+
             // Generate Line Segment
             // Use semantic edge color, do not inherit node color!
-            let edgeColor = colorForEdgeType(edge.edgeType)
+            var edgeColor = colorForEdgeType(edge.edgeType)
+            var pressure = sourceNode.physics.w
+
+            if isCritical {
+                // Highlighting Logic
+                edgeColor = SIMD4<Float>(1.0, 0.1, 0.1, 1.0)  // Bright Red
+                pressure = 1.0  // Max flow pulse
+            }
 
             // Physics:
             // Inherit pressure (w) from nodes to allow flow visualization in shader.
             // Zero out mass/charge/temp (xyz) to avoid displacement artifacts.
-            let sPhysics = SIMD4<Float>(0, 0, 0, sourceNode.physics.w)
-            let tPhysics = SIMD4<Float>(0, 0, 0, targetNode.physics.w)
+            let sPhysics = SIMD4<Float>(0, 0, 0, isCritical ? 1.0 : sourceNode.physics.w)
+            let tPhysics = SIMD4<Float>(0, 0, 0, isCritical ? 1.0 : targetNode.physics.w)
 
             var s = sourceNode
             var t = targetNode
