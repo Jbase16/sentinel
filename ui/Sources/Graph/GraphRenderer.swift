@@ -46,6 +46,7 @@ final class GraphRenderer: NSObject {
     private(set) var pipelineState: MTLRenderPipelineState?
     private(set) var linePipelineState: MTLRenderPipelineState?
     private(set) var depthState: MTLDepthStencilState?
+    private(set) var edgeDepthState: MTLDepthStencilState?
 
     private(set) var vertexBuffer: MTLBuffer?
     private(set) var edgeVertexBuffer: MTLBuffer?
@@ -58,7 +59,7 @@ final class GraphRenderer: NSObject {
     // Interaction State
     var rotationX: Float = 0
     var rotationY: Float = 0
-    var zoom: Float = -200.0  // Move back to see the scene
+    var zoom: Float = -120.0  // Closer camera for dramatic depth
 
     // Thread Safety
     private let lock = NSLock()
@@ -222,10 +223,18 @@ final class GraphRenderer: NSObject {
     }
 
     private func buildDepthState() {
+        // Standard Depth State (Nodes)
         let desc = MTLDepthStencilDescriptor()
         desc.isDepthWriteEnabled = true
         desc.depthCompareFunction = .less
         depthState = device.makeDepthStencilState(descriptor: desc)
+
+        // Edge Depth State (Read-only)
+        // Edges should test against nodes but not occlude them or each other
+        let edgeDesc = MTLDepthStencilDescriptor()
+        edgeDesc.isDepthWriteEnabled = false
+        edgeDesc.depthCompareFunction = .less
+        edgeDepthState = device.makeDepthStencilState(descriptor: edgeDesc)
     }
 
     // MARK: - Event Handling
@@ -259,7 +268,8 @@ final class GraphRenderer: NSObject {
         let radius: Float = 20.0 + Float(nodeCount) * 3.0
         let x = cos(angle) * radius
         let y = sin(angle) * radius
-        let z = stableFloat(seed: nodeId, min: -30, max: 30)  // widen Z so rotation shows parallax
+        // Dramatic Z-spread for parallax
+        let z = stableFloat(seed: nodeId, min: -120, max: 120)
 
         let color = colorForNodeType(nodeType)
         let size: Float = sizeForNodeType(nodeType)
@@ -504,7 +514,7 @@ final class GraphRenderer: NSObject {
         self.nodes = newNodes.map { node in
             let x = node.x ?? Float.random(in: -40...40)
             let y = node.y ?? Float.random(in: -40...40)
-            let z = node.z ?? Float.random(in: -40...40)
+            let z = node.z ?? Float.random(in: -120...120)
 
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
             let physics = SIMD4<Float>(1.0, 0.0, 0.0, 0.0)
@@ -576,8 +586,12 @@ final class GraphRenderer: NSObject {
             .rotated(angle: rotationX, axis: SIMD3<Float>(1, 0, 0))
             .rotated(angle: rotationY, axis: SIMD3<Float>(0, 1, 0))
 
-        let modelMatrix = matrix_identity_float4x4.rotated(
-            angle: time * 0.1, axis: SIMD3<Float>(0, 1, 0))
+        // Compound rotation for complex motion parallax
+        let modelMatrix =
+            matrix_identity_float4x4
+            .rotated(angle: time * 0.12, axis: SIMD3<Float>(0, 1, 0))
+            .rotated(angle: time * 0.07, axis: SIMD3<Float>(1, 0, 0))
+
         let viewProjection = projectionMatrix * viewMatrix
 
         var uniforms = Uniforms(
@@ -589,9 +603,19 @@ final class GraphRenderer: NSObject {
             let eBuffer = edgeVertexBuffer,
             !edgeVertices.isEmpty
         {
+            // Use Read-Only Depth for edges (transparency-like behavior)
+            if let edgeDS = edgeDepthState {
+                encoder.setDepthStencilState(edgeDS)
+            }
+
             encoder.setRenderPipelineState(linePSO)
             encoder.setVertexBuffer(eBuffer, offset: 0, index: 0)
             encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeVertices.count)
+        }
+
+        // Restore write-enabled depth for Nodes
+        if let depthState {
+            encoder.setDepthStencilState(depthState)
         }
 
         // Nodes

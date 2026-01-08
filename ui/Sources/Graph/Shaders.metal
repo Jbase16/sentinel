@@ -13,20 +13,14 @@ struct VertexIn {
     float4 physics [[attribute(2)]];  // x=mass, y=charge, z=temp, w=structural
 };
 
+// --- Vertex Shader ---
 struct VertexOut {
     float4 position [[position]];
     float4 color;
     float size [[point_size]];
+    float depth; // Pass depth for fogging
 };
 
-struct Uniforms {
-    float4x4 viewProjectionMatrix;
-    float4x4 modelMatrix;
-    float time;
-    float3 _pad; // Explicit padding to match 16-byte alignment of Swift struct
-};
-
-// --- Vertex Shader ---
 vertex VertexOut vertex_main(
     VertexIn in [[stage_in]],
     constant Uniforms &uniforms [[buffer(1)]]
@@ -45,9 +39,10 @@ vertex VertexOut vertex_main(
     
     // VIBRATION (Temperature)
     // High temperature (Friction) causes violent vibration
+    // NOW 3D: Breathe in all axes, especially Z for depth perception
     float vibration = 0.05 + (temperature * 0.5); // Baseline breath + Friction
     float breath = sin(uniforms.time * (1.5 + temperature * 10.0) + pos.x * 5.0 + pos.y * 3.0) * vibration;
-    pos += float3(breath * 0.5, breath * 0.5, 0.0);
+    pos += float3(breath * 0.4, breath * 0.4, breath * 0.6); // Exaggerate Z motion
     
     // GRAVITY (Mass)
     // Heavier nodes are larger visually
@@ -57,6 +52,7 @@ vertex VertexOut vertex_main(
     // Apply model rotation then view-projection
     float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
     out.position = uniforms.viewProjectionMatrix * worldPos;
+    out.depth = out.position.w; // Store linear depth for fog
     
     // Size attenuation based on depth
     out.size = max(5.0, visualSize * (100.0 / (out.position.w + 0.1)));
@@ -82,13 +78,20 @@ fragment float4 fragment_main(
     float core = 1.0 - smoothstep(0.3, 0.4, dist);
     float glow = 1.0 - smoothstep(0.4, 1.0, dist);
     
+    // Depth Fog / Contrast Compression
+    // Map depth (approx 50 to 500) to 0..1 range
+    float fog = clamp((in.depth - 50.0) / 400.0, 0.0, 1.0);
+    
     float3 finalColor = in.color.rgb;
+    
+    // Modulate brightness with depth - subtle darkening
+    finalColor *= mix(1.2, 0.6, fog);
     
     // Add a hot white core
     finalColor += float3(1.0) * core * 0.8;
     
-    // Alpha falloff
-    float alpha = in.color.a * glow;
+    // Alpha falloff with depth (distant nodes more transparent)
+    float alpha = in.color.a * glow * mix(1.0, 0.4, fog);
     
     return float4(finalColor, alpha);
 }
@@ -97,5 +100,7 @@ fragment float4 fragment_main(
 fragment float4 fragment_line(
     VertexOut in [[stage_in]]
 ) {
-    return float4(in.color.rgb, in.color.a);
+    // Fade edges with depth so they don't form a flat spiderweb
+    float fade = clamp(1.0 - (in.depth / 600.0), 0.05, 1.0);
+    return float4(in.color.rgb, in.color.a * fade);
 }
