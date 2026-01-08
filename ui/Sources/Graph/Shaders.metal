@@ -13,6 +13,13 @@ struct VertexIn {
     float4 physics [[attribute(2)]];  // x=mass, y=charge, z=temp, w=structural
 };
 
+struct Uniforms {
+    float4x4 viewProjectionMatrix;
+    float4x4 modelMatrix;
+    float time;
+    float3 _pad; // Explicit padding to match 16-byte alignment of Swift struct
+};
+
 // --- Vertex Shader ---
 struct VertexOut {
     float4 position [[position]];

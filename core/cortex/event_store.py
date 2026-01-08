@@ -48,6 +48,7 @@ class StoredEvent:
             "id": event_id,
             "sequence": self.sequence,
             "type": self.event.type.value,
+            "event_type": self.event.type.value,
             "payload": self.event.payload,
             "timestamp": self.event.timestamp,
             "wall_time": wall_time,

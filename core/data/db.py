@@ -79,7 +79,7 @@ class Database:
                 return
 
             try:
-                self._db_connection = await aiosqlite.connect(self.db_path, timeout=30.0)
+                self._db_connection = await aiosqlite.connect(self.db_path, timeout=30.0, isolation_level=None)
                 await self._db_connection.execute("PRAGMA journal_mode=WAL;")
                 await self._db_connection.execute("PRAGMA synchronous=NORMAL;")
                 await self._db_connection.execute("PRAGMA busy_timeout=30000;")  # 30 seconds
@@ -1219,7 +1219,7 @@ class Database:
                 if nodes:
                     await self._db_connection.executemany(
                         """
-                        INSERT INTO graph_nodes (id, session_id, type, label, data)
+                        INSERT OR REPLACE INTO graph_nodes (id, session_id, type, label, data)
                         VALUES (?, ?, ?, ?, ?)
                         """,
                         [
@@ -1238,7 +1238,7 @@ class Database:
                 if edges:
                     await self._db_connection.executemany(
                         """
-                        INSERT INTO graph_edges (id, session_id, source_id, target_id, type, weight, data)
+                        INSERT OR REPLACE INTO graph_edges (id, session_id, source_id, target_id, type, weight, data)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         [

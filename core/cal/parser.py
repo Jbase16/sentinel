@@ -49,7 +49,10 @@ class Condition:
         
         # Operators map for custom CAL syntax "IS NOT EMPTY" etc.
         expr = self.raw_expression
-        expr = expr.replace("IS NOT EMPTY", "len(x) > 0").replace("IS EMPTY", "len(x) == 0")
+        # Regex to handle "IS NOT EMPTY" and "IS EMPTY" on attributes
+        # e.g. "tool.gates IS NOT EMPTY" -> "len(tool.gates) > 0"
+        expr = re.sub(r'(\S+)\s+IS\s+NOT\s+EMPTY', r'len(\1) > 0', expr)
+        expr = re.sub(r'(\S+)\s+IS\s+EMPTY', r'len(\1) == 0', expr)
         expr = expr.replace("NOT IN", "not in") # Pythonic  
         # 'IN' is already pythonic
         

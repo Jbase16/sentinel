@@ -450,7 +450,8 @@ class PressureGraphManager(Observable):
         """
         # Node ID unique to this failure instance
         import time
-        node_id = f"friction_{tool}_{int(time.time()*1000)}"
+        import time
+        node_id = f"{self.session_id}_friction_{tool}_{int(time.time()*1000)}"
         
         mass = 50.0 if is_catastrophic else 10.0
         temp = 1.0 # Max vibration
@@ -616,12 +617,13 @@ class PressureGraphManager(Observable):
         # Node ID - Robust generation
         raw_id = issue.get("id")
         if raw_id:
-             node_id = str(raw_id)
+             node_id = f"{self.session_id}_{str(raw_id)}"
         else:
              # Create deterministic ID from content if missing
              import hashlib
              content_str = f"{issue.get('title')}{issue.get('target')}{issue.get('type')}"
-             node_id = f"issue_{hashlib.md5(content_str.encode()).hexdigest()[:8]}"
+             node_hash = hashlib.md5(content_str.encode()).hexdigest()[:8]
+             node_id = f"{self.session_id}_issue_{node_hash}"
         
         return PressureNode(
             id=node_id,
@@ -673,7 +675,7 @@ class PressureGraphManager(Observable):
             confidence = 0.8
         
         # Edge ID
-        edge_id = edge.get("id", f"edge_{hash(str(edge))}")
+        edge_id = edge.get("id", f"{self.session_id}_edge_{hash(str(edge))}")
         
         return PressureEdge(
             id=edge_id,

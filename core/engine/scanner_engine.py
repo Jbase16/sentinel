@@ -472,9 +472,9 @@ class ScanTransaction:
         # Findings
         if self._staged_findings:
             if self._engine.session:
-                self._engine.session.findings.bulk_add(self._staged_findings, persist=True)
+                self._engine.session.findings.bulk_add(self._staged_findings, persist=False)
             else:
-                findings_store.bulk_add(self._staged_findings, persist=True)
+                findings_store.bulk_add(self._staged_findings, persist=False)
 
         # Evidence
         if self._staged_evidence:
@@ -483,14 +483,14 @@ class ScanTransaction:
                 tool = ev.get("tool", "unknown")
                 raw_output = ev.get("raw_output", "")
                 metadata = ev.get("metadata", {})
-                evidence_store.add_evidence(tool, raw_output, metadata, persist=True)
+                evidence_store.add_evidence(tool, raw_output, metadata, persist=False)
 
         # Issues
         if self._staged_issues:
             if self._engine.session:
-                self._engine.session.issues.replace_all(self._staged_issues, persist=True)
+                self._engine.session.issues.replace_all(self._staged_issues, persist=False)
             else:
-                issues_store.replace_all(self._staged_issues, persist=True)
+                issues_store.replace_all(self._staged_issues, persist=False)
 
         # Killchain edges (rules + recon + correlator implied edges)
         if self._engine.session and hasattr(self._engine.session, "killchain"):
@@ -518,7 +518,7 @@ class ScanTransaction:
                 if implied_edges:
                     combined_edges.extend(implied_edges)
 
-            self._engine.session.killchain.replace_all(combined_edges, persist=True)
+            self._engine.session.killchain.replace_all(combined_edges, persist=False)
             logger.info(
                 f"[ScanTransaction] UI PUBLISH COMPLETE {self._scan_id}: issues={len(self._staged_issues)} "
                 f"killchain_edges={len(combined_edges)}"
