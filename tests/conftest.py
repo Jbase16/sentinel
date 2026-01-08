@@ -2,6 +2,7 @@
 import os
 import sys
 import warnings
+import atexit
 
 
 def pytest_configure():
@@ -11,3 +12,36 @@ def pytest_configure():
     # Suppress known deprecation warnings
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="websockets")
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
+
+
+def pytest_unconfigure(config):
+    """
+    Clean up after pytest finishes.
+    
+    Python 3.14 has stricter asyncio shutdown that can cause
+    'Bad file descriptor' errors during pytest-asyncio teardown.
+    We suppress these by forcing cleanup of known singletons.
+    """
+    # Force cleanup of async singletons that may hold file descriptors
+    try:
+        from core.data.db import Database
+        if Database._instance is not None and Database._instance._db_connection:
+            import asyncio
+            try:
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(Database._instance.close())
+                loop.close()
+            except Exception:
+                pass
+            Database._instance = None
+    except Exception:
+        pass
+    
+    try:
+        from core.data.blackbox import BlackBox
+        if BlackBox._instance is not None:
+            BlackBox._instance._stopped = True
+            BlackBox._instance._draining = True
+            BlackBox._instance = None
+    except Exception:
+        pass

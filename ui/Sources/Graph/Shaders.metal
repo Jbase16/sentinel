@@ -20,17 +20,16 @@ struct VertexOut {
 };
 
 struct Uniforms {
-    float4x4 view_projection_matrix;
-    float4x4 model_matrix;
+    float4x4 viewProjectionMatrix;
+    float4x4 modelMatrix;
     float time;
+    float3 _pad; // Explicit padding to match 16-byte alignment of Swift struct
 };
 
 // --- Vertex Shader ---
 vertex VertexOut vertex_main(
     VertexIn in [[stage_in]],
-    constant float4x4 &viewProjectionMatrix [[buffer(1)]],
-    constant float4x4 &modelMatrix [[buffer(2)]],
-    constant float &time [[buffer(3)]]
+    constant Uniforms &uniforms [[buffer(1)]]
 ) {
     VertexOut out;
     
@@ -47,7 +46,7 @@ vertex VertexOut vertex_main(
     // VIBRATION (Temperature)
     // High temperature (Friction) causes violent vibration
     float vibration = 0.05 + (temperature * 0.5); // Baseline breath + Friction
-    float breath = sin(time * (1.5 + temperature * 10.0) + pos.x * 5.0 + pos.y * 3.0) * vibration;
+    float breath = sin(uniforms.time * (1.5 + temperature * 10.0) + pos.x * 5.0 + pos.y * 3.0) * vibration;
     pos += float3(breath * 0.5, breath * 0.5, 0.0);
     
     // GRAVITY (Mass)
@@ -55,7 +54,9 @@ vertex VertexOut vertex_main(
     float visualSize = baseSize + (mass * 0.5);
     
     // Project to Screen
-    out.position = viewProjectionMatrix * float4(pos, 1.0);
+    // Apply model rotation then view-projection
+    float4 worldPos = uniforms.modelMatrix * float4(pos, 1.0);
+    out.position = uniforms.viewProjectionMatrix * worldPos;
     
     // Size attenuation based on depth
     out.size = max(5.0, visualSize * (100.0 / (out.position.w + 0.1)));

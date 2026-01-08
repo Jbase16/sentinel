@@ -36,17 +36,13 @@ struct NeuralGraphView: NSViewRepresentable {
     func makeNSView(context: Context) -> MTKView {
         let mtkView = MTKView()
         mtkView.delegate = context.coordinator
-        mtkView.preferredFramesPerSecond = 60
-        mtkView.enableSetNeedsDisplay = true
         mtkView.device = MTLCreateSystemDefaultDevice()
-        mtkView.framebufferOnly = false
-        mtkView.colorPixelFormat = .bgra8Unorm
-        mtkView.depthStencilPixelFormat = .invalid
-        mtkView.clearColor = MTLClearColor(red: 0.05, green: 0.05, blue: 0.1, alpha: 1.0)
-        mtkView.drawableSize = mtkView.frame.size
 
+        // Configuration handled by renderer to ensure matching formats
         if let device = mtkView.device {
-            context.coordinator.renderer = GraphRenderer(device: device)
+            let renderer = GraphRenderer(device: device)
+            renderer.configure(view: mtkView)
+            context.coordinator.renderer = renderer
         }
 
         NotificationCenter.default.addObserver(forName: .cameraMove, object: nil, queue: .main) {
