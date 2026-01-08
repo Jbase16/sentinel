@@ -61,6 +61,10 @@ final class GraphRenderer: NSObject {
     var rotationY: Float = 0
     var zoom: Float = -120.0  // Closer camera for dramatic depth
 
+    // Selection State (must be sent to GPU every frame)
+    var selectedNodeId: String? = nil  // Authoritative Source of Truth
+    private var selectedNodeIndex: Int32 = -1  // Derived for GPU
+
     // Thread Safety
     private let lock = NSLock()
 
@@ -81,7 +85,8 @@ final class GraphRenderer: NSObject {
         var viewProj: matrix_float4x4  // 64
         var model: matrix_float4x4  // 64
         var time: Float  // 4
-        var _pad0: SIMD3<Float>  // 12 (pad to 16-byte alignment)
+        var selectedNodeIndex: Int32  // 4 (Use Int32 to match C++ int)
+        var _pad0: SIMD2<Float>  // 8 (pad to 16-byte alignment)
         // total = 144 bytes
     }
 
@@ -277,7 +282,7 @@ final class GraphRenderer: NSObject {
         let newNode = Node(
             position: SIMD4<Float>(x, y, z, size),
             color: color,
-            physics: SIMD4<Float>(1.0, 0.0, 0.0, 0.0)
+            physics: SIMD4<Float>(1.0, 0.0, 0.0, 0.1)  // 0.1 baseline pressure
         )
 
         lock.lock()
@@ -348,7 +353,7 @@ final class GraphRenderer: NSObject {
         let newNode = Node(
             position: SIMD4<Float>(x, y, z, 35.0),
             color: color,
-            physics: SIMD4<Float>(50.0, 0.0, 0.0, 0.0)
+            physics: SIMD4<Float>(50.0, 0.0, 0.0, pressureForSeverity(severity))
         )
 
         lock.lock()
@@ -366,7 +371,7 @@ final class GraphRenderer: NSObject {
         let targetNode = Node(
             position: SIMD4<Float>(0, 0, 0, 50.0),
             color: SIMD4<Float>(1.0, 0.3, 0.3, 1.0),
-            physics: SIMD4<Float>(100.0, 0.0, 0.0, 1.0)
+            physics: SIMD4<Float>(100.0, 0.0, 0.0, 0.9)  // High pressure for target
         )
 
         lock.lock()
@@ -485,6 +490,16 @@ final class GraphRenderer: NSObject {
         }
     }
 
+    private func pressureForSeverity(_ severity: String) -> Float {
+        switch severity.uppercased() {
+        case "CRITICAL": return 1.0
+        case "HIGH": return 0.8
+        case "MEDIUM": return 0.5
+        case "LOW": return 0.2
+        default: return 0.1
+        }
+    }
+
     private func colorForEdgeType(_ edgeType: String) -> SIMD4<Float> {
         switch edgeType {
         case "EXPOSES", "VULNERABLE_TO": return SIMD4<Float>(1.0, 0.3, 0.3, 0.15)
@@ -517,7 +532,18 @@ final class GraphRenderer: NSObject {
             let z = node.z ?? Float.random(in: -120...120)
 
             let color = node.color ?? SIMD4<Float>(0.0, 0.5, 1.0, 0.8)
-            let physics = SIMD4<Float>(1.0, 0.0, 0.0, 0.0)
+
+            // Pressure mapping:
+            // 1) If NodeModel provides pressure, use it.
+            // 2) Else fall back to a safe baseline.
+            let pressure: Float = {
+                if let p = node.pressure { return max(0.0, min(1.0, p)) }
+                if let sev = node.severity { return pressureForSeverity(sev) }
+                return 0.1
+            }()
+
+            // physics: x=mass, y=charge, z=temp, w=pressure
+            let physics = SIMD4<Float>(1.0, 0.0, 0.0, pressure)
 
             return Node(position: SIMD4<Float>(x, y, z, 30.0), color: color, physics: physics)
         }
@@ -533,15 +559,33 @@ final class GraphRenderer: NSObject {
     private var frameCount: Int = 0
 
     func draw(in view: MTKView) {
+        // 1. Snapshot State (Minimizing Lock Time)
         lock.lock()
-        defer { lock.unlock() }
+
+        // Update Time safely
+        let localTime = self.time + 0.015
+        self.time = localTime
+
+        // Sync Selection (ensure GPU index matches ID)
+        if let id = selectedNodeId, let idx = nodePositions[id] {
+            selectedNodeIndex = Int32(idx)
+        } else {
+            selectedNodeIndex = -1
+        }
+
+        // Copy State
+        let localNodesCount = nodes.count
+        let localEdgesCount = edgeVertices.count
+        let localZoom = self.zoom
+        let localRotX = self.rotationX
+        let localRotY = self.rotationY
+        let localSelection = self.selectedNodeIndex
+        let vBuffer = self.vertexBuffer
+        let eBuffer = self.edgeVertexBuffer
+
+        lock.unlock()  // Release lock immediately
 
         frameCount += 1
-        if frameCount % 60 == 0 {
-            print(
-                "GraphRenderer: Watchdog - Drawing frame \(frameCount). Nodes: \(nodes.count) Edges: \(edgeVertices.count)"
-            )
-        }
 
         guard let drawable = view.currentDrawable,
             let descriptor = view.currentRenderPassDescriptor,
@@ -564,12 +608,10 @@ final class GraphRenderer: NSObject {
             return
         }
 
-        // Depth state ON (this is what makes it feel 3D)
+        // Depth state ON
         if let depthState {
             encoder.setDepthStencilState(depthState)
         }
-
-        time += 0.015
 
         let aspect = Float(viewportSize.width / max(1.0, viewportSize.height))
         let projectionMatrix = matrix_perspective_right_hand(
@@ -579,38 +621,43 @@ final class GraphRenderer: NSObject {
             farZ: 1000.0
         )
 
-        // Camera
+        // Camera (Use Locals)
         let viewMatrix =
             matrix_identity_float4x4
-            .translated(x: 0, y: 0, z: zoom)
-            .rotated(angle: rotationX, axis: SIMD3<Float>(1, 0, 0))
-            .rotated(angle: rotationY, axis: SIMD3<Float>(0, 1, 0))
+            .translated(x: 0, y: 0, z: localZoom)
+            .rotated(angle: localRotX, axis: SIMD3<Float>(1, 0, 0))
+            .rotated(angle: localRotY, axis: SIMD3<Float>(0, 1, 0))
 
-        // Compound rotation for complex motion parallax
+        // Compound rotation (Use Local Time)
         let modelMatrix =
             matrix_identity_float4x4
-            .rotated(angle: time * 0.12, axis: SIMD3<Float>(0, 1, 0))
-            .rotated(angle: time * 0.07, axis: SIMD3<Float>(1, 0, 0))
+            .rotated(angle: localTime * 0.12, axis: SIMD3<Float>(0, 1, 0))
+            .rotated(angle: localTime * 0.07, axis: SIMD3<Float>(1, 0, 0))
 
         let viewProjection = projectionMatrix * viewMatrix
 
         var uniforms = Uniforms(
-            viewProj: viewProjection, model: modelMatrix, time: time, _pad0: SIMD3<Float>(0, 0, 0))
+            viewProj: viewProjection,
+            model: modelMatrix,
+            time: localTime,
+            selectedNodeIndex: localSelection,
+            _pad0: SIMD2<Float>(0, 0)
+        )
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
 
         // Edges
         if let linePSO = linePipelineState,
-            let eBuffer = edgeVertexBuffer,
-            !edgeVertices.isEmpty
+            let eBuffer = eBuffer,
+            localEdgesCount > 0
         {
-            // Use Read-Only Depth for edges (transparency-like behavior)
             if let edgeDS = edgeDepthState {
                 encoder.setDepthStencilState(edgeDS)
             }
 
             encoder.setRenderPipelineState(linePSO)
             encoder.setVertexBuffer(eBuffer, offset: 0, index: 0)
-            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: edgeVertices.count)
+            encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: localEdgesCount)
         }
 
         // Restore write-enabled depth for Nodes
@@ -619,21 +666,140 @@ final class GraphRenderer: NSObject {
         }
 
         // Nodes
-        guard !nodes.isEmpty, let vBuffer = vertexBuffer else {
-            if frameCount % 60 == 0 { print("GraphRenderer: Nodes empty. Skipping draw.") }
-            encoder.endEncoding()
-            commandBuffer.present(drawable)
-            commandBuffer.commit()
-            return
+        if localNodesCount > 0, let vBuffer = vBuffer {
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
+            encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: localNodesCount)
         }
-
-        encoder.setRenderPipelineState(pipelineState)
-        encoder.setVertexBuffer(vBuffer, offset: 0, index: 0)
-        encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: nodes.count)
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
+    }
+
+    // MARK: - Hit Testing
+
+    func selectNode(at location: CGPoint) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Reconstruct matrices (must match draw loop)
+        let aspect = Float(viewportSize.width / max(1.0, viewportSize.height))
+        let projectionMatrix = matrix_perspective_right_hand(
+            fovyRadians: Float.pi / 4.0,
+            aspectRatio: aspect,
+            nearZ: 1.0,
+            farZ: 1000.0
+        )
+
+        let viewMatrix =
+            matrix_identity_float4x4
+            .translated(x: 0, y: 0, z: zoom)
+            .rotated(angle: rotationX, axis: SIMD3<Float>(1, 0, 0))
+            .rotated(angle: rotationY, axis: SIMD3<Float>(0, 1, 0))
+
+        let modelMatrix =
+            matrix_identity_float4x4
+            .rotated(angle: time * 0.12, axis: SIMD3<Float>(0, 1, 0))
+            .rotated(angle: time * 0.07, axis: SIMD3<Float>(1, 0, 0))
+
+        let viewProj = projectionMatrix * viewMatrix
+
+        // Ray Casting from Screen Point
+        // 1. Normalized Device Coordinates (NDC)
+        // Metal NDC: x=[-1, 1], y=[1, -1] (Y is flipped vs CoreGraphics), z=[0, 1]
+        let x_ndc = Float((location.x / viewportSize.width) * 2.0 - 1.0)
+        let y_ndc = Float(1.0 - (location.y / viewportSize.height) * 2.0)  // Flip Y
+
+        var bestNodeIndex: Int32 = -1
+        var minDepth: Float = Float.greatestFiniteMagnitude
+        var foundNodeId: String? = nil
+
+        // Iterate over all nodes
+        for (id, index) in nodePositions {
+            if index >= nodes.count { continue }
+            let node = nodes[index]
+
+            // Apply Model transform
+            let worldPos =
+                modelMatrix * SIMD4<Float>(node.position.x, node.position.y, node.position.z, 1.0)
+
+            // Apply ViewProjection
+            let clipPos = viewProj * worldPos
+
+            // Perspective Divide
+            if clipPos.w <= 0 { continue }  // Behind camera
+            let ndc = SIMD3<Float>(
+                clipPos.x / clipPos.w, clipPos.y / clipPos.w, clipPos.z / clipPos.w)
+
+            // Convert to Screen Coords
+            // x: [-1,1] -> [0, W]
+            // y: [1,-1] -> [0, H]
+            let screenX = CGFloat((ndc.x + 1.0) * 0.5) * viewportSize.width
+            let screenY = CGFloat((1.0 - ndc.y) * 0.5) * viewportSize.height
+
+            // Distance Check
+            let dx = screenX - location.x
+            let dy = screenY - location.y
+            let dist = sqrt(dx * dx + dy * dy)
+
+            let projectedSize = CGFloat(node.position.w * (400.0 / clipPos.w))
+            let hitRadius = max(20.0, projectedSize * 0.8)
+
+            if dist < hitRadius {
+                if ndc.z < minDepth {
+                    minDepth = ndc.z
+                    bestNodeIndex = Int32(index)
+                    foundNodeId = id
+                }
+            }
+        }
+
+        self.selectedNodeIndex = bestNodeIndex
+        return foundNodeId
+    }
+
+    func projectNode(id: String) -> CGPoint? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let index = nodePositions[id] else { return nil }
+        if index >= nodes.count { return nil }
+        let node = nodes[index]
+
+        // Use current matrices (approximate if time advanced slightly, but fine for overlay)
+        let aspect = Float(viewportSize.width / max(1.0, viewportSize.height))
+        let projectionMatrix = matrix_perspective_right_hand(
+            fovyRadians: Float.pi / 4.0,
+            aspectRatio: aspect,
+            nearZ: 1.0,
+            farZ: 1000.0
+        )
+
+        let viewMatrix =
+            matrix_identity_float4x4
+            .translated(x: 0, y: 0, z: zoom)
+            .rotated(angle: rotationX, axis: SIMD3<Float>(1, 0, 0))
+            .rotated(angle: rotationY, axis: SIMD3<Float>(0, 1, 0))
+
+        let modelMatrix =
+            matrix_identity_float4x4
+            .rotated(angle: time * 0.12, axis: SIMD3<Float>(0, 1, 0))
+            .rotated(angle: time * 0.07, axis: SIMD3<Float>(1, 0, 0))
+
+        let viewProj = projectionMatrix * viewMatrix
+
+        let worldPos =
+            modelMatrix * SIMD4<Float>(node.position.x, node.position.y, node.position.z, 1.0)
+        let clipPos = viewProj * worldPos
+
+        if clipPos.w <= 0 { return nil }
+
+        let ndc = SIMD3<Float>(clipPos.x / clipPos.w, clipPos.y / clipPos.w, clipPos.z / clipPos.w)
+        let screenX = CGFloat((ndc.x + 1.0) * 0.5) * viewportSize.width
+        let screenY = CGFloat((1.0 - ndc.y) * 0.5) * viewportSize.height
+
+        return CGPoint(x: screenX, y: screenY)
     }
 }
 
