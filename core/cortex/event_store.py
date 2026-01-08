@@ -55,7 +55,8 @@ class StoredEvent:
             "source": source,
             # Epoch: Unique per process lifetime. Client must reset state when this changes.
             # This prevents silent event drops after server restart.
-            "epoch": self.event.run_id
+            "epoch": self.event.run_id,
+            "entity_id": self.event.entity_id
         }, default=str)
 
 

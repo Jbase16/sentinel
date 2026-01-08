@@ -96,7 +96,7 @@ class EvidenceStore(Observable):
         except Exception as e:
             logger.error(f"[EvidenceStore] Failed to load evidence: {e}")
 
-    def add_evidence(self, tool: str, raw_output: str, metadata: dict, persist: bool = True):
+    def add_evidence(self, tool: str, raw_output: str, metadata: dict, persist: bool = True, session_id: str = None):
         """Function add_evidence."""
         self._counter += 1
         eid = self._counter
@@ -116,7 +116,8 @@ class EvidenceStore(Observable):
         if persist:
             # save_evidence is fire-and-forget - it uses BlackBox internally
             # No need for create_safe_task wrapper
-            self.db.save_evidence(evidence_data, self.session_id)
+            target_session = session_id or self.session_id
+            self.db.save_evidence(evidence_data, target_session)
 
         self.evidence_changed.emit()
         return eid

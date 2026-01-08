@@ -530,4 +530,4 @@ class EvidenceLedger:
             "citations": [asdict(c) for c in finding.citations],
             "metadata": finding.metadata
         }
-        findings_store.add_finding(finding_dict)
+        findings_store.add_finding(finding_dict, persist=False)

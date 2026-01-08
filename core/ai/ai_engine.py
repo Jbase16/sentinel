@@ -511,6 +511,7 @@ class AIEngine:
             tool=tool_name,
             raw_output=stdout,
             metadata=metadata,
+            session_id=metadata.get("session_id")
         )
 
         # Step 2: generate summary
