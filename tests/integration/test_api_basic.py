@@ -1,105 +1,79 @@
-"""Module test_api_basic: inline documentation for /Users/jason/Developer/sentinelforge/tests/integration/test_api_basic.py."""
-#
-# PURPOSE:
-# This module is part of the integration package in SentinelForge.
-# [Specific purpose based on module name: test_api_basic]
-#
-# KEY RESPONSIBILITIES:
-# - [Automatically generated - review and enhance based on actual functionality]
-#
-# INTEGRATION:
-# - Used by: [To be documented]
-# - Depends on: [To be documented]
-#
+"""
+Integration tests for SentinelForge API basic endpoints.
 
-import sys
+Uses httpx.AsyncClient with ASGITransport for proper async test isolation
+instead of spawning a real server thread (which causes cleanup issues).
+"""
 import os
-import time
-import threading
-import json
-import urllib.request
-import unittest
-
-# Ensure we can import core
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from core.server.api import serve
+import sys
+import pytest
 from unittest.mock import MagicMock, patch
 
-# Patch get_config GLOBALLY for this module before any other imports rely on it (if possible)
-import core.base.config
-original_get_config = core.base.config.get_config
+# Ensure we can import core
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-def mock_get_config():
-    # Return a minimal safe config
+
+@pytest.fixture
+def mock_config():
+    """Create a mock config for testing."""
     conf = MagicMock()
-    conf.security.require_auth = True
+    conf.security.require_auth = False  # Disable auth for simpler tests
     conf.security.api_token = "test-token-12345"
+    conf.security.allowed_origins = ("http://localhost:*", "http://127.0.0.1:*")
+    conf.security.terminal_enabled = True
+    conf.security.terminal_require_auth = False
     conf.api_host = "127.0.0.1"
     conf.api_port = 8766
     conf.storage.db_path = "/tmp/sentinel_test.db"
+    conf.ai.provider = "ollama"
+    conf.ai.ollama_url = "http://localhost:11434"
     return conf
 
-# We need to patch it such that 'core.server.api' sees it.
-core.base.config.get_config = mock_get_config
 
-class TestCoreAPI(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        """Function setUpClass."""
-        # Generate a test token
-        cls.token_path = os.path.expanduser("~/.sentinelforge/api_token")
-        os.makedirs(os.path.dirname(cls.token_path), exist_ok=True)
-        cls.test_token = "test-token-12345"
-        with open(cls.token_path, "w") as f:
-            f.write(cls.test_token)
+@pytest.fixture
+async def async_client(mock_config):
+    """Create an async test client using ASGI transport."""
+    import httpx
+    
+    with patch("core.base.config.get_config", return_value=mock_config):
+        with patch("core.base.config.SecurityInterlock.verify_safe_boot"):
+            # Import after patching to get mocked config
+            from core.server.api import app
+            
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test"
+            ) as client:
+                yield client
 
-        # Start API in a separate thread
-        cls.port = 8766 # Use a test port
-        cls.server_thread = threading.Thread(target=serve, args=(cls.port,), daemon=True)
-        cls.server_thread.start()
-        # Give it a moment to bind
-        time.sleep(1)
 
-    def _get_auth_request(self, url):
-         req = urllib.request.Request(url)
-         req.add_header("Authorization", f"Bearer {self.test_token}")
-         return req
+class TestCoreAPI:
+    """Core API endpoint tests."""
+    
+    @pytest.mark.asyncio
+    async def test_01_ping(self, async_client):
+        """Test ping endpoint returns ok status."""
+        response = await async_client.get("/v1/ping")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
 
-    def test_01_ping(self):
-        """Function test_01_ping."""
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/v1/ping") as resp:
-            data = json.loads(resp.read().decode())
-            self.assertEqual(data["status"], "ok")
+    @pytest.mark.asyncio
+    async def test_02_status_structure(self, async_client):
+        """Test status endpoint returns expected structure."""
+        response = await async_client.get("/v1/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "ai" in data
+        assert "tools" in data
+        assert "installed" in data["tools"]
+        assert "missing" in data["tools"]
 
-    def test_02_status_structure(self):
-        """Function test_02_status_structure."""
-        req = self._get_auth_request(f"http://127.0.0.1:{self.port}/v1/status")
-        try:
-            with urllib.request.urlopen(req) as resp:
-                data = json.loads(resp.read().decode())
-                self.assertIn("ai", data)
-                self.assertIn("tools", data)
-                self.assertIn("installed", data["tools"])
-                self.assertIn("missing", data["tools"])
-                print(f"\n[Test] Detected Tools: {data['tools']['installed']}")
-                print(f"[Test] Missing Tools: {data['tools']['missing']}")
-        except urllib.error.HTTPError as e:
-            print(f"\n[Test] HTTP {e.code} Error Body: {e.read().decode()}")
-            raise e
-
-    def test_03_ai_status(self):
-         """Function test_03_ai_status."""
-         req = self._get_auth_request(f"http://127.0.0.1:{self.port}/v1/status")
-         try:
-             with urllib.request.urlopen(req) as resp:
-                data = json.loads(resp.read().decode())
-                ai = data.get("ai", {})
-                self.assertIn("connected", ai)
-                print(f"[Test] AI Connected: {ai['connected']}")
-         except urllib.error.HTTPError as e:
-            print(f"\n[Test] HTTP {e.code} Error Body: {e.read().decode()}")
-            raise e
-
-if __name__ == '__main__':
-    unittest.main()
+    @pytest.mark.asyncio
+    async def test_03_ai_status(self, async_client):
+        """Test AI status is included in status response."""
+        response = await async_client.get("/v1/status")
+        assert response.status_code == 200
+        data = response.json()
+        ai = data.get("ai", {})
+        assert "connected" in ai

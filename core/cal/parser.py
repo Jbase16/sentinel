@@ -49,8 +49,8 @@ class Condition:
         
         # Operators map for custom CAL syntax "IS NOT EMPTY" etc.
         expr = self.raw_expression
-        expr = expr.replace("IS NOT EMPTY", "!= []").replace("IS EMPTY", "== []")
-        expr = expr.replace("NOT IN", "not in") # Pythonic
+        expr = expr.replace("IS NOT EMPTY", "len(x) > 0").replace("IS EMPTY", "len(x) == 0")
+        expr = expr.replace("NOT IN", "not in") # Pythonic  
         # 'IN' is already pythonic
         
         try:

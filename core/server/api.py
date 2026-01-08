@@ -31,7 +31,7 @@ import uvicorn
 from fastapi import APIRouter, Body, Depends, FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 
 
@@ -66,23 +66,23 @@ class ScanRequest(BaseModel):
     force: bool = False
     mode: str = "standard"  # Strategos mode: standard, bug_bounty, stealth
 
-    @validator("target")
+    @field_validator("target")
+    @classmethod
     def validate_target(cls, v: str) -> str:
-        """Function validate_target."""
+        """Validate target string for security."""
         v = v.strip()
-        # Conditional branch.
         if not v:
             raise ValueError("Target cannot be empty")
         dangerous_patterns = [";", "&&", "||", "`", "$(", "\n", "\r"]
-        # Loop over items.
         for pattern in dangerous_patterns:
             if pattern in v:
                 raise ValueError(f"Invalid character in target: {pattern}")
         return v
 
-    @validator("modules")
+    @field_validator("modules")
+    @classmethod
     def validate_modules(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        """Function validate_modules."""
+        """Validate module names against known tools."""
         if v is None:
             return v
         from core.toolkit.tools import TOOLS
@@ -100,10 +100,132 @@ class ChatRequest(BaseModel):
 
 # --- App Setup ---
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan context manager for startup and shutdown.
+    
+    Replaces deprecated @app.on_event("startup") and @app.on_event("shutdown").
+    """
+    # === STARTUP ===
+    global _api_loop, _session_cleanup_task
+    config = get_config()
+
+    setup_logging(config)
+    logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
+    _write_boot_manifest(
+        "starting",
+        {
+            "pid": os.getpid(),
+            "api_host": config.api_host,
+            "api_port": config.api_port,
+            "require_auth": config.security.require_auth,
+            "ai_provider": config.ai.provider,
+            "ollama_url": config.ai.ollama_url,
+        },
+    )
+
+    try:
+        _api_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _api_loop = None
+
+    # Async DB Init
+    db = Database.instance()
+    await db.init()
+
+    # Initialize global event sequence counter from database
+    from core.cortex.events import initialize_event_sequence_from_db
+    await initialize_event_sequence_from_db()
+
+    # Load CAL policies from database into ArbitrationEngine
+    try:
+        from core.cortex.reasoning import reasoning_engine
+        policy_count = await reasoning_engine.strategos.load_policies_from_db()
+        if policy_count > 0:
+            logger.info(f"[Startup] Loaded {policy_count} CAL policies from database")
+    except Exception as e:
+        logger.error(f"[Startup] Failed to load policies from database: {e}")
+
+    # Start policy file watcher for hot-reload
+    try:
+        from core.cortex.policy_watcher import get_policy_watcher
+        from core.cortex.reasoning import reasoning_engine
+
+        watcher = get_policy_watcher()
+
+        async def reload_policies_on_change():
+            """Reload policies from constitution.cal when file changes."""
+            try:
+                arbitrator = reasoning_engine.strategos.arbitrator
+                active_policies = arbitrator.list_policies()
+                for policy_name in active_policies:
+                    if policy_name.startswith("CAL:"):
+                        arbitrator.unregister_policy(policy_name)
+
+                policies = arbitrator.load_cal_file("assets/laws/constitution.cal")
+                logger.info(f"[PolicyWatcher] Reloaded {len(policies)} policies from constitution.cal")
+
+                db_count = await reasoning_engine.strategos.load_policies_from_db()
+                logger.info(f"[PolicyWatcher] Reloaded {db_count} policies from database")
+
+            except Exception as e:
+                logger.error(f"[PolicyWatcher] Reload callback failed: {e}")
+
+        watcher.set_reload_callback(reload_policies_on_change)
+        await watcher.start()
+        logger.info("[Startup] Policy file watcher started")
+    except Exception as e:
+        logger.error(f"[Startup] Failed to start policy watcher: {e}")
+
+    # Start session cleanup task
+    _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
+    logger.info("Session cleanup task started")
+    _write_boot_manifest("ready")
+
+    yield  # Application runs here
+
+    # === SHUTDOWN ===
+    logger.info("SentinelForge API Shutting Down...")
+    _write_boot_manifest("stopping")
+
+    # Cancel session cleanup task
+    if _session_cleanup_task and not _session_cleanup_task.done():
+        _session_cleanup_task.cancel()
+        try:
+            await _session_cleanup_task
+        except asyncio.CancelledError:
+            pass
+
+    # Stop policy file watcher
+    try:
+        from core.cortex.policy_watcher import get_policy_watcher
+        watcher = get_policy_watcher()
+        await watcher.stop()
+        logger.info("[Shutdown] Policy file watcher stopped")
+    except Exception as e:
+        logger.error(f"[Shutdown] Failed to stop policy watcher: {e}")
+
+    from core.data.blackbox import BlackBox
+    await BlackBox.instance().shutdown()
+
+    # Persist final sequence counter
+    from core.base.sequence import GlobalSequenceAuthority
+    await GlobalSequenceAuthority.persist_to_db()
+
+    # Close database connection
+    db = Database.instance()
+    await db.close()
+    _write_boot_manifest("stopped")
+
+
 app = FastAPI(
     title="SentinelForge API",
     description="AI-augmented offensive security platform",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # API Versioning: Create v1 router for all endpoints
@@ -558,139 +680,6 @@ async def check_ai_rate_limit(request: Request) -> None:
             "AI rate limit exceeded",
             details={"endpoint": str(request.url.path), "client_ip": get_client_ip(request)}
         )
-
-@app.on_event("startup")
-async def startup_event():
-    """
-    FastAPI startup event handler.
-
-    This is the first code that runs when the server starts. We use it to:
-    1. Initialize logging
-    2. Initialize database
-    3. Start background tasks
-
-    The security interlock runs at import time to prevent pre-bind exposure.
-    """
-    global _api_loop, _session_cleanup_task
-    config = get_config()
-
-    setup_logging(config)
-    logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
-    _write_boot_manifest(
-        "starting",
-        {
-            "pid": os.getpid(),
-            "api_host": config.api_host,
-            "api_port": config.api_port,
-            "require_auth": config.security.require_auth,
-            "ai_provider": config.ai.provider,
-            "ollama_url": config.ai.ollama_url,
-        },
-    )
-
-    # Error handling block.
-    try:
-        _api_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        _api_loop = None
-
-    # Async DB Init
-    db = Database.instance()
-    await db.init()  # Ensure DB is ready before requests
-
-    # Initialize global event sequence counter from database
-    # This ensures event IDs remain unique across restarts (one continuous logical brain)
-    from core.cortex.events import initialize_event_sequence_from_db
-    await initialize_event_sequence_from_db()
-
-    # Load CAL policies from database into ArbitrationEngine
-    # This enables persistent policy management via REST API
-    try:
-        from core.cortex.reasoning import reasoning_engine
-        policy_count = await reasoning_engine.strategos.load_policies_from_db()
-        if policy_count > 0:
-            logger.info(f"[Startup] Loaded {policy_count} CAL policies from database")
-    except Exception as e:
-        logger.error(f"[Startup] Failed to load policies from database: {e}")
-        # Non-fatal - server can still start with constitution.cal policies
-
-    # Start policy file watcher for hot-reload
-    try:
-        from core.cortex.policy_watcher import get_policy_watcher
-        from core.cortex.reasoning import reasoning_engine
-
-        watcher = get_policy_watcher()
-
-        # Set reload callback to reload policies when files change
-        async def reload_policies_on_change():
-            """Reload policies from constitution.cal when file changes."""
-            try:
-                # Clear existing CAL policies
-                arbitrator = reasoning_engine.strategos.arbitrator
-                active_policies = arbitrator.list_policies()
-                for policy_name in active_policies:
-                    if policy_name.startswith("CAL:"):
-                        arbitrator.unregister_policy(policy_name)
-
-                # Reload from file
-                policies = arbitrator.load_cal_file("assets/laws/constitution.cal")
-                logger.info(f"[PolicyWatcher] Reloaded {len(policies)} policies from constitution.cal")
-
-                # Also reload from database
-                db_count = await reasoning_engine.strategos.load_policies_from_db()
-                logger.info(f"[PolicyWatcher] Reloaded {db_count} policies from database")
-
-            except Exception as e:
-                logger.error(f"[PolicyWatcher] Reload callback failed: {e}")
-
-        watcher.set_reload_callback(reload_policies_on_change)
-        await watcher.start()
-        logger.info("[Startup] Policy file watcher started")
-    except Exception as e:
-        logger.error(f"[Startup] Failed to start policy watcher: {e}")
-        # Non-fatal - server can still operate without hot-reload
-
-    # Start session cleanup task
-    _session_cleanup_task = asyncio.create_task(_session_cleanup_loop())
-    logger.info("Session cleanup task started")
-    _write_boot_manifest("ready")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """AsyncFunction shutdown_event."""
-    global _session_cleanup_task
-    logger.info("SentinelForge API Shutting Down...")
-    _write_boot_manifest("stopping")
-
-    # Cancel session cleanup task
-    if _session_cleanup_task and not _session_cleanup_task.done():
-        _session_cleanup_task.cancel()
-        try:
-            await _session_cleanup_task
-        except asyncio.CancelledError:
-            pass
-
-    # Stop policy file watcher
-    try:
-        from core.cortex.policy_watcher import get_policy_watcher
-        watcher = get_policy_watcher()
-        await watcher.stop()
-        logger.info("[Shutdown] Policy file watcher stopped")
-    except Exception as e:
-        logger.error(f"[Shutdown] Failed to stop policy watcher: {e}")
-
-    from core.data.blackbox import BlackBox
-    await BlackBox.instance().shutdown()
-
-    # Persist final sequence counter to GlobalSequenceAuthority
-    # This ensures continuity across restarts for both Events and Decisions
-    from core.base.sequence import GlobalSequenceAuthority
-    await GlobalSequenceAuthority.persist_to_db()
-
-    # Close database connection
-    db = Database.instance()
-    await db.close()
-    _write_boot_manifest("stopped")
 
 def is_origin_allowed(origin: str, allowed_patterns: Iterable[str]) -> bool:
     """
@@ -2188,9 +2177,10 @@ class InstallRequest(BaseModel):
     """Class InstallRequest."""
     tools: List[str]
 
-    @validator("tools")
+    @field_validator("tools")
+    @classmethod
     def validate_tools(cls, v: List[str]) -> List[str]:
-        """Function validate_tools."""
+        """Validate tool names against known tools."""
         from core.toolkit.tools import TOOLS
         valid_tools = set(TOOLS.keys())
         invalid = [tool for tool in v if tool not in valid_tools]
