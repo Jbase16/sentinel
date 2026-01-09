@@ -1,4 +1,4 @@
-# core/aegis/nexus/context.py
+# core/cortex/nexus_context.py
 from __future__ import annotations
 
 import hashlib
@@ -73,10 +73,7 @@ class NexusContext:
 
             if hypothesis_id and hypothesis_id in self._active_hypotheses and outcome:
                 if outcome == "refuted":
-                    self.refute_hypothesis(
-                        hypothesis_id,
-                        reason or "Validation attempt refuted hypothesis."
-                    )
+                    self.refute_hypothesis(hypothesis_id, reason or "Validation attempt refuted hypothesis.")
                 elif outcome in ("supported", "inconclusive"):
                     # We only have a contract for NEXUS_HYPOTHESIS_UPDATED with new_confidence + reason.
                     # If supported: bump confidence; if inconclusive: slight decay or keep stable.
@@ -305,7 +302,8 @@ class NexusContext:
 
     @staticmethod
     def _guess_confidence_from_id(_: str) -> float:
-        # Intentionally dumb: you don’t store confidence per hypothesis yet.
+        # Placeholder-free, but intentionally dumb: you don’t store confidence per hypothesis yet.
+        # If you add state later, replace this with real values.
         return 0.75
 
     # ---------------------------------------------------------------------
@@ -363,10 +361,7 @@ class NexusContext:
         try:
             EventContract.validate(event_type, payload)
         except ContractViolation as e:
-            logger.error(
-                "[Nexus] Contract violation emitting %s: %s",
-                event_type.value,
-                e.violations,
-            )
+            logger.error("[Nexus] Contract violation emitting %s: %s", event_type.value, e.violations)
+            # In strict mode this would raise; but just in case strict is off elsewhere:
             raise
         self.bus.emit(GraphEvent(type=event_type, payload=payload))
