@@ -187,7 +187,7 @@ class EventSchema:
         Validate a payload against this schema.
         Returns list of violation messages (empty = valid).
         """
-        violations = []
+        violations: List[str] = []
         
         # Check required fields
         for field_name in self.required_fields:
@@ -283,7 +283,7 @@ class EventContract:
     In production, violations are logged but not fatal.
     """
     
-    _instance: Optional[EventContract] = None
+    _instance: Optional["EventContract"] = None
     _schemas: Dict[EventType, EventSchema] = {}
     _causal_tracker: CausalTracker = CausalTracker()
     _strict_mode: bool = True  # Raise on violation (set False in prod)
@@ -442,7 +442,7 @@ class EventContract:
         )
         
         # ----------------------------------------------------------------
-        # GRAPH MUTATIONS
+        # GRAPH MUTATIONS (FIX: missing schemas)
         # ----------------------------------------------------------------
         cls._schemas[EventType.NODE_ADDED] = EventSchema(
             event_type=EventType.NODE_ADDED,
@@ -451,6 +451,36 @@ class EventContract:
                 FieldSpec("node_id", str, required=True),
                 FieldSpec("node_type", str, required=True),
                 FieldSpec("label", str, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.NODE_UPDATED] = EventSchema(
+            event_type=EventType.NODE_UPDATED,
+            description="Node updated in knowledge graph.",
+            fields=[
+                FieldSpec("node_id", str, required=True),
+                FieldSpec("changes", dict, required=True, description="Changed fields/values"),
+            ]
+        )
+
+        cls._schemas[EventType.NODE_REMOVED] = EventSchema(
+            event_type=EventType.NODE_REMOVED,
+            description="Node removed from knowledge graph.",
+            fields=[
+                FieldSpec("node_id", str, required=True),
+                FieldSpec("reason", str, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.EDGE_ADDED] = EventSchema(
+            event_type=EventType.EDGE_ADDED,
+            description="Edge added to knowledge graph.",
+            fields=[
+                FieldSpec("source", str, required=True),
+                FieldSpec("target", str, required=True),
+                FieldSpec("edge_type", str, required=True),
+                FieldSpec("label", str, required=False),
+                FieldSpec("weight", float, required=False),
             ]
         )
 
@@ -628,7 +658,7 @@ class EventContract:
         """
         cls._init_schemas()
         
-        violations = []
+        violations: List[str] = []
         
         # Schema validation
         schema = cls._schemas.get(event_type)
@@ -646,7 +676,7 @@ class EventContract:
             if cls._strict_mode:
                 raise ContractViolation(event_type.value, violations)
             else:
-                logger.warning(f"[EventContract] Violations for {event_type.value}: {violations}")
+                logger.warning("[EventContract] Violations for %s: %s", event_type.value, violations)
     
     @classmethod
     def get_schema(cls, event_type: EventType) -> Optional[EventSchema]:
