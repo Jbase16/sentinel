@@ -872,7 +872,8 @@ public actor CortexClient {
     private func getToken() -> String? {
         let path = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".sentinelforge/api_token")
-        return try? String(contentsOf: path).trimmingCharacters(in: .whitespacesAndNewlines)
+        return try? String(contentsOf: path, encoding: .utf8).trimmingCharacters(
+            in: .whitespacesAndNewlines)
     }
 
     public func fetchTopology(graph: GraphDataDTO, entryNodes: [String], criticalAssets: [String])

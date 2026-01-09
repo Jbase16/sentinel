@@ -89,50 +89,6 @@ public enum GraphEventType: String, CaseIterable {
     case unknown = "unknown"
 }
 
-/// Type-erased Codable wrapper for heterogeneous payloads
-public struct AnyCodable: Decodable {
-    public let value: Any
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-
-        // Conditional branch.
-        if let string = try? container.decode(String.self) {
-            value = string
-        } else if let int = try? container.decode(Int.self) {
-            value = int
-        } else if let double = try? container.decode(Double.self) {
-            value = double
-        } else if let bool = try? container.decode(Bool.self) {
-            value = bool
-        } else if let dict = try? container.decode([String: AnyCodable].self) {
-            value = dict.mapValues { $0.value }
-        } else if let array = try? container.decode([AnyCodable].self) {
-            value = array.map { $0.value }
-        } else if container.decodeNil() {
-            value = NSNull()
-        } else {
-            throw DecodingError.dataCorruptedError(
-                in: container, debugDescription: "Unsupported type")
-        }
-    }
-
-    /// Get value as String
-    public var stringValue: String? { value as? String }
-
-    /// Get value as Int
-    public var intValue: Int? { value as? Int }
-
-    /// Get value as Double
-    public var doubleValue: Double? { value as? Double }
-
-    /// Get value as Bool
-    public var boolValue: Bool? { value as? Bool }
-
-    /// Get value as Dictionary
-    public var dictValue: [String: Any]? { value as? [String: Any] }
-}
-
 // MARK: - EventStreamClient
 
 /// Reactive client for the /events/stream SSE endpoint

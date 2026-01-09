@@ -83,17 +83,19 @@ public class LedgerStreamClient: ObservableObject {
                     }
                 }
             case .success(let message):
-                switch message {
-                case .string(let text):
-                    self.handleMessage(text)
-                case .data(let data):
-                    if let text = String(data: data, encoding: .utf8) {
+                Task { @MainActor in
+                    switch message {
+                    case .string(let text):
                         self.handleMessage(text)
+                    case .data(let data):
+                        if let text = String(data: data, encoding: .utf8) {
+                            self.handleMessage(text)
+                        }
+                    @unknown default:
+                        break
                     }
-                @unknown default:
-                    break
+                    self.receiveMessage()  // Loop
                 }
-                self.receiveMessage()  // Loop
             }
         }
     }

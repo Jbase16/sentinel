@@ -75,7 +75,7 @@ struct ReportView: View {
                             .padding(.horizontal)
                             .padding(.top)
 
-                        List(appState.apiResults?.findings ?? [], id: \.id) { finding in
+                        List(appState.apiResults?.findings ?? []) { finding in
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(finding.title).font(.system(size: 13, weight: .medium))

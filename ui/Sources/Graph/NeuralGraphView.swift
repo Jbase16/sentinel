@@ -283,14 +283,14 @@ struct InteractiveGraphContainer: View {
                     }
                     .onEnded { _ in lastDrag = .zero }
             )
-            .onChange(of: selectedNodeId) { newId in
-                if let id = newId {
+            .onChange(of: selectedNodeId) {
+                if let id = selectedNodeId {
                     // Trigger Analysis (Phase 11)
                     appState.fetchInsights(for: id)
                 }
             }
-            .onChange(of: appState.isScanRunning) { isRunning in
-                if !isRunning {
+            .onChange(of: appState.isScanRunning) {
+                if !appState.isScanRunning {
                     // Refresh Analysis when scan completes
                     appState.fetchAnalysis()
                 }

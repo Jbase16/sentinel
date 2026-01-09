@@ -368,4 +368,6 @@ class PTYManager:
             except Exception as e:
                 logger.error(f"[PTYManager] Cleanup loop error: {e}")
                 await asyncio.sleep(60)
-
+    def attach_listener(self, session_id: str, callback):
+        session = self.get_session(session_id)
+        return session.attach_listener(callback)

@@ -6,26 +6,21 @@ import json
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, Request
 from starlette.websockets import WebSocketState
+from sse_starlette.sse import EventSourceResponse
 
-from core.base.config import get_config, is_network_exposed
-from core.server.routers.auth import is_origin_allowed
-from core.server.state import get_state
-from core.errors import SentinelError
-from core.cortex.event_store import get_event_store
-from core.engine.pty_manager import PTYManager
-
-logger = logging.getLogger(__name__)
+# ... imports ...
 
 router = APIRouter(prefix="/ws", tags=["realtime"])
+sse_router = APIRouter(tags=["events"])
 
 async def validate_websocket_connection(
     websocket: WebSocket,
     endpoint_name: str,
 ) -> bool:
     """
-    Validate WebSocket connection security before accepting.
+    Validate WebSocket connection security.
     """
     config = get_config()
     
@@ -33,8 +28,8 @@ async def validate_websocket_connection(
     origin = websocket.headers.get("origin")
     if origin and not is_origin_allowed(origin, config.security.allowed_origins):
         logger.warning(f"[WebSocket] {endpoint_name} denied origin: {origin}")
-        await websocket.close(code=4003, reason="Origin not allowed")
-        return False
+        # Reject handshake
+        raise HTTPException(status_code=403, detail="Origin not allowed")
 
     # Auth Check
     is_exposed = is_network_exposed(config.api_host)
@@ -49,20 +44,60 @@ async def validate_websocket_connection(
         
         if not token or token != config.security.api_token:
             logger.warning(f"[WebSocket] {endpoint_name} denied: invalid or missing token")
-            await websocket.close(code=4001, reason="Unauthorized")
-            return False
+            raise HTTPException(status_code=403, detail="Unauthorized")
 
     return True
 
+@sse_router.get("/stream")
+async def sse_events_endpoint(request: Request):
+    """
+    Server-Sent Events (SSE) stream for system events.
+    Compatible with existing Swift client.
+    """
+    store = get_event_store()
+    
+    async def event_generator():
+        queue = asyncio.Queue()
+        sub_id = store.subscribe(queue.put_nowait)
+        try:
+            # Check for Last-Event-ID header or query param
+            last_id = request.headers.get("last-event-id") or request.query_params.get("since")
+            if last_id:
+                try:
+                    seq = int(last_id)
+                    missed = store.get_events_since(seq)
+                    for evt in missed:
+                        yield {
+                            "event": "message",
+                            "id": str(evt.sequence),
+                            "data": evt.to_json()
+                        }
+                except ValueError:
+                    pass
+            
+            while True:
+                if await request.is_disconnected():
+                    break
+                evt = await queue.get()
+                yield {
+                    "event": "message",
+                    "id": str(evt.sequence),
+                    "data": evt.to_json()
+                }
+        except asyncio.CancelledError:
+            pass
+        finally:
+            store.unsubscribe(sub_id)
+
+    return EventSourceResponse(event_generator())
+
 @router.websocket("/events")
 async def ws_events_endpoint(websocket: WebSocket):
-    """
-    Stream real-time system events (findings, scan progress).
-    """
-    if not await validate_websocket_connection(websocket, "/ws/events"):
-        return
-
+    # ... (existing WS implementation) ...
+    await validate_websocket_connection(websocket, "/ws/events")
     await websocket.accept()
+    # ... (rest of implementation)
+
     
     # Handle "since" parameter for event replay
     since_str = websocket.query_params.get("since", "0")
@@ -128,7 +163,7 @@ async def terminal_websocket_pty(
     config = get_config()
     
     # Feature Flag Check
-    if not config.security.enable_terminal:
+    if not config.security.terminal_enabled:
         await websocket.close(code=4003, reason="Terminal access disabled by configuration")
         return
 
@@ -143,7 +178,7 @@ async def terminal_websocket_pty(
     if not session_id:
         session_id = str(uuid.uuid4())
         logger.info(f"[PTY] Creating new session {session_id}")
-        pty_mgr.create_session(session_id, shell="/bin/bash")
+        pty_mgr.create_session(session_id)
     
     # Attach to PTY output stream
     async def output_reader(data: bytes):
