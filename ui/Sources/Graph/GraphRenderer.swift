@@ -319,8 +319,8 @@ final class GraphRenderer: NSObject {
         edgeDefinitions.append((sourceId: sourceId, targetId: targetId, edgeType: edgeType))
         isEdgesDirty = true
 
-        guard let sourceIndex = nodePositions[sourceId],
-            let targetIndex = nodePositions[targetId]
+        guard nodePositions[sourceId] != nil,
+            nodePositions[targetId] != nil
         else {
             // Processing deferred until next rebuild/dirty check
             return
@@ -584,12 +584,11 @@ final class GraphRenderer: NSObject {
             // Generate Line Segment
             // Use semantic edge color, do not inherit node color!
             var edgeColor = colorForEdgeType(edge.edgeType)
-            var pressure = sourceNode.physics.w
 
             if isCritical {
                 // Highlighting Logic
                 edgeColor = SIMD4<Float>(1.0, 0.1, 0.1, 1.0)  // Bright Red
-                pressure = 1.0  // Max flow pulse
+                
             }
 
             // Physics:
@@ -825,8 +824,6 @@ final class GraphRenderer: NSObject {
         // Ray Casting from Screen Point
         // 1. Normalized Device Coordinates (NDC)
         // Metal NDC: x=[-1, 1], y=[1, -1] (Y is flipped vs CoreGraphics), z=[0, 1]
-        let x_ndc = Float((location.x / viewportSize.width) * 2.0 - 1.0)
-        let y_ndc = Float(1.0 - (location.y / viewportSize.height) * 2.0)  // Flip Y
 
         var bestNodeIndex: Int32 = -1
         var minDepth: Float = Float.greatestFiniteMagnitude

@@ -222,10 +222,14 @@ v1_router.include_router(scans.router)
 v1_router.include_router(ai.router)
 v1_router.include_router(system.router)
 v1_router.include_router(realtime.router)
-v1_router.include_router(cortex.router)
+
 # v1_router.include_router(auth.router) # Auth is mostly dependencies, not endpoints
 
 app.include_router(v1_router)
+
+@v1_router.get("/ping")
+async def ping():
+    return {"status": "ok"}
 
 # Root redirect
 @app.get("/")

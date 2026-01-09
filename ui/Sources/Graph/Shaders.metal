@@ -187,3 +187,5 @@ fragment float4 fragment_line(
     
     return float4(color * pulse, in.color.a * fade * flowIntensity);
 }
+
+

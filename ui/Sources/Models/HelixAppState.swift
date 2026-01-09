@@ -760,7 +760,7 @@ extension HelixAppState {
 
     func fetchPoC(findingId: String) async {
         do {
-            var comps = URLComponents(
+            let comps = URLComponents(
                 url: apiClient.baseURL.appendingPathComponent("/v1/reporting/poc/\(findingId)"),
                 resolvingAgainstBaseURL: false)!
             // comps.queryItems = [URLQueryItem(name: "target", value: "example.com")] // Optional

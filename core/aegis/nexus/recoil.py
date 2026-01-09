@@ -22,7 +22,6 @@ class EpistemicRecoil:
     
     def __init__(self):
         self.bus = get_event_bus()
-        self.reasoning = get_reasoning_engine()
         self._subscription_id = None
         
     def start(self):
@@ -84,7 +83,8 @@ class EpistemicRecoil:
         
         # Submit dispute to CAL
         # supporting=False means we are ATTACKING the claim
-        self.reasoning.add_evidence(
+        reasoning = get_reasoning_engine()
+        reasoning.add_evidence(
             claim_id=finding_id,
             evidence=evidence,
             supporting=False

@@ -82,4 +82,9 @@ public struct AnyCodable: Codable, Sendable {
     public var intValue: Int? {
         return value as? Int
     }
+
+    // Helper to cast to Dictionary
+    public var dictValue: [String: Any]? {
+        return value as? [String: Any]
+    }
 }
