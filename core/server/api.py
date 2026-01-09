@@ -240,8 +240,8 @@ async def status():
     
     state = get_state()
     
-    # Get scan state
-    scan_state = state.scan_state
+    # Get scan state - ensure it's always present
+    scan_state = state.scan_state if state.scan_state else {}
     scan_running = scan_state.get("status") == "running" if scan_state else False
     
     # Get AI status
@@ -273,11 +273,12 @@ async def status():
         }
     
     # Build response matching Swift EngineStatus structure
+    # Ensure all expected fields are present, even if empty
     response = {
         "status": "ok",
         "scan_running": scan_running,
         "latest_target": scan_state.get("target") if scan_state else None,
-        "ai": ai_status,
+        "ai": ai_status if ai_status else {},
         "tools": tools_status,
         "scan_state": scan_state,
         "cancel_requested": state.cancel_requested.is_set() if state.cancel_requested else False
@@ -320,23 +321,31 @@ async def scan_status_alias():
 async def graph_alias():
     """
     Alias route for /v1/graph -> Returns current graph state for Swift client compatibility.
-    Returns empty graph structure for now. Real implementation would return current Aegis graph.
+    Returns empty topology structure for now. Real implementation would return current Aegis graph.
     """
-    from core.cortex.models import TopologyRequest, TopologyResponse
-    from core.cortex.graph_analyzer import GraphAnalyzer
+    from core.cortex.models import TopologyResponse
     
     try:
-        analyzer = GraphAnalyzer()
-        # Return empty topology for now
+        # Return empty topology for now matching TopologyResponse schema
         return TopologyResponse(
-            nodes=[],
-            edges=[],
+            graph_hash="empty",
+            computed_at=0.0,
             centrality={},
-            communities=[]
+            communities={},
+            critical_paths=[],
+            limits_applied={}
         )
     except Exception as e:
         logger.warning(f"[Graph] Failed to get graph state: {e}")
-        return {"nodes": [], "edges": [], "centrality": {}, "communities": []}
+        # Return minimal valid structure on error
+        return TopologyResponse(
+            graph_hash="error",
+            computed_at=0.0,
+            centrality={},
+            communities={},
+            critical_paths=[],
+            limits_applied={}
+        )
 
 app.include_router(v1_router)
 # Mount realtime directly to support /ws path

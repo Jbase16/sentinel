@@ -30,6 +30,9 @@ async def validate_websocket_connection(
     """
     config = get_config()
     
+    logger.info(f"[WebSocket] {endpoint_name} - Connection attempt from {websocket.client}")
+    logger.debug(f"[WebSocket] {endpoint_name} - Headers: {dict(websocket.headers)}")
+    
     # Origin Check
     origin = websocket.headers.get("origin")
     if origin and not is_origin_allowed(origin, config.security.allowed_origins):
@@ -41,6 +44,8 @@ async def validate_websocket_connection(
     # Auth Check
     is_exposed = is_network_exposed(config.api_host)
     require_auth = is_exposed or config.security.require_auth
+    
+    logger.debug(f"[WebSocket] {endpoint_name} - is_exposed: {is_exposed}, require_auth: {require_auth}")
 
     if require_auth:
         token = websocket.query_params.get("token")
@@ -49,10 +54,19 @@ async def validate_websocket_connection(
             if auth_header.startswith("Bearer "):
                 token = auth_header.split(" ")[1]
         
-        if not token or token != config.security.api_token:
-            logger.warning(f"[WebSocket] {endpoint_name} denied: invalid or missing token")
+        if not token:
+            logger.warning(f"[WebSocket] {endpoint_name} denied: missing token (require_auth={require_auth})")
             await websocket.close(code=4403, reason="Unauthorized")
             return False
+            
+        if token != config.security.api_token:
+            logger.warning(f"[WebSocket] {endpoint_name} denied: invalid token")
+            await websocket.close(code=4403, reason="Unauthorized")
+            return False
+        
+        logger.info(f"[WebSocket] {endpoint_name} - Authentication successful")
+    else:
+        logger.info(f"[WebSocket] {endpoint_name} - Authentication not required")
 
     return True
 

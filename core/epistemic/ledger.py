@@ -185,9 +185,22 @@ class EvidenceLedger:
 
     def record_observation(self, tool_name: str, tool_args: List[str], target: str, 
                           raw_output: bytes, exit_code: int = 0, 
-                          timestamp_override: Optional[float] = None) -> Observation:
+                          timestamp_override: Optional[float] = None,
+                          session_id: Optional[str] = None) -> Observation:
         """
         Ingest raw tool output.
+        
+        Args:
+            tool_name: Name of the tool that generated the output
+            tool_args: Arguments passed to the tool
+            target: Target being scanned
+            raw_output: Raw bytes output from the tool
+            exit_code: Tool exit code
+            timestamp_override: Optional timestamp override
+            session_id: Optional session ID. If None, uses "global_scan"
+        
+        Returns:
+            The recorded Observation object
         """
         # 1. Store in CAS
         blob_hash = self.cas.store(raw_output)
@@ -208,15 +221,23 @@ class EvidenceLedger:
         if obs_id not in self._observations:
             self._observations[obs_id] = obs
             
+            # Use global_scan session if no session_id provided
+            effective_session_id = session_id or "global_scan"
+            
             # Emit OBSERVED event
             self._emit_event(
                 event_type=EventType.OBSERVED,
                 entity_id=obs_id,
-                payload={"tool": tool_name, "target": target, "blob_hash": blob_hash},
+                payload={
+                    "tool": tool_name, 
+                    "target": target, 
+                    "blob_hash": blob_hash,
+                    "session_id": effective_session_id
+                },
                 timestamp_override=timestamp_override
             )
             
-            logger.info(f"[EvidenceLedger] Recorded Observation {obs_id}: {tool_name} -> {blob_hash[:8]}")
+            logger.info(f"[EvidenceLedger] Recorded Observation {obs_id}: {tool_name} -> {blob_hash[:8]} (session: {effective_session_id})")
         else:
             logger.debug(f"[EvidenceLedger] Idempotent observation seen: {obs_id}")
             

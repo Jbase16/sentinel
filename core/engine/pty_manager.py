@@ -53,6 +53,10 @@ class PTYSession:
         self.write_counter: int = 0
         self.history_lock = threading.Lock()
         
+        # Listeners for real-time events
+        self._listeners: List[callable] = []
+        self._listeners_lock = threading.Lock()
+        
         self.running = True
         self.exit_code: Optional[int] = None
         
@@ -149,6 +153,9 @@ class PTYSession:
                 with self.history_lock:
                     self.history.append(data)
                     self.write_counter += 1
+                
+                # Notify listeners
+                self._notify_listeners(data)
                     
             except Exception as e:
                 logger.error(f"Error in PTY reader loop {self.session_id}: {e}")
@@ -231,9 +238,42 @@ class PTYSession:
         except Exception as e:
             logger.warning(f"Failed to resize PTY {self.session_id}: {e}")
 
+    def _notify_listeners(self, data: bytes):
+        """Notify all registered listeners about new data."""
+        with self._listeners_lock:
+            for callback in self._listeners:
+                try:
+                    callback(data)
+                except Exception as e:
+                    logger.error(f"[PTYSession] Listener error: {e}")
+    
+    def attach_listener(self, callback):
+        """
+        Register a callback to be called when new data arrives.
+        
+        Args:
+            callback: A callable that accepts bytes data
+            
+        Returns:
+            self for chaining
+        """
+        with self._listeners_lock:
+            self._listeners.append(callback)
+        return self
+    
+    def detach_listener(self, callback):
+        """Remove a previously registered listener."""
+        with self._listeners_lock:
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+    
     def close(self):
         """Terminate the session and cleanup."""
         self.running = False
+        
+        # Clear listeners
+        with self._listeners_lock:
+            self._listeners.clear()
         
         # 1. Close the Master FD (interrupts reader)
         if self.fd is not None:
