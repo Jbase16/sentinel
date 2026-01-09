@@ -124,7 +124,7 @@ struct TerminalView: NSViewRepresentable {
       switch type {
       case "ready":
         // Start connection
-        if let url = URL(string: "ws://127.0.0.1:8765/v1/ws/pty") {
+        if let url = URL(string: "ws://127.0.0.1:8765/ws/pty") {
           client.connect(url: url)
         }
       case "input":

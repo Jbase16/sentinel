@@ -301,9 +301,8 @@ struct FindingsListView: View {
             Section(header: Text("Findings")) {
                 // Conditional branch.
                 if let findings = appState.apiResults?.findings {
-                    ForEach(findings.indices, id: \.self) { idx in
-                        let f = findings[idx]
-                        FindingRow(finding: f)
+                    ForEach(findings) { finding in
+                        FindingRow(finding: finding)
                     }
                 } else {
                     Text("No findings yet.")
@@ -316,19 +315,19 @@ struct FindingsListView: View {
 
 /// Struct FindingRow.
 struct FindingRow: View {
-    let finding: JSONDict
+    let finding: FindingDTO
 
     var body: some View {
         VStack(alignment: .leading) {
             HStack {
-                Text(finding["type"]?.stringValue ?? "Unknown")
+                Text(finding.type)
                     .font(.headline)
                 Spacer()
-                Text(finding["tool"]?.stringValue ?? "")
+                Text(finding.tool ?? "")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            Text(finding["message"]?.stringValue ?? "")
+            Text(finding.message ?? finding.title ?? finding.description ?? "")
                 .font(.caption)
                 .lineLimit(2)
         }

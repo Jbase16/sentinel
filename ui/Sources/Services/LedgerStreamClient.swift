@@ -32,7 +32,7 @@ public class LedgerStreamClient: ObservableObject {
     @Published public var isConnected: Bool = false
 
     private var webSocketTask: URLSessionWebSocketTask?
-    private let url = URL(string: "ws://127.0.0.1:8765/v1/ws/events")!
+    private let url = URL(string: "ws://127.0.0.1:8765/ws/events")!
 
     public init() {
         connect()

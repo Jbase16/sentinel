@@ -78,8 +78,10 @@ struct ReportView: View {
                         List(appState.apiResults?.findings ?? []) { finding in
                             HStack {
                                 VStack(alignment: .leading) {
-                                    Text(finding.title).font(.system(size: 13, weight: .medium))
-                                    Text(finding.type).font(.caption).foregroundStyle(.secondary)
+                                    Text(finding.title ?? "Untitled Finding").font(
+                                        .system(size: 13, weight: .medium))
+                                    Text(finding.severity).font(.caption).foregroundColor(
+                                        .secondary)
                                 }
                                 Spacer()
                                 Button("Gen PoC") {

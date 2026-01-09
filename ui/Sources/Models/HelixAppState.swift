@@ -135,7 +135,7 @@ public class HelixAppState: ObservableObject {
         if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
             cortexStream.connect(url: wsURL)
         }
-        if let ptyURL = URL(string: "ws://127.0.0.1:8765/v1/ws/pty") {
+        if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/pty") {
             ptyClient.connect(url: ptyURL)
         }
 
