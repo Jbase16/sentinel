@@ -173,6 +173,7 @@ class GraphEvent:
         timestamp: When event occurred (epoch time)
         event_sequence: Global monotonically increasing sequence number
         run_id: UUID v4 identifying the runtime/process that generated this event
+        entity_id: Optional identifier for the entity this event relates to (finding, observation, etc.)
 
     The event_sequence enables:
     - Total ordering of events regardless of clock skew
@@ -183,12 +184,18 @@ class GraphEvent:
     - Forensics: identify which runtime generated a specific event
     - Post-mortem analysis: correlate events across restarts
     - Debugging: distinguish between events from different process lifetimes
+
+    The entity_id enables:
+    - Correlation between events and their associated entities
+    - Tracking lifecycle of observations, findings, conflicts, etc.
+    - Event streaming to UI with proper entity references
     """
     type: GraphEventType
     payload: Dict[str, Any]
     timestamp: float = field(default_factory=time.time)
     event_sequence: int = field(default_factory=get_next_sequence)
     run_id: str = field(default_factory=get_run_id)
+    entity_id: Optional[str] = None
 
 class EventBus:
     """

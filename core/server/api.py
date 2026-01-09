@@ -315,6 +315,29 @@ async def scan_status_alias():
     """Alias route for /v1/scan/status -> /v1/scans/status for Swift client compatibility."""
     return await scans.get_scan_status()
 
+# Graph alias route for backwards compatibility
+@v1_router.get("/graph", include_in_schema=False)
+async def graph_alias():
+    """
+    Alias route for /v1/graph -> Returns current graph state for Swift client compatibility.
+    Returns empty graph structure for now. Real implementation would return current Aegis graph.
+    """
+    from core.cortex.models import TopologyRequest, TopologyResponse
+    from core.cortex.graph_analyzer import GraphAnalyzer
+    
+    try:
+        analyzer = GraphAnalyzer()
+        # Return empty topology for now
+        return TopologyResponse(
+            nodes=[],
+            edges=[],
+            centrality={},
+            communities=[]
+        )
+    except Exception as e:
+        logger.warning(f"[Graph] Failed to get graph state: {e}")
+        return {"nodes": [], "edges": [], "centrality": {}, "communities": []}
+
 app.include_router(v1_router)
 # Mount realtime directly to support /ws path
 app.include_router(realtime.router)
