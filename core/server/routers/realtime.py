@@ -19,6 +19,8 @@ from core.server.routers.auth import is_origin_allowed
 router = APIRouter(prefix="/ws", tags=["realtime"])
 sse_router = APIRouter(tags=["events"])
 
+logger = logging.getLogger(__name__)
+
 async def validate_websocket_connection(
     websocket: WebSocket,
     endpoint_name: str,
@@ -153,13 +155,6 @@ async def terminal_websocket_pty(
     """
     Bidirectional PTY access (Terminal Virtual Session).
     """
-    config = get_config()
-    
-    # Feature Flag Check
-    if not config.security.terminal_enabled:
-        await websocket.close(code=4003, reason="Terminal access disabled by configuration")
-        return
-
     if not await validate_websocket_connection(websocket, "/ws/pty"):
         return
 

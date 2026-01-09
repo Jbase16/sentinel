@@ -287,15 +287,33 @@ async def status():
 
 
 # Import routers AFTER v1_router exists
-from core.server.routers import auth, scans, ai, system, realtime, cortex
+from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost
 
 v1_router.include_router(scans.router)
 v1_router.include_router(ai.router)
 v1_router.include_router(system.router)
+v1_router.include_router(ghost.router, prefix="/ghost")
 # v1_router.include_router(realtime.router) # Removed from v1_router
 v1_router.include_router(cortex.router)
 v1_router.include_router(realtime.sse_router, prefix="/events")
 # v1_router.include_router(auth.router)  # Auth is dependencies-only
+
+# AI Chat alias route for backwards compatibility
+@v1_router.post("/chat", include_in_schema=False)
+async def chat_alias(req: ai.ChatRequest):
+    """Alias route for /v1/chat -> /v1/ai/chat for Swift client compatibility."""
+    return await ai.chat_with_ai(req)
+
+# Scan alias routes for backwards compatibility
+@v1_router.post("/scan", include_in_schema=False)
+async def scan_alias(req: scans.ScanRequest):
+    """Alias route for /v1/scan -> /v1/scans/start for Swift client compatibility."""
+    return await scans.start_scan(req)
+
+@v1_router.get("/scan/status", include_in_schema=False)
+async def scan_status_alias():
+    """Alias route for /v1/scan/status -> /v1/scans/status for Swift client compatibility."""
+    return await scans.get_scan_status()
 
 app.include_router(v1_router)
 # Mount realtime directly to support /ws path
