@@ -172,7 +172,7 @@ class ReasoningEngine:
         Return a summary of the reasoning state (Decision Ledger + CAL + Nexus).
         Used by /cortex/reasoning API endpoint and Report Engine.
         """
-        from core.aegis.nexus.context import NexusContext
+        from core.cortex.nexus_context import NexusContext
         
         ledger_stats = {}
         if self.strategos._decision_ledger:

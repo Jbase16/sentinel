@@ -793,3 +793,137 @@ extension HelixAppState {
         }
     }
 }
+
+// MARK: - TEMPORARY CONSOLIDATION: CortexClient
+// Moved here because Xcode project target membership for 'Services/CortexClient.swift' is likely broken.
+
+public struct AnalysisCaps: Codable {
+    public var max_paths: Int = 5
+    public var timeout_seconds: Double = 5.0
+    public var approximation_threshold: Int = 500
+
+    public init() {}
+}
+
+public struct TopologyRequest: Codable {
+    public let graph_data: GraphDataDTO
+    public let entry_nodes: [String]
+    public let critical_assets: [String]
+    public let caps: AnalysisCaps
+}
+
+public struct PathResult: Codable {
+    public let path: [String]
+    public let score: [Double]  // (length, risk, bottleneck)
+    public let metadata: [String: String]?
+}
+
+public struct TopologyResponse: Codable {
+    public let graph_hash: String
+    public let computed_at: Double
+    public let centrality: [String: Double]
+    public let communities: [String: Int]
+    public let critical_paths: [PathResult]?
+    public let limits_applied: [String: Bool]
+}
+
+public struct InsightRequest: Codable {
+    public let graph_hash: String
+    public let target_nodes: [String]
+    public let insight_type: String
+    public let graph_data: GraphDataDTO
+}
+
+public struct InsightClaim: Codable, Identifiable {
+    public var id: String { claim + String(confidence) }
+    public let claim: String
+    public let evidence: [String]
+    public let confidence: Double
+}
+
+public struct InsightResponse: Codable {
+    public let graph_hash: String
+    public let insights: [InsightClaim]
+}
+
+public struct GraphDataDTO: Codable {
+    public let nodes: [NodeDTO]
+    public let edges: [EdgeDTO]
+}
+
+public struct NodeDTO: Codable {
+    public let id: String
+    public let type: String
+    public let attributes: [String: String]
+}
+
+public struct EdgeDTO: Codable {
+    public let source: String
+    public let target: String
+    public let type: String
+    public let weight: Double
+}
+
+public actor CortexClient {
+    private let baseURL = URL(string: "http://127.0.0.1:8765/v1/cortex")!
+
+    public init() {}
+
+    private func getToken() -> String? {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge/api_token")
+        return try? String(contentsOf: path).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public func fetchTopology(graph: GraphDataDTO, entryNodes: [String], criticalAssets: [String])
+        async throws -> TopologyResponse
+    {
+        let caps = AnalysisCaps()
+        let requestPayload = TopologyRequest(
+            graph_data: graph,
+            entry_nodes: entryNodes,
+            critical_assets: criticalAssets,
+            caps: caps
+        )
+
+        return try await performRequest(endpoint: "analysis/topology", payload: requestPayload)
+    }
+
+    public func fetchInsights(graph: GraphDataDTO, hash: String, nodes: [String], type: String)
+        async throws -> InsightResponse
+    {
+        let requestPayload = InsightRequest(
+            graph_hash: hash,
+            target_nodes: nodes,
+            insight_type: type,
+            graph_data: graph
+        )
+
+        return try await performRequest(endpoint: "analysis/insights", payload: requestPayload)
+    }
+
+    private func performRequest<T: Codable, R: Codable>(endpoint: String, payload: T) async throws
+        -> R
+    {
+        let url = baseURL.appendingPathComponent(endpoint)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        if let token = getToken() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        request.httpBody = try JSONEncoder().encode(payload)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+            (200...299).contains(httpResponse.statusCode)
+        else {
+            throw URLError(.badServerResponse)
+        }
+
+        return try JSONDecoder().decode(R.self, from: data)
+    }
+}

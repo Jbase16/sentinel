@@ -117,7 +117,7 @@ struct MainWindowView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                     // Time Travel Scrubber
-                    TimelineView()
+                    SentinelTimelineView()
                 }
             }
         }

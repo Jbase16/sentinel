@@ -40,7 +40,6 @@ vertex VertexOut vertex_main(
     
     // Check Selection
     bool isSelected = (int(vid) == uniforms.selectedNodeIndex);
-    bool hasSelection = (uniforms.selectedNodeIndex != -1);
     out.isSelected = isSelected ? 1.0 : 0.0;
     
     // Animate Position (Subtle "Breathing" Data)

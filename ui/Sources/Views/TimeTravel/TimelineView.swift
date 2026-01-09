@@ -8,7 +8,7 @@
 
 import SwiftUI
 
-struct TimelineView: View {
+struct SentinelTimelineView: View {
     @EnvironmentObject var appState: HelixAppState
 
     // Local drag state for smooth scrubbing
