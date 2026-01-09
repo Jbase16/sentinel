@@ -230,7 +230,60 @@ async def ping():
 
 @v1_router.get("/status")
 async def status():
-    return {"status": "ok"}
+    """
+    Comprehensive status endpoint matching Swift EngineStatus structure.
+    Returns scan state, AI status, and tool information.
+    """
+    from core.ai.ai_engine import AIEngine
+    from core.toolkit.tools import get_installed_tools, TOOLS
+    from core.base.config import get_config
+    
+    state = get_state()
+    
+    # Get scan state
+    scan_state = state.scan_state
+    scan_running = scan_state.get("status") == "running" if scan_state else False
+    
+    # Get AI status
+    try:
+        ai_engine = AIEngine.instance()
+        ai_status = ai_engine.status()
+    except Exception as e:
+        logger.warning(f"[Status] Failed to get AI status: {e}")
+        ai_status = None
+    
+    # Get tool status
+    try:
+        installed_tools = list(get_installed_tools().keys())
+        all_tools = list(TOOLS.keys())
+        missing_tools = [t for t in all_tools if t not in installed_tools]
+        tools_status = {
+            "installed": installed_tools,
+            "missing": missing_tools,
+            "count_installed": len(installed_tools),
+            "count_total": len(all_tools)
+        }
+    except Exception as e:
+        logger.warning(f"[Status] Failed to get tool status: {e}")
+        tools_status = {
+            "installed": [],
+            "missing": [],
+            "count_installed": 0,
+            "count_total": 0
+        }
+    
+    # Build response matching Swift EngineStatus structure
+    response = {
+        "status": "ok",
+        "scan_running": scan_running,
+        "latest_target": scan_state.get("target") if scan_state else None,
+        "ai": ai_status,
+        "tools": tools_status,
+        "scan_state": scan_state,
+        "cancel_requested": state.cancel_requested.is_set() if state.cancel_requested else False
+    }
+    
+    return response
 
 
 # Import routers AFTER v1_router exists

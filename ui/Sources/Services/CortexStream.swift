@@ -109,8 +109,21 @@ class CortexStream: ObservableObject {
             configuration: config, delegate: nil, delegateQueue: OperationQueue.main)
         self.session = session
 
-        var request = URLRequest(url: url)
-        if let token = Self.readToken() {
+        let token = Self.readToken()
+        var finalURL = url
+        if let token = token, !token.isEmpty {
+            if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                var items = components.queryItems ?? []
+                items.append(URLQueryItem(name: "token", value: token))
+                components.queryItems = items
+                if let withToken = components.url {
+                    finalURL = withToken
+                }
+            }
+        }
+
+        var request = URLRequest(url: finalURL)
+        if let token = token, !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 

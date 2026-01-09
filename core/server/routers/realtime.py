@@ -33,7 +33,8 @@ async def validate_websocket_connection(
     if origin and not is_origin_allowed(origin, config.security.allowed_origins):
         logger.warning(f"[WebSocket] {endpoint_name} denied origin: {origin}")
         # Reject handshake
-        raise HTTPException(status_code=403, detail="Origin not allowed")
+        await websocket.close(code=4403, reason="Unauthorized")
+        return False
 
     # Auth Check
     is_exposed = is_network_exposed(config.api_host)
@@ -48,7 +49,8 @@ async def validate_websocket_connection(
         
         if not token or token != config.security.api_token:
             logger.warning(f"[WebSocket] {endpoint_name} denied: invalid or missing token")
-            raise HTTPException(status_code=403, detail="Unauthorized")
+            await websocket.close(code=4403, reason="Unauthorized")
+            return False
 
     return True
 
@@ -61,15 +63,13 @@ async def sse_events_endpoint(request: Request):
     store = get_event_store()
     
     async def event_generator():
-        queue = asyncio.Queue()
-        sub_id = store.subscribe(queue.put_nowait)
         try:
             # Check for Last-Event-ID header or query param
             last_id = request.headers.get("last-event-id") or request.query_params.get("since")
             if last_id:
                 try:
                     seq = int(last_id)
-                    missed = store.get_events_since(seq)
+                    missed, _ = store.get_since(seq)
                     for evt in missed:
                         yield {
                             "event": "message",
@@ -79,29 +79,25 @@ async def sse_events_endpoint(request: Request):
                 except ValueError:
                     pass
             
-            while True:
-                if await request.is_disconnected():
-                    break
-                evt = await queue.get()
+            # Stream live events using async generator
+            async for stored_event in store.subscribe():
                 yield {
                     "event": "message",
-                    "id": str(evt.sequence),
-                    "data": evt.to_json()
+                    "id": str(stored_event.sequence),
+                    "data": stored_event.to_json()
                 }
         except asyncio.CancelledError:
             pass
-        finally:
-            store.unsubscribe(sub_id)
 
     return EventSourceResponse(event_generator())
 
 @router.websocket("/events")
 async def ws_events_endpoint(websocket: WebSocket):
-    # ... (existing WS implementation) ...
-    await validate_websocket_connection(websocket, "/ws/events")
+    """WebSocket endpoint for streaming graph events."""
+    if not await validate_websocket_connection(websocket, "/ws/events"):
+        return
+    
     await websocket.accept()
-    # ... (rest of implementation)
-
     
     # Handle "since" parameter for event replay
     since_str = websocket.query_params.get("since", "0")
@@ -111,29 +107,22 @@ async def ws_events_endpoint(websocket: WebSocket):
         last_seq = 0
 
     store = get_event_store()
-    queue = asyncio.Queue()
     
-    # Subscribe to new events
-    sub_id = store.subscribe(queue.put_nowait)
-
     try:
         # Replay missed events
         if last_seq >= 0:
-            missed = store.get_events_since(last_seq)
+            missed, _ = store.get_since(last_seq)
             for evt in missed:
                 await websocket.send_text(evt.to_json())
 
-        # Stream new events
-        while True:
-            evt = await queue.get()
-            await websocket.send_text(evt.to_json())
+        # Stream live events
+        async for stored_event in store.subscribe():
+            await websocket.send_text(stored_event.to_json())
 
     except WebSocketDisconnect:
         logger.debug("[WebSocket] Events client disconnected")
     except Exception as e:
         logger.error(f"[WebSocket] Events stream error: {e}")
-    finally:
-        store.unsubscribe(sub_id)
 
 @router.websocket("/graph")
 async def ws_graph_endpoint(websocket: WebSocket):
