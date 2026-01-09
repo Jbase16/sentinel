@@ -97,6 +97,11 @@ public class HelixAppState: ObservableObject {
     // Security State
     @Published var activeBreachTarget: String? = nil
 
+    // MARK: - Phase 12: Reporting State
+    @Published var activeReportMarkdown: String = ""
+    @Published var activeReportMeta: ReportArtifactDTO? = nil
+    @Published var activePoCByFindingId: [String: PoCArtifactDTO] = [:]
+
     private let llm: LLMService
 
     init(llm: LLMService) {
@@ -598,11 +603,7 @@ public class HelixAppState: ObservableObject {
             let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
 
             // Determine entry/critical nodes?
-            // For now, let's say "internet" -> "high value" or just analyze everything if specific nodes aren't set.
-            // Strategos usually defines the Entry.
-            // Let's assume Entry = "The Internet" or any node with type="entry_point" logic.
-            // For now, empty lists rely on backend defaults or we can pass some if we know them.
-            // Let's pass entry_nodes = [] to let backend decide or error?
+            // Heuristic placeholder until Strategos exposes authoritative entry/asset classification.
             // Backend GraphAnalyzer requires entry_nodes to find paths.
             // Let's use nodes with type="entry" or hardcoded "INTERNET" if it exists.
 
@@ -631,6 +632,11 @@ public class HelixAppState: ObservableObject {
     }
 
     func fetchInsights(for nodeID: String) {
+        guard let analysis = graphAnalysis else {
+            print("[Analysis] Skipping insight fetch - No underlying topology analysis available.")
+            return
+        }
+
         Task {
             // Snapshot current graph state (Similar to above, could refactor into helper)
             let nodes = cortexStream.nodes
@@ -653,10 +659,11 @@ public class HelixAppState: ObservableObject {
             }
             let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
 
-            // If we have a cached analysis hash, use it.
-            let hash = graphAnalysis?.graph_hash ?? "live-\(Date().timeIntervalSince1970)"
+            // Use the authoritative hash from the topology analysis
+            let hash = analysis.graph_hash
 
             do {
+                // TODO: Selection context should drive insight type (e.g. critical_path vs cluster_summary)
                 let response = try await cortexClient.fetchInsights(
                     graph: graphDTO,
                     hash: hash,
@@ -683,4 +690,106 @@ struct PendingAction: Identifiable, Decodable {
     let reason: String?
     let target: String?
     let timestamp: String?
+}
+
+struct ReportArtifactDTO: Decodable {
+    let report_id: String
+    let created_at: String
+    let target: String
+    let scope: String?
+    let format: String
+    let content: String
+}
+
+struct PoCArtifactDTO: Decodable {
+    let finding_id: String
+    let title: String
+    let risk: String
+    let safe: Bool
+    let commands: [String]
+    let notes: [String]
+    let created_at: String
+}
+
+extension HelixAppState {
+    // MARK: - Reporting & Proof of Concept (Phase 12)
+
+    func generateReport(target: String, scope: String? = nil, format: String = "markdown") async {
+        do {
+            let url = apiClient.baseURL.appendingPathComponent("/v1/reporting/generate")
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+            let body: [String: Any] = [
+                "target": target,
+                "scope": scope as Any,
+                "format": format,
+                "include_attack_paths": true,
+                "max_paths": 5,
+            ]
+            req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+
+            // Use API Client's URLSession if possible, but here we construct raw request for custom endpoint structure
+            // Assuming apiClient exposes session or we use shared.
+            // Best practice: Add to SentinelAPIClient, but for now implementing here as requested.
+            let (data, resp) = try await URLSession.shared.data(for: req)
+
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                throw NSError(
+                    domain: "Report", code: status,
+                    userInfo: [NSLocalizedDescriptionKey: "Report generation failed (\(status))"])
+            }
+
+            let decoded = try JSONDecoder().decode(ReportArtifactDTO.self, from: data)
+            await MainActor.run {
+                self.activeReportMeta = decoded
+                self.activeReportMarkdown =
+                    (decoded.format.lowercased() == "markdown") ? decoded.content : decoded.content
+            }
+        } catch {
+            print("[Report] Generation failed: \(error)")
+            await MainActor.run {
+                self.activeReportMeta = nil
+                self.activeReportMarkdown =
+                    "Report generation failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func fetchPoC(findingId: String) async {
+        do {
+            var comps = URLComponents(
+                url: apiClient.baseURL.appendingPathComponent("/v1/reporting/poc/\(findingId)"),
+                resolvingAgainstBaseURL: false)!
+            // comps.queryItems = [URLQueryItem(name: "target", value: "example.com")] // Optional
+
+            let (data, resp) = try await URLSession.shared.data(from: comps.url!)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+                throw NSError(
+                    domain: "PoC", code: status,
+                    userInfo: [NSLocalizedDescriptionKey: "PoC fetch failed (\(status))"])
+            }
+
+            let decoded = try JSONDecoder().decode(PoCArtifactDTO.self, from: data)
+            await MainActor.run {
+                self.activePoCByFindingId[findingId] = decoded
+            }
+        } catch {
+            print("[PoC] Fetch failed: \(error)")
+            await MainActor.run {
+                self.activePoCByFindingId[findingId] = PoCArtifactDTO(
+                    finding_id: findingId,
+                    title: "PoC unavailable",
+                    risk: "unknown",
+                    safe: false,
+                    commands: [],
+                    notes: ["Failed to fetch PoC: \(error.localizedDescription)"],
+                    created_at: ""
+                )
+            }
+        }
+    }
 }

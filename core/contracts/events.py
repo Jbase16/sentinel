@@ -55,6 +55,9 @@ class EventType(str, Enum):
     
     # Findings
     FINDING_CREATED = "finding_created"
+    FINDING_UPDATED = "finding_updated"
+    FINDING_INVALIDATED = "finding_invalidated"
+    FINDING_SUPPRESSED = "finding_suppressed"
     
     # Reasoning (Narrator/Strategos)
     DECISION_MADE = "decision_made"
@@ -107,6 +110,12 @@ class EventType(str, Enum):
     NEXUS_CHAIN_ABORTED = "nexus_chain_aborted"
     NEXUS_STEP_STARTED = "nexus_step_started"
     NEXUS_STEP_COMPLETED = "nexus_step_completed"
+
+    # NEXUS - Hypothesis Engine (Apex Hardening)
+    NEXUS_HYPOTHESIS_FORMED = "nexus_hypothesis_formed"
+    NEXUS_HYPOTHESIS_UPDATED = "nexus_hypothesis_updated"
+    NEXUS_HYPOTHESIS_REFUTED = "nexus_hypothesis_refuted"
+    NEXUS_INSIGHT_FORMED = "nexus_insight_formed"
 
     # OMEGA - Integration
     OMEGA_RUN_STARTED = "omega_run_started"
@@ -369,6 +378,33 @@ class EventContract:
             ]
         )
         
+        cls._schemas[EventType.FINDING_UPDATED] = EventSchema(
+            event_type=EventType.FINDING_UPDATED,
+            description="A finding was modified (e.g. confidence change).",
+            fields=[
+                FieldSpec("finding_id", str, required=True),
+                FieldSpec("changes", dict, required=True),
+            ]
+        )
+
+        cls._schemas[EventType.FINDING_INVALIDATED] = EventSchema(
+            event_type=EventType.FINDING_INVALIDATED,
+            description="A finding was proven false.",
+            fields=[
+                FieldSpec("finding_id", str, required=True),
+                FieldSpec("reason", str, required=True),
+            ]
+        )
+
+        cls._schemas[EventType.FINDING_SUPPRESSED] = EventSchema(
+            event_type=EventType.FINDING_SUPPRESSED,
+            description="A finding was hidden by policy/user.",
+            fields=[
+                FieldSpec("finding_id", str, required=True),
+                FieldSpec("reason", str, required=True),
+            ]
+        )
+        
         # ----------------------------------------------------------------
         # REASONING
         # ----------------------------------------------------------------
@@ -529,6 +565,56 @@ class EventContract:
                 FieldSpec("path", str, required=True),
                 FieldSpec("method", str, required=False),
                 FieldSpec("status_code", int, required=True, description="401 or 403"),
+            ]
+        )
+
+        # ----------------------------------------------------------------
+        # NEXUS - Hypothesis Engine
+        # ----------------------------------------------------------------
+        cls._schemas[EventType.NEXUS_HYPOTHESIS_FORMED] = EventSchema(
+            event_type=EventType.NEXUS_HYPOTHESIS_FORMED,
+            description="Nexus hypothesized a path/chain exists.",
+            fields=[
+                FieldSpec("hypothesis_id", str, required=True, description="Deterministic hash of inputs + logic"),
+                FieldSpec("constituent_finding_ids", list, required=True, description="Sorted list of Finding IDs"),
+                FieldSpec("rule_id", str, required=True, description="Logic rule identifier"),
+                FieldSpec("rule_version", str, required=True, description="Logic rule version"),
+                FieldSpec("confidence", float, required=True, description="0.0 to 1.0"),
+                FieldSpec("explanation", str, required=False, description="Human readable description"),
+            ]
+        )
+
+        cls._schemas[EventType.NEXUS_HYPOTHESIS_UPDATED] = EventSchema(
+            event_type=EventType.NEXUS_HYPOTHESIS_UPDATED,
+            description="Nexus changed confidence/structure because inputs changed.",
+            fields=[
+                FieldSpec("hypothesis_id", str, required=True),
+                FieldSpec("previous_confidence", float, required=False),
+                FieldSpec("new_confidence", float, required=True),
+                FieldSpec("reason", str, required=True),
+            ]
+        )
+
+        cls._schemas[EventType.NEXUS_HYPOTHESIS_REFUTED] = EventSchema(
+            event_type=EventType.NEXUS_HYPOTHESIS_REFUTED,
+            description="A planned validation attempt failed in a way that weakens the hypothesis.",
+            fields=[
+                FieldSpec("hypothesis_id", str, required=True),
+                FieldSpec("refuting_evidence_id", str, required=False),
+                FieldSpec("reason", str, required=True),
+                FieldSpec("constituent_finding_ids", list, required=True, description="Finding IDs invalidated by this refutation"),
+            ]
+        )
+
+        cls._schemas[EventType.NEXUS_INSIGHT_FORMED] = EventSchema(
+            event_type=EventType.NEXUS_INSIGHT_FORMED,
+            description="Nexus minted a human-facing insight derived from hypotheses/findings.",
+            fields=[
+                FieldSpec("insight_id", str, required=True),
+                FieldSpec("title", str, required=True),
+                FieldSpec("description", str, required=True),
+                FieldSpec("severity", str, required=True),
+                FieldSpec("hypothesis_ids", list, required=True),
             ]
         )
     

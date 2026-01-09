@@ -58,6 +58,11 @@ class ReasoningEngine:
             topic="SentinelForge Cognitive State"
         )
         
+        # Initialize Epistemic Recoil (Automated Falsification)
+        from core.aegis.nexus.recoil import EpistemicRecoil
+        self.recoil = EpistemicRecoil()
+        self.recoil.start()
+        
         logger.info("[CAL] ReasoningEngine initialized with global ReasoningSession")
         
     @classmethod
