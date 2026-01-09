@@ -453,6 +453,9 @@ class Database:
     async def _save_finding_impl(self, finding: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0):
         import hashlib
 
+        # Provide default session_id to satisfy NOT NULL constraint
+        effective_session_id = session_id if session_id is not None else "global_scan"
+
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
 
@@ -464,7 +467,7 @@ class Database:
         """,
             (
                 fid,
-                session_id,
+                effective_session_id,
                 int(scan_sequence),
                 finding.get("tool", "unknown"),
                 finding.get("tool_version"),
@@ -484,6 +487,9 @@ class Database:
     async def _save_issue_impl(self, issue: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0):
         import hashlib
 
+        # Provide default session_id to satisfy NOT NULL constraint
+        effective_session_id = session_id if session_id is not None else "global_scan"
+
         blob = json.dumps(issue, sort_keys=True)
         iid = hashlib.sha256(blob.encode()).hexdigest()
 
@@ -495,7 +501,7 @@ class Database:
         """,
             (
                 iid,
-                session_id,
+                effective_session_id,
                 int(scan_sequence),
                 issue.get("title", "unknown"),
                 issue.get("severity", "INFO"),
@@ -513,6 +519,9 @@ class Database:
     async def _save_evidence_impl(
         self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0
     ):
+        # Provide default session_id to satisfy NOT NULL constraint
+        effective_session_id = session_id if session_id is not None else "global_scan"
+
         await self._execute_internal(
             """
             INSERT INTO evidence
@@ -520,7 +529,7 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         """,
             (
-                session_id,
+                effective_session_id,
                 int(scan_sequence),
                 evidence_data.get("tool", "unknown"),
                 evidence_data.get("tool_version"),
@@ -574,6 +583,9 @@ class Database:
     ) -> None:
         import hashlib
 
+        # Provide default session_id to satisfy NOT NULL constraint
+        effective_session_id = session_id if session_id is not None else "global_scan"
+
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
 
@@ -585,7 +597,7 @@ class Database:
         """,
             (
                 fid,
-                session_id,
+                effective_session_id,
                 int(scan_sequence),
                 finding.get("tool", "unknown"),
                 finding.get("tool_version"),
@@ -601,6 +613,9 @@ class Database:
     ) -> None:
         import hashlib
 
+        # Provide default session_id to satisfy NOT NULL constraint
+        effective_session_id = session_id if session_id is not None else "global_scan"
+
         blob = json.dumps(issue, sort_keys=True)
         iid = hashlib.sha256(blob.encode()).hexdigest()
 
@@ -612,7 +627,7 @@ class Database:
         """,
             (
                 iid,
-                session_id,
+                effective_session_id,
                 int(scan_sequence),
                 issue.get("title", "unknown"),
                 issue.get("severity", "INFO"),
@@ -624,6 +639,9 @@ class Database:
     async def save_evidence_txn(
         self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None
     ) -> None:
+        # Provide default session_id to satisfy NOT NULL constraint
+        effective_session_id = session_id if session_id is not None else "global_scan"
+
         await conn.execute(
             """
             INSERT INTO evidence
@@ -631,7 +649,7 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         """,
             (
-                session_id,
+                effective_session_id,
                 int(scan_sequence),
                 evidence_data.get("tool", "unknown"),
                 evidence_data.get("tool_version"),
