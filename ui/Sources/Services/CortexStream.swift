@@ -199,11 +199,21 @@ class CortexStream: ObservableObject {
             self.positionCache[id] = base
 
             let existing = nodes.first(where: { $0.id == id })
-            let severity =
-                (data["severity"] as? Double)
-                ?? event.payload["severity"]?.doubleValue
-                ?? existing?.pressure.map { Double($0 * 10.0) }
-                ?? 0.0
+
+            // Break up complex expressions to help compiler type-check
+            var resolvedSeverity: Double? = data["severity"] as? Double
+            if resolvedSeverity == nil {
+                resolvedSeverity = event.payload["severity"]?.doubleValue
+            }
+            if resolvedSeverity == nil, let p = existing?.pressure {
+                resolvedSeverity = Double(p * 10.0)
+            }
+            let severity = resolvedSeverity ?? 0.0
+
+            let massDouble = (data["mass"] as? Double) ?? Double(existing?.mass ?? 1.0)
+            let chargeDouble = (data["charge"] as? Double) ?? Double(existing?.charge ?? 0.0)
+            let tempDouble =
+                (data["temperature"] as? Double) ?? Double(existing?.temperature ?? 0.0)
 
             let newNode = NodeModel(
                 id: id,
@@ -212,10 +222,9 @@ class CortexStream: ObservableObject {
                 y: base.y,
                 z: base.z,
                 color: self.colorForType(type, severity: severity),
-                mass: Float((data["mass"] as? Double) ?? Double(existing?.mass ?? 1.0)),
-                charge: Float((data["charge"] as? Double) ?? Double(existing?.charge ?? 0.0)),
-                temperature: Float(
-                    (data["temperature"] as? Double) ?? Double(existing?.temperature ?? 0.0)),
+                mass: Float(massDouble),
+                charge: Float(chargeDouble),
+                temperature: Float(tempDouble),
                 structural: (data["structural"] as? Bool) ?? existing?.structural,
                 description: (data["description"] as? String)
                     ?? event.payload["label"]?.stringValue

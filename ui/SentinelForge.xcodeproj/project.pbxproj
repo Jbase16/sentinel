@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -26,6 +26,7 @@
 		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
 		9369DFE67CE6BB7E573BBAB3 /* AuditFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A68494FDEACABC92B894B50 /* AuditFeedView.swift */; };
 		96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */; };
+		9648C16A2F1201D10088A303 /* BackendSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C1692F1201D10088A303 /* BackendSettingsView.swift */; };
 		9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */; };
 		9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C910B6EF70385F75EC7BA /* PTYClient.swift */; };
 		A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */; };
@@ -73,6 +74,7 @@
 		7D47C9AABA588CA41003B700 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelAPIClient.swift; sourceTree = "<group>"; };
 		8318D0791A1940E626D7A7ED /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
+		9648C1692F1201D10088A303 /* BackendSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendSettingsView.swift; sourceTree = "<group>"; };
 		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
 		AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamClient.swift; sourceTree = "<group>"; };
 		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
@@ -256,6 +258,7 @@
 		D2F5FD7733DE5DF6B1387441 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				9648C1692F1201D10088A303 /* BackendSettingsView.swift */,
 				FEBD4BFB76B48DD1736FC1FA /* ChatBubbleView.swift */,
 				B28396B11B909875C4B8BB20 /* MainWindowView.swift */,
 				C303CDE894C92523DAC01B0A /* ToolsBankView.swift */,
@@ -334,7 +337,6 @@
 			);
 			mainGroup = 2BE62123C101D1A0E78E9AC3;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -391,6 +393,7 @@
 				AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */,
 				14F802FA073267C118AFB865 /* SentinelAPIClient.swift in Sources */,
 				BE954D7AE0662CD4A638C666 /* SentinelForgeApp.swift in Sources */,
+				9648C16A2F1201D10088A303 /* BackendSettingsView.swift in Sources */,
 				80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */,
 				2F3DA20D5D2C21A0200A21C9 /* SharedModels.swift in Sources */,
 				854DB144D784ECD29694882E /* StatusComponents.swift in Sources */,

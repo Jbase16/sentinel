@@ -305,7 +305,7 @@ v1_router.include_router(realtime.sse_router, prefix="/events")
 # AI Chat alias route for backwards compatibility
 def _confirm_v1_chat_mount() -> None:
     for route in v1_router.routes:
-        if isinstance(route, APIRoute) and route.path == "/ai/chat" and "POST" in route.methods:
+        if isinstance(route, APIRoute) and route.path == "/v1/ai/chat" and "POST" in route.methods:
             return
     raise RuntimeError("Expected /v1/ai/chat to be mounted before /v1/chat alias.")
 

@@ -130,7 +130,7 @@ public struct SentinelAPIClient: Sendable {
     }
 
     /// Fetch lightweight engine + AI status (model availability, running scan).
-    public func fetchStatus() async throws -> EngineStatus? {
+    func fetchStatus() async throws -> EngineStatus? {
         guard let url = URL(string: "/v1/status", relativeTo: baseURL) else { return nil }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
@@ -142,7 +142,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Fetch dedicated AI status (including Circuit Breaker)
     /// NEW: Trinity of Hardening - Chapter 19
-    public func fetchAIStatus() async throws -> AIStatusResponse {
+    func fetchAIStatus() async throws -> AIStatusResponse {
         guard let url = URL(string: "/v1/ai/status", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
@@ -155,7 +155,7 @@ public struct SentinelAPIClient: Sendable {
     }
 
     /// Fetch the latest scan snapshot (findings/issues/killchain/phase_results).
-    public func fetchResults() async throws -> SentinelResults? {
+    func fetchResults() async throws -> SentinelResults? {
         let request = authenticatedRequest(url: baseURL.appendingPathComponent("/v1/scan/results"))
         let (data, response) = try await session.data(for: request)
 
@@ -173,7 +173,7 @@ public struct SentinelAPIClient: Sendable {
     }
 
     /// Fetch the Pressure Graph (Ground Truth).
-    public func fetchGraph() async throws -> PressureGraphDTO? {
+    func fetchGraph() async throws -> PressureGraphDTO? {
         guard let url = URL(string: "/v1/graph", relativeTo: baseURL) else { return nil }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
@@ -186,7 +186,7 @@ public struct SentinelAPIClient: Sendable {
     // MARK: - Tool Management
 
     /// Install selected tools
-    public func installTools(_ tools: [String]) async throws -> [InstallResult] {
+    func installTools(_ tools: [String]) async throws -> [InstallResult] {
         struct InstallResponse: Decodable { let results: [InstallResult] }
         guard let url = URL(string: "/v1/tools/install", relativeTo: baseURL) else {
             throw APIError.badStatus
@@ -202,7 +202,7 @@ public struct SentinelAPIClient: Sendable {
     }
 
     /// Uninstall selected tools
-    public func uninstallTools(_ tools: [String]) async throws -> [InstallResult] {
+    func uninstallTools(_ tools: [String]) async throws -> [InstallResult] {
         struct InstallResponse: Decodable { let results: [InstallResult] }
         guard let url = URL(string: "/v1/tools/uninstall", relativeTo: baseURL) else {
             throw APIError.badStatus
@@ -379,7 +379,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Stream server-sent events (logs, findings, etc.)
     /// Automatically reconnects with exponential backoff on failure.
-    public func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
+    func streamEvents() -> AsyncThrowingStream<SSEEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 var attempt = 0
@@ -469,7 +469,7 @@ public struct SentinelAPIClient: Sendable {
 
     // MARK: - Report Generation
 
-    public func generateReport(
+    func generateReport(
         target: String,
         scope: String?,
         format: String,
@@ -500,7 +500,7 @@ public struct SentinelAPIClient: Sendable {
         return try JSONDecoder().decode(ReportGenerateResponse.self, from: data)
     }
 
-    public func fetchPoC(findingId: String) async throws -> PoCResponse {
+    func fetchPoC(findingId: String) async throws -> PoCResponse {
         guard
             let url = URL(
                 string: "/v1/cortex/reporting/poc/\(findingId)", relativeTo: baseURL)
