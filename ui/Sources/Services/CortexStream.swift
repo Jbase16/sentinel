@@ -181,14 +181,29 @@ class CortexStream: ObservableObject {
     {
         switch event.eventType {
         case .nodeAdded, .nodeUpdated:
-            guard let id = event.payload["id"]?.stringValue,
-                let type = event.payload["type"]?.stringValue
+            guard let id = event.payload["node_id"]?.stringValue ?? event.payload["id"]?.stringValue
             else { return }
 
-            let data = event.payload["data"]?.dictValue ?? event.payload
+            let type =
+                event.payload["node_type"]?.stringValue
+                ?? event.payload["type"]?.stringValue
+                ?? nodes.first(where: { $0.id == id })?.type
+                ?? "unknown"
+
+            let data =
+                event.payload["changes"]?.dictValue
+                ?? event.payload["data"]?.dictValue
+                ?? [:]
 
             let base = self.positionCache[id] ?? self.stablePosition(for: id)
             self.positionCache[id] = base
+
+            let existing = nodes.first(where: { $0.id == id })
+            let severity =
+                (data["severity"] as? Double)
+                ?? event.payload["severity"]?.doubleValue
+                ?? existing?.pressure.map { Double($0 * 10.0) }
+                ?? 0.0
 
             let newNode = NodeModel(
                 id: id,
@@ -196,14 +211,17 @@ class CortexStream: ObservableObject {
                 x: base.x,
                 y: base.y,
                 z: base.z,
-                color: self.colorForType(type, severity: data["severity"] as? Double),
-                mass: Float((data["mass"] as? Double) ?? 1.0),
-                charge: Float((data["charge"] as? Double) ?? 0.0),
-                temperature: Float((data["temperature"] as? Double) ?? 0.0),
-                structural: data["structural"] as? Bool,
-                description: data["description"] as? String,
-                pressure: Float((data["severity"] as? Double ?? 0.0) / 10.0),
-                severity: (data["severity"] as? Double ?? 0.0) > 7 ? "HIGH" : "INFO"
+                color: self.colorForType(type, severity: severity),
+                mass: Float((data["mass"] as? Double) ?? Double(existing?.mass ?? 1.0)),
+                charge: Float((data["charge"] as? Double) ?? Double(existing?.charge ?? 0.0)),
+                temperature: Float(
+                    (data["temperature"] as? Double) ?? Double(existing?.temperature ?? 0.0)),
+                structural: (data["structural"] as? Bool) ?? existing?.structural,
+                description: (data["description"] as? String)
+                    ?? event.payload["label"]?.stringValue
+                    ?? existing?.description,
+                pressure: Float(severity / 10.0),
+                severity: severity > 7 ? "HIGH" : "INFO"
             )
 
             if let idx = nodes.firstIndex(where: { $0.id == id }) {
@@ -212,19 +230,41 @@ class CortexStream: ObservableObject {
                 nodes.append(newNode)
             }
 
-        case .edgeAdded:
-            guard let id = event.payload["id"]?.stringValue,
-                let source = event.payload["source"]?.stringValue,
+        case .nodeRemoved:
+            guard let id = event.payload["node_id"]?.stringValue ?? event.payload["id"]?.stringValue
+            else { return }
+
+            nodes.removeAll { $0.id == id }
+            edges.removeAll { $0.source == id || $0.target == id }
+            positionCache.removeValue(forKey: id)
+
+        case .edgeAdded, .edgeUpdated:
+            guard let source = event.payload["source"]?.stringValue,
                 let target = event.payload["target"]?.stringValue
             else { return }
 
+            let edgeType =
+                event.payload["edge_type"]?.stringValue
+                ?? event.payload["type"]?.stringValue
+                ?? "unknown"
+
+            let edgeId =
+                event.payload["edge_id"]?.stringValue
+                ?? event.payload["id"]?.stringValue
+                ?? "\(source)->\(target):\(edgeType)"
+
             let newEdge = EdgeModel(
-                id: id,
+                id: edgeId,
                 source: source,
                 target: target,
-                type: event.payload["type"]?.stringValue ?? "unknown"
+                type: edgeType
             )
-            edges.append(newEdge)
+
+            if let idx = edges.firstIndex(where: { $0.id == edgeId }) {
+                edges[idx] = newEdge
+            } else {
+                edges.append(newEdge)
+            }
 
         default:
             break
