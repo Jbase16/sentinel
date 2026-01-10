@@ -329,31 +329,39 @@ async def scan_status_alias():
 async def graph_alias():
     """
     Alias route for /v1/graph -> Returns current graph state for Swift client compatibility.
-    Returns empty topology structure for now. Real implementation would return current Aegis graph.
+    Returns current Pressure Graph state for Swift client compatibility.
     """
-    from core.cortex.models import TopologyResponse
-    
-    try:
-        # Return empty topology for now matching TopologyResponse schema
-        return TopologyResponse(
-            graph_hash="empty",
-            computed_at=0.0,
-            centrality={},
-            communities={},
-            critical_paths=[],
-            limits_applied={}
+    from fastapi.responses import Response
+
+    state = get_state()
+    scan_state = state.scan_state or {}
+    db = Database.instance()
+
+    session_id = scan_state.get("session_id")
+    if not session_id:
+        recent_sessions = await db.fetch_all(
+            "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1",
+            (),
         )
+        if not recent_sessions:
+            return Response(status_code=204)
+        session_id = recent_sessions[0][0]
+
+    try:
+        session = await state.get_session(session_id)
+        if session and getattr(session, "pressure_graph", None):
+            return session.pressure_graph.to_dict()
+
+        nodes, edges = await db.load_graph_snapshot(session_id)
+        return {
+            "session_id": session_id,
+            "nodes": nodes,
+            "edges": edges,
+            "count": {"nodes": len(nodes), "edges": len(edges)},
+        }
     except Exception as e:
         logger.warning(f"[Graph] Failed to get graph state: {e}")
-        # Return minimal valid structure on error
-        return TopologyResponse(
-            graph_hash="error",
-            computed_at=0.0,
-            centrality={},
-            communities={},
-            critical_paths=[],
-            limits_applied={}
-        )
+        return Response(status_code=204)
 
 app.include_router(v1_router)
 # Mount realtime directly to support /ws path
