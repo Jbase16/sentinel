@@ -198,6 +198,19 @@ async def start_scan(req: ScanRequest):
     session_id = await begin_scan_logic(req)
     return {"session_id": session_id, "status": "started"}
 
+@router.post("/cancel", dependencies=[Depends(verify_sensitive_token)])
+async def cancel_scan():
+    from fastapi.responses import Response
+
+    state = get_state()
+    async with state.scan_lock:
+        if not state.active_scan_task or state.active_scan_task.done():
+            return Response(status_code=409)
+
+        state.cancel_requested.set()
+        state.active_scan_task.cancel()
+        return Response(status_code=202)
+
 @router.get("/status")
 async def get_scan_status():
     return get_state().scan_state

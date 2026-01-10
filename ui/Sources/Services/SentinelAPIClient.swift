@@ -104,7 +104,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Request best-effort scan cancellation.
     public func cancelScan() async throws {
-        guard let url = URL(string: "/v1/cancel", relativeTo: baseURL) else { return }
+        guard let url = URL(string: "/v1/scans/cancel", relativeTo: baseURL) else { return }
         let request = authenticatedRequest(url: url, method: "POST")
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw APIError.badStatus }
