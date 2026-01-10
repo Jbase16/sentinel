@@ -86,7 +86,7 @@ class BackendManager: ObservableObject {
         "aiosqlite",
         "websockets",
         "sse_starlette",
-        "python_multipart",
+        "multipart",
         "cryptography",
         "requests",
     ]
