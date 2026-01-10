@@ -692,7 +692,7 @@ struct PendingAction: Identifiable, Decodable {
     let timestamp: String?
 }
 
-struct ReportGenerateResponse: Decodable {
+public struct ReportGenerateResponse: Decodable {
     let report_id: String
     let created_at: String
     let target: String
@@ -701,7 +701,7 @@ struct ReportGenerateResponse: Decodable {
     let content: String
 }
 
-struct PoCResponse: Decodable {
+public struct PoCResponse: Decodable {
     let finding_id: String
     let title: String
     let risk: String
