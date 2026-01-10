@@ -99,8 +99,8 @@ public class HelixAppState: ObservableObject {
 
     // MARK: - Phase 12: Reporting State
     @Published var activeReportMarkdown: String = ""
-    @Published var activeReportMeta: ReportArtifactDTO? = nil
-    @Published var activePoCByFindingId: [String: PoCArtifactDTO] = [:]
+    @Published var activeReportMeta: ReportGenerateResponse? = nil
+    @Published var activePoCByFindingId: [String: PoCResponse] = [:]
 
     private let llm: LLMService
 
@@ -692,7 +692,7 @@ struct PendingAction: Identifiable, Decodable {
     let timestamp: String?
 }
 
-struct ReportArtifactDTO: Decodable {
+struct ReportGenerateResponse: Decodable {
     let report_id: String
     let created_at: String
     let target: String
@@ -701,7 +701,7 @@ struct ReportArtifactDTO: Decodable {
     let content: String
 }
 
-struct PoCArtifactDTO: Decodable {
+struct PoCResponse: Decodable {
     let finding_id: String
     let title: String
     let risk: String
@@ -716,33 +716,13 @@ extension HelixAppState {
 
     func generateReport(target: String, scope: String? = nil, format: String = "markdown") async {
         do {
-            let url = apiClient.baseURL.appendingPathComponent("/v1/reporting/generate")
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-            let body: [String: Any] = [
-                "target": target,
-                "scope": scope as Any,
-                "format": format,
-                "include_attack_paths": true,
-                "max_paths": 5,
-            ]
-            req.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
-
-            // Use API Client's URLSession if possible, but here we construct raw request for custom endpoint structure
-            // Assuming apiClient exposes session or we use shared.
-            // Best practice: Add to SentinelAPIClient, but for now implementing here as requested.
-            let (data, resp) = try await URLSession.shared.data(for: req)
-
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                throw NSError(
-                    domain: "Report", code: status,
-                    userInfo: [NSLocalizedDescriptionKey: "Report generation failed (\(status))"])
-            }
-
-            let decoded = try JSONDecoder().decode(ReportArtifactDTO.self, from: data)
+            let decoded = try await apiClient.generateReport(
+                target: target,
+                scope: scope,
+                format: format,
+                includeAttackPaths: true,
+                maxPaths: 5
+            )
             await MainActor.run {
                 self.activeReportMeta = decoded
                 self.activeReportMarkdown =
@@ -760,27 +740,14 @@ extension HelixAppState {
 
     func fetchPoC(findingId: String) async {
         do {
-            let comps = URLComponents(
-                url: apiClient.baseURL.appendingPathComponent("/v1/reporting/poc/\(findingId)"),
-                resolvingAgainstBaseURL: false)!
-            // comps.queryItems = [URLQueryItem(name: "target", value: "example.com")] // Optional
-
-            let (data, resp) = try await URLSession.shared.data(from: comps.url!)
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-                throw NSError(
-                    domain: "PoC", code: status,
-                    userInfo: [NSLocalizedDescriptionKey: "PoC fetch failed (\(status))"])
-            }
-
-            let decoded = try JSONDecoder().decode(PoCArtifactDTO.self, from: data)
+            let decoded = try await apiClient.fetchPoC(findingId: findingId)
             await MainActor.run {
                 self.activePoCByFindingId[findingId] = decoded
             }
         } catch {
             print("[PoC] Fetch failed: \(error)")
             await MainActor.run {
-                self.activePoCByFindingId[findingId] = PoCArtifactDTO(
+                self.activePoCByFindingId[findingId] = PoCResponse(
                     finding_id: findingId,
                     title: "PoC unavailable",
                     risk: "unknown",

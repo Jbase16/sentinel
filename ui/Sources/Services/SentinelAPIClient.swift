@@ -474,6 +474,52 @@ public struct SentinelAPIClient: Sendable {
 
     // MARK: - Report Generation
 
+    public func generateReport(
+        target: String,
+        scope: String?,
+        format: String,
+        includeAttackPaths: Bool,
+        maxPaths: Int
+    ) async throws -> ReportGenerateResponse {
+        guard let url = URL(string: "/v1/cortex/reporting/generate", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
+        var request = authenticatedRequest(url: url, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        var body: [String: Any] = [
+            "target": target,
+            "format": format,
+            "include_attack_paths": includeAttackPaths,
+            "max_paths": maxPaths,
+        ]
+        if let scope {
+            body["scope"] = scope
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.badStatus
+        }
+        return try JSONDecoder().decode(ReportGenerateResponse.self, from: data)
+    }
+
+    public func fetchPoC(findingId: String) async throws -> PoCResponse {
+        guard
+            let url = URL(
+                string: "/v1/cortex/reporting/poc/\(findingId)", relativeTo: baseURL)
+        else {
+            throw APIError.badStatus
+        }
+        let request = authenticatedRequest(url: url, method: "GET")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw APIError.badStatus
+        }
+        return try JSONDecoder().decode(PoCResponse.self, from: data)
+    }
+
     /// Stream report section
     public func streamReportSection(section: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in

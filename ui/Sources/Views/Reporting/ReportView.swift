@@ -136,7 +136,7 @@ struct ReportView: View {
 }
 
 struct PoCCard: View {
-    let poc: PoCArtifactDTO
+    let poc: PoCResponse
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
