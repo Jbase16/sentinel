@@ -288,12 +288,14 @@ async def status():
 
 
 # Import routers AFTER v1_router exists
-from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost
+# Import routers AFTER v1_router exists
+from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost, forge
 
 v1_router.include_router(scans.router)
 v1_router.include_router(ai.router)
 v1_router.include_router(system.router)
 v1_router.include_router(ghost.router, prefix="/ghost")
+v1_router.include_router(forge.router)
 # v1_router.include_router(realtime.router) # Removed from v1_router
 v1_router.include_router(cortex.router)
 v1_router.include_router(realtime.sse_router, prefix="/events")
@@ -304,6 +306,12 @@ v1_router.include_router(realtime.sse_router, prefix="/events")
 async def chat_alias(req: ai.ChatRequest):
     """Alias route for /v1/chat -> /v1/ai/chat for Swift client compatibility."""
     return await ai.chat_with_ai(req)
+
+# Scan results alias route for Swift client compatibility
+@v1_router.get("/scan/results", include_in_schema=False)
+async def scan_results_alias():
+    """Alias route for /v1/scan/results -> /v1/scans/results for Swift client compatibility."""
+    return await scans.get_scan_results()
 
 # Scan alias routes for backwards compatibility
 @v1_router.post("/scan", include_in_schema=False)

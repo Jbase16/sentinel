@@ -93,13 +93,7 @@ class ToolRegistry:
             "intrusiveness": 1,
              "gates": ["protocol:http", "protocol:https"]
         },
-        "sslyze": {
-            "intent": INTENT_ACTIVE_LIVE_CHECK,
-            "phase": PHASE_2_LIGHT,
-            "cost": 2,
-            "intrusiveness": 1,
-            "gates": ["protocol:https"]
-        },
+
         "pshtt": {
             "intent": INTENT_ACTIVE_LIVE_CHECK,
             "phase": PHASE_2_LIGHT,

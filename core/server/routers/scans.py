@@ -201,3 +201,99 @@ async def start_scan(req: ScanRequest):
 @router.get("/status")
 async def get_scan_status():
     return get_state().scan_state
+
+@router.get("/sessions/{session_id}/findings")
+async def get_session_findings(session_id: str):
+    """
+    Retrieve all findings for a specific session.
+    Fallback endpoint when WebSocket connection is lost.
+    """
+    db = Database.instance()
+    findings = await db.get_findings(session_id)
+    return {"session_id": session_id, "findings": findings, "count": len(findings)}
+
+@router.get("/sessions/{session_id}/evidence")
+async def get_session_evidence(session_id: str):
+    """
+    Retrieve all evidence for a specific session.
+    """
+    db = Database.instance()
+    evidence = await db.get_evidence(session_id)
+    return {"session_id": session_id, "evidence": evidence, "count": len(evidence)}
+
+@router.get("/sessions/{session_id}/issues")
+async def get_session_issues(session_id: str):
+    """
+    Retrieve all issues for a specific session.
+    """
+    db = Database.instance()
+    issues = await db.get_issues(session_id)
+    return {"session_id": session_id, "issues": issues, "count": len(issues)}
+
+@router.get("/results")
+async def get_scan_results():
+    """
+    Get complete scan results for the active or most recent scan session.
+    This is the primary endpoint used by the Swift UI.
+    Returns findings, issues, evidence, and scan metadata.
+    """
+    state = get_state()
+    scan_state = state.scan_state
+    db = Database.instance()
+
+    # Get session_id from active scan, or fall back to most recent session
+    session_id = scan_state.get("session_id") if scan_state else None
+
+    if not session_id:
+        # No active scan - try to get the most recent session from database
+        recent_sessions = await db.fetch_all(
+            "SELECT id, target, status, start_time FROM sessions ORDER BY start_time DESC LIMIT 1",
+            ()
+        )
+        if not recent_sessions or len(recent_sessions) == 0:
+            from fastapi.responses import Response
+            return Response(status_code=204)
+
+        row = recent_sessions[0]
+        session_id = row[0]
+        # Build scan_state from database
+        scan_state = {
+            "target": row[1],
+            "status": row[2],
+            "started_at": row[3],
+            "finished_at": None,
+            "modules": []
+        }
+
+    # Fetch from database
+    findings = await db.get_findings(session_id)
+    issues = await db.get_issues(session_id)
+    evidence = await db.get_evidence(session_id)
+
+    # Build response matching Swift SentinelResults structure
+    result = {
+        "scan": {
+            "target": scan_state.get("target"),
+            "modules": scan_state.get("modules") or [],
+            "status": scan_state.get("status"),
+            "started_at": scan_state.get("started_at"),
+            "finished_at": scan_state.get("finished_at"),
+        },
+        "summary": {
+            "counts": {
+                "findings": len(findings),
+                "issues": len(issues),
+                "killchain_edges": 0,
+                "logs": 0,
+                "phase_results": {},
+            }
+        },
+        "findings": findings,
+        "issues": issues,
+        "evidence": evidence,
+        "killchain": None,
+        "phase_results": {},
+        "logs": []
+    }
+
+    return result
