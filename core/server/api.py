@@ -21,6 +21,7 @@ from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, APIRouter, Request
+from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -302,6 +303,14 @@ v1_router.include_router(realtime.sse_router, prefix="/events")
 # v1_router.include_router(auth.router)  # Auth is dependencies-only
 
 # AI Chat alias route for backwards compatibility
+def _confirm_v1_chat_mount() -> None:
+    for route in v1_router.routes:
+        if isinstance(route, APIRoute) and route.path == "/ai/chat" and "POST" in route.methods:
+            return
+    raise RuntimeError("Expected /v1/ai/chat to be mounted before /v1/chat alias.")
+
+_confirm_v1_chat_mount()
+
 @v1_router.post("/chat", include_in_schema=False)
 async def chat_alias(req: ai.ChatRequest):
     """Alias route for /v1/chat -> /v1/ai/chat for Swift client compatibility."""

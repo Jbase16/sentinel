@@ -296,9 +296,11 @@ public struct SentinelAPIClient: Sendable {
     }
 
     // MARK: - Chat & AI
+    // TODO: Replace with /v1/chat so the chat call matches the backend API.
+
 
     public func chatQuery(question: String) async throws -> String {
-        guard let url = URL(string: "/v1/chat/query", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/chat", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         var request = authenticatedRequest(url: url, method: "POST")
