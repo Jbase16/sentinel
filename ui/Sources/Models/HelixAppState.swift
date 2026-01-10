@@ -132,9 +132,6 @@ public class HelixAppState: ObservableObject {
 
     private func connectServices() {
         print("[AppState] Backend Ready. Connecting Services...")
-        if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
-            cortexStream.connect(url: wsURL)
-        }
         if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/pty") {
             ptyClient.connect(url: ptyURL)
         }
@@ -238,6 +235,16 @@ public class HelixAppState: ObservableObject {
                     guard let rendered else { return }
 
                     self.apiLogItems.append(LogItem(id: UUID(), text: rendered))
+                }
+                .store(in: &cancellables)
+
+            eventClient.graphEventPublisher
+                .receive(on: RunLoop.main)
+                .sink { [weak self] event in
+                    guard let self else { return }
+                    guard !self.isReplaying else { return }
+
+                    self.cortexStream.processEvent(event)
                 }
                 .store(in: &cancellables)
 
@@ -482,9 +489,6 @@ public class HelixAppState: ObservableObject {
         isReplaying = true
         replayCursor = allEvents.count - 1
 
-        // Disconnect legacy socket to prevent interference
-        cortexStream.disconnect()
-
         print("[TimeTravel] Entered Replay Mode. Cursor: \(replayCursor ?? 0)")
     }
 
@@ -492,11 +496,6 @@ public class HelixAppState: ObservableObject {
         guard isReplaying else { return }
         isReplaying = false
         replayCursor = nil
-
-        // Restore Live Connection
-        if let wsURL = URL(string: "ws://127.0.0.1:8765/ws/graph") {
-            cortexStream.connect(url: wsURL)
-        }
 
         // Force refresh to sync with backend state
         refreshGraph()
