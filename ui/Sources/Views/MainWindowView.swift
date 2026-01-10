@@ -138,14 +138,27 @@ extension Color {
 struct BackendStatusBadge: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
+    @State private var showingSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Backend Status
             VStack(alignment: .leading, spacing: 4) {
-                Text("BACKEND")
-                    .font(.caption2)
-                    .foregroundColor(.gray)
+                HStack {
+                    Text("BACKEND")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+
+                    Spacer()
+
+                    Button(action: { showingSettings = true }) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Configure backend runtime")
+                }
 
                 HStack(spacing: 6) {
                     // Conditional branch.
@@ -169,6 +182,9 @@ struct BackendStatusBadge: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.black.opacity(0.4))
             .cornerRadius(4)
+            .sheet(isPresented: $showingSettings) {
+                BackendSettingsView()
+            }
 
             // AI Status
             VStack(alignment: .leading, spacing: 4) {

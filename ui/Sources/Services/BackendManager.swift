@@ -14,6 +14,27 @@
 import AppKit
 import Foundation
 
+enum BackendConfigKeys {
+    static let backendRuntime = "backend.runtime"
+    static let backendPath = "backend.path"
+}
+
+enum BackendRuntimeSelection: String, CaseIterable, Identifiable {
+    case auto
+    case custom
+    case bundled
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .auto: return "Auto"
+        case .custom: return "Custom Path"
+        case .bundled: return "Bundled Runtime"
+        }
+    }
+}
+
 extension Notification.Name {
     static let backendReady = Notification.Name("backendReady")
 }
@@ -53,6 +74,21 @@ class BackendManager: ObservableObject {
     private let healthCheckURL = URL(string: "http://127.0.0.1:8765/v1/ping")!
     private let startupFailureSignatures = [
         "ModuleNotFoundError: No module named 'uvicorn'"
+    ]
+    private let bundledBackendRelativePath = "Backend"
+    private let bundledPythonRelativePath = "PythonRuntime/bin/python3"
+    private let minPythonMajor = 3
+    private let minPythonMinor = 10
+    private let requiredPythonModules = [
+        "fastapi",
+        "uvicorn",
+        "httpx",
+        "aiosqlite",
+        "websockets",
+        "sse_starlette",
+        "python_multipart",
+        "cryptography",
+        "requests",
     ]
     private let startupStateQueue = DispatchQueue(label: "BackendManager.startupState")
     private var startupFailureMessage: String?
@@ -172,27 +208,15 @@ class BackendManager: ObservableObject {
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
 
-        // Find the repository root (contains core/api.py)
-        let possiblePaths = [
-            home.appendingPathComponent("Developer/sentinelforge"),
-            home.appendingPathComponent("Developer/sentinel"),
-            URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
-        ]
-
-        guard
-            let repoPath = possiblePaths.first(where: { path in
-                fileManager.fileExists(
-                    atPath: path.appendingPathComponent("core/server/api.py").path)
-            })
-        else {
-            await MainActor.run { self.status = "Error: Repository not found" }
+        guard let repoPath = resolveBackendRoot(home: home) else {
+            await MainActor.run { self.status = "Error: Backend path not found" }
             return
         }
 
         print("[BackendManager] Repository: \(repoPath.path)")
 
         // Find Python executable (prefer venv)
-        let pythonExecutable = findPythonExecutable(in: repoPath)
+        let pythonExecutable = resolvePythonExecutable(for: repoPath)
         // Guard condition.
         guard let python = pythonExecutable else {
             await MainActor.run { self.status = "Error: Python not found" }
@@ -201,10 +225,19 @@ class BackendManager: ObservableObject {
 
         await MainActor.run {
             self.pythonPath = python.path
-            self.status = "Booting Neural Core..."
+            self.status = "Running Preflight..."
         }
         print("[BackendManager] Python: \(python.path)")
         resetStartupState()
+
+        if let preflightError = await runPreflightChecks(python: python, backendRoot: repoPath) {
+            recordStartupFailure(preflightError)
+            return
+        }
+
+        await MainActor.run {
+            self.status = "Booting Neural Core..."
+        }
 
         // Create and configure the process
         let p = Process()
@@ -428,6 +461,67 @@ class BackendManager: ObservableObject {
         }
     }
 
+    private func resolveBackendRoot(home: URL) -> URL? {
+        let fileManager = FileManager.default
+        let runtime = resolveRuntimeSelection()
+
+        switch runtime {
+        case .custom:
+            if let customPath = UserDefaults.standard.string(forKey: BackendConfigKeys.backendPath),
+                !customPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                let customURL = URL(fileURLWithPath: customPath).standardizedFileURL
+                if fileManager.fileExists(
+                    atPath: customURL.appendingPathComponent("core/server/api.py").path)
+                {
+                    return customURL
+                }
+            }
+            return nil
+        case .bundled:
+            if let bundledURL = Bundle.main.resourceURL?.appendingPathComponent(
+                bundledBackendRelativePath),
+                fileManager.fileExists(
+                    atPath: bundledURL.appendingPathComponent("core/server/api.py").path)
+            {
+                return bundledURL
+            }
+            return nil
+        case .auto:
+            let possiblePaths = [
+                home.appendingPathComponent("Developer/sentinelforge"),
+                home.appendingPathComponent("Developer/sentinel"),
+                URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
+            ]
+
+            return possiblePaths.first(where: { path in
+                fileManager.fileExists(
+                    atPath: path.appendingPathComponent("core/server/api.py").path)
+            })
+        }
+    }
+
+    private func resolvePythonExecutable(for backendRoot: URL) -> URL? {
+        let runtime = resolveRuntimeSelection()
+        switch runtime {
+        case .bundled:
+            if let bundledPython = Bundle.main.resourceURL?.appendingPathComponent(
+                bundledPythonRelativePath),
+                FileManager.default.fileExists(atPath: bundledPython.path)
+            {
+                return bundledPython
+            }
+            return findPythonExecutable(in: backendRoot)
+        case .custom, .auto:
+            return findPythonExecutable(in: backendRoot)
+        }
+    }
+
+    private func resolveRuntimeSelection() -> BackendRuntimeSelection {
+        let rawValue = UserDefaults.standard.string(forKey: BackendConfigKeys.backendRuntime) ?? ""
+        return BackendRuntimeSelection(rawValue: rawValue) ?? .auto
+    }
+
     /// Finds Python executable, preferring virtual environment
     private func findPythonExecutable(in repoPath: URL) -> URL? {
         let fileManager = FileManager.default
@@ -464,6 +558,83 @@ class BackendManager: ObservableObject {
         }
 
         return nil
+    }
+
+    private func runPreflightChecks(python: URL, backendRoot: URL) async -> String? {
+        let script = """
+        import json
+        import sys
+        import importlib.util
+
+        required = \(requiredPythonModules)
+        missing = [name for name in required if importlib.util.find_spec(name) is None]
+        payload = {
+            "python_version": sys.version.split()[0],
+            "missing": missing,
+        }
+        print(json.dumps(payload))
+        """
+
+        let result = runPythonScript(python: python, backendRoot: backendRoot, script: script)
+        guard result.exitCode == 0, let output = result.standardOutput,
+            let data = output.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            let detail = result.standardError ?? "Unknown error"
+            return "Preflight failed: \(detail)"
+        }
+
+        let versionString = json["python_version"] as? String ?? "unknown"
+        let versionComponents = versionString.split(separator: ".").compactMap { Int($0) }
+        if versionComponents.count >= 2 {
+            let major = versionComponents[0]
+            let minor = versionComponents[1]
+            if major < minPythonMajor || (major == minPythonMajor && minor < minPythonMinor) {
+                return "Python \(minPythonMajor).\(minPythonMinor)+ required (found \(versionString))"
+            }
+        }
+
+        if let missing = json["missing"] as? [String], !missing.isEmpty {
+            let missingList = missing.sorted().joined(separator: ", ")
+            return "Missing Python packages: \(missingList)"
+        }
+
+        return nil
+    }
+
+    private func runPythonScript(python: URL, backendRoot: URL, script: String)
+        -> (exitCode: Int32, standardOutput: String?, standardError: String?)
+    {
+        let process = Process()
+        process.executableURL = python
+        process.currentDirectoryURL = backendRoot
+        process.arguments = ["-c", script]
+        var env = ProcessInfo.processInfo.environment
+        env["PYTHONPATH"] = backendRoot.path
+        process.environment = env
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        do {
+            try process.run()
+        } catch {
+            return (exitCode: -1, standardOutput: nil, standardError: error.localizedDescription)
+        }
+
+        process.waitUntilExit()
+
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+
+        let stdout = String(data: stdoutData, encoding: .utf8)?.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        let stderr = String(data: stderrData, encoding: .utf8)?.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+
+        return (exitCode: process.terminationStatus, standardOutput: stdout, standardError: stderr)
     }
 
     @MainActor
