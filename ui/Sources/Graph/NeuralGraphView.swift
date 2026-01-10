@@ -155,8 +155,14 @@ struct NeuralGraphView: NSViewRepresentable {
             mtkView?.setNeedsDisplay(mtkView?.bounds ?? .zero)
 
             // Update overlay position if selected
-            if let id = parent.selectedNodeId, let point = renderer?.projectNode(id: id) {
-                parent.selectedNodePoint = point
+            // Defer to avoid "Modifying state during view update"
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if let id = self.parent.selectedNodeId,
+                    let point = self.renderer?.projectNode(id: id)
+                {
+                    self.parent.selectedNodePoint = point
+                }
             }
         }
 
@@ -172,10 +178,14 @@ struct NeuralGraphView: NSViewRepresentable {
             renderer?.setSelected(id)
 
             // Force immediate overlay update to avoid lag
-            if let id = id, let point = renderer?.projectNode(id: id) {
-                parent.selectedNodePoint = point
-            } else {
-                parent.selectedNodePoint = nil
+            // Defer to avoid "Modifying state during view update"
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if let id = id, let point = self.renderer?.projectNode(id: id) {
+                    self.parent.selectedNodePoint = point
+                } else {
+                    self.parent.selectedNodePoint = nil
+                }
             }
         }
 

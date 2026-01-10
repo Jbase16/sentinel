@@ -279,7 +279,7 @@ async def status():
         "status": "ok",
         "scan_running": scan_running,
         "latest_target": scan_state.get("target") if scan_state else None,
-        "ai": ai_status if ai_status else {},
+        "ai": ai_status,
         "tools": tools_status,
         "scan_state": scan_state,
         "cancel_requested": state.cancel_requested.is_set() if state.cancel_requested else False
