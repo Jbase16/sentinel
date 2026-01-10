@@ -87,7 +87,7 @@ final class LLMService: ObservableObject {
 
             // Do-catch block.
             do {
-                // Use the new Python API streamChat which is context-aware
+                // Use the Python API streamChat which streams plain text chunks
                 for try await token in client.streamChat(prompt: trimmed) {
                     // Conditional branch.
                     if Task.isCancelled { break }

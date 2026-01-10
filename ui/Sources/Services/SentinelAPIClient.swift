@@ -316,7 +316,7 @@ public struct SentinelAPIClient: Sendable {
         return response.response
     }
 
-    /// Stream context-aware chat from Python backend
+    /// Stream context-aware chat from Python backend (plain text chunks, not SSE)
     public func streamChat(prompt: String) -> AsyncThrowingStream<String, Error> {
         print("[Swift] Attempting to stream chat...")
         return AsyncThrowingStream { continuation in
@@ -334,16 +334,9 @@ public struct SentinelAPIClient: Sendable {
                     print("[Swift] Received response headers: \(response)")
 
                     for try await line in bytes.lines {
-                        if line.hasPrefix("data: ") {
-                            let jsonStr = String(line.dropFirst(6))
-                            if jsonStr == "[DONE]" { break }
-                            if let data = jsonStr.data(using: .utf8),
-                                let obj = try? JSONDecoder().decode(
-                                    [String: String].self, from: data),
-                                let token = obj["token"]
-                            {
-                                continuation.yield(token)
-                            }
+                        let chunk = line.trimmingCharacters(in: .newlines)
+                        if !chunk.isEmpty {
+                            continuation.yield(chunk)
                         }
                     }
                     continuation.finish()
