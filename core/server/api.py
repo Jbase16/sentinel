@@ -289,7 +289,6 @@ async def status():
 
 
 # Import routers AFTER v1_router exists
-# Import routers AFTER v1_router exists
 from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost, forge
 
 v1_router.include_router(scans.router)
@@ -297,83 +296,13 @@ v1_router.include_router(ai.router)
 v1_router.include_router(system.router)
 v1_router.include_router(ghost.router, prefix="/ghost")
 v1_router.include_router(forge.router)
-# v1_router.include_router(realtime.router) # Removed from v1_router
+
 v1_router.include_router(cortex.router)
 v1_router.include_router(realtime.sse_router, prefix="/events")
-# v1_router.include_router(auth.router)  # Auth is dependencies-only
 
-# AI Chat alias route for backwards compatibility
-def _confirm_v1_chat_mount() -> None:
-    for route in v1_router.routes:
-        if isinstance(route, APIRoute) and route.path == "/v1/ai/chat" and "POST" in route.methods:
-            return
-    raise RuntimeError("Expected /v1/ai/chat to be mounted before /v1/chat alias.")
-
-_confirm_v1_chat_mount()
-
-@v1_router.post("/chat", include_in_schema=False)
-async def chat_alias(req: ai.ChatRequest):
-    """Alias route for /v1/chat -> /v1/ai/chat for Swift client compatibility."""
-    return await ai.chat_with_ai(req)
-
-# Scan results alias route for Swift client compatibility
-@v1_router.get("/scan/results", include_in_schema=False)
-async def scan_results_alias():
-    """Alias route for /v1/scan/results -> /v1/scans/results for Swift client compatibility."""
-    return await scans.get_scan_results()
-
-# Scan alias routes for backwards compatibility
-@v1_router.post("/scan", include_in_schema=False)
-async def scan_alias(req: scans.ScanRequest):
-    """Alias route for /v1/scan -> /v1/scans/start for Swift client compatibility."""
-    return await scans.start_scan(req)
-
-@v1_router.get("/scan/status", include_in_schema=False)
-async def scan_status_alias():
-    """Alias route for /v1/scan/status -> /v1/scans/status for Swift client compatibility."""
-    return await scans.get_scan_status()
-
-# Graph alias route for backwards compatibility
-@v1_router.get("/graph", include_in_schema=False)
-async def graph_alias():
-    """
-    Alias route for /v1/graph -> Returns current graph state for Swift client compatibility.
-    Returns current Pressure Graph state for Swift client compatibility.
-    """
-    from fastapi.responses import Response
-
-    state = get_state()
-    scan_state = state.scan_state or {}
-    db = Database.instance()
-
-    session_id = scan_state.get("session_id")
-    if not session_id:
-        recent_sessions = await db.fetch_all(
-            "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1",
-            (),
-        )
-        if not recent_sessions:
-            return Response(status_code=204)
-        session_id = recent_sessions[0][0]
-
-    try:
-        session = await state.get_session(session_id)
-        if session and getattr(session, "pressure_graph", None):
-            return session.pressure_graph.to_dict()
-
-        nodes, edges = await db.load_graph_snapshot(session_id)
-        return {
-            "session_id": session_id,
-            "nodes": nodes,
-            "edges": edges,
-            "count": {"nodes": len(nodes), "edges": len(edges)},
-        }
-    except Exception as e:
-        logger.warning(f"[Graph] Failed to get graph state: {e}")
-        return Response(status_code=204)
 
 app.include_router(v1_router)
-# Mount realtime directly to support /ws path
+
 app.include_router(realtime.router)
 
 
