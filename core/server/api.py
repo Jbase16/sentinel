@@ -67,9 +67,28 @@ async def lifespan(app: FastAPI):
     # === STARTUP ===
     state = get_state()
     config = get_config()
+    build_sha = os.getenv("SENTINEL_BUILD_SHA", "dev")
+    build_id = os.getenv("SENTINEL_BUILD_ID", "local")
+    app.state.boot_status = {
+        "state": "starting",
+        "build_sha": build_sha,
+        "build_id": build_id,
+        "module_path": __file__,
+        "db_ready": False,
+        "policy_watcher_ready": False,
+        "nexus_ready": False,
+        "cronus_ready": False,
+        "codex_ready": False,
+    }
 
     setup_logging(config)
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
+    logger.info(
+        "[Startup] build_sha=%s build_id=%s module=%s",
+        build_sha,
+        build_id,
+        __file__,
+    )
 
     _write_boot_manifest(
         "starting",
@@ -91,6 +110,7 @@ async def lifespan(app: FastAPI):
     # Async DB Init
     db = Database.instance()
     await db.init()
+    app.state.boot_status["db_ready"] = True
 
     # Initialize global event sequence counter
     from core.cortex.events import initialize_event_sequence_from_db
@@ -136,6 +156,7 @@ async def lifespan(app: FastAPI):
         watcher.set_reload_callback(reload_policies_on_change)
         await watcher.start()
         logger.info("[Startup] Policy file watcher started")
+        app.state.boot_status["policy_watcher_ready"] = True
 
     except Exception as e:
         logger.error(f"[Startup] Failed to start policy watcher: {e}")
@@ -160,22 +181,27 @@ async def lifespan(app: FastAPI):
 
     # Initialize Codex (Graph Database)
     codex_db.initialize()
+    app.state.boot_status["codex_ready"] = True
 
     # Initialize The Nervous System (Nexus)
     from core.cortex.manager import NexusManager
     nexus_manager = NexusManager()
     nexus_manager.start()
+    app.state.boot_status["nexus_ready"] = True
 
     # Initialize The Time Machine (Cronus)
     from core.cronus.manager import CronusManager
     cronus_manager = CronusManager()
     cronus_manager.start()
+    app.state.boot_status["cronus_ready"] = True
+    app.state.boot_status["state"] = "ready"
 
     yield
 
     # === SHUTDOWN ===
     logger.info("SentinelForge API Shutting Down...")
     _write_boot_manifest("stopping")
+    app.state.boot_status["state"] = "stopping"
 
     if state.session_cleanup_task and not state.session_cleanup_task.done():
         state.session_cleanup_task.cancel()
@@ -307,6 +333,26 @@ async def status():
     }
     
     return response
+
+@v1_router.get("/health")
+async def health():
+    """
+    Lightweight health endpoint for startup diagnostics.
+    """
+    boot_status = getattr(app.state, "boot_status", None)
+    if not boot_status:
+        return {"status": "unknown", "reason": "boot_status_unavailable"}
+    return {
+        "status": boot_status.get("state", "unknown"),
+        "build_sha": boot_status.get("build_sha"),
+        "build_id": boot_status.get("build_id"),
+        "module_path": boot_status.get("module_path"),
+        "db_ready": boot_status.get("db_ready"),
+        "policy_watcher_ready": boot_status.get("policy_watcher_ready"),
+        "nexus_ready": boot_status.get("nexus_ready"),
+        "cronus_ready": boot_status.get("cronus_ready"),
+        "codex_ready": boot_status.get("codex_ready"),
+    }
 
 
 # Import routers AFTER v1_router exists
