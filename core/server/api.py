@@ -197,10 +197,7 @@ async def lifespan(app: FastAPI):
     from core.cronus.manager import CronusManager
     cronus_manager = CronusManager()
     cronus_manager.start()
-<<<<<<< HEAD
     app.state.boot_status["cronus_ready"] = True
-    app.state.boot_status["state"] = "ready"
-=======
     
     # Initialize The Source (Mimic)
     from core.mimic.manager import MimicManager, MimicConfig
@@ -208,7 +205,10 @@ async def lifespan(app: FastAPI):
     # Using get_event_bus() assuming strict mode is global
     mimic_manager = MimicManager.get(get_event_bus()) 
     mimic_manager.start()
->>>>>>> fcb049f (feat(contracts): add Mimic source reconstruction event payloads and schemas)
+    app.state.boot_status["mimic_ready"] = True
+    app.state.boot_status["state"] = "ready"
+
+    yield (feat(contracts): add Mimic source reconstruction event payloads and schemas)
 
     yield
 
