@@ -248,15 +248,36 @@ class EventBus:
 
         # CONTRACT VALIDATION: Ensure event conforms to schema and causal rules
         if self._validate:
+            violations = []
             try:
-                EventContract.validate(event.type, event.payload)
+                violations = EventContract.validate(event.type, event.payload)
             except ContractViolation as e:
-                # In strict mode, this raises. In non-strict, it only logs.
-                # The validate() method already handles logging for non-strict.
-                logger.warning(f"[EventBus] Contract violation: {e}")
-                # Re-raise if we're in strict mode
-                if EventContract._strict_mode:
-                    raise
+                # In strict mode, it raised. We capture violations from the exception.
+                violations = e.violations
+                logger.warning(f"[EventBus] Contract violation (Strict): {e}")
+
+            # If we found violations (either via return or exception), emit governance event
+            if violations:
+                # EMIT CONTRACT_VIOLATION EVENT (Governance)
+                # Prevent recursion: if the violation is FOR a violation event, just panic.
+                if event.type != EventType.CONTRACT_VIOLATION:
+                    try:
+                        self.emit(GraphEvent(
+                            type=EventType.CONTRACT_VIOLATION,
+                            payload={
+                                "offending_event_type": event.type.value,
+                                "violations": violations,
+                                "context": {"original_payload": str(event.payload)[:1000]} # Truncate
+                            }
+                        ))
+                    except Exception as emit_err:
+                        logger.critical(f"[EventBus] FAILED TO EMIT CONTRACT_VIOLATION: {emit_err}")
+
+            # Re-raise if we're in strict mode and it was a real violation
+            if violations and EventContract._strict_mode:
+                # Check if we already have an active exception context, if so raise from it is cleaner
+                # but simple raise is sufficient as we are effectively re-asserting the strictness
+                raise ContractViolation(event.type.value, violations)
 
         # Loop over items.
         for callback in self._subscribers:
@@ -554,9 +575,11 @@ def reset_event_sequence() -> None:
 
     IMPLEMENTATION NOTE:
     Delegates to GlobalSequenceAuthority.reset_for_testing().
+    Also re-initializes it (memory-only) so next calls work.
     """
     from core.base.sequence import GlobalSequenceAuthority
     GlobalSequenceAuthority.reset_for_testing()
+    GlobalSequenceAuthority.initialize_for_testing()
 
 
 # ============================================================================

@@ -25,8 +25,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Callable
+from typing import Any, Dict, List, Optional, Set, Callable, Type
 import logging
+from pydantic import BaseModel, ValidationError
+
+from core.contracts.schemas import (
+    ContractViolationPayload,
+    ResourceGuardTripPayload,
+    TrafficObservedPayload,
+    EventSilencePayload,
+    ToolChurnPayload
+)
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +126,25 @@ class EventType(str, Enum):
     NEXUS_HYPOTHESIS_REFUTED = "nexus_hypothesis_refuted"
     NEXUS_INSIGHT_FORMED = "nexus_insight_formed"
 
+
     # OMEGA - Integration
     OMEGA_RUN_STARTED = "omega_run_started"
     OMEGA_RUN_COMPLETED = "omega_run_completed"
     OMEGA_PHASE_STARTED = "omega_phase_started"
     OMEGA_PHASE_COMPLETED = "omega_phase_completed"
+
+    # GOVERNANCE & SAFETY (Phase 0)
+    CONTRACT_VIOLATION = "contract_violation"
+    RESOURCE_GUARD_TRIP = "resource_guard_trip"
+
+    # GHOST - Passive
+    TRAFFIC_OBSERVED = "traffic_observed"
+    
+    NEXUS_CONTEXT_ATTACHED = "nexus_context_attached"
+    
+    # OBSERVER - Watchdog
+    EVENT_SILENCE = "event_silence"
+    TOOL_CHURN = "tool_churn"
 
 
 # ============================================================================
@@ -138,6 +161,11 @@ class FieldSpec:
     required: bool = True
     validator: Optional[Callable[[Any], bool]] = None
     description: str = ""
+
+@dataclass(frozen=True)
+class PydanticSpec:
+    """Wrapper for Pydantic model validation."""
+    model: Type[BaseModel]
 
     def validate(self, value: Any) -> bool:
         """Check if value satisfies this field spec."""
@@ -172,13 +200,15 @@ class EventSchema:
     def __init__(
         self,
         event_type: EventType,
-        fields: List[FieldSpec],
+        fields: Optional[List[FieldSpec]] = None,
+        model: Optional[Type[BaseModel]] = None,
         preconditions: Optional[List[EventType]] = None,
         description: str = ""
     ):
         self.event_type = event_type
-        self.fields = {f.name: f for f in fields}
-        self.required_fields = {f.name for f in fields if f.required}
+        self.fields = {f.name: f for f in fields} if fields else {}
+        self.required_fields = {f.name for f in fields if f.required} if fields else set()
+        self.model = model
         self.preconditions = preconditions or []
         self.description = description
 
@@ -189,6 +219,22 @@ class EventSchema:
         """
         violations: List[str] = []
 
+        # 1. Pydantic Validation (Preferred)
+        if self.model:
+            try:
+                self.model.model_validate(payload)
+                # If model passes, strictly speaking we are good.
+                # However, if 'fields' were ALSO defined, we could check them too.
+                # For now, Model takes precedence.
+                return [] 
+            except ValidationError as e:
+                # Convert Pydantic errors to readable strings
+                for err in e.errors():
+                    loc = ".".join(str(l) for l in err['loc'])
+                    violations.append(f"{loc}: {err['msg']}")
+                return violations
+
+        # 2. Legacy FieldSpec Validation
         # Check required fields
         for field_name in self.required_fields:
             if field_name not in payload:
@@ -648,13 +694,55 @@ class EventContract:
             ]
         )
 
+        # ----------------------------------------------------------------
+        # GOVERNANCE & SAFETY (Pydantic Backed)
+        # ----------------------------------------------------------------
+        cls._schemas[EventType.CONTRACT_VIOLATION] = EventSchema(
+            event_type=EventType.CONTRACT_VIOLATION,
+            description="Event failed validation.",
+            model=ContractViolationPayload
+        )
+
+        cls._schemas[EventType.RESOURCE_GUARD_TRIP] = EventSchema(
+            event_type=EventType.RESOURCE_GUARD_TRIP,
+            description="Budget limit reached.",
+            model=ResourceGuardTripPayload
+        )
+
+        cls._schemas[EventType.TRAFFIC_OBSERVED] = EventSchema(
+            event_type=EventType.TRAFFIC_OBSERVED,
+            description="Passive traffic observation (redacted).",
+            model=TrafficObservedPayload
+        )
+        
+        cls._schemas[EventType.NEXUS_CONTEXT_ATTACHED] = EventSchema(
+            event_type=EventType.NEXUS_CONTEXT_ATTACHED,
+            description="Nexus session anchored to scan.",
+            fields=[
+                FieldSpec("scan_id", str, required=True),
+                FieldSpec("timestamp", float, required=False),
+            ]
+        )
+        
+        cls._schemas[EventType.EVENT_SILENCE] = EventSchema(
+            event_type=EventType.EVENT_SILENCE,
+            description="Watchdog detected lack of progress.",
+            model=EventSilencePayload
+        )
+
+        cls._schemas[EventType.TOOL_CHURN] = EventSchema(
+            event_type=EventType.TOOL_CHURN,
+            description="Watchdog detected high velocity with no findings.",
+            model=ToolChurnPayload
+        )
+
     @classmethod
-    def validate(cls, event_type: EventType, payload: Dict[str, Any]) -> None:
+    def validate(cls, event_type: EventType, payload: Dict[str, Any]) -> List[str]:
         """
         Validate an event against the contract.
 
-        Raises ContractViolation in strict mode.
-        Logs warning in non-strict mode.
+        Returns list of violation messages.
+        Raises ContractViolation within this method if strict mode is enabled.
         """
         cls._init_schemas()
 
@@ -677,6 +765,8 @@ class EventContract:
                 raise ContractViolation(event_type.value, violations)
             else:
                 logger.warning("[EventContract] Violations for %s: %s", event_type.value, violations)
+        
+        return violations
 
     @classmethod
     def get_schema(cls, event_type: EventType) -> Optional[EventSchema]:
