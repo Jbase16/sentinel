@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
+from functools import partial
 
 from core.cortex.events import EventBus, GraphEvent
 from core.contracts.events import EventType
@@ -21,7 +23,7 @@ class MimicSession:
     hidden_routes: Set[str] = field(default_factory=set)
     secrets: List[Secret] = field(default_factory=list)
 
-    def ingest_asset(self, asset: Asset) -> None:
+    async def ingest_asset(self, asset: Asset) -> None:
         self.assets[asset.asset_id] = asset
 
         text = self._decode(asset.content)
@@ -29,10 +31,17 @@ class MimicSession:
             return
 
         if asset.url.lower().endswith(".map"):
-            self._process_sourcemap(asset.asset_id, text)
+            # SourceMap parsing is also CPU heavy, offload it
+            await self._process_sourcemap(asset.asset_id, text)
             return
 
-        for r in mine_routes(asset.asset_id, text):
+        # Offload Mining to ThreadPool to prevent EventLoop blocking
+        # This is critical for high-throughput scanning of large JS bundles
+        loop = asyncio.get_running_loop()
+        
+        # Run Route Mining
+        routes = await loop.run_in_executor(None, mine_routes, asset.asset_id, text)
+        for r in routes:
             if r.hidden:
                 if r.route not in self.hidden_routes:
                     self.hidden_routes.add(r.route)
@@ -68,7 +77,9 @@ class MimicSession:
                         )
                     )
 
-        for s in mine_secrets(asset.asset_id, text):
+        # Run Secret Mining
+        secrets = await loop.run_in_executor(None, mine_secrets, asset.asset_id, text)
+        for s in secrets:
             self.secrets.append(s)
             self.bus.emit(
                 GraphEvent(
@@ -117,7 +128,7 @@ class MimicSession:
         except Exception:
             return None
 
-    def _process_sourcemap(self, asset_id: str, text: str) -> None:
+    async def _process_sourcemap(self, asset_id: str, text: str) -> None:
         try:
             obj = json.loads(text)
         except Exception:
@@ -127,11 +138,15 @@ class MimicSession:
         if not isinstance(sources_content, list):
             return
 
+        loop = asyncio.get_running_loop()
+
         for i, src in enumerate(sources_content):
             if not isinstance(src, str) or not src.strip():
                 continue
 
-            for r in mine_routes(asset_id, src):
+            # Offload map-based mining as well
+            routes = await loop.run_in_executor(None, mine_routes, asset_id, src)
+            for r in routes:
                 dest = self.hidden_routes if r.hidden else self.routes
                 if r.route in dest:
                     continue
@@ -152,7 +167,8 @@ class MimicSession:
                     )
                 )
 
-            for s in mine_secrets(asset_id, src):
+            secrets = await loop.run_in_executor(None, mine_secrets, asset_id, src)
+            for s in secrets:
                 self.secrets.append(s)
                 self.bus.emit(
                     GraphEvent(

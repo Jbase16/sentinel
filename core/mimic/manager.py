@@ -37,8 +37,8 @@ class MimicManager:
         self._config = config
         self._sessions: Dict[str, MimicSession] = {}
 
-        # Subscribe only to what we need (no global handler ambiguity)
-        self._bus.subscribe(self._on_download_started)
+        # Subscribe only to what we need (optimized dispatch)
+        self._bus.subscribe(self._on_download_started, event_types=[EventType.MIMIC_DOWNLOAD_STARTED])
         # Note: Ideally subscribe(EventType.MIMIC_DOWNLOAD_STARTED, ...) but EventBus currently 
         # supports basic callback. We'll filter inside. 
         # WAIT: The EventBus implementation I see in `core/cortex/events.py` just appends to `_subscribers`.
@@ -75,10 +75,7 @@ class MimicManager:
         self._sessions.pop(scan_id, None)
 
     def _on_download_started(self, event: GraphEvent) -> None:
-        # Implicit filter if bus is global
-        if event.type != EventType.MIMIC_DOWNLOAD_STARTED:
-            return
-            
+        # Bus dispatch guarantees type
         try:
             scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id")
             if not scan_id:
@@ -143,8 +140,8 @@ class MimicManager:
                 )
             )
 
-            # Process deterministically
-            session.ingest_asset(asset)
+            # Process deterministically (async ingest for offloaded mining)
+            await session.ingest_asset(asset)
 
         self._bus.emit(
             GraphEvent(

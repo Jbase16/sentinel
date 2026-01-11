@@ -219,12 +219,27 @@ class EventBus:
         
         Validation is now mandatory (Phase 1.5/3 Hardening).
         """
-        self._subscribers: List[Callable[[GraphEvent], None]] = []
+        # Optimized dispatch: Map[EventType, List[Callable]]
+        self._subscribers: Dict[str, List[Callable[[GraphEvent], None]]] = {}
+        self._wildcard_subscribers: List[Callable[[GraphEvent], None]] = []
         self._last_event_sequence: int = 0  # Track last sequence for diagnostics
 
-    def subscribe(self, callback: Callable[[GraphEvent], None]):
-        """Function subscribe."""
-        self._subscribers.append(callback)
+    def subscribe(self, callback: Callable[[GraphEvent], None], event_types: Optional[List[str]] = None):
+        """
+        Subscribe to events.
+        
+        Args:
+            callback: Function to handle the event.
+            event_types: Optional list of EventTypes to subscribe to. 
+                         If None, subscribes to ALL events (wildcard).
+        """
+        if event_types is None:
+            self._wildcard_subscribers.append(callback)
+        else:
+            for et in event_types:
+                if et not in self._subscribers:
+                    self._subscribers[et] = []
+                self._subscribers[et].append(callback)
 
     @property
     def last_event_sequence(self) -> int:
@@ -233,7 +248,7 @@ class EventBus:
 
     def emit(self, event: GraphEvent):
         """
-        Broadcast event to all subscribers.
+        Broadcast event to subscribers.
 
         CONTRACT VALIDATION:
         Before broadcasting, the event is ALWAYS validated against the EventContract.
@@ -276,12 +291,21 @@ class EventBus:
                 # but simple raise is sufficient as we are effectively re-asserting the strictness
                 raise ContractViolation(event.type.value, violations)
 
-        # Loop over items.
-        for callback in self._subscribers:
+        # DISPATCH (O(1) lookup + O(M) subscribers)
+        # 1. Specific subscribers
+        if event.type in self._subscribers:
+            for callback in self._subscribers[event.type]:
+                try:
+                    callback(event)
+                except Exception as e:
+                    logger.error(f"[EventBus] Subscriber failed on {event.type}: {e}")
+
+        # 2. Wildcard subscribers (e.g., logging, debuggers)
+        for callback in self._wildcard_subscribers:
             try:
                 callback(event)
             except Exception as e:
-                logger.error(f"[EventBus] Subscriber failed: {e}")
+                logger.error(f"[EventBus] Wildcard subscriber failed on {event.type}: {e}")
 
     # --- Convenience Methods ---
 
