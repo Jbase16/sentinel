@@ -627,6 +627,7 @@ class EventContract:
             description="Sitemap comparison completed.",
             preconditions=[EventType.CRONUS_DIFF_STARTED],
             fields=[
+                FieldSpec("scan_id", str, required=False, description="Correlated scan context"),
                 FieldSpec("target", str, required=True),
                 FieldSpec("deleted_count", int, required=True, description="Zombie candidates"),
                 FieldSpec("stable_count", int, required=True),
@@ -640,6 +641,7 @@ class EventContract:
             event_type=EventType.CRONUS_HUNT_STARTED,
             description="Zombie endpoint hunting started.",
             fields=[
+                FieldSpec("scan_id", str, required=False, description="Correlated scan context"),
                 FieldSpec("target", str, required=True),
                 FieldSpec("candidate_count", int, required=True, description="Endpoints to probe"),
             ]
@@ -662,6 +664,7 @@ class EventContract:
             event_type=EventType.CRONUS_ZOMBIE_CONFIRMED,
             description="Zombie endpoint confirmed active.",
             fields=[
+                FieldSpec("scan_id", str, required=False, description="Correlated scan context"),
                 FieldSpec("path", str, required=True, description="Endpoint path"),
                 FieldSpec("method", str, required=False, description="HTTP method"),
                 FieldSpec("status_code", int, required=True, description="HTTP response code"),
@@ -673,6 +676,7 @@ class EventContract:
             event_type=EventType.CRONUS_ZOMBIE_DENIED,
             description="Zombie endpoint exists but requires authentication.",
             fields=[
+                FieldSpec("scan_id", str, required=False, description="Correlated scan context"),
                 FieldSpec("path", str, required=True),
                 FieldSpec("method", str, required=False),
                 FieldSpec("status_code", int, required=True, description="401 or 403"),
