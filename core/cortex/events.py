@@ -224,6 +224,10 @@ class EventBus:
         self._subscribers: Dict[EventType, List[Callable[[GraphEvent], None]]] = {}
         self._wildcard_subscribers: List[Callable[[GraphEvent], None]] = []
         self._last_event_sequence: int = 0  # Track last sequence for diagnostics
+        
+        # Identity
+        # Use simple global accessor (defined in this module)
+        self._run_id = get_run_id()
 
     def subscribe(self, callback: Callable[[GraphEvent], None], event_types: Optional[List[EventType]] = None) -> None:
         """
@@ -263,14 +267,16 @@ class EventBus:
              logger.warning(f"[EventBus] Event run_id mismatch: {event.run_id} != {self._run_id}")
 
         # INJECTION: Ensure payload has scan_id if envelope has it (Point 3 of Audit)
-        if event.scan_id and "scan_id" not in event.payload:
-            event.payload["scan_id"] = event.scan_id
+        # Prevent mutation of original event (Point 5 of Audit)
+        payload = dict(event.payload or {})
+        if event.scan_id and "scan_id" not in payload:
+            payload["scan_id"] = event.scan_id
 
         # CONTRACT VALIDATION: Ensure event conforms to schema and causal rules
         # Mandatory enforcement
         violations = []
         try:
-            violations = EventContract.validate(event.type, event.payload)
+            violations = EventContract.validate(event.type, payload)
         except ContractViolation as e:
             # In strict mode, it raised. We capture violations from the exception.
             violations = e.violations
@@ -317,107 +323,98 @@ class EventBus:
 
     # --- Convenience Methods ---
 
-    def emit_decision_made(self, intent: str, reason: str, context: Dict, source: str = "strategos", session_id: Optional[str] = None):
-        """Function emit_decision_made."""
+    def emit_decision_made(
+        self,
+        intent: str,
+        reason: str,
+        context: Dict,
+        source: str = "strategos",
+        scan_id: Optional[str] = None,
+    ):
         payload = {
             "intent": intent,
             "reason": reason,
             "context": context,
-            "source": source
+            "source": source,
         }
-        if session_id:
-            payload["session_id"] = session_id
+        if scan_id:
+            payload["scan_id"] = scan_id
 
-        self.emit(GraphEvent(
-            type=GraphEventType.DECISION_MADE,
-            payload=payload
-        ))
+        self.emit(GraphEvent(type=EventType.DECISION_MADE, payload=payload, scan_id=scan_id))
 
-    def emit_narrative_emitted(self, narrative: str, decision_id: str, decision_type: str, context: Dict, session_id: Optional[str] = None):
-        """Function emit_narrative_emitted."""
+    def emit_narrative_emitted(
+        self,
+        narrative: str,
+        decision_id: str,
+        decision_type: str,
+        context: Dict,
+        scan_id: Optional[str] = None,
+    ):
         payload = {
             "narrative": narrative,
             "decision_id": decision_id,
             "decision_type": decision_type,
-            "context": context
+            "context": context,
         }
-        if session_id:
-            payload["session_id"] = session_id
+        if scan_id:
+            payload["scan_id"] = scan_id
 
-        self.emit(GraphEvent(
-            type=GraphEventType.NARRATIVE_EMITTED,
-            payload=payload
-        ))
+        self.emit(GraphEvent(type=EventType.NARRATIVE_EMITTED, payload=payload, scan_id=scan_id))
 
-    def emit_scan_phase_changed(self, phase: str, previous_phase: Optional[str] = None, session_id: Optional[str] = None):
-        """Function emit_scan_phase_changed."""
-        payload = {
-            "phase": phase,
-            "previous_phase": previous_phase
-        }
-        if session_id:
-            payload["session_id"] = session_id
+    def emit_scan_phase_changed(
+        self,
+        phase: str,
+        previous_phase: Optional[str] = None,
+        scan_id: Optional[str] = None,
+    ):
+        payload = {"phase": phase, "previous_phase": previous_phase}
+        if scan_id:
+            payload["scan_id"] = scan_id
 
-        self.emit(GraphEvent(
-            type=GraphEventType.SCAN_PHASE_CHANGED,
-            payload=payload
-        ))
+        self.emit(GraphEvent(type=EventType.SCAN_PHASE_CHANGED, payload=payload, scan_id=scan_id))
 
-    def emit_scan_started(self, target: str, allowed_tools: List[str], session_id: str):
-        """Function emit_scan_started."""
-        self.emit(GraphEvent(
-            type=GraphEventType.SCAN_STARTED,
-            payload={
-                "target": target,
-                "allowed_tools": allowed_tools,
-                "session_id": session_id
-            }
-        ))
+    def emit_scan_started(self, target: str, allowed_tools: List[str], scan_id: str):
+        payload = {"target": target, "allowed_tools": allowed_tools, "scan_id": scan_id}
+        self.emit(GraphEvent(type=EventType.SCAN_STARTED, payload=payload, scan_id=scan_id))
 
-    def emit_scan_completed(self, status: str, findings_count: int, duration: float, session_id: Optional[str] = None):
-        """Function emit_scan_completed."""
-        payload = {
-            "status": status,
-            "findings_count": findings_count,
-            "duration_seconds": duration
-        }
-        if session_id:
-            payload["session_id"] = session_id
+    def emit_scan_completed(
+        self,
+        status: str,
+        findings_count: int,
+        duration: float,
+        scan_id: Optional[str] = None,
+    ):
+        payload = {"status": status, "findings_count": findings_count, "duration_seconds": duration}
+        if scan_id:
+            payload["scan_id"] = scan_id
 
-        self.emit(GraphEvent(
-            type=GraphEventType.SCAN_COMPLETED,
-            payload=payload
-        ))
+        self.emit(GraphEvent(type=EventType.SCAN_COMPLETED, payload=payload, scan_id=scan_id))
 
-    def emit_tool_invoked(self, tool: str, target: str, args: List[str], session_id: Optional[str] = None):
-        """Function emit_tool_invoked."""
-        payload = {
-            "tool": tool,
-            "target": target,
-            "args": args
-        }
-        if session_id:
-            payload["session_id"] = session_id
+    def emit_tool_invoked(
+        self,
+        tool: str,
+        target: str,
+        args: List[str],
+        scan_id: Optional[str] = None,
+    ):
+        payload = {"tool": tool, "target": target, "args": args}
+        if scan_id:
+            payload["scan_id"] = scan_id
 
-        self.emit(GraphEvent(
-            type=GraphEventType.TOOL_STARTED,
-            payload=payload
-        ))
+        self.emit(GraphEvent(type=EventType.TOOL_STARTED, payload=payload, scan_id=scan_id))
 
-    def emit_tool_completed(self, tool: str, exit_code: int, findings_count: int, session_id: Optional[str] = None):
-        """Function emit_tool_completed."""
-        payload = {
-            "tool": tool,
-            "exit_code": exit_code,
-            "findings_count": findings_count
-        }
-        if session_id:
-            payload["session_id"] = session_id
+    def emit_tool_completed(
+        self,
+        tool: str,
+        exit_code: int,
+        findings_count: int,
+        scan_id: Optional[str] = None,
+    ):
+        payload = {"tool": tool, "exit_code": exit_code, "findings_count": findings_count}
+        if scan_id:
+            payload["scan_id"] = scan_id
 
-        self.emit(GraphEvent(
-            type=GraphEventType.TOOL_COMPLETED,
-            payload=payload
-        ))
+        self.emit(GraphEvent(type=EventType.TOOL_COMPLETED, payload=payload, scan_id=scan_id))
 
     # --- CRONUS Event Convenience Methods ---
 

@@ -424,23 +424,25 @@ class EventContract:
         # ----------------------------------------------------------------
         cls._schemas[EventType.TOOL_STARTED] = EventSchema(
             event_type=EventType.TOOL_STARTED,
-            description="A security tool has been invoked.",
+            description="External tool execution started.",
             preconditions=[EventType.SCAN_STARTED],
             fields=[
                 FieldSpec("tool", str, required=True),
                 FieldSpec("target", str, required=True),
-                FieldSpec("args", list, required=False),
+                FieldSpec("scan_id", str, required=True),
+                FieldSpec("args", list, required=True),
             ]
         )
 
         cls._schemas[EventType.TOOL_COMPLETED] = EventSchema(
             event_type=EventType.TOOL_COMPLETED,
-            description="A security tool has finished execution.",
+            description="External tool execution finished.",
             preconditions=[EventType.TOOL_STARTED],
             fields=[
                 FieldSpec("tool", str, required=True),
                 FieldSpec("exit_code", int, required=True),
-                FieldSpec("findings_count", int, required=True),
+                FieldSpec("findings_count", int, required=False),
+                FieldSpec("scan_id", str, required=True),
             ]
         )
 
@@ -680,6 +682,51 @@ class EventContract:
         )
 
         # ----------------------------------------------------------------
+        # MIMIC - Source Reconstruction (Pydantic Backed)
+        # ----------------------------------------------------------------
+        cls._schemas[EventType.MIMIC_DOWNLOAD_STARTED] = EventSchema(
+            event_type=EventType.MIMIC_DOWNLOAD_STARTED,
+            description="Asset download initiated.",
+            model=MimicDownloadStartedPayload
+        )
+
+        cls._schemas[EventType.MIMIC_ASSET_DOWNLOADED] = EventSchema(
+            event_type=EventType.MIMIC_ASSET_DOWNLOADED,
+            description="Asset download completed (individual).",
+            model=MimicAssetDownloadedPayload
+        )
+
+        cls._schemas[EventType.MIMIC_DOWNLOAD_COMPLETED] = EventSchema(
+            event_type=EventType.MIMIC_DOWNLOAD_COMPLETED,
+            description="All downloads for batch/session completed.",
+            model=MimicDownloadCompletedPayload
+        )
+
+        cls._schemas[EventType.MIMIC_ROUTE_FOUND] = EventSchema(
+            event_type=EventType.MIMIC_ROUTE_FOUND,
+            description="Endpoint/Route extracted from source.",
+            model=MimicRouteFoundPayload
+        )
+
+        cls._schemas[EventType.MIMIC_HIDDEN_ROUTE_FOUND] = EventSchema(
+            event_type=EventType.MIMIC_HIDDEN_ROUTE_FOUND,
+            description="Hidden/Heuristic route discovered.",
+            model=MimicRouteFoundPayload
+        )
+
+        cls._schemas[EventType.MIMIC_SECRET_FOUND] = EventSchema(
+            event_type=EventType.MIMIC_SECRET_FOUND,
+            description="Secret/Token discovered in source.",
+            model=MimicSecretFoundPayload
+        )
+
+        cls._schemas[EventType.MIMIC_ANALYSIS_COMPLETED] = EventSchema(
+            event_type=EventType.MIMIC_ANALYSIS_COMPLETED,
+            description="Mimic analysis session finished.",
+            model=MimicAnalysisCompletedPayload
+        )
+        
+        # ----------------------------------------------------------------
         # NEXUS - Hypothesis Engine
         # ----------------------------------------------------------------
         # Unified Pydantic Contract (Point 1 of Audit)
@@ -862,10 +909,33 @@ if __name__ == "__main__":
         EventContract.reset_causal_state()
 
         try:
+            # 1. Valid event
+            print("Test 1: Valid Event...")
             validate_event(EventType.SCAN_STARTED, {
                 "target": "http://example.com",
-                "session_id": "test-123",
+                "scan_id": "test-123",
                 "allowed_tools": ["nmap", "httpx"]
+            })
+            print("✅ SCAN_STARTED valid.")
+            print("✅ SCAN_STARTED valid.")
+            
+            # 2. Invalid event
+            print("\nTest 2: Expecting Failure (Missing Fields)...")
+            try:
+                validate_event(EventType.SCAN_STARTED, {
+                    "target": "http://example.com"
+                    # Missing scan_id and allowed_tools
+                })
+            except ContractViolation as e:
+                print(f"✅ Caught expected violation: {e}")
+
+            # 3. Causal Check
+            print("\nTest 3: Causal Integrity...")
+            # Start verify
+            validate_event(EventType.SCAN_STARTED, {
+                "target": "http://example.com",
+                "scan_id": "causal-test",
+                "allowed_tools": []
             })
             print("✓ SCAN_STARTED validated")
 
@@ -896,7 +966,7 @@ if __name__ == "__main__":
         try:
             validate_event(EventType.SCAN_STARTED, {
                 "target": "http://example.com",
-                "session_id": "test-456",
+                "scan_id": "test-456",
                 "allowed_tools": []
             })
             validate_event(EventType.TOOL_COMPLETED, {

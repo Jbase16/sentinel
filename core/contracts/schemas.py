@@ -95,7 +95,7 @@ class ToolChurnPayload(OmegaEventPayload):
     findings_in_window: int
     is_assumed_zero_findings: bool = True # Heuristic: we assume 0 if we haven't seen FINDING_CREATED
 
-class OrphanEventPayload(OmegaEventPayload):
+class OrphanEventPayload(EventPayload):
     """
     Payload for ORPHAN_EVENT_DROPPED.
     Emitted when an event is received for a non-existent or missing scan session.
@@ -168,6 +168,7 @@ class HypothesisPayload(EventPayload):
     """
     model_config = ConfigDict(extra="forbid")
 
+    scan_id: str = Field(..., min_length=1, description="Canonical scan identifier")
     hypothesis_id: str = Field(..., min_length=1)
     confidence: float = Field(..., ge=0.0, le=1.0, description="Bounded probability [0.0, 1.0]")
     summary: str = Field(..., min_length=5, description="One-line human readable summary")
