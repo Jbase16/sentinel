@@ -4,7 +4,7 @@ Verification of Rule Logic and Confidence Arithmetic.
 """
 import pytest
 from core.cortex.events import EventBus, GraphEvent
-from core.contracts.events import EventType
+from core.contracts.events import EventType, EventContract
 from core.reasoning.engine import ReasoningEngine
 from core.reasoning.models import Confidence
 from core.base.sequence import GlobalSequenceAuthority
@@ -34,8 +34,24 @@ def test_confidence_arithmetic():
     assert c.value == 0.0
 
 def test_admin_surface_rule():
+    ReasoningEngine.reset_for_testing()
+    EventContract.set_strict_mode(True)
+    EventContract.reset_causal_state()
+    
     bus = EventBus()
-    engine = ReasoningEngine(bus) # Fresh instance
+    
+    scan_id = "test_scan"
+    bus.emit(GraphEvent(
+        type=EventType.SCAN_STARTED,
+        scan_id=scan_id,
+        payload={
+            "target": "http://test",
+            "scan_id": scan_id, # Canonical
+            "allowed_tools": ["mimic"]
+        }
+    ))
+    
+    engine = ReasoningEngine.get(bus) # Fresh instance
     
     evidence = []
     def spy(event: GraphEvent):
@@ -47,9 +63,9 @@ def test_admin_surface_rule():
     # Trigger
     bus.emit(GraphEvent(
         type=EventType.MIMIC_ROUTE_FOUND,
-        scan_id="test_scan",
+        scan_id=scan_id,
         payload={
-            "scan_id": "test_scan",
+            "scan_id": scan_id,
             "asset_id": "a1",
             "route": "/internal/config",
             "confidence": 80

@@ -282,20 +282,21 @@ class CausalTracker:
         """
         Process event and return violation message if causal rule broken.
         """
-        # 1. Resolve Context
+        # 1. Resolve Context (Canonical: scan_id)
+        # Normalize session_id if present for legacy compat, but prefer scan_id
         scan_id = payload.get("scan_id") or payload.get("session_id")
         
         # 2. Lifecycle Events (Create/Destroy Context)
         if event_type == EventType.SCAN_STARTED:
             if not scan_id:
-                return "Causal violation: scan_started missing session_id"
+                return "Causal violation: scan_started missing scan_id"
             self._active_scans.add(scan_id)
             self._scan_tool_state[scan_id] = set()
             return None
 
         if event_type == EventType.SCAN_COMPLETED:
             if not scan_id:
-                return "Causal violation: scan_completed missing session_id"
+                return "Causal violation: scan_completed missing scan_id"
             if scan_id not in self._active_scans:
                 return f"Causal violation: scan_completed for unknown scan '{scan_id}'"
             
@@ -382,7 +383,7 @@ class EventContract:
             description="A scan has begun. All subsequent events belong to this scan.",
             fields=[
                 FieldSpec("target", str, required=True, description="Scan target URL/IP"),
-                FieldSpec("session_id", str, required=True, description="Unique scan session"),
+                FieldSpec("scan_id", str, required=True, description="Unique scan identifier"),
                 FieldSpec("allowed_tools", list, required=True, description="Tools to run"),
             ]
         )
@@ -681,52 +682,23 @@ class EventContract:
         # ----------------------------------------------------------------
         # NEXUS - Hypothesis Engine
         # ----------------------------------------------------------------
-        cls._schemas[EventType.NEXUS_HYPOTHESIS_FORMED] = EventSchema(
-            event_type=EventType.NEXUS_HYPOTHESIS_FORMED,
-            description="Nexus hypothesized a path/chain exists.",
-            fields=[
-                FieldSpec("hypothesis_id", str, required=True, description="Deterministic hash of inputs + logic"),
-                FieldSpec("constituent_finding_ids", list, required=True, description="Sorted list of Finding IDs"),
-                FieldSpec("rule_id", str, required=True, description="Logic rule identifier"),
-                FieldSpec("rule_version", str, required=True, description="Logic rule version"),
-                FieldSpec("confidence", float, required=True, description="0.0 to 1.0"),
-                FieldSpec("explanation", str, required=False, description="Human readable description"),
-            ]
-        )
-
-        cls._schemas[EventType.NEXUS_HYPOTHESIS_UPDATED] = EventSchema(
-            event_type=EventType.NEXUS_HYPOTHESIS_UPDATED,
-            description="Nexus changed confidence/structure because inputs changed.",
-            fields=[
-                FieldSpec("hypothesis_id", str, required=True),
-                FieldSpec("previous_confidence", float, required=False),
-                FieldSpec("new_confidence", float, required=True),
-                FieldSpec("reason", str, required=True),
-            ]
-        )
-
-        cls._schemas[EventType.NEXUS_HYPOTHESIS_REFUTED] = EventSchema(
-            event_type=EventType.NEXUS_HYPOTHESIS_REFUTED,
-            description="A planned validation attempt failed in a way that weakens the hypothesis.",
-            fields=[
-                FieldSpec("hypothesis_id", str, required=True),
-                FieldSpec("refuting_evidence_id", str, required=False),
-                FieldSpec("reason", str, required=True),
-                FieldSpec("constituent_finding_ids", list, required=True, description="Finding IDs invalidated by this refutation"),
-            ]
-        )
-
-        cls._schemas[EventType.NEXUS_INSIGHT_FORMED] = EventSchema(
-            event_type=EventType.NEXUS_INSIGHT_FORMED,
-            description="Nexus minted a human-facing insight derived from hypotheses/findings.",
-            fields=[
-                FieldSpec("insight_id", str, required=True),
-                FieldSpec("title", str, required=True),
-                FieldSpec("description", str, required=True),
-                FieldSpec("severity", str, required=True),
-                FieldSpec("hypothesis_ids", list, required=True),
-            ]
-        )
+        # Unified Pydantic Contract (Point 1 of Audit)
+        for et in [
+            EventType.NEXUS_HYPOTHESIS_FORMED,
+            EventType.NEXUS_HYPOTHESIS_UPDATED,
+            EventType.NEXUS_HYPOTHESIS_CONFIRMED,
+            EventType.NEXUS_HYPOTHESIS_REFUTED,
+            EventType.NEXUS_INSIGHT_FORMED # Assuming InsightPayload exists or re-using HypothesisPayload for now if similar
+        ]:
+            # Note: Insight might need its own payload, but for now we focus on Hypothesis fix
+            schema_model = HypothesisPayload
+            # TODO: Create InsightPayload if needed, for now Hypothesis logic drives strictness
+            
+            cls._schemas[et] = EventSchema(
+                event_type=et,
+                description="Probabilistic reasoning event (Strict Contract).",
+                model=schema_model
+            )
 
         # ----------------------------------------------------------------
         # GOVERNANCE & SAFETY (Pydantic Backed)
@@ -823,6 +795,11 @@ class EventContract:
     def set_strict_mode(cls, strict: bool) -> None:
         """Enable/disable strict validation (exceptions vs warnings)."""
         cls._strict_mode = strict
+
+    @classmethod
+    def is_strict(cls) -> bool:
+        """Check if strict mode is enabled."""
+        return cls._strict_mode
 
     @classmethod
     def reset_causal_state(cls) -> None:

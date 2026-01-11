@@ -5,7 +5,7 @@ Verification ensuring Hypotheses do NOT pollute the KnowledgeGraph.
 import pytest
 from unittest.mock import MagicMock
 from core.cortex.events import EventBus, GraphEvent
-from core.contracts.events import EventType
+from core.contracts.events import EventType, EventContract
 from core.reasoning.engine import ReasoningEngine
 from core.base.sequence import GlobalSequenceAuthority
 from itertools import count
@@ -24,7 +24,24 @@ def setup_module():
 
 def test_hypothesis_isolation():
     # Setup
-    bus = EventBus()
+    ReasoningEngine.reset_for_testing()
+    EventContract.set_strict_mode(True)
+    EventContract.reset_causal_state()
+    
+    # Need to spoof a SCAN_STARTED to satisfy CausalTracker
+    # because strict mode checks causal predecessors
+    scan_id = "isolation_test_scan"
+    bus = EventBus() # Moved bus initialization after EventContract setup
+    bus.emit(GraphEvent(
+        type=EventType.SCAN_STARTED,
+        scan_id=scan_id,
+        payload={
+            "target": "http://test",
+            "scan_id": scan_id,
+            "allowed_tools": ["mimic"]
+        }
+    ))
+
     engine = ReasoningEngine.get(bus)
     engine.start()
     
@@ -39,7 +56,7 @@ def test_hypothesis_isolation():
     bus.subscribe(spy)
     
     # Trigger a hypothesis via Mimic event
-    scan_id = "isolation_test_scan"
+    # scan_id = "isolation_test_scan" # This line is now defined earlier
     trigger = GraphEvent(
         type=EventType.MIMIC_ROUTE_FOUND,
         scan_id=scan_id,

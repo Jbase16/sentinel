@@ -215,8 +215,6 @@ async def lifespan(app: FastAPI):
     
     app.state.boot_status["state"] = "ready"
 
-    yield (feat(contracts): add Mimic source reconstruction event payloads and schemas)
-
     yield
 
     # === SHUTDOWN ===

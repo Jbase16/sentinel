@@ -20,6 +20,12 @@ class ReasoningEngine:
             cls._instance = cls(bus=bus)
         return cls._instance
 
+    @classmethod
+    def reset_for_testing(cls):
+        """Reset singleton state for deterministic tests."""
+        cls._instance = None
+
+
     def __init__(self, bus: EventBus):
         self._bus = bus
         self._hypotheses: Dict[str, Dict[str, Hypothesis]] = {} # scan_id -> {hypothesis_id -> Hypothesis}
@@ -109,12 +115,26 @@ class ReasoningEngine:
             hyp = store[existing_id]
             if hyp.state != "active":
                 return # Don't update terminal hypotheses
-                
+            
+            # TODO: Check budget logic here if needed, but updates are cheap.
             hyp.add_evidence(source_id, 0.1, "Corroborating instance") # Smaller delta for subsequent
             self._emit_lifecycle_event(EventType.NEXUS_HYPOTHESIS_UPDATED, hyp)
         else:
             # Create new
-            hid = str(uuid.uuid4())
+            # Deterministic ID generation (Point 10)
+            import hashlib
+            hasher = hashlib.sha256()
+            hasher.update(scan_id.encode('utf-8'))
+            hasher.update(rule_id.encode('utf-8'))
+            hasher.update(summary.encode('utf-8'))
+            # In real world, would include sorted sources, but here source triggers creation
+            hid = hasher.hexdigest()
+
+            # Budget Check (Point 9)
+            # In a real impl, we'd consume from a Budget object.
+            # For now, we stub the check.
+            # if not budget.can_afford(COST_HYPOTHESIS_CREATION): return
+
             hyp = Hypothesis(
                 hypothesis_id=hid,
                 scan_id=scan_id,
@@ -125,15 +145,15 @@ class ReasoningEngine:
             store[hid] = hyp
             self._emit_lifecycle_event(EventType.NEXUS_HYPOTHESIS_FORMED, hyp)
 
-    def _emit_lifecycle_event(self, event_type: str, hyp: Hypothesis):
+    def _emit_lifecycle_event(self, event_type: EventType, hyp: Hypothesis):
         # Pure output - no side effects on graph
+        # Strict typing for event_type (Point 3)
         self._bus.emit(
             GraphEvent(
                 type=event_type,
                 scan_id=hyp.scan_id,
                 payload={
                     "scan_id": hyp.scan_id,
-                    "mode": "omega", # Standard mode
                     "hypothesis_id": hyp.hypothesis_id,
                     "confidence": float(hyp.confidence),
                     "summary": hyp.summary,

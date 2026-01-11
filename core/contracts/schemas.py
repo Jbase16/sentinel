@@ -6,8 +6,8 @@ This module provides the STRICT runtime validation models for the EventContract.
 Every event type related to Omega/Governance MUST have a corresponding schema here.
 """
 
-from typing import Dict, List, Optional, Any
-from pydantic import BaseModel, Field, HttpUrl, validator
+from typing import Dict, List, Optional, Any, Literal
+from pydantic import BaseModel, Field, HttpUrl, validator, conint, ConfigDict, field_validator
 
 # ---------------------------------------------------------------------------
 # Base Models
@@ -161,11 +161,13 @@ class MimicAnalysisCompletedPayload(BaseModel):
 # Reasoning & Hypotheses (The Brain)
 # ---------------------------------------------------------------------------
 
-class HypothesisPayload(OmegaEventPayload):
+class HypothesisPayload(EventPayload):
     """
     Payload for NEXUS_HYPOTHESIS_*.
     Represents a probabilistic assertion, strictly separated from graph facts.
     """
+    model_config = ConfigDict(extra="forbid")
+
     hypothesis_id: str = Field(..., min_length=1)
     confidence: float = Field(..., ge=0.0, le=1.0, description="Bounded probability [0.0, 1.0]")
     summary: str = Field(..., min_length=5, description="One-line human readable summary")

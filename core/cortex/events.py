@@ -221,23 +221,26 @@ class EventBus:
         Validation is now mandatory (Phase 1.5/3 Hardening).
         """
         # Optimized dispatch: Map[EventType, List[Callable]]
-        self._subscribers: Dict[str, List[Callable[[GraphEvent], None]]] = {}
+        self._subscribers: Dict[EventType, List[Callable[[GraphEvent], None]]] = {}
         self._wildcard_subscribers: List[Callable[[GraphEvent], None]] = []
         self._last_event_sequence: int = 0  # Track last sequence for diagnostics
 
-    def subscribe(self, callback: Callable[[GraphEvent], None], event_types: Optional[List[str]] = None):
+    def subscribe(self, callback: Callable[[GraphEvent], None], event_types: Optional[List[EventType]] = None) -> None:
         """
         Subscribe to events.
         
         Args:
-            callback: Function to handle the event.
-            event_types: Optional list of EventTypes to subscribe to. 
-                         If None, subscribes to ALL events (wildcard).
+            callback: Function to call when event occurs.
+            event_types: List of EventType enums to filter on. If None, subscribes to ALL events (wildcard).
+                         Must use EventType enums, strings are NOT supported for safety.
         """
         if event_types is None:
             self._wildcard_subscribers.append(callback)
         else:
             for et in event_types:
+                if not isinstance(et, EventType):
+                    logger.warning(f"[EventBus] Subscriber registered with invalid key type {type(et)}; ignoring.")
+                    continue
                 if et not in self._subscribers:
                     self._subscribers[et] = []
                 self._subscribers[et].append(callback)
@@ -256,8 +259,12 @@ class EventBus:
         In strict mode (development), invalid events raise ContractViolation.
         In non-strict mode (production), invalid events log warnings.
         """
-        # Track last sequence for diagnostics
-        self._last_event_sequence = event.event_sequence
+        if event.run_id != self._run_id:
+             logger.warning(f"[EventBus] Event run_id mismatch: {event.run_id} != {self._run_id}")
+
+        # INJECTION: Ensure payload has scan_id if envelope has it (Point 3 of Audit)
+        if event.scan_id and "scan_id" not in event.payload:
+            event.payload["scan_id"] = event.scan_id
 
         # CONTRACT VALIDATION: Ensure event conforms to schema and causal rules
         # Mandatory enforcement
@@ -287,7 +294,7 @@ class EventBus:
                         logger.critical(f"[EventBus] FAILED TO EMIT CONTRACT_VIOLATION: {emit_err}")
 
         # Re-raise if we're in strict mode and it was a real violation
-        if violations and EventContract._strict_mode:
+        if violations and EventContract.is_strict():
             # Check if we already have an active exception context, if so raise from it is cleaner
             # but simple raise is sufficient as we are effectively re-asserting the strictness
             raise ContractViolation(event.type.value, violations)
