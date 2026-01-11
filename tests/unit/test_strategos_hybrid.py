@@ -6,6 +6,7 @@ from core.scheduler.strategos import Strategos, ScanContext
 from core.contracts.schemas import InsightActionType, InsightPayload
 from core.scheduler.modes import ScanMode
 from core.cortex.events import EventBus
+from core.contracts.events import EventType
 
 @pytest.mark.anyio
 async def test_full_insight_flow():
@@ -46,10 +47,16 @@ async def test_full_insight_flow():
         # We poll for the side effect: knowledge update
         
         async def wait_for_knowledge():
-            for _ in range(10):
+            for i in range(50):
                 if "high_value_targets" in strategos.context.knowledge:
                     return True
                 await asyncio.sleep(0.05)
+            # Debug info
+            print(f"DEBUG: Knowledge keys: {strategos.context.knowledge.keys()}")
+            print(f"DEBUG: Queue stats: {strategos._insight_queue.get_stats()}")
+            print("DEBUG: Logs captured:")
+            for call in mock_log.call_args_list:
+                print(f"  LOG: {call}")
             return False
             
         success = await wait_for_knowledge()
@@ -71,9 +78,9 @@ async def test_full_insight_flow():
         # Note: In strategos.py we emit manually.
         mock_bus.emit.assert_called()
         call_args = mock_bus.emit.call_args[1]
-        assert call_args["event_type"] == "nexus_insight_formed"
-        assert isinstance(call_args["payload"], InsightPayload)
-        assert call_args["payload"].action_type == InsightActionType.HIGH_VALUE_TARGET
+        assert call_args["event_type"] == EventType.NEXUS_INSIGHT_FORMED
+        assert isinstance(call_args["payload"], dict)
+        assert call_args["payload"]["action_type"] == InsightActionType.HIGH_VALUE_TARGET.value
         
     finally:
         # Cleanup

@@ -82,6 +82,10 @@ class CircuitBreaker:
     """
     Circuit breaker for insight processing.
     Prevents cascading failures by stopping processing when failures exceed threshold.
+    
+    LIMITATION: This is currently global for all insight types. A failure in one
+    handler type will trip the breaker for all insights. Phase 6 should introduce
+    per-handler buckets if granularity is needed.
     """
     
     def __init__(
@@ -202,7 +206,8 @@ class InsightQueue:
         """
         # Check circuit breaker
         if not await self._circuit_breaker.acquire():
-            self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
+            async with self._lock:
+                self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
             return False
         
         # Dequeue insight
@@ -215,17 +220,20 @@ class InsightQueue:
         try:
             await handler(insight)
             await self._circuit_breaker.record_success()
-            self._stats.total_processed += 1
+            async with self._lock:
+                self._stats.total_processed += 1
             return True
         except Exception as e:
             await self._circuit_breaker.record_failure()
-            self._stats.total_failed += 1
+            async with self._lock:
+                self._stats.total_failed += 1
             logger.error(f"[InsightQueue] Failed to process insight {insight.insight_id}: {e}")
             return False
         finally:
             duration = (asyncio.get_event_loop().time() - start) * 1000
-            self._stats.processing_time_ms += duration
-            self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
+            async with self._lock:
+                self._stats.processing_time_ms += duration
+                self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
     
     def get_stats(self) -> InsightQueueStats:
         """Get current queue statistics."""
@@ -244,6 +252,9 @@ class ScanContext:
     """Class ScanContext."""
     target: str
     scan_id: str = field(default_factory=lambda: get_run_id())
+    # Lock for guarding mutable state (knowledge, findings) from concurrent access
+    # by intent loop and insight handlers.
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     phase_index: int = 0
     knowledge: Dict[str, Any] = field(default_factory=dict)
     active_tools: int = 0
@@ -438,7 +449,9 @@ class Strategos:
         self._decision_ctx = create_decision_context(
             event_bus=self._event_bus,
             ledger=self._decision_ledger,
-            narrator=self._narrator
+            narrator=self._narrator,
+            scan_id=self.context.scan_id,
+            source="strategos"
         )
         
         current_intent = INTENT_PASSIVE_RECON
@@ -773,27 +786,43 @@ class Strategos:
             # Generic handler for unknown types
             await self._handle_generic_insight(insight)
 
+    async def _emit_reaction_decision(self, insight: InsightPayload):
+        """Emit a decision record for the reactive action taken."""
+        if self._decision_ctx:
+            # We don't strictly require a parent decision here since reactions are async,
+            # but we can try to link to current intent if it exists.
+            self._decision_ctx.choose(
+                decision_type=DecisionType.REACTIVE_SIGNAL,
+                chosen=insight.action_type.value,
+                reason=insight.summary,
+                context={
+                    "target": insight.target,
+                    "insight_id": insight.insight_id
+                },
+                evidence={
+                    "confidence": insight.confidence,
+                    "source_tool": insight.source_tool
+                }
+            )
+
     async def _handle_high_value_target(self, insight: InsightPayload) -> None:
         """Handle high-value target insights."""
         if not self.context:
              return
              
-        if "high_value_targets" not in self.context.knowledge:
-            self.context.knowledge["high_value_targets"] = []
+        async with self.context.lock:
+            if "high_value_targets" not in self.context.knowledge:
+                self.context.knowledge["high_value_targets"] = []
+            
+            self.context.knowledge["high_value_targets"].append({
+                "target": insight.target,
+                "insight_id": insight.insight_id,
+                "confidence": insight.confidence,
+                "details": insight.details,
+                "discovered_at": insight.created_at
+            })
         
-        self.context.knowledge["high_value_targets"].append({
-            "target": insight.target,
-            "insight_id": insight.insight_id,
-            "confidence": insight.confidence,
-            "details": insight.details,
-            "discovered_at": insight.created_at
-        })
-        
-        # Emit event for UI via Decision Ledger if context exists
-        if self._decision_ctx and self._current_intent_decision:
-             # This is a reactive decision (reaction to insight)
-             # Ideally we link it to the current intent decision
-             pass
+        await self._emit_reaction_decision(insight)
         
         self._emit_log(
             f"[Strategos] ⚠ High-value target discovered: {insight.target} "
@@ -805,18 +834,21 @@ class Strategos:
         if not self.context:
              return
 
-        if "critical_paths" not in self.context.knowledge:
-            self.context.knowledge["critical_paths"] = []
-        
-        self.context.knowledge["critical_paths"].append({
-            "target": insight.target,
-            "path": insight.details.get("path", ""),
-            "method": insight.details.get("method", "GET"),
-            "insight_id": insight.insight_id,
-            "confidence": insight.confidence,
-            "discovered_at": insight.created_at
-        })
-        
+        async with self.context.lock:
+            if "critical_paths" not in self.context.knowledge:
+                self.context.knowledge["critical_paths"] = []
+            
+            self.context.knowledge["critical_paths"].append({
+                "target": insight.target,
+                "path": insight.details.get("path", ""),
+                "method": insight.details.get("method", "GET"),
+                "insight_id": insight.insight_id,
+                "confidence": insight.confidence,
+                "discovered_at": insight.created_at
+            })
+            
+        await self._emit_reaction_decision(insight)
+
         self._emit_log(
             f"[Strategos] ⚡ Critical path discovered: {insight.details.get('path', '')} "
             f"(confidence: {insight.confidence})"
@@ -827,16 +859,19 @@ class Strategos:
         if not self.context:
              return
 
-        if "confirmed_vulns" not in self.context.knowledge:
-            self.context.knowledge["confirmed_vulns"] = []
-        
-        self.context.knowledge["confirmed_vulns"].append({
-            "target": insight.target,
-            "vuln_type": insight.details.get("vuln_type") or insight.details.get("type", ""),
-            "insight_id": insight.insight_id,
-            "confidence": insight.confidence
-        })
-        
+        async with self.context.lock:
+            if "confirmed_vulns" not in self.context.knowledge:
+                self.context.knowledge["confirmed_vulns"] = []
+            
+            self.context.knowledge["confirmed_vulns"].append({
+                "target": insight.target,
+                "vuln_type": insight.details.get("vuln_type") or insight.details.get("type", ""),
+                "insight_id": insight.insight_id,
+                "confidence": insight.confidence
+            })
+            
+        await self._emit_reaction_decision(insight)
+
         self._emit_log(f"[Strategos] 💥 Confirmed vulnerability: {insight.summary}")
 
     async def _handle_waf_detected(self, insight: InsightPayload) -> None:
@@ -844,8 +879,12 @@ class Strategos:
         if not self.context:
              return
 
-        self.context.knowledge["waf_detected"] = True
-        self.context.knowledge["waf_details"] = insight.details
+        async with self.context.lock:
+            self.context.knowledge["waf_detected"] = True
+            self.context.knowledge["waf_details"] = insight.details
+
+        await self._emit_reaction_decision(insight)
+
         self._emit_log(f"[Strategos] 🛡 WAF detected: {insight.summary}")
 
     async def _handle_auth_required(self, insight: InsightPayload) -> None:
@@ -853,14 +892,18 @@ class Strategos:
         if not self.context:
              return
 
-        if "auth_required" not in self.context.knowledge:
-            self.context.knowledge["auth_required"] = []
-        
-        self.context.knowledge["auth_required"].append({
-            "target": insight.target,
-            "auth_type": insight.details.get("auth_type", "unknown"),
-            "insight_id": insight.insight_id
-        })
+        async with self.context.lock:
+            if "auth_required" not in self.context.knowledge:
+                self.context.knowledge["auth_required"] = []
+            
+            self.context.knowledge["auth_required"].append({
+                "target": insight.target,
+                "auth_type": insight.details.get("auth_type", "unknown"),
+                "insight_id": insight.insight_id
+            })
+
+        await self._emit_reaction_decision(insight)
+
         self._emit_log(f"[Strategos] 🔒 Authentication required: {insight.target}")
 
     async def _handle_rate_limit(self, insight: InsightPayload) -> None:
@@ -868,11 +911,16 @@ class Strategos:
         if not self.context:
              return
 
-        self.context.knowledge["rate_limited"] = True
+        async with self.context.lock:
+            self.context.knowledge["rate_limited"] = True
+
+        await self._emit_reaction_decision(insight)
+
         self._emit_log(f"[Strategos] 🐌 Rate limiting detected: {insight.summary}")
 
     async def _handle_generic_insight(self, insight: InsightPayload) -> None:
         """Handle generic insights."""
+        await self._emit_reaction_decision(insight)
         self._emit_log(f"[Strategos] ℹ Generic insight: {insight.summary}")
 
     def _handle_tool_completed(self, event: ToolCompletedEvent):
@@ -901,24 +949,29 @@ class Strategos:
             
         # Loop over items.
         for finding in findings:
-            self.context.findings.append(finding)
-            self.context.findings_this_intent += 1
+            async with self.context.lock:
+                self.context.findings.append(finding)
+                self.context.findings_this_intent += 1
 
-            surface_key = self._surface_key(finding)
-            if surface_key and surface_key not in self.context.surface_seen:
-                self.context.surface_seen.add(surface_key)
-                self.context.surface_delta_this_intent += 1
-            
-            tags = finding.get("tags", [])
-            finding_type = finding.get("type", "")
-            if finding_type:
-                tags.append(finding_type)
-            
-            existing_tags = self.context.knowledge.get("tags", set())
-            existing_tags.update(tags)
-            self.context.knowledge["tags"] = existing_tags
+                surface_key = self._surface_key(finding)
+                if surface_key and surface_key not in self.context.surface_seen:
+                    self.context.surface_seen.add(surface_key)
+                    self.context.surface_delta_this_intent += 1
+                
+                tags = list(finding.get("tags", []))
+                finding_type = finding.get("type", "")
+                if finding_type:
+                    tags.append(finding_type)
+                
+                existing_tags = self.context.knowledge.get("tags", set())
+                # Handle potential type mismatch if tags wasn't a set
+                if not isinstance(existing_tags, set):
+                     existing_tags = set(existing_tags) if existing_tags else set()
+                existing_tags.update(tags)
+                self.context.knowledge["tags"] = existing_tags
             
             # Phase 5: Generate and enqueue insights
+            # Done OUTSIDE the lock to reduce contention
             insight = await self._generate_insights_from_finding(finding)
             if insight:
                 enqueued = await self._insight_queue.enqueue(insight)
@@ -934,11 +987,11 @@ class Strategos:
                         # The EventType constant is NEXUS_INSIGHT_FORMED
                         # The payload is InsightPayload
                         
-                        # We will construct it manually for now as no helper exists yet
+                        # Fix: Model dump for strict dictionary contract
                         try:
                            self._event_bus.emit(
                                event_type=EventType.NEXUS_INSIGHT_FORMED,
-                               payload=insight,
+                               payload=insight.model_dump(),
                                scan_id=self.context.scan_id,
                                description=f"Insight formed: {insight.summary}",
                                source="strategos.nexus.hybrid"
@@ -960,7 +1013,6 @@ class Strategos:
         target = finding.get("asset") or finding.get("target") or "unknown"
         priority = finding.get("priority", 5)
         
-        insight_type = None
         action_type = None
         confidence = 0.5
         summary = ""
@@ -995,6 +1047,20 @@ class Strategos:
             priority = 4
         
         if action_type:
+            # Fix: Sanitize details instead of leaking raw finding (Fixes Problem 4)
+            # We extract only what is needed for the insight context to avoid bloating
+            sanitized_details = {
+                 "finding_type": finding_type,
+                 "severity": finding.get("severity"),
+                 "path": finding.get("details", {}).get("path"),
+                 "method": finding.get("details", {}).get("method"),
+                 "vuln_type": finding.get("details", {}).get("vuln_type") or finding_type,
+                 "auth_type": finding.get("details", {}).get("auth_type"),
+                 "waf_name": finding.get("details", {}).get("waf_name")
+            }
+            # Remove None values
+            sanitized_details = {k: v for k, v in sanitized_details.items() if v is not None}
+            
             return InsightPayload(
                 insight_id=uuid.uuid4().hex,
                 scan_id=self.context.scan_id,
@@ -1002,7 +1068,7 @@ class Strategos:
                 confidence=confidence,
                 target=target,
                 summary=summary,
-                details=finding,
+                details=sanitized_details,
                 source_tool=finding.get("source", "strategos_inference"),
                 source_finding_id=finding.get("id"),
                 priority=priority
