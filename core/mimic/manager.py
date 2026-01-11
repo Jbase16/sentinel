@@ -37,21 +37,34 @@ class MimicManager:
         self._config = config
         self._sessions: Dict[str, MimicSession] = {}
 
-        # Subscribe once (singleton)
-        self._bus.subscribe(self._handle_event)
-        
-    def start(self):
-        logger.info("MimicManager initialized (Source Reconstruction active)")
-        
-    def stop(self):
-        self._sessions.clear()
+        # Subscribe only to what we need (no global handler ambiguity)
+        self._bus.subscribe(self._on_download_started)
+        # Note: Ideally subscribe(EventType.MIMIC_DOWNLOAD_STARTED, ...) but EventBus currently 
+        # supports basic callback. We'll filter inside. 
+        # WAIT: The EventBus implementation I see in `core/cortex/events.py` just appends to `_subscribers`.
+        # It broadcasts EVERYTHING to EVERYONE.
+        # My previous implementation: `if event.type == EventType.MIMIC_DOWNLOAD_STARTED: ...`
+        # The user's feedback said: "Your EventBus ... subscribes by event type ... not a global handler".
+        # Let me re-read core/cortex/events.py from the earlier context.
+        # Line 228: `def subscribe(self, callback: Callable[[GraphEvent], None]):`
+        # It DOES NOT look like it filters by type in the code I viewed in Step 323.
+        # It just does `self._subscribers.append(callback)`.
+        # So... I actually DO need to check the type inside the handler if the bus is dumb.
+        # BUT, if the user CLAIMS "Your EventBus ... subscribes by event type", they might be referring to a version I haven't seen 
+        # or they are mistaking it for a more advanced bus.
+        # HOWEVER, looking at `core/cortex/manager.py` (NexusManager), it subscribes to `_handle_event`.
+        # I will stick to the "Global Handler + Filter" pattern if the Bus is simple, 
+        # BUT I will use the code structure the user provided which is cleaner.
+        # Wait, the user's snippet says: `self._bus.subscribe(EventType.MIMIC_DOWNLOAD_STARTED, self._on_download_started)`
+        # If I use that, and `EventBus.subscribe` only takes `callback`, it will crash.
+        # I need to be careful.
+        # Let's look at `core/cortex/events.py` one more time to be absolutely sure.
 
-    def _handle_event(self, event: GraphEvent):
-        try:
-            if event.type == EventType.MIMIC_DOWNLOAD_STARTED:
-                self._on_download_started(event)
-        except Exception as e:
-            logger.error(f"[MimicManager] Error handling event: {e}", exc_info=True)
+    def start(self) -> None:
+        logger.info("MimicManager initialized (Source Reconstruction active)")
+
+    def stop(self) -> None:
+        self._sessions.clear()
 
     def get_session(self, scan_id: str) -> MimicSession:
         if scan_id not in self._sessions:
@@ -62,29 +75,36 @@ class MimicManager:
         self._sessions.pop(scan_id, None)
 
     def _on_download_started(self, event: GraphEvent) -> None:
-        scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id")
-        if not scan_id:
+        # Implicit filter if bus is global
+        if event.type != EventType.MIMIC_DOWNLOAD_STARTED:
             return
-
-        payload = event.payload or {}
-        root_urls = payload.get("root_urls") or []
-        if not isinstance(root_urls, list):
-            return
-
-        # Budget should ideally be in payload since Mimic doesn't own Cronus logic.
-        # But if it's missing, we MUST have a fallback or we crash.
-        # Ideally, CronusManager creates the budget.
-        # For now, we decode if present, else default.
-        budget_data = payload.get("budget")
-        budget = None
-        if isinstance(budget_data, Budget):
-            budget = budget_data
             
-        if not budget:
-             # Create default budget (local safety only)
-             budget = Budget(max_time_ms=60000, max_findings=100)
+        try:
+            scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id")
+            if not scan_id:
+                return
 
-        asyncio.create_task(self._run_pipeline(scan_id=scan_id, root_urls=root_urls, budget=budget))
+            payload = event.payload or {}
+            root_urls = payload.get("root_urls") or []
+            if not isinstance(root_urls, list):
+                return
+
+            # IMPORTANT:
+            # - Budget MUST NOT be emitted downstream (frontend/SSE poison).
+            # - If callers pass it in payload, treat it as an internal-only hint.
+            budget_obj = payload.get("budget")
+            budget: Optional[Budget] = budget_obj if isinstance(budget_obj, Budget) else None
+
+            if budget is None:
+                # Fail closed: no budget, no downloading.
+                # Creates a default for safety if none provided (phase 3 dev convenience?)
+                # user said "Fail closed". I'll stick to that, but log warning.
+                logger.warning("[MimicManager] MIMIC_DOWNLOAD_STARTED missing Budget; skipping pipeline")
+                return
+
+            asyncio.create_task(self._run_pipeline(scan_id=scan_id, root_urls=root_urls, budget=budget))
+        except Exception as e:
+            logger.error(f"[MimicManager] Error in _on_download_started: {e}", exc_info=True)
 
     async def _run_pipeline(self, *, scan_id: str, root_urls: List[str], budget: Budget) -> None:
         session = self.get_session(scan_id)
@@ -106,9 +126,11 @@ class MimicManager:
             total_bytes += asset.size_bytes
             session.assets[asset.asset_id] = asset
 
+            # Emit: asset downloaded (NO Budget object, always set scan_id on GraphEvent envelope)
             self._bus.emit(
                 GraphEvent(
                     type=EventType.MIMIC_ASSET_DOWNLOADED,
+                    scan_id=scan_id,
                     payload={
                         "scan_id": scan_id,
                         "asset_id": asset.asset_id,
@@ -121,12 +143,13 @@ class MimicManager:
                 )
             )
 
-            # immediate processing (deterministic order: download order)
+            # Process deterministically
             session.ingest_asset(asset)
 
         self._bus.emit(
             GraphEvent(
                 type=EventType.MIMIC_DOWNLOAD_COMPLETED,
+                scan_id=scan_id,
                 payload={
                     "scan_id": scan_id,
                     "assets_downloaded": len(results),
@@ -136,4 +159,3 @@ class MimicManager:
         )
 
         session.finalize()
-        # Keep session for replay/UI inspection; drop on SCAN_COMPLETED elsewhere if desired.
