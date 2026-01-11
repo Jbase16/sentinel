@@ -34,7 +34,8 @@ from core.contracts.schemas import (
     ResourceGuardTripPayload,
     TrafficObservedPayload,
     EventSilencePayload,
-    ToolChurnPayload
+    ToolChurnPayload,
+    OrphanEventPayload
 )
 
 logger = logging.getLogger(__name__)
@@ -145,6 +146,7 @@ class EventType(str, Enum):
     # OBSERVER - Watchdog
     EVENT_SILENCE = "event_silence"
     TOOL_CHURN = "tool_churn"
+    ORPHAN_EVENT_DROPPED = "orphan_event_dropped"
 
 
 # ============================================================================
@@ -259,48 +261,75 @@ class EventSchema:
 class CausalTracker:
     """
     Tracks causal relationships to enforce event ordering rules.
-
+    State is sharded by scan_id to allow concurrent scans.
+    
     Rule: tool_completed for tool X requires prior tool_started for tool X
-    Rule: scan_completed requires prior scan_started
+    Rule: scan_completed requires prior scan_started (per scan)
     """
 
     def __init__(self):
-        self._started_tools: Set[str] = set()
-        self._active_scan: Optional[str] = None  # session_id
+        # Format: {scan_id: set(started_tools)}
+        self._scan_tool_state: Dict[str, Set[str]] = {}
+        # Track active scans to ensure they exist
+        self._active_scans: Set[str] = set()
 
     def on_event(self, event_type: EventType, payload: Dict[str, Any]) -> Optional[str]:
         """
         Process event and return violation message if causal rule broken.
         """
+        # 1. Resolve Context
+        scan_id = payload.get("scan_id") or payload.get("session_id")
+        
+        # 2. Lifecycle Events (Create/Destroy Context)
         if event_type == EventType.SCAN_STARTED:
-            self._active_scan = payload.get("session_id")
-            self._started_tools.clear()
+            if not scan_id:
+                return "Causal violation: scan_started missing session_id"
+            self._active_scans.add(scan_id)
+            self._scan_tool_state[scan_id] = set()
             return None
 
+        if event_type == EventType.SCAN_COMPLETED:
+            if not scan_id:
+                return "Causal violation: scan_completed missing session_id"
+            if scan_id not in self._active_scans:
+                return f"Causal violation: scan_completed for unknown scan '{scan_id}'"
+            
+            # Cleanup
+            self._active_scans.discard(scan_id)
+            if scan_id in self._scan_tool_state:
+                del self._scan_tool_state[scan_id]
+            return None
+
+        # 3. Context Check for other events
+        # If event has a scan_id but we don't know it, that's a violation 
+        # (unless it's an orphan drop, which we allow)
+        if scan_id and scan_id not in self._active_scans and event_type != EventType.ORPHAN_EVENT_DROPPED:
+             # We might optionally allow some events to fly without context, 
+             # but strictly speaking, if it claims a scan_id, that scan should be active.
+             # However, to avoid "double jeopardy" with the Manager's checks, 
+             # we will focus only on Causal Order here.
+             pass
+
+        # 4. Tool Execution Rules
         if event_type == EventType.TOOL_STARTED:
             tool = payload.get("tool")
-            if tool:
-                self._started_tools.add(tool)
+            if tool and scan_id in self._scan_tool_state:
+                self._scan_tool_state[scan_id].add(tool)
             return None
 
         if event_type == EventType.TOOL_COMPLETED:
             tool = payload.get("tool")
-            if tool and tool not in self._started_tools:
-                return f"Causal violation: tool_completed for '{tool}' without prior tool_started"
-            return None
-
-        if event_type == EventType.SCAN_COMPLETED:
-            if self._active_scan is None:
-                return "Causal violation: scan_completed without prior scan_started"
-            self._active_scan = None
+            if scan_id and scan_id in self._scan_tool_state:
+                 if tool and tool not in self._scan_tool_state[scan_id]:
+                     return f"Causal violation: tool_completed for '{tool}' without prior tool_started in scan '{scan_id}'"
             return None
 
         return None
 
     def reset(self):
-        """Reset state (for testing or new scan session)."""
-        self._started_tools.clear()
-        self._active_scan = None
+        """Reset state (for testing)."""
+        self._scan_tool_state.clear()
+        self._active_scans.clear()
 
 
 # ============================================================================
@@ -734,6 +763,12 @@ class EventContract:
             event_type=EventType.TOOL_CHURN,
             description="Watchdog detected high velocity with no findings.",
             model=ToolChurnPayload
+        )
+
+        cls._schemas[EventType.ORPHAN_EVENT_DROPPED] = EventSchema(
+            event_type=EventType.ORPHAN_EVENT_DROPPED,
+            description="Event dropped because it lacked a valid session context.",
+            model=OrphanEventPayload
         )
 
     @classmethod

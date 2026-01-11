@@ -143,15 +143,19 @@ def test_tool_churn_detection():
     assert len(catured_events) >= 1
     types = [e[0] for e in catured_events]
     assert EventType.TOOL_CHURN in types
+    
+    # Verify Honesty
+    churn_payload = catured_events[0][1]
+    assert churn_payload["is_assumed_zero_findings"] is True
 
 # ---------------------------------------------------------------------------
 # Routing Safety Tests
 # ---------------------------------------------------------------------------
 
 def test_routing_safety_violations(manager, mock_bus):
-    """Test that missing scan_ids cause violations."""
+    """Test violations and orphan events."""
     
-    # 1. Missing session_id on SCAN_STARTED
+    # 1. Missing session_id on SCAN_STARTED (Contract Violation)
     manager._handle_event(GraphEvent(
         type=EventType.SCAN_STARTED,
         payload={}, # Missing
@@ -163,3 +167,17 @@ def test_routing_safety_violations(manager, mock_bus):
     violation_calls = [c for c in calls if c[0][0].type == EventType.CONTRACT_VIOLATION]
     assert len(violation_calls) == 1
     assert "Missing session_id" in violation_calls[0][0][0].payload["violations"][0]
+    
+    # 2. Event for missing session (Orphan Drop)
+    mock_bus.emit.reset_mock()
+    manager._handle_event(GraphEvent(
+        type=EventType.TOOL_STARTED,
+        payload={"scan_id": "ghost-scan", "tool": "nmap"},
+        event_sequence=2
+    ))
+    
+    calls = mock_bus.emit.call_args_list
+    orphan_calls = [c for c in calls if c[0][0].type == EventType.ORPHAN_EVENT_DROPPED]
+    assert len(orphan_calls) == 1
+    assert orphan_calls[0][0][0].payload["scan_id"] == "ghost-scan"
+    assert "not found" in orphan_calls[0][0][0].payload["reason"]

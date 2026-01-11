@@ -158,6 +158,19 @@ async def lifespan(app: FastAPI):
 
     _write_boot_manifest("ready")
 
+    # Initialize Codex (Graph Database)
+    codex_db.initialize()
+
+    # Initialize The Nervous System (Nexus)
+    from core.cortex.manager import NexusManager
+    nexus_manager = NexusManager()
+    nexus_manager.start()
+
+    # Initialize The Time Machine (Cronus)
+    from core.cronus.manager import CronusManager
+    cronus_manager = CronusManager()
+    cronus_manager.start()
+
     yield
 
     # === SHUTDOWN ===
@@ -178,6 +191,14 @@ async def lifespan(app: FastAPI):
         logger.info("[Shutdown] Policy file watcher stopped")
     except Exception as e:
         logger.error(f"[Shutdown] Failed to stop policy watcher: {e}")
+
+    # Shutdown Managers
+    try:
+        nexus_manager.stop()
+        cronus_manager.stop()
+        codex_db.close()
+    except Exception as e:
+        logger.error(f"[Shutdown] Manager cleanup failed: {e}")
 
     from core.data.blackbox import BlackBox
     await BlackBox.instance().shutdown()

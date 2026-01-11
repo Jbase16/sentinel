@@ -102,12 +102,10 @@ class NexusManager:
             
             if not scan_id:
                 # Some events are truly global (e.g. LOG, SYSTEM_STARTUP). 
-                # We ignore those safely.
-                # Only warn if it LOOKS like a scan event (has target/tool)
-                if "target" in payload or "tool" in payload:
-                     # Warn or Violate?
-                     # For now, strict log.
-                     pass 
+                # We ignore those safely, but specifically monitor "operational" events
+                # that SHOULD have a context.
+                if "target" in payload or "tool" in payload or event_type in {EventType.TOOL_STARTED, EventType.FINDING_CREATED}:
+                     self._emit_orphan(event_type, scan_id, "Missing scan_id in payload")
                 return
 
             session = self.sessions.get(scan_id)
@@ -116,10 +114,26 @@ class NexusManager:
             else:
                 # Event for a scan that doesn't exist (orphaned or late)
                 # This prevents "zombie" events allowing logic to run context-free
-                pass
+                self._emit_orphan(event_type, scan_id, f"Session {scan_id} not found (zombie/late event)")
 
         except Exception as e:
             logger.error(f"[NexusManager] Error handling event: {e}", exc_info=True)
+
+    def _emit_orphan(self, original_type: EventType, scan_id: Optional[str], reason: str):
+        """Emit a diagnostic event for dropped orphans."""
+        try:
+            self.bus.emit(GraphEvent(
+                type=EventType.ORPHAN_EVENT_DROPPED,
+                payload={
+                    "original_event_type": original_type.value,
+                    "scan_id": scan_id,
+                    "reason": reason,
+                    "source_component": "NexusManager",
+                    "mode": "omega" # Default
+                }
+            ))
+        except Exception as e:
+            logger.warning(f"[NexusManager] Failed to emit orphan event: {e}")
 
     def _create_session(self, scan_id: str):
         """Initialize a new NexusSession."""

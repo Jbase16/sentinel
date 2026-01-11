@@ -156,7 +156,8 @@ class NexusSession:
                 "mode": "omega",
                 "tool_started_count": len(self._tool_starts),
                 "window_seconds": WINDOW,
-                "findings_in_window": 0 # Placeholder: needs stricter coupling with Finding count
+                "findings_in_window": 0, # Placeholder
+                "is_assumed_zero_findings": True
             })
 
     # --- Domain Logic ---

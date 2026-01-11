@@ -93,6 +93,17 @@ class ToolChurnPayload(OmegaEventPayload):
     tool_started_count: int
     window_seconds: float
     findings_in_window: int
+    is_assumed_zero_findings: bool = True # Heuristic: we assume 0 if we haven't seen FINDING_CREATED
+
+class OrphanEventPayload(OmegaEventPayload):
+    """
+    Payload for ORPHAN_EVENT_DROPPED.
+    Emitted when an event is received for a non-existent or missing scan session.
+    """
+    original_event_type: str
+    scan_id: Optional[str] = None
+    reason: str
+    source_component: str
 
 # ---------------------------------------------------------------------------
 # Cronus (Time Machine)

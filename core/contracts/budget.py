@@ -62,8 +62,16 @@ class Budget(BaseModel):
         new_total = current + amount
         
         # Check against defined limits if they exist
-        if hasattr(self, metric):
+        # Convention: limit field is "max_{metric}"
+        limit_field = f"max_{metric}"
+        limit = None
+        
+        if hasattr(self, limit_field):
+            limit = getattr(self, limit_field)
+        elif hasattr(self, metric):
             limit = getattr(self, metric)
+            
+        if limit is not None:
             if new_total > limit:
                 raise BudgetOverrun(metric, limit, new_total)
         
