@@ -30,7 +30,9 @@ Implements a True Async Agent Loop with Event-Driven Concurrency.
 
 import asyncio
 import logging
-from typing import List, Dict, Any, Callable, Awaitable, Optional, Set, TYPE_CHECKING
+from typing import List, Dict, Any, Callable, Awaitable, Optional, Set, Literal, TYPE_CHECKING
+import time
+import itertools
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
@@ -45,7 +47,10 @@ from core.scheduler.intents import (
     INTENT_HEAVY_ARTILLERY
 )
 from core.scheduler.events import ToolCompletedEvent, MissionTerminatedEvent
-from core.cortex.events import EventBus
+from core.cortex.events import EventBus, get_run_id
+from core.contracts.schemas import InsightPayload, InsightActionType, InsightQueueStats
+from core.contracts.events import EventType
+import uuid
 from core.scheduler.decisions import (
     DecisionContext,
     DecisionLedger,
@@ -63,10 +68,182 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_EVENT_QUEUE_MAXSIZE = 1024
 
+
+@dataclass
+class CircuitBreakerState:
+    """Immutable state for circuit breaker."""
+    state: Literal["CLOSED", "OPEN", "HALF_OPEN"] = "CLOSED"
+    failure_count: int = 0
+    last_failure_time: float = 0.0
+    success_count: int = 0
+
+
+class CircuitBreaker:
+    """
+    Circuit breaker for insight processing.
+    Prevents cascading failures by stopping processing when failures exceed threshold.
+    """
+    
+    def __init__(
+        self,
+        failure_threshold: int = 3,
+        timeout_seconds: float = 30.0,
+        success_threshold: int = 1
+    ):
+        self._state = CircuitBreakerState()
+        self._lock = asyncio.Lock()
+        self._failure_threshold = failure_threshold
+        self._timeout_seconds = timeout_seconds
+        self._success_threshold = success_threshold
+    
+    async def acquire(self) -> bool:
+        """
+        Attempt to acquire permission to process.
+        Returns True if processing should proceed, False otherwise.
+        """
+        async with self._lock:
+            # Check if we should transition from OPEN to HALF_OPEN
+            if self._state.state == "OPEN":
+                if time.time() - self._state.last_failure_time > self._timeout_seconds:
+                    self._state = CircuitBreakerState(state="HALF_OPEN")
+                else:
+                    return False
+            
+            return True
+    
+    async def record_success(self) -> None:
+        """Record a successful processing attempt."""
+        async with self._lock:
+            if self._state.state == "HALF_OPEN":
+                self._state.success_count += 1
+                if self._state.success_count >= self._success_threshold:
+                    self._state = CircuitBreakerState(state="CLOSED")
+            else:
+                # Reset failure count on success in CLOSED state
+                self._state.failure_count = 0
+    
+    async def record_failure(self) -> None:
+        """Record a failed processing attempt."""
+        async with self._lock:
+            self._state.failure_count += 1
+            self._state.last_failure_time = time.time()
+            
+            if self._state.failure_count >= self._failure_threshold:
+                self._state = CircuitBreakerState(
+                    state="OPEN",
+                    last_failure_time=self._state.last_failure_time,
+                    failure_count=self._state.failure_count
+                )
+                logger.warning(
+                    f"[CircuitBreaker] Circuit OPEN - {self._failure_threshold} failures"
+                )
+    
+    def get_state(self) -> str:
+        """Get current circuit breaker state (non-blocking)."""
+        return self._state.state
+
+
+class InsightQueue:
+    """
+    Thread-safe async queue for insight processing.
+    """
+    
+    def __init__(
+        self,
+        maxsize: int = 100,
+        circuit_breaker: Optional[CircuitBreaker] = None
+    ):
+        self._maxsize = maxsize
+        self._queue: asyncio.PriorityQueue = asyncio.PriorityQueue(maxsize=maxsize)
+        self._lock = asyncio.Lock()
+        self._circuit_breaker = circuit_breaker or CircuitBreaker()
+        self._stats = InsightQueueStats()
+        self._counter = itertools.count()  # Tie-breaker for stable sorting in priority queue
+    
+    async def enqueue(self, insight: InsightPayload) -> bool:
+        """
+        Enqueue an insight for processing.
+        Non-blocking operation: Returns False if queue is full.
+        """
+        async with self._lock:
+            if self._queue.qsize() >= self._maxsize:
+                self._stats.dropped_count += 1
+                return False
+            
+            # Use priority as first element of tuple (lower integer = higher priority)
+            # Use counter as second element to break ties (FIFO for same priority)
+            # InsightPayload is third
+            priority = insight.priority
+            count = next(self._counter)
+            await self._queue.put((priority, count, insight))
+            self._stats.total_enqueued += 1
+            self._stats.current_size = self._queue.qsize()
+            return True
+    
+    async def dequeue(self, timeout: float = 0.1) -> Optional[InsightPayload]:
+        """
+        Dequeue an insight for processing.
+        """
+        try:
+            # Tuple is (priority, count, insight)
+            priority, count, insight = await asyncio.wait_for(
+                self._queue.get(),
+                timeout=timeout
+            )
+            async with self._lock:
+                self._stats.current_size = self._queue.qsize()
+            return insight
+        except asyncio.TimeoutError:
+            return None
+    
+    async def process_one(self, handler: Callable[[InsightPayload], Awaitable[None]]) -> bool:
+        """
+        Process one insight from the queue.
+        """
+        # Check circuit breaker
+        if not await self._circuit_breaker.acquire():
+            self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
+            return False
+        
+        # Dequeue insight
+        insight = await self.dequeue()
+        if insight is None:
+            return False
+        
+        # Process insight
+        start = asyncio.get_event_loop().time()
+        try:
+            await handler(insight)
+            await self._circuit_breaker.record_success()
+            self._stats.total_processed += 1
+            return True
+        except Exception as e:
+            await self._circuit_breaker.record_failure()
+            self._stats.total_failed += 1
+            logger.error(f"[InsightQueue] Failed to process insight {insight.insight_id}: {e}")
+            return False
+        finally:
+            duration = (asyncio.get_event_loop().time() - start) * 1000
+            self._stats.processing_time_ms += duration
+            self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
+    
+    def get_stats(self) -> InsightQueueStats:
+        """Get current queue statistics."""
+        return InsightQueueStats(
+            total_enqueued=self._stats.total_enqueued,
+            total_processed=self._stats.total_processed,
+            total_failed=self._stats.total_failed,
+            current_size=self._queue.qsize(),
+            dropped_count=self._stats.dropped_count,
+            processing_time_ms=self._stats.processing_time_ms,
+            circuit_breaker_state=self._circuit_breaker.get_state()
+        )
+
 @dataclass
 class ScanContext:
     """Class ScanContext."""
     target: str
+    scan_id: str = field(default_factory=lambda: get_run_id())
     phase_index: int = 0
     knowledge: Dict[str, Any] = field(default_factory=dict)
     active_tools: int = 0
@@ -109,6 +286,17 @@ class Strategos:
         self._event_bus = event_bus
         self._narrator = narrator
         
+        # Phase 5: Insight Queue and Circuit Breaker
+        self._circuit_breaker = CircuitBreaker()
+        self._insight_queue = InsightQueue(
+            maxsize=100,
+            circuit_breaker=self._circuit_breaker
+        )
+        self._insight_processor_task: Optional[asyncio.Task] = None
+        # Phase 5: Reactive Handlers
+        # Buffer for concurrent insight handlers if we wanted to limit them specifically, 
+        # but they are naturally throttled by the queue drain rate.
+
         # Decision Emission Layer: All strategic choices flow through this context
         # This creates a complete audit trail separate from the event stream
         self._decision_ledger = decision_ledger or DecisionLedger()
@@ -227,6 +415,8 @@ class Strategos:
 
         # Initialize scan context
         self.context = ScanContext(target=target)
+        # scan_id will be auto-generated or could be passed if we modify signature
+        
         self.context.knowledge["mode"] = mode
         
         # Seed baseline protocol tags for deterministic tool gating
@@ -257,6 +447,11 @@ class Strategos:
         
         # Start event listener in background
         listener_task = asyncio.create_task(self._event_listener())
+        
+        # Phase 5: Start insight processor in background
+        self._insight_processor_task = asyncio.create_task(
+            self._process_pending_insights()
+        )
         
         # Error handling block.
         try:
@@ -363,6 +558,24 @@ class Strategos:
                 await listener_task
             except asyncio.CancelledError:
                 pass
+            
+            # Phase 5: Cancel insight processor
+            if self._insight_processor_task:
+                self._insight_processor_task.cancel()
+                try:
+                    await self._insight_processor_task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Log insight queue stats
+            stats = self._insight_queue.get_stats()
+            self._emit_log(
+                f"[Strategos] Insight Queue Stats: "
+                f"enqueued={stats.total_enqueued}, "
+                f"processed={stats.total_processed}, "
+                f"failed={stats.total_failed}, "
+                f"dropped={stats.dropped_count}"
+            )
         
         reason = "Mission Complete. All intents exhausted or Walk Away triggered."
         self._emit_log(f"[Strategos] {reason}")
@@ -479,7 +692,7 @@ class Strategos:
             duration = max(0.0, asyncio.get_running_loop().time() - start)
             try:
                 if findings:
-                    self.ingest_findings(findings)
+                    await self.ingest_findings(findings)
             finally:
                 self.context.completed_tools_per_intent.setdefault(intent, set()).add(tool)
                 self.context.running_tools.discard(tool)
@@ -514,6 +727,154 @@ class Strategos:
             except asyncio.CancelledError:
                 break
     
+    async def _process_pending_insights(self) -> None:
+        """
+        Background loop for processing pending insights (Phase 5).
+        """
+        while not self._terminated:
+            try:
+                # Process one insight with timeout
+                processed = await self._insight_queue.process_one(
+                    self._route_insight_to_handler
+                )
+                
+                if not processed:
+                    # No insight available or circuit breaker open
+                    await asyncio.sleep(0.1)
+                    
+            except asyncio.CancelledError:
+                # Graceful shutdown
+                logger.info("[Strategos] Insight processing loop cancelled")
+                break
+            except Exception as e:
+                # Unexpected error - log and continue
+                logger.error(f"[Strategos] Error in insight processing loop: {e}")
+                await asyncio.sleep(0.1)
+
+    async def _route_insight_to_handler(self, insight: InsightPayload) -> None:
+        """
+        Route insight to appropriate handler based on action type.
+        """
+        action_type = insight.action_type
+        
+        if action_type == InsightActionType.HIGH_VALUE_TARGET:
+            await self._handle_high_value_target(insight)
+        elif action_type == InsightActionType.CRITICAL_PATH:
+            await self._handle_critical_path(insight)
+        elif action_type == InsightActionType.CONFIRMED_VULN:
+            await self._handle_confirmed_vuln(insight)
+        elif action_type == InsightActionType.WAF_DETECTED:
+            await self._handle_waf_detected(insight)
+        elif action_type == InsightActionType.AUTH_REQUIRED:
+            await self._handle_auth_required(insight)
+        elif action_type == InsightActionType.RATE_LIMIT:
+            await self._handle_rate_limit(insight)
+        else:
+            # Generic handler for unknown types
+            await self._handle_generic_insight(insight)
+
+    async def _handle_high_value_target(self, insight: InsightPayload) -> None:
+        """Handle high-value target insights."""
+        if not self.context:
+             return
+             
+        if "high_value_targets" not in self.context.knowledge:
+            self.context.knowledge["high_value_targets"] = []
+        
+        self.context.knowledge["high_value_targets"].append({
+            "target": insight.target,
+            "insight_id": insight.insight_id,
+            "confidence": insight.confidence,
+            "details": insight.details,
+            "discovered_at": insight.created_at
+        })
+        
+        # Emit event for UI via Decision Ledger if context exists
+        if self._decision_ctx and self._current_intent_decision:
+             # This is a reactive decision (reaction to insight)
+             # Ideally we link it to the current intent decision
+             pass
+        
+        self._emit_log(
+            f"[Strategos] ⚠ High-value target discovered: {insight.target} "
+            f"(confidence: {insight.confidence})"
+        )
+
+    async def _handle_critical_path(self, insight: InsightPayload) -> None:
+        """Handle critical path insights."""
+        if not self.context:
+             return
+
+        if "critical_paths" not in self.context.knowledge:
+            self.context.knowledge["critical_paths"] = []
+        
+        self.context.knowledge["critical_paths"].append({
+            "target": insight.target,
+            "path": insight.details.get("path", ""),
+            "method": insight.details.get("method", "GET"),
+            "insight_id": insight.insight_id,
+            "confidence": insight.confidence,
+            "discovered_at": insight.created_at
+        })
+        
+        self._emit_log(
+            f"[Strategos] ⚡ Critical path discovered: {insight.details.get('path', '')} "
+            f"(confidence: {insight.confidence})"
+        )
+
+    async def _handle_confirmed_vuln(self, insight: InsightPayload) -> None:
+        """Handle confirmed vulnerability insights."""
+        if not self.context:
+             return
+
+        if "confirmed_vulns" not in self.context.knowledge:
+            self.context.knowledge["confirmed_vulns"] = []
+        
+        self.context.knowledge["confirmed_vulns"].append({
+            "target": insight.target,
+            "vuln_type": insight.details.get("vuln_type") or insight.details.get("type", ""),
+            "insight_id": insight.insight_id,
+            "confidence": insight.confidence
+        })
+        
+        self._emit_log(f"[Strategos] 💥 Confirmed vulnerability: {insight.summary}")
+
+    async def _handle_waf_detected(self, insight: InsightPayload) -> None:
+        """Handle WAF detection insights."""
+        if not self.context:
+             return
+
+        self.context.knowledge["waf_detected"] = True
+        self.context.knowledge["waf_details"] = insight.details
+        self._emit_log(f"[Strategos] 🛡 WAF detected: {insight.summary}")
+
+    async def _handle_auth_required(self, insight: InsightPayload) -> None:
+        """Handle authentication requirement insights."""
+        if not self.context:
+             return
+
+        if "auth_required" not in self.context.knowledge:
+            self.context.knowledge["auth_required"] = []
+        
+        self.context.knowledge["auth_required"].append({
+            "target": insight.target,
+            "auth_type": insight.details.get("auth_type", "unknown"),
+            "insight_id": insight.insight_id
+        })
+        self._emit_log(f"[Strategos] 🔒 Authentication required: {insight.target}")
+
+    async def _handle_rate_limit(self, insight: InsightPayload) -> None:
+        """Handle rate limit detection insights."""
+        if not self.context:
+             return
+
+        self.context.knowledge["rate_limited"] = True
+        self._emit_log(f"[Strategos] 🐌 Rate limiting detected: {insight.summary}")
+
+    async def _handle_generic_insight(self, insight: InsightPayload) -> None:
+        """Handle generic insights."""
+        self._emit_log(f"[Strategos] ℹ Generic insight: {insight.summary}")
+
     def _handle_tool_completed(self, event: ToolCompletedEvent):
         """
         Process a completed tool event.
@@ -529,9 +890,10 @@ class Strategos:
         while self.context.running_tools:
             await asyncio.sleep(0.1)
     
-    def ingest_findings(self, findings: List[Dict]):
+    async def ingest_findings(self, findings: List[Dict]):
         """
         Active Feedback.
+        Ingests findings and generates insights (Phase 5).
         """
         # Conditional branch.
         if not self.context:
@@ -556,7 +918,97 @@ class Strategos:
             existing_tags.update(tags)
             self.context.knowledge["tags"] = existing_tags
             
+            # Phase 5: Generate and enqueue insights
+            insight = await self._generate_insights_from_finding(finding)
+            if insight:
+                enqueued = await self._insight_queue.enqueue(insight)
+                if enqueued:
+                    # Emit NEXUS_INSIGHT_FORMED event
+                    # We can use the event bus if available, but for now we trust the queue processor
+                    # to handle reactions. However, for full traceability we should emit.
+                    if self._event_bus:
+                        # Assuming emit_event is generic or we have a helper 
+                        # We used to have generic emit, but now strict types.
+                        # We need emit_nexus_insight_formed? No, use generic emit with Payload.
+                        # But wait, event bus validates strictness.
+                        # The EventType constant is NEXUS_INSIGHT_FORMED
+                        # The payload is InsightPayload
+                        
+                        # We will construct it manually for now as no helper exists yet
+                        try:
+                           self._event_bus.emit(
+                               event_type=EventType.NEXUS_INSIGHT_FORMED,
+                               payload=insight,
+                               scan_id=self.context.scan_id,
+                               description=f"Insight formed: {insight.summary}",
+                               source="strategos.nexus.hybrid"
+                           )
+                        except Exception as e:
+                           logger.warning(f"Failed to emit insight event: {e}")
+            
         self._emit_log(f"[Strategos] Ingested {len(findings)} findings. Total: {len(self.context.findings)}")
+
+    async def _generate_insights_from_finding(self, finding: Dict) -> Optional[InsightPayload]:
+        """
+        Generate actionable insights from raw findings.
+        This is the bridge between raw data (Scanner) and strategy (Brain).
+        """
+        if not self.context:
+            return None
+            
+        finding_type = finding.get("type", "unknown")
+        target = finding.get("asset") or finding.get("target") or "unknown"
+        priority = finding.get("priority", 5)
+        
+        insight_type = None
+        action_type = None
+        confidence = 0.5
+        summary = ""
+        
+        # Rule 1: High Value Targets (HVT)
+        # e.g. admin panels, git configs, env files
+        if finding_type in ["admin_panel", "config_exposure", "git_exposure"]:
+            action_type = InsightActionType.HIGH_VALUE_TARGET
+            confidence = 0.9
+            summary = f"High Value Target discovered: {finding_type} at {target}"
+            priority = 1
+            
+        # Rule 2: Critical Paths / Vulnerabilities
+        elif finding_type in ["sqli", "rce", "lfi", "ssrf"]:
+            action_type = InsightActionType.CONFIRMED_VULN  # Assuming scanner output implies some confidence
+            confidence = 0.8 # Scanners can have false positives
+            summary = f"Possible Critical Vulnerability: {finding_type} at {target}"
+            priority = 1
+            
+        # Rule 3: WAF Detection
+        elif finding_type == "waf_detected":
+            action_type = InsightActionType.WAF_DETECTED
+            confidence = 1.0
+            summary = f"WAF Detected: {finding.get('details', {}).get('waf_name', 'Generic')}"
+            priority = 3
+            
+        # Rule 4: Auth Boundaries
+        elif finding_type in ["login_page", "401_unauthorized", "403_forbidden"]:
+            action_type = InsightActionType.AUTH_REQUIRED
+            confidence = 1.0
+            summary = f"Authentication Boundary found at {target}"
+            priority = 4
+        
+        if action_type:
+            return InsightPayload(
+                insight_id=uuid.uuid4().hex,
+                scan_id=self.context.scan_id,
+                action_type=action_type,
+                confidence=confidence,
+                target=target,
+                summary=summary,
+                details=finding,
+                source_tool=finding.get("source", "strategos_inference"),
+                source_finding_id=finding.get("id"),
+                priority=priority
+            )
+            
+        return None
 
     def _select_tools(self, intent: str, available_tools: List[str], mode: ScanMode) -> List[str]:
         """

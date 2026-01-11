@@ -7,6 +7,10 @@ Every event type related to Omega/Governance MUST have a corresponding schema he
 """
 
 from typing import Dict, List, Optional, Any, Literal
+from enum import Enum
+import time
+from datetime import datetime
+from dataclasses import dataclass
 from pydantic import BaseModel, Field, HttpUrl, validator, conint, ConfigDict, field_validator
 
 # ---------------------------------------------------------------------------
@@ -156,6 +160,79 @@ class MimicAnalysisCompletedPayload(BaseModel):
     secrets_found: conint(ge=0) = 0
     hidden_routes_found: conint(ge=0) = 0
     notes: List[str] = Field(default_factory=list)
+
+
+class InsightActionType(str, Enum):
+    """
+    Classification of insight actions.
+    Determines which handler processes the insight.
+    """
+    # Target Discovery
+    HIGH_VALUE_TARGET = "high_value_target"  # Discovered critical asset
+    CRITICAL_PATH = "critical_path"  # Found path to critical system
+    
+    # Vulnerability Discovery
+    CONFIRMED_VULN = "confirmed_vuln"  # Vulnerability validated
+    POTENTIAL_VULN = "potential_vuln"  # Vulnerability candidate
+    
+    # Surface Expansion
+    NEW_SUBDOMAIN = "new_subdomain"  # New subdomain discovered
+    NEW_ENDPOINT = "new_endpoint"  # New endpoint discovered
+    NEW_PARAMETER = "new_parameter"  # New parameter discovered
+    
+    # Security Posture
+    WAF_DETECTED = "waf_detected"  # WAF identified
+    AUTH_REQUIRED = "auth_required"  # Authentication required
+    RATE_LIMIT = "rate_limit"  # Rate limiting detected
+    
+    # Intelligence
+    TECHNOLOGY_STACK = "technology_stack"  # Technology identified
+    EXPOSED_SERVICE = "exposed_service"  # Exposed service found
+    MISCONFIGURATION = "misconfiguration"  # Misconfiguration found
+    
+    # Meta
+    GENERAL = "general"  # General insight
+
+
+class InsightPayload(BaseModel):
+    """
+    Payload for NEXUS_INSIGHT_FORMED events.
+    Represents a strategic insight discovered during scanning.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    # Identification
+    insight_id: str = Field(..., min_length=1, description="Unique insight identifier")
+    scan_id: str = Field(..., min_length=1, description="Associated scan identifier")
+    
+    # Classification
+    action_type: InsightActionType = Field(..., description="Type of insight action")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score [0.0, 1.0]")
+    
+    # Content
+    target: str = Field(..., min_length=1, description="Target asset for this insight")
+    summary: str = Field(..., min_length=5, description="Human-readable summary")
+    details: Dict[str, Any] = Field(default_factory=dict, description="Structured details")
+    
+    # Traceability
+    source_tool: str = Field(..., description="Tool that generated this insight")
+    source_finding_id: Optional[str] = Field(None, description="Related finding ID")
+    created_at: float = Field(default_factory=time.time, description="Creation timestamp")
+    
+    # Priority
+    priority: int = Field(default=5, ge=1, le=10, description="Priority (1=highest, 10=lowest)")
+
+
+@dataclass
+class InsightQueueStats:
+    """Statistics for insight queue monitoring."""
+    total_enqueued: int = 0
+    total_processed: int = 0
+    total_failed: int = 0
+    current_size: int = 0
+    dropped_count: int = 0  # Insights dropped due to queue full
+    processing_time_ms: float = 0.0
+    circuit_breaker_state: str = "CLOSED"
 
 # ---------------------------------------------------------------------------
 # Reasoning & Hypotheses (The Brain)

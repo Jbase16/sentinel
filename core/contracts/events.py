@@ -42,7 +42,9 @@ from core.contracts.schemas import (
     MimicRouteFoundPayload,
     MimicSecretFoundPayload,
     MimicAnalysisCompletedPayload,
-    HypothesisPayload
+    HypothesisPayload,
+    InsightPayload,
+    InsightActionType
 )
 
 logger = logging.getLogger(__name__)
@@ -736,18 +738,20 @@ class EventContract:
             EventType.NEXUS_HYPOTHESIS_FORMED,
             EventType.NEXUS_HYPOTHESIS_UPDATED,
             EventType.NEXUS_HYPOTHESIS_CONFIRMED,
-            EventType.NEXUS_HYPOTHESIS_REFUTED,
-            EventType.NEXUS_INSIGHT_FORMED # Assuming InsightPayload exists or re-using HypothesisPayload for now if similar
+            EventType.NEXUS_HYPOTHESIS_REFUTED
         ]:
-            # Note: Insight might need its own payload, but for now we focus on Hypothesis fix
-            schema_model = HypothesisPayload
-            # TODO: Create InsightPayload if needed, for now Hypothesis logic drives strictness
-            
             cls._schemas[et] = EventSchema(
                 event_type=et,
                 description="Probabilistic reasoning event (Strict Contract).",
-                model=schema_model
+                model=HypothesisPayload
             )
+            
+        # NEXUS - Insight Engine (Hybrid Strategy)
+        cls._schemas[EventType.NEXUS_INSIGHT_FORMED] = EventSchema(
+            event_type=EventType.NEXUS_INSIGHT_FORMED,
+            description="Strategic insight formed from findings.",
+            model=InsightPayload
+        )
 
         # ----------------------------------------------------------------
         # GOVERNANCE & SAFETY (Pydantic Backed)
