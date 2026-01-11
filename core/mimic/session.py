@@ -28,12 +28,10 @@ class MimicSession:
         if text is None:
             return
 
-        # Source map handling: if it's a *.map, try to unpack "sourcesContent"
         if asset.url.lower().endswith(".map"):
             self._process_sourcemap(asset.asset_id, text)
             return
 
-        # Route mining
         for r in mine_routes(asset.asset_id, text):
             if r.hidden:
                 if r.route not in self.hidden_routes:
@@ -41,6 +39,7 @@ class MimicSession:
                     self.bus.emit(
                         GraphEvent(
                             type=EventType.MIMIC_HIDDEN_ROUTE_FOUND,
+                            scan_id=self.scan_id,
                             payload={
                                 "scan_id": self.scan_id,
                                 "asset_id": asset.asset_id,
@@ -57,6 +56,7 @@ class MimicSession:
                     self.bus.emit(
                         GraphEvent(
                             type=EventType.MIMIC_ROUTE_FOUND,
+                            scan_id=self.scan_id,
                             payload={
                                 "scan_id": self.scan_id,
                                 "asset_id": asset.asset_id,
@@ -68,12 +68,12 @@ class MimicSession:
                         )
                     )
 
-        # Secret mining
         for s in mine_secrets(asset.asset_id, text):
             self.secrets.append(s)
             self.bus.emit(
                 GraphEvent(
                     type=EventType.MIMIC_SECRET_FOUND,
+                    scan_id=self.scan_id,
                     payload={
                         "scan_id": self.scan_id,
                         "asset_id": asset.asset_id,
@@ -96,6 +96,7 @@ class MimicSession:
         self.bus.emit(
             GraphEvent(
                 type=EventType.MIMIC_ANALYSIS_COMPLETED,
+                scan_id=self.scan_id,
                 payload={
                     "scan_id": self.scan_id,
                     "assets_analyzed": summary.assets_analyzed,
@@ -121,6 +122,7 @@ class MimicSession:
             obj = json.loads(text)
         except Exception:
             return
+
         sources_content = obj.get("sourcesContent")
         if not isinstance(sources_content, list):
             return
@@ -129,21 +131,22 @@ class MimicSession:
             if not isinstance(src, str) or not src.strip():
                 continue
 
-            # Mine routes/secrets from embedded sources
             for r in mine_routes(asset_id, src):
                 dest = self.hidden_routes if r.hidden else self.routes
                 if r.route in dest:
                     continue
+
                 dest.add(r.route)
                 self.bus.emit(
                     GraphEvent(
                         type=EventType.MIMIC_HIDDEN_ROUTE_FOUND if r.hidden else EventType.MIMIC_ROUTE_FOUND,
+                        scan_id=self.scan_id,
                         payload={
                             "scan_id": self.scan_id,
                             "asset_id": asset_id,
                             "route": r.route,
                             "method": r.method,
-                            "confidence": min(90, max(r.confidence, 60)),  # sourcemap is strong evidence
+                            "confidence": min(90, max(r.confidence, 60)),
                             "evidence": {**r.evidence, "sourcemap_sourcesContent_index": i},
                         },
                     )
@@ -154,6 +157,7 @@ class MimicSession:
                 self.bus.emit(
                     GraphEvent(
                         type=EventType.MIMIC_SECRET_FOUND,
+                        scan_id=self.scan_id,
                         payload={
                             "scan_id": self.scan_id,
                             "asset_id": asset_id,

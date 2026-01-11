@@ -21,13 +21,10 @@ def test_detects_private_key_pem_header():
     secrets = mine_secrets("a1", text)
     assert any(s.secret_type == "private_key_pem_header" for s in secrets)
 
-def test_high_entropy_string():
-    # Long random string
-    random_str = "aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890+/="
-    js = f'const secret = "{random_str}";'
+def test_high_entropy_string_triggers():
+    # Deterministic, high-entropy-ish string that should clear your thresholds
+    cand = "aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890+/=QWERTYuiopASDFGHjklZXCVBNm"
+    # assert shannon_entropy(cand) >= 4.2 # Function not imported in test but we know it passes
+    js = f'const secret = "{cand}";'
     secrets = mine_secrets("a1", js)
-    # The entropy of this string should be high enough to trigger
-    # But it might be borderline depending on implementation.
-    # Let's trust the logic if it's high enough.
-    # Actually, let's verify if implementation uses 4.2 threshold.
-    pass 
+    assert any(s.secret_type == "high_entropy_string" for s in secrets) 
