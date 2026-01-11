@@ -106,6 +106,58 @@ class OrphanEventPayload(OmegaEventPayload):
     source_component: str
 
 # ---------------------------------------------------------------------------
+# Mimic (Source Reconstruction)
+# ---------------------------------------------------------------------------
+
+class MimicDownloadStartedPayload(BaseModel):
+    scan_id: str = Field(..., min_length=1)
+    root_urls: List[str] = Field(default_factory=list)
+    note: Optional[str] = None
+
+
+class MimicAssetDownloadedPayload(BaseModel):
+    scan_id: str = Field(..., min_length=1)
+    asset_id: str = Field(..., min_length=1)
+    url: str = Field(..., min_length=1)
+    content_type: Optional[str] = None
+    size_bytes: conint(ge=0) = 0
+    sha256: str = Field(..., min_length=64, max_length=64)
+    discovered_from: Optional[str] = None  # parent URL
+
+
+class MimicDownloadCompletedPayload(BaseModel):
+    scan_id: str = Field(..., min_length=1)
+    assets_downloaded: conint(ge=0) = 0
+    total_bytes: conint(ge=0) = 0
+
+
+class MimicRouteFoundPayload(BaseModel):
+    scan_id: str = Field(..., min_length=1)
+    asset_id: str = Field(..., min_length=1)
+    route: str = Field(..., min_length=1)
+    method: Optional[Literal["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]] = None
+    confidence: conint(ge=0, le=100) = 50
+    evidence: Dict[str, Any] = Field(default_factory=dict)  # offsets, match hashes, etc.
+
+
+class MimicSecretFoundPayload(BaseModel):
+    scan_id: str = Field(..., min_length=1)
+    asset_id: str = Field(..., min_length=1)
+    secret_type: str = Field(..., min_length=1)
+    confidence: conint(ge=0, le=100) = 50
+    redacted_preview: str = Field(..., min_length=1)
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MimicAnalysisCompletedPayload(BaseModel):
+    scan_id: str = Field(..., min_length=1)
+    assets_analyzed: conint(ge=0) = 0
+    routes_found: conint(ge=0) = 0
+    secrets_found: conint(ge=0) = 0
+    hidden_routes_found: conint(ge=0) = 0
+    notes: List[str] = Field(default_factory=list)
+
+# ---------------------------------------------------------------------------
 # Cronus (Time Machine)
 # ---------------------------------------------------------------------------
 

@@ -35,7 +35,13 @@ from core.contracts.schemas import (
     TrafficObservedPayload,
     EventSilencePayload,
     ToolChurnPayload,
-    OrphanEventPayload
+    OrphanEventPayload,
+    MimicDownloadStartedPayload,
+    MimicAssetDownloadedPayload,
+    MimicDownloadCompletedPayload,
+    MimicRouteFoundPayload,
+    MimicSecretFoundPayload,
+    MimicAnalysisCompletedPayload
 )
 
 logger = logging.getLogger(__name__)
@@ -96,16 +102,12 @@ class EventType(str, Enum):
 
     # MIMIC - Source Reconstruction
     MIMIC_DOWNLOAD_STARTED = "mimic_download_started"
-    MIMIC_DOWNLOAD_COMPLETED = "mimic_download_completed"
-    MIMIC_DOWNLOAD_FAILED = "mimic_download_failed"
     MIMIC_ASSET_DOWNLOADED = "mimic_asset_downloaded"
-    MIMIC_PARSE_STARTED = "mimic_parse_started"
-    MIMIC_PARSE_COMPLETED = "mimic_parse_completed"
+    MIMIC_DOWNLOAD_COMPLETED = "mimic_download_completed"
     MIMIC_ROUTE_FOUND = "mimic_route_found"
-    MIMIC_SECRET_FOUND = "mimic_secret_found"
-    MIMIC_ANALYSIS_STARTED = "mimic_analysis_started"
-    MIMIC_ANALYSIS_COMPLETED = "mimic_analysis_completed"
     MIMIC_HIDDEN_ROUTE_FOUND = "mimic_hidden_route_found"
+    MIMIC_SECRET_FOUND = "mimic_secret_found"
+    MIMIC_ANALYSIS_COMPLETED = "mimic_analysis_completed"
 
     # NEXUS - Logic Chaining
     NEXUS_COLLECT_STARTED = "nexus_collect_started"

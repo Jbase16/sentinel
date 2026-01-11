@@ -113,8 +113,12 @@ async def lifespan(app: FastAPI):
     app.state.boot_status["db_ready"] = True
 
     # Initialize global event sequence counter
-    from core.cortex.events import initialize_event_sequence_from_db
+    from core.cortex.events import initialize_event_sequence_from_db, set_strict_contract_mode
     await initialize_event_sequence_from_db()
+    
+    # ANCHOR: Enforce strict contract validation
+    # This prevents invalid events from circulating in the system.
+    set_strict_contract_mode(True)
 
     # Load CAL policies from database
     try:
@@ -193,8 +197,18 @@ async def lifespan(app: FastAPI):
     from core.cronus.manager import CronusManager
     cronus_manager = CronusManager()
     cronus_manager.start()
+<<<<<<< HEAD
     app.state.boot_status["cronus_ready"] = True
     app.state.boot_status["state"] = "ready"
+=======
+    
+    # Initialize The Source (Mimic)
+    from core.mimic.manager import MimicManager, MimicConfig
+    from core.cortex.events import get_event_bus
+    # Using get_event_bus() assuming strict mode is global
+    mimic_manager = MimicManager.get(get_event_bus()) 
+    mimic_manager.start()
+>>>>>>> fcb049f (feat(contracts): add Mimic source reconstruction event payloads and schemas)
 
     yield
 
@@ -222,6 +236,7 @@ async def lifespan(app: FastAPI):
     try:
         nexus_manager.stop()
         cronus_manager.stop()
+        mimic_manager.stop()
         codex_db.close()
     except Exception as e:
         logger.error(f"[Shutdown] Manager cleanup failed: {e}")

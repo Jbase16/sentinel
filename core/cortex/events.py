@@ -213,17 +213,14 @@ class EventBus:
     - strict=True (dev): Raises ContractViolation on invalid events
     - strict=False (prod): Logs warning but continues execution
     """
-    def __init__(self, validate: bool = True):
+    def __init__(self):
         """
         Initialize EventBus.
-
-        Args:
-            validate: Enable contract validation (default True).
-                      Set False for legacy code or performance-critical paths.
+        
+        Validation is now mandatory (Phase 1.5/3 Hardening).
         """
         self._subscribers: List[Callable[[GraphEvent], None]] = []
         self._last_event_sequence: int = 0  # Track last sequence for diagnostics
-        self._validate = validate
 
     def subscribe(self, callback: Callable[[GraphEvent], None]):
         """Function subscribe."""
@@ -239,7 +236,7 @@ class EventBus:
         Broadcast event to all subscribers.
 
         CONTRACT VALIDATION:
-        Before broadcasting, the event is validated against the EventContract.
+        Before broadcasting, the event is ALWAYS validated against the EventContract.
         In strict mode (development), invalid events raise ContractViolation.
         In non-strict mode (production), invalid events log warnings.
         """
@@ -247,17 +244,17 @@ class EventBus:
         self._last_event_sequence = event.event_sequence
 
         # CONTRACT VALIDATION: Ensure event conforms to schema and causal rules
-        if self._validate:
-            violations = []
-            try:
-                violations = EventContract.validate(event.type, event.payload)
-            except ContractViolation as e:
-                # In strict mode, it raised. We capture violations from the exception.
-                violations = e.violations
-                logger.warning(f"[EventBus] Contract violation (Strict): {e}")
+        # Mandatory enforcement
+        violations = []
+        try:
+            violations = EventContract.validate(event.type, event.payload)
+        except ContractViolation as e:
+            # In strict mode, it raised. We capture violations from the exception.
+            violations = e.violations
+            logger.warning(f"[EventBus] Contract violation (Strict): {e}")
 
-            # If we found violations (either via return or exception), emit governance event
-            if violations:
+        # If we found violations (either via return or exception), emit governance event
+        if violations:
                 # EMIT CONTRACT_VIOLATION EVENT (Governance)
                 # Prevent recursion: if the violation is FOR a violation event, just panic.
                 if event.type != EventType.CONTRACT_VIOLATION:
