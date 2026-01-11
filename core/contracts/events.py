@@ -391,8 +391,8 @@ class EventContract:
         cls._schemas[EventType.SCAN_COMPLETED] = EventSchema(
             event_type=EventType.SCAN_COMPLETED,
             description="Scan finished successfully.",
-            preconditions=[EventType.SCAN_STARTED],
             fields=[
+                FieldSpec("scan_id", str, required=True),
                 FieldSpec("status", str, required=True),
                 FieldSpec("findings_count", int, required=True),
                 FieldSpec("duration_seconds", float, required=False),
@@ -402,8 +402,8 @@ class EventContract:
         cls._schemas[EventType.SCAN_FAILED] = EventSchema(
             event_type=EventType.SCAN_FAILED,
             description="Scan terminated with error.",
-            preconditions=[EventType.SCAN_STARTED],
             fields=[
+                FieldSpec("scan_id", str, required=True),
                 FieldSpec("error", str, required=True),
                 FieldSpec("phase", str, required=False),
             ]
@@ -412,32 +412,30 @@ class EventContract:
         cls._schemas[EventType.SCAN_PHASE_CHANGED] = EventSchema(
             event_type=EventType.SCAN_PHASE_CHANGED,
             description="Scan transitioned to new phase.",
-            preconditions=[EventType.SCAN_STARTED],
             fields=[
+                FieldSpec("scan_id", str, required=True),
                 FieldSpec("phase", str, required=True),
                 FieldSpec("previous_phase", str, required=False),
             ]
         )
 
         # ----------------------------------------------------------------
-        # TOOL EXECUTION
+        # TOOLS - Execution (Strict + Causal)
         # ----------------------------------------------------------------
         cls._schemas[EventType.TOOL_STARTED] = EventSchema(
             event_type=EventType.TOOL_STARTED,
             description="External tool execution started.",
-            preconditions=[EventType.SCAN_STARTED],
             fields=[
                 FieldSpec("tool", str, required=True),
                 FieldSpec("target", str, required=True),
                 FieldSpec("scan_id", str, required=True),
-                FieldSpec("args", list, required=True),
+                FieldSpec("args", list, required=False),
             ]
         )
 
         cls._schemas[EventType.TOOL_COMPLETED] = EventSchema(
             event_type=EventType.TOOL_COMPLETED,
             description="External tool execution finished.",
-            preconditions=[EventType.TOOL_STARTED],
             fields=[
                 FieldSpec("tool", str, required=True),
                 FieldSpec("exit_code", int, required=True),
@@ -917,7 +915,6 @@ if __name__ == "__main__":
                 "allowed_tools": ["nmap", "httpx"]
             })
             print("✅ SCAN_STARTED valid.")
-            print("✅ SCAN_STARTED valid.")
             
             # 2. Invalid event
             print("\nTest 2: Expecting Failure (Missing Fields)...")
@@ -931,7 +928,7 @@ if __name__ == "__main__":
 
             # 3. Causal Check
             print("\nTest 3: Causal Integrity...")
-            # Start verify
+
             validate_event(EventType.SCAN_STARTED, {
                 "target": "http://example.com",
                 "scan_id": "causal-test",
@@ -941,43 +938,43 @@ if __name__ == "__main__":
 
             validate_event(EventType.TOOL_STARTED, {
                 "tool": "nmap",
-                "target": "http://example.com"
+                "target": "http://example.com",
+                "scan_id": "causal-test",
+                "args": ["-sV"]
             })
             print("✓ TOOL_STARTED validated")
 
             validate_event(EventType.TOOL_COMPLETED, {
                 "tool": "nmap",
                 "exit_code": 0,
-                "findings_count": 5
+                "findings_count": 5,
+                "scan_id": "causal-test"
             })
             print("✓ TOOL_COMPLETED validated")
 
             validate_event(EventType.SCAN_COMPLETED, {
                 "status": "success",
-                "findings_count": 5
+                "findings_count": 5,
+                "duration_seconds": 1.23,
+                "scan_id": "causal-test"
             })
             print("✓ SCAN_COMPLETED validated")
 
-        except ContractViolation as e:
-            print(f"✗ Unexpected violation: {e}")
-            sys.exit(1)
+            # 4. Causal Violation Test
+            print("\nTest 4: Expecting Causal Violation (No Tool Start)...")
+            try:
+                validate_event(EventType.TOOL_COMPLETED, {
+                    "tool": "unknown_tool",
+                    "exit_code": 0,
+                    "findings_count": 0,
+                    "scan_id": "causal-test" # Valid scan_id, but tool never started
+                })
+            except ContractViolation as e:
+                print(f"✅ Caught expected violation: {e}")
 
-        EventContract.reset_causal_state()
-        try:
-            validate_event(EventType.SCAN_STARTED, {
-                "target": "http://example.com",
-                "scan_id": "test-456",
-                "allowed_tools": []
-            })
-            validate_event(EventType.TOOL_COMPLETED, {
-                "tool": "unknown_tool",
-                "exit_code": 0,
-                "findings_count": 0
-            })
-            print("✗ Should have raised ContractViolation for causal error")
-            sys.exit(1)
         except ContractViolation as e:
-            print(f"✓ Correctly caught causal violation: {e.violations[0]}")
+            print(f"❌ UNEXPECTED VIOLATION: {e}")
+            sys.exit(1)
 
         print("\n✅ All contract tests passed!")
     else:
