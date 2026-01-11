@@ -158,6 +158,28 @@ class MimicAnalysisCompletedPayload(BaseModel):
     notes: List[str] = Field(default_factory=list)
 
 # ---------------------------------------------------------------------------
+# Reasoning & Hypotheses (The Brain)
+# ---------------------------------------------------------------------------
+
+class HypothesisPayload(OmegaEventPayload):
+    """
+    Payload for NEXUS_HYPOTHESIS_*.
+    Represents a probabilistic assertion, strictly separated from graph facts.
+    """
+    hypothesis_id: str = Field(..., min_length=1)
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Bounded probability [0.0, 1.0]")
+    summary: str = Field(..., min_length=5, description="One-line human readable summary")
+    explanation: str = Field(..., min_length=10, description="Structured reasoning for the confidence score")
+    
+    # Traceability
+    sources: List[str] = Field(default_factory=list, description="IDs of observations (findings, events, nodes) that support this")
+    rule_id: Optional[str] = Field(None, description="ID of the reasoning rule that generated this")
+    
+    # State tracking
+    is_terminal: bool = False # If True, no further updates expected (Confirmed/Refuted)
+    
+
+# ---------------------------------------------------------------------------
 # Cronus (Time Machine)
 # ---------------------------------------------------------------------------
 

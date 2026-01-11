@@ -195,6 +195,7 @@ class GraphEvent:
     timestamp: float = field(default_factory=time.time)
     event_sequence: int = field(default_factory=get_next_sequence)
     run_id: str = field(default_factory=get_run_id)
+    scan_id: Optional[str] = None
     entity_id: Optional[str] = None
 
 class EventBus:
@@ -285,11 +286,11 @@ class EventBus:
                     except Exception as emit_err:
                         logger.critical(f"[EventBus] FAILED TO EMIT CONTRACT_VIOLATION: {emit_err}")
 
-            # Re-raise if we're in strict mode and it was a real violation
-            if violations and EventContract._strict_mode:
-                # Check if we already have an active exception context, if so raise from it is cleaner
-                # but simple raise is sufficient as we are effectively re-asserting the strictness
-                raise ContractViolation(event.type.value, violations)
+        # Re-raise if we're in strict mode and it was a real violation
+        if violations and EventContract._strict_mode:
+            # Check if we already have an active exception context, if so raise from it is cleaner
+            # but simple raise is sufficient as we are effectively re-asserting the strictness
+            raise ContractViolation(event.type.value, violations)
 
         # DISPATCH (O(1) lookup + O(M) subscribers)
         # 1. Specific subscribers

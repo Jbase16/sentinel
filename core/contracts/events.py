@@ -41,7 +41,8 @@ from core.contracts.schemas import (
     MimicDownloadCompletedPayload,
     MimicRouteFoundPayload,
     MimicSecretFoundPayload,
-    MimicAnalysisCompletedPayload
+    MimicAnalysisCompletedPayload,
+    HypothesisPayload
 )
 
 logger = logging.getLogger(__name__)
@@ -123,9 +124,11 @@ class EventType(str, Enum):
     NEXUS_STEP_STARTED = "nexus_step_started"
     NEXUS_STEP_COMPLETED = "nexus_step_completed"
 
-    # NEXUS - Hypothesis Engine (Apex Hardening)
+    # NEXUS - Hypothesis Engine (Probabilistic Reasoning)
+    # Strictly separated from Graph Facts.
     NEXUS_HYPOTHESIS_FORMED = "nexus_hypothesis_formed"
     NEXUS_HYPOTHESIS_UPDATED = "nexus_hypothesis_updated"
+    NEXUS_HYPOTHESIS_CONFIRMED = "nexus_hypothesis_confirmed"
     NEXUS_HYPOTHESIS_REFUTED = "nexus_hypothesis_refuted"
     NEXUS_INSIGHT_FORMED = "nexus_insight_formed"
 
@@ -166,11 +169,6 @@ class FieldSpec:
     validator: Optional[Callable[[Any], bool]] = None
     description: str = ""
 
-@dataclass(frozen=True)
-class PydanticSpec:
-    """Wrapper for Pydantic model validation."""
-    model: Type[BaseModel]
-
     def validate(self, value: Any) -> bool:
         """Check if value satisfies this field spec."""
         if value is None:
@@ -189,6 +187,11 @@ class PydanticSpec:
             return False
 
         return True
+
+@dataclass(frozen=True)
+class PydanticSpec:
+    """Wrapper for Pydantic model validation."""
+    model: Type[BaseModel]
 
 
 # ============================================================================

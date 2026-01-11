@@ -206,6 +206,13 @@ async def lifespan(app: FastAPI):
     mimic_manager = MimicManager.get(get_event_bus()) 
     mimic_manager.start()
     app.state.boot_status["mimic_ready"] = True
+    
+    # Initialize The Brain (Reasoning Engine)
+    from core.reasoning.engine import ReasoningEngine
+    reasoning_engine = ReasoningEngine.get(get_event_bus())
+    reasoning_engine.start()
+    app.state.boot_status["reasoning_ready"] = True
+    
     app.state.boot_status["state"] = "ready"
 
     yield (feat(contracts): add Mimic source reconstruction event payloads and schemas)
@@ -237,6 +244,7 @@ async def lifespan(app: FastAPI):
         nexus_manager.stop()
         cronus_manager.stop()
         mimic_manager.stop()
+        reasoning_engine.stop()
         codex_db.close()
     except Exception as e:
         logger.error(f"[Shutdown] Manager cleanup failed: {e}")

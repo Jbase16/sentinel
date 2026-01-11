@@ -77,6 +77,10 @@ class MimicManager:
     def _on_download_started(self, event: GraphEvent) -> None:
         # Bus dispatch guarantees type
         try:
+            # DEFENSIVE GUARD: Even though we subscribe by type, a confused bus could send us garbage.
+            if event.type != EventType.MIMIC_DOWNLOAD_STARTED:
+                return
+
             scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id")
             if not scan_id:
                 return
@@ -89,6 +93,7 @@ class MimicManager:
             # IMPORTANT:
             # - Budget MUST NOT be emitted downstream (frontend/SSE poison).
             # - If callers pass it in payload, treat it as an internal-only hint.
+            # INTERNAL: budget is consumed here and MUST NOT be forwarded beyond this handler
             budget_obj = payload.get("budget")
             budget: Optional[Budget] = budget_obj if isinstance(budget_obj, Budget) else None
 
