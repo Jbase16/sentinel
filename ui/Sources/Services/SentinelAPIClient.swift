@@ -77,6 +77,10 @@ public struct SentinelAPIClient: Sendable {
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (json?["status"] as? String) == "ok"
         } catch {
+            // Log error only if it's a real error (not connection refused during startup)
+            if ErrorClassifier.shouldLogAsError(error) {
+                print("[SentinelAPIClient] ping error: \(error.localizedDescription)")
+            }
             return false
         }
     }
@@ -422,7 +426,10 @@ public struct SentinelAPIClient: Sendable {
                         // But if we want to stop, we break. For now, assume persistent stream.
                         print("[SSE] Sync stream ended, reconnecting...")
                     } catch {
-                        print("[SSE] Connection lost: \(error). Reconnecting...")
+                        // Log error only if it's a real error (not connection refused during startup)
+                        if ErrorClassifier.shouldLogAsError(error) {
+                            print("[SSE] Connection lost: \(error). Reconnecting...")
+                        }
                     }
 
                     attempt += 1
@@ -432,9 +439,8 @@ public struct SentinelAPIClient: Sendable {
                         return
                     }
 
-                    // Exponential backoff: 1, 2, 4, 8, 16 seconds
-                    let delay = UInt64(pow(2.0, Double(attempt - 1)) * 1_000_000_000)
-                    try? await Task.sleep(nanoseconds: delay)
+                    // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
+                    await RetryBackoff.sleep(for: attempt)
                 }
 
                 continuation.finish()

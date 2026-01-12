@@ -213,16 +213,26 @@ public class EventStreamClient: ObservableObject {
                 lastError = error
                 isConnected = false
 
-                // Exponential backoff with jitter
-                let delay =
-                    reconnectBaseDelay * pow(2.0, Double(reconnectAttempt))
-                    + Double.random(in: 0...0.5)
+                // Log error only if it's a real error (not connection refused during startup)
+                if ErrorClassifier.shouldLogAsError(error) {
+                    print("[EventStreamClient] Error: \(error.localizedDescription)")
+                }
+
+                // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
                 reconnectAttempt += 1
+                let delay = RetryBackoff.delayForAttempt(reconnectAttempt)
+
+                let logMessage: String
+                if ErrorClassifier.isConnectionRefused(error) {
+                    logMessage = "Backend starting, retrying..."
+                } else {
+                    logMessage = "Reconnecting..."
+                }
 
                 print(
-                    "[EventStreamClient] Reconnecting in \(String(format: "%.1f", delay))s (attempt \(reconnectAttempt))"
+                    "[EventStreamClient] \(logMessage) in \(String(format: "%.1f", delay))s (attempt \(reconnectAttempt))"
                 )
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                await RetryBackoff.sleep(for: reconnectAttempt)
             }
         }
 

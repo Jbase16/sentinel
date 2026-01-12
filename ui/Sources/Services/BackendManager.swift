@@ -400,11 +400,11 @@ class BackendManager: ObservableObject {
                 self.status = "Core Starting (attempt \(attempt))..."
             }
 
-            let sleepDuration = min(backoff, max(0, deadline.timeIntervalSinceNow))
+            // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
+            let sleepDuration = min(RetryBackoff.delayForAttempt(attempt), max(0, deadline.timeIntervalSinceNow))
             if sleepDuration > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(sleepDuration * 1_000_000_000))
             }
-            backoff = min(backoff * 2, startupMaxBackoff)
         }
 
         let manifest = readBootManifest()
