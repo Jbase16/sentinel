@@ -17,6 +17,8 @@ from core.cortex.insight_engine import InsightEngine
 from core.data.findings_store import get_finding_store
 from core.reporting.report_composer import ReportComposer
 from core.reporting.poc_generator import PoCGenerator, PoCSafetyError
+from core.cortex.causal_graph import get_graph_dto_for_session
+from core.server.routers.auth import verify_token
 
 
 router = APIRouter(prefix="/cortex", tags=["cortex"])
@@ -65,6 +67,31 @@ async def generate_insights(
     Generate LLM-driven insights for selected nodes.
     """
     return await engine.generate_insights(request)
+
+
+@router.get("/graph", dependencies=[Depends(verify_token)])
+async def get_current_graph():
+    """
+    Get the Causal/Pressure Graph for the active or most recent session.
+    """
+    from core.server.state import get_state
+    from fastapi.responses import Response
+    
+    state = get_state()
+    session_id = state.scan_state.get("session_id")
+    
+    if not session_id:
+         # Fallback to most recent session in DB
+         from core.data.db import Database
+         db = Database.instance()
+         rows = await db.fetch_all("SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1", ())
+         if rows:
+             session_id = rows[0][0]
+             
+    if not session_id:
+        return Response(status_code=204)
+        
+    return await get_graph_dto_for_session(session_id)
 
 
 # ---------------------------------------------------------------------------

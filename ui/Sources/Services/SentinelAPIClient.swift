@@ -87,7 +87,7 @@ public struct SentinelAPIClient: Sendable {
     public func startScan(target: String, modules: [String] = [], mode: String = "standard")
         async throws
     {
-        guard let url = URL(string: "/v1/scan", relativeTo: baseURL) else { return }
+        guard let url = URL(string: "/v1/scans/start", relativeTo: baseURL) else { return }
         var request = authenticatedRequest(url: url, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -156,7 +156,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Fetch the latest scan snapshot (findings/issues/killchain/phase_results).
     func fetchResults() async throws -> SentinelResults? {
-        let request = authenticatedRequest(url: baseURL.appendingPathComponent("/v1/scan/results"))
+        let request = authenticatedRequest(url: baseURL.appendingPathComponent("/v1/scans/results"))
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -174,7 +174,7 @@ public struct SentinelAPIClient: Sendable {
 
     /// Fetch the Pressure Graph (Ground Truth).
     func fetchGraph() async throws -> PressureGraphDTO? {
-        guard let url = URL(string: "/v1/graph", relativeTo: baseURL) else { return nil }
+        guard let url = URL(string: "/v1/cortex/graph", relativeTo: baseURL) else { return nil }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { return nil }
@@ -300,7 +300,7 @@ public struct SentinelAPIClient: Sendable {
 
 
     public func chatQuery(question: String) async throws -> String {
-        guard let url = URL(string: "/v1/chat", relativeTo: baseURL) else {
+        guard let url = URL(string: "/v1/ai/chat", relativeTo: baseURL) else {
             throw APIError.badStatus
         }
         var request = authenticatedRequest(url: url, method: "POST")
@@ -323,7 +323,7 @@ public struct SentinelAPIClient: Sendable {
         print("[Swift] Attempting to stream chat...")
         return AsyncThrowingStream { continuation in
             let task = Task {
-                guard let url = URL(string: "/v1/chat", relativeTo: baseURL) else {
+                guard let url = URL(string: "/v1/ai/chat", relativeTo: baseURL) else {
                     continuation.finish(throwing: APIError.badStatus)
                     return
                 }
@@ -386,7 +386,7 @@ public struct SentinelAPIClient: Sendable {
                 let maxRetries = 5
 
                 while !Task.isCancelled {
-                    guard let url = URL(string: "/v1/events", relativeTo: baseURL) else {
+                    guard let url = URL(string: "/v1/events/stream", relativeTo: baseURL) else {
                         continuation.finish(throwing: APIError.badStatus)
                         return
                     }

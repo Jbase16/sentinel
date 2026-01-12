@@ -385,6 +385,35 @@ class CausalGraphBuilder:
         logger.info(f"[CausalGraph] Found {len(chains)} attack chains")
         return chains
 
+    def export_dto(self) -> Dict[str, Any]:
+        """
+        Export graph nodes and edges for API consumption (PressureGraphDTO).
+        """
+        nodes = []
+        for node in self.graph.nodes():
+            finding = self.findings_map.get(node)
+            if finding:
+                nodes.append({
+                    "id": finding.id,
+                    "label": finding.title,
+                    "type": finding.type,
+                    "severity": finding.severity,
+                    "data": finding.data or {}
+                })
+        
+        edges = []
+        for source, target in self.graph.edges():
+            edges.append({
+                "source": source,
+                "target": target,
+                "type": "enables" # consistent with relationship
+            })
+            
+        return {
+            "nodes": nodes,
+            "edges": edges
+        }
+
     def export_summary(self) -> Dict[str, Any]:
         """
         Export graph summary for API/UI consumption.
@@ -502,3 +531,17 @@ async def build_causal_graph_for_session(session_id: str) -> Dict[str, Any]:
 
     # Return summary
     return builder.export_summary()
+
+
+async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
+    """
+    Build a causal graph from findings and return DTO (nodes/edges).
+    """
+    from core.data.db import Database
+    db = Database.instance()
+    await db.init()
+    findings = await db.get_findings(session_id)
+    
+    builder = CausalGraphBuilder()
+    builder.build(findings)
+    return builder.export_dto()

@@ -19,6 +19,9 @@ router = APIRouter(tags=["system"])
 class ToolInstallRequest(BaseModel):
     tools: List[str]
 
+class LogBatch(BaseModel):
+    lines: List[str]
+
 @router.get("/health")
 async def health_check():
     """Simple health check endpoint."""
@@ -59,3 +62,21 @@ async def get_system_config():
         "environment": conf.environment,
         "log_level": conf.logging.level
     }
+
+@router.get("/logs", response_model=LogBatch, dependencies=[Depends(verify_token)])
+async def fetch_logs():
+    """
+    Flush up to 2000 buffered log lines from the global queue.
+    """
+    state = get_state()
+    lines = []
+    try:
+        # Fetch up to 2000 lines to avoid massive payloads
+        for _ in range(2000):
+            if state.log_queue.empty():
+                break
+            lines.append(state.log_queue.get_nowait())
+    except Exception:
+        pass
+        
+    return {"lines": lines}
