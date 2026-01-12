@@ -123,7 +123,10 @@ struct MainWindowView: View {
         }
         .frame(minWidth: 800, idealWidth: 1000, minHeight: 500, idealHeight: 700)
         .onAppear {
-            appState.refreshStatus()
+            // Only refresh status if backend is ready - prevents spamming during startup
+            if BackendManager.shared.backendState == .ready {
+                appState.refreshStatus()
+            }
         }
     }
 }

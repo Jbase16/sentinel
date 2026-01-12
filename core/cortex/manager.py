@@ -166,7 +166,13 @@ class NexusManager:
         ))
 
     def _emit_violation(self, source_event: GraphEvent, reason: str):
-        """Emit a contract violation for routing failures."""
+        """
+        Emit a contract violation for routing failures.
+        
+        NOTE: This event is marked as _internal=True to prevent recursion loops.
+        The CONTRACT_VIOLATION event bypasses wildcard subscribers, preventing
+        feedback loop where violation handlers re-emit events that cause violations.
+        """
         # Use the manager's bus access to emit
         self.bus.emit(GraphEvent(
             type=EventType.CONTRACT_VIOLATION,
@@ -174,5 +180,6 @@ class NexusManager:
                 "offending_event_type": source_event.type.value,
                 "violations": [reason],
                 "context": {"router": "NexusManager"}
-            }
+            },
+            _internal=True  # Prevent recursion by bypassing wildcard subscribers
         ))

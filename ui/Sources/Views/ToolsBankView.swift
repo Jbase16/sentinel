@@ -19,7 +19,7 @@ struct ToolsBankView: View {
     @State private var selectedMissing: Set<String> = []
     @State private var installing = false
     @State private var lastResults: [InstallResult] = []
-    @State private var processingTool: String? = nil // Which tool is being acted on (for uninstall)
+    @State private var processingTool: String? = nil  // Which tool is being acted on (for uninstall)
 
     var body: some View {
         VStack(alignment: .leading) {
@@ -42,7 +42,8 @@ struct ToolsBankView: View {
             HStack(alignment: .top) {
                 // Installed Column
                 VStack(alignment: .leading) {
-                    Text("Installed (") + Text("\(appState.engineStatus?.tools?.installed.count ?? 0)") + Text(")")
+                    Text("Installed (")
+                        + Text("\(appState.engineStatus?.tools?.installed.count ?? 0)") + Text(")")
                     List(appState.engineStatus?.tools?.installed ?? [], id: \.self) { name in
                         HStack {
                             Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
@@ -65,11 +66,14 @@ struct ToolsBankView: View {
 
                 // Missing Column
                 VStack(alignment: .leading) {
-                    Text("Missing (") + Text("\(appState.engineStatus?.tools?.missing.count ?? 0)") + Text(") – select to install")
+                    Text("Missing (") + Text("\(appState.engineStatus?.tools?.missing.count ?? 0)")
+                        + Text(") – select to install")
                     List(selection: $selectedMissing) {
                         ForEach(appState.engineStatus?.tools?.missing ?? [], id: \.self) { name in
                             HStack {
-                                Image(systemName: selectedMissing.contains(name) ? "checkmark.square" : "square")
+                                Image(
+                                    systemName: selectedMissing.contains(name)
+                                        ? "checkmark.square" : "square")
                                 Text(name)
                             }
                             .contentShape(Rectangle())
@@ -96,19 +100,28 @@ struct ToolsBankView: View {
                             Text(msg)
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
-                                .textSelection(.enabled) // Enable copy
+                                .textSelection(.enabled)  // Enable copy
                         }
                     }
                 }.frame(minHeight: 120)
             }
         }
         .padding()
-        .onAppear { appState.refreshStatus() }
+        .onAppear {
+            // Only refresh status if backend is ready - prevents spamming during startup
+            if BackendManager.shared.backendState == .ready {
+                appState.refreshStatus()
+            }
+        }
     }
 
     private func toggle(_ name: String) {
         // Conditional branch.
-        if selectedMissing.contains(name) { selectedMissing.remove(name) } else { selectedMissing.insert(name) }
+        if selectedMissing.contains(name) {
+            selectedMissing.remove(name)
+        } else {
+            selectedMissing.insert(name)
+        }
     }
 
     private func installSelected() {
@@ -123,7 +136,10 @@ struct ToolsBankView: View {
                 self.selectedMissing.removeAll()
                 self.appState.refreshStatus()
             } catch {
-                self.lastResults = [InstallResult(tool: "Batch", status: "error", message: error.localizedDescription)]
+                self.lastResults = [
+                    InstallResult(
+                        tool: "Batch", status: "error", message: error.localizedDescription)
+                ]
             }
             installing = false
         }
@@ -138,7 +154,9 @@ struct ToolsBankView: View {
                 self.lastResults = results
                 self.appState.refreshStatus()
             } catch {
-                self.lastResults = [InstallResult(tool: name, status: "error", message: error.localizedDescription)]
+                self.lastResults = [
+                    InstallResult(tool: name, status: "error", message: error.localizedDescription)
+                ]
             }
             processingTool = nil
         }
@@ -156,7 +174,7 @@ struct StatusBadge: View {
             .foregroundColor(color)
             .cornerRadius(4)
     }
-    
+
     var color: Color {
         // Switch over value.
         switch status {

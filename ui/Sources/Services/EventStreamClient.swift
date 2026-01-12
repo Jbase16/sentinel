@@ -85,6 +85,13 @@ public enum GraphEventType: String, CaseIterable {
     case breachDetected = "BREACH_DETECTED"
     case identityEstablished = "IDENTITY_ESTABLISHED"
 
+    // Diagnostic / Governance Events (internal events, handled gracefully)
+    case contractViolation = "contract_violation"
+    case orphanEventDropped = "orphan_event_dropped"
+    case resourceGuardTrip = "resource_guard_trip"
+    case eventSilence = "event_silence"
+    case toolChurn = "tool_churn"
+
     // Fallback
     case unknown = "unknown"
 }
@@ -371,6 +378,11 @@ public class EventStreamClient: ObservableObject {
         case .breachDetected, .identityEstablished:
             // Critical Identity/Security events - broadcast to scan stream (where HelixAppState listens)
             scanEventPublisher.send(event)
+
+        case .contractViolation, .orphanEventDropped, .resourceGuardTrip, .eventSilence, .toolChurn:
+            // Diagnostic / Governance events - handled gracefully, not shown to user
+            // These are internal events for monitoring and debugging
+            break
 
         case .unknown:
             print("[EventStreamClient] Unknown event type: \(event.type)")
