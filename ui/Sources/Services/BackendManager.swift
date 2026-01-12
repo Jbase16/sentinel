@@ -46,6 +46,7 @@ extension Notification.Name {
 class BackendManager: ObservableObject {
     static let shared = BackendManager()
 
+    @Published var backendState: BackendState = .stopped
     @Published var status: String = "Initializing..."
     @Published var isRunning: Bool = false
     @Published var pythonPath: String = ""
@@ -101,6 +102,7 @@ class BackendManager: ObservableObject {
             // Check if backend is already running externally
             if await checkBackendHealth() {
                 await MainActor.run {
+                    self.backendState = .ready
                     self.status = "Core Connected (External)"
                     self.isRunning = true
                     NotificationCenter.default.post(name: .backendReady, object: nil)
@@ -134,6 +136,7 @@ class BackendManager: ObservableObject {
         logRingBuffer.removeAll()
         lastCoreLogs.removeAll()
         isRunning = false
+        backendState = .stopped
         status = "Core Stopped"
     }
 
@@ -350,6 +353,11 @@ class BackendManager: ObservableObject {
     /// Polls the health endpoint until the server is ready
     /// - Parameter launchTime: The time the process was started (used to verify token freshness)
     private func waitForServerReady(launchTime: Date) async {
+        // Set backend to starting state
+        await MainActor.run {
+            self.backendState = .starting
+        }
+
         let deadline = Date().addingTimeInterval(maxStartupDuration)
         var attempt = 0
         var backoff = startupInitialBackoff
@@ -371,6 +379,7 @@ class BackendManager: ObservableObject {
                 // before the new backend has overwritten it.
                 if isTokenFileFresh(since: launchTime) {
                     await MainActor.run {
+                        self.backendState = .ready
                         self.status = "Core Online"
                         self.isRunning = true
                         NotificationCenter.default.post(name: .backendReady, object: nil)
@@ -404,6 +413,12 @@ class BackendManager: ObservableObject {
         }
 
         await MainActor.run {
+            let timeoutError = NSError(
+                domain: NSURLErrorDomain,
+                code: NSURLErrorTimedOut,
+                userInfo: [NSLocalizedDescriptionKey: "Backend failed to start within \(Int(maxStartupDuration)) seconds"]
+            )
+            self.backendState = .failed(timeoutError)
             self.status = "Core Timeout (\(Int(maxStartupDuration))s) - Check Logs"
             self.isRunning = false
         }

@@ -382,22 +382,19 @@ class DecisionContext:
         if decision.type == DecisionType.PHASE_TRANSITION:
             phase = decision.context.get("phase", "UNKNOWN")
             previous_phase = decision.context.get("previous_phase")
+            # Prefer scan-scoped if signature supports it
             try:
-                # Prefer scan-scoped if signature supports it
                 self._event_bus.emit_scan_phase_changed(
                     phase=phase,
                     previous_phase=previous_phase,
                     scan_id=self._scan_id,
-                    source=self._source,
                 )
             except TypeError:
-                # Back-compat older signature
+                # Fallback only if scan_id itself causes issues (unlikely with current EventBus)
                 self._event_bus.emit_scan_phase_changed(
                     phase=phase,
                     previous_phase=previous_phase,
                 )
-            except Exception:
-                pass
 
         # Generic "decision made" event
         # Map intent transition to intent string for older UI semantics

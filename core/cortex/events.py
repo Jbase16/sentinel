@@ -32,6 +32,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+import asyncio
+import inspect
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass, field
 
@@ -310,14 +312,27 @@ class EventBus:
         if event.type in self._subscribers:
             for callback in self._subscribers[event.type]:
                 try:
-                    callback(event)
+                    result = callback(event)
+                    if inspect.isawaitable(result):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(result)
+                        except RuntimeError:
+                            # No running loop, can't schedule async handler
+                            logger.error(f"[EventBus] Async handler for {event.type} called from sync context")
                 except Exception as e:
                     logger.error(f"[EventBus] Subscriber failed on {event.type}: {e}")
 
         # 2. Wildcard subscribers (e.g., logging, debuggers)
         for callback in self._wildcard_subscribers:
             try:
-                callback(event)
+                result = callback(event)
+                if inspect.isawaitable(result):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(result)
+                    except RuntimeError:
+                        logger.error(f"[EventBus] Async wildcard handler called from sync context")
             except Exception as e:
                 logger.error(f"[EventBus] Wildcard subscriber failed on {event.type}: {e}")
 
