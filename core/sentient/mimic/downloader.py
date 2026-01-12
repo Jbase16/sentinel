@@ -47,7 +47,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
+from core.base.config import get_config
+
 # Safety fuse: prevents unsafe operations
+# Default to true, but overridden by config in factory
 SAFE_MODE: bool = True
 
 logger = logging.getLogger(__name__)
@@ -504,6 +507,21 @@ def create_asset_downloader(
     Returns:
         Configured AssetDownloader instance
     """
+    # Use config defaults if not provided (or if they match the hardcoded defaults)
+    config = get_config()
+    mimic_cfg = config.mimic
+    
+    # If the caller passed the hardcoded default (likely from a CLI default arg),
+    # we prefer the config value.
+    if safe_mode == SAFE_MODE:
+        safe_mode = mimic_cfg.safe_mode
+        
+    if max_concurrent == AssetDownloader.DEFAULT_MAX_CONCURRENT:
+        max_concurrent = mimic_cfg.max_download_concurrent
+        
+    if rate_limit == AssetDownloader.DEFAULT_RATE_LIMIT:
+        rate_limit = mimic_cfg.download_rate_limit
+
     return AssetDownloader(
         safe_mode=safe_mode,
         max_concurrent=max_concurrent,

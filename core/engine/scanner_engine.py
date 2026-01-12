@@ -42,6 +42,7 @@ from core.data.killchain_store import killchain_store
 from core.toolkit.tools import TOOLS, get_tool_command, get_installed_tools
 from core.base.task_router import TaskRouter
 from core.cortex.correlator import GraphCorrelator
+from core.base.config import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -212,16 +213,19 @@ def calculate_concurrent_limit() -> int:
             cpu_based = max(1, cpu_count // 2)
             calculated = min(memory_based, cpu_based)
 
-            return max(MIN_CONCURRENT_TOOLS, min(calculated, MAX_CONCURRENT_TOOLS_BASE * 2))
+            # Cap at config limit
+            config_limit = get_config().scan.max_concurrent_tools
+            return min(max(MIN_CONCURRENT_TOOLS, calculated), config_limit)
 
-        return max(MIN_CONCURRENT_TOOLS, min(cpu_count // 2, MAX_CONCURRENT_TOOLS_BASE * 2))
+        config_limit = get_config().scan.max_concurrent_tools
+        return min(max(MIN_CONCURRENT_TOOLS, cpu_count // 2), config_limit)
     except Exception:
         return MAX_CONCURRENT_TOOLS_BASE
 
 
 MAX_CONCURRENT_TOOLS = calculate_concurrent_limit()
 
-DEFAULT_TOOL_TIMEOUT_SECONDS = 300  # 5 minutes per tool hard cap
+DEFAULT_TOOL_TIMEOUT_SECONDS = get_config().scan.tool_timeout_seconds
 DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS = 60  # 1 minute without output => consider stuck
 DEFAULT_GLOBAL_SCAN_TIMEOUT_SECONDS = 900  # 15 minutes overall cap
 
@@ -611,7 +615,10 @@ class ScannerEngine:
         self._procs: Dict[str, asyncio.subprocess.Process] = {}
 
         # Resource guard
-        self.resource_guard = ResourceGuard(max_findings=10000, max_disk_mb=1000)
+        scan_config = get_config().scan
+        # We allow 10x the per-tool limit for the global scan aggregation
+        global_max_findings = scan_config.max_findings_per_tool * 10
+        self.resource_guard = ResourceGuard(max_findings=global_max_findings, max_disk_mb=1000)
 
         # Transaction state
         self._active_transaction: Optional[ScanTransaction] = None
@@ -636,7 +643,7 @@ class ScannerEngine:
             return default
 
     def _tool_timeout_seconds(self) -> int:
-        return self._get_env_seconds("SCANNER_TOOL_TIMEOUT", DEFAULT_TOOL_TIMEOUT_SECONDS)
+        return get_config().scan.tool_timeout_seconds
 
     def _tool_idle_timeout_seconds(self) -> int:
         return self._get_env_seconds("SCANNER_TOOL_IDLE_TIMEOUT", DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS)

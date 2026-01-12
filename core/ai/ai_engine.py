@@ -206,7 +206,8 @@ class OllamaClient:
         
         # Error handling block.
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            config = get_config()
+            async with httpx.AsyncClient(timeout=config.ai.request_timeout) as client:
                 resp = await client.post(url, json=payload)
                 if resp.status_code == 200:
                     result = resp.json()
@@ -237,7 +238,8 @@ class OllamaClient:
         
         # Error handling block.
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client:
+            config = get_config()
+            async with httpx.AsyncClient(timeout=config.ai.request_timeout) as client:
                 async with client.stream("POST", url, json=payload) as response:
                     logger.info(f"Ollama Response Status: {response.status_code}")
                     if response.status_code != 200:
@@ -295,11 +297,13 @@ class AIEngine:
         self._last_connect_attempt = 0.0
         self._reconnect_interval = 5.0
 
-        # Conditional branch.
-        if AI_PROVIDER == "ollama":
-            raw_client = OllamaClient(OLLAMA_URL, AI_MODEL)
+        self._reconnect_interval = 5.0
+
+        config = get_config()
+        if config.ai.provider == "ollama":
+            raw_client = OllamaClient(config.ai.ollama_url, config.ai.model)
             if not raw_client.check_connection():
-                logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
+                logger.warning(f"Ollama not reachable at {config.ai.ollama_url}. AI features will be disabled.")
                 self.client = None
             else:
                 self.client = raw_client
@@ -308,7 +312,9 @@ class AIEngine:
         """Attempt to (re)connect to Ollama if the client is missing."""
         if self.client is not None:
             return
-        if AI_PROVIDER != "ollama":
+        
+        config = get_config()
+        if config.ai.provider != "ollama":
             return
 
         now = time.time()
@@ -321,9 +327,13 @@ class AIEngine:
                 return
             self._last_connect_attempt = now
 
-            raw_client = OllamaClient(OLLAMA_URL, AI_MODEL)
+            config = get_config()
+            if config.ai.provider != "ollama":
+                return
+
+            raw_client = OllamaClient(config.ai.ollama_url, config.ai.model)
             if not raw_client.check_connection():
-                logger.warning(f"Ollama not reachable at {OLLAMA_URL}. AI features will be disabled.")
+                logger.warning(f"Ollama not reachable at {config.ai.ollama_url}. AI features will be disabled.")
                 return
 
             self.client = raw_client
@@ -388,18 +398,19 @@ class AIEngine:
         """Function status."""
         self.ensure_client()
         connected = self.client is not None
+        
+        config = get_config()
         # model attribute might be direct now if client is standard OllamaClient
-        model_name = getattr(self.client, "model", AI_MODEL) if self.client else AI_MODEL
+        model_name = getattr(self.client, "model", config.ai.model) if self.client else config.ai.model
         
         status = {
-            "provider": AI_PROVIDER,
+            "provider": config.ai.provider,
             "model": model_name,
             "connected": connected,
-            "fallback_enabled": AI_FALLBACK_ENABLED,
+            "fallback_enabled": config.ai.fallback_enabled,
             "circuit_breaker": self.circuit_breaker.get_state(),
             "available_models": [],
         }
-        # Conditional branch.
         if connected:
             try:
                 status["available_models"] = self.available_models()
@@ -532,9 +543,9 @@ class AIEngine:
                 next_steps = analysis_result.get("next_steps", [])
             except Exception as e:
                 logger.error(f"LLM analysis failed: {e}")
-                if AI_FALLBACK_ENABLED:
+                if get_config().ai.fallback_enabled:
                     proposals = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
-        elif AI_FALLBACK_ENABLED:
+        elif get_config().ai.fallback_enabled:
              proposals = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
 
         # Step 4: map killchain phases (Do this later based on actual Promoted findings?)
