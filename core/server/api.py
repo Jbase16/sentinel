@@ -352,21 +352,13 @@ async def status():
 @v1_router.get("/health")
 async def health():
     """
-    Lightweight health endpoint for startup diagnostics.
+    Readiness health endpoint.
+    Returns "starting" during FastAPI lifespan startup, "ready" after all initialization completes.
     """
     boot_status = getattr(app.state, "boot_status", None)
     if not boot_status:
-        return {"status": "unknown", "reason": "boot_status_unavailable"}
-    return {
-        "status": boot_status.get("state", "unknown"),
-        "build_sha": boot_status.get("build_sha"),
-        "build_id": boot_status.get("build_id"),
-        "module_path": boot_status.get("module_path"),
-        "db_ready": boot_status.get("db_ready"),
-        "policy_watcher_ready": boot_status.get("policy_watcher_ready"),
-        "nexus_ready": boot_status.get("nexus_ready"),
-        "cronus_ready": boot_status.get("cronus_ready"),
-    }
+        return {"status": "unknown"}
+    return {"status": boot_status.get("state", "unknown")}
 
 
 # Import routers AFTER v1_router exists

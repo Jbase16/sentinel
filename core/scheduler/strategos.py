@@ -999,11 +999,11 @@ class Strategos:
                         # Fix: Model dump for strict dictionary contract
                         try:
                            self._event_bus.emit(
-                               event_type=EventType.NEXUS_INSIGHT_FORMED,
-                               payload=insight.model_dump(),
-                               scan_id=self.context.scan_id,
-                               description=f"Insight formed: {insight.summary}",
-                               source="strategos.nexus.hybrid"
+                               GraphEvent(
+                                   type=EventType.NEXUS_INSIGHT_FORMED,
+                                   payload=insight.model_dump(),
+                                   scan_id=self.context.scan_id
+                               )
                            )
                         except Exception as e:
                            logger.warning(f"Failed to emit insight event: {e}")

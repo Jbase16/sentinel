@@ -157,16 +157,15 @@ class LazarusEngine:
                     event_bus = get_event_bus()
                     
                     for route in routes:
-                        # Emit FINDING_DISCOVERED for each hidden route
+                        # Emit FINDING_CREATED for each hidden route
                         event_bus.emit(GraphEvent(
-                            type=GraphEventType.FINDING_DISCOVERED,
+                            type=GraphEventType.FINDING_CREATED,
                             payload={
+                                "finding_id": hashlib.sha256(f"{url}:{route['method']}:{route['path']}".encode()).hexdigest()[:32],
                                 "tool": "lazarus",
-                                "type": "hidden_api_route",
                                 "severity": "MEDIUM",
-                                "value": f"Hidden API route discovered: {route['method']} {route['path']}",
-                                "proof": f"Source: {url}",
-                                "route_data": route
+                                "title": f"Hidden API route discovered: {route['method']} {route['path']}",
+                                "target": url
                             }
                         ))
                         logger.info(f"[Lazarus] Discovered hidden route: {route['method']} {route['path']}")

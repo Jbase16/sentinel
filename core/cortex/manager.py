@@ -120,7 +120,13 @@ class NexusManager:
             logger.error(f"[NexusManager] Error handling event: {e}", exc_info=True)
 
     def _emit_orphan(self, original_type: EventType, scan_id: Optional[str], reason: str):
-        """Emit a diagnostic event for dropped orphans."""
+        """
+        Emit a diagnostic event for dropped orphans.
+        
+        NOTE: This event is marked as _internal=True to prevent recursion loops.
+        The ORPHAN_EVENT_DROPPED event bypasses wildcard subscribers, preventing
+        the feedback loop where orphan handlers re-emit events that become orphans.
+        """
         try:
             self.bus.emit(GraphEvent(
                 type=EventType.ORPHAN_EVENT_DROPPED,
@@ -130,7 +136,8 @@ class NexusManager:
                     "reason": reason,
                     "source_component": "NexusManager",
                     "mode": "omega" # Default
-                }
+                },
+                _internal=True  # Prevent recursion by bypassing wildcard subscribers
             ))
         except Exception as e:
             logger.warning(f"[NexusManager] Failed to emit orphan event: {e}")

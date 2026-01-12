@@ -176,6 +176,8 @@ class GraphEvent:
         event_sequence: Global monotonically increasing sequence number
         run_id: UUID v4 identifying the runtime/process that generated this event
         entity_id: Optional identifier for the entity this event relates to (finding, observation, etc.)
+        _internal: If True, this is a diagnostic/internal event that bypasses wildcard subscribers
+                  to prevent recursion loops (e.g., ORPHAN_EVENT_DROPPED, CONTRACT_VIOLATION)
 
     The event_sequence enables:
     - Total ordering of events regardless of clock skew
@@ -191,6 +193,11 @@ class GraphEvent:
     - Correlation between events and their associated entities
     - Tracking lifecycle of observations, findings, conflicts, etc.
     - Event streaming to UI with proper entity references
+
+    The _internal flag enables:
+    - Prevention of recursion loops when diagnostic events are emitted
+    - Diagnostic events are still logged and stored, but bypass wildcard subscribers
+    - Wildcard subscribers that might re-emit events won't receive diagnostic events
     """
     type: GraphEventType
     payload: Dict[str, Any]
@@ -199,6 +206,7 @@ class GraphEvent:
     run_id: str = field(default_factory=get_run_id)
     scan_id: Optional[str] = None
     entity_id: Optional[str] = None
+    _internal: bool = False
 
 class EventBus:
     """
@@ -264,6 +272,11 @@ class EventBus:
         Before broadcasting, the event is ALWAYS validated against the EventContract.
         In strict mode (development), invalid events raise ContractViolation.
         In non-strict mode (production), invalid events log warnings.
+
+        INTERNAL EVENTS:
+        Events marked with _internal=True are diagnostic events (e.g., ORPHAN_EVENT_DROPPED,
+        CONTRACT_VIOLATION) that bypass wildcard subscribers to prevent recursion loops.
+        They are still dispatched to specific subscribers and logged.
         """
         if event.run_id != self._run_id:
              logger.warning(f"[EventBus] Event run_id mismatch: {event.run_id} != {self._run_id}")
@@ -288,6 +301,7 @@ class EventBus:
         if violations:
                 # EMIT CONTRACT_VIOLATION EVENT (Governance)
                 # Prevent recursion: if the violation is FOR a violation event, just panic.
+                # Mark as internal to bypass wildcard subscribers and prevent recursion loops.
                 if event.type != EventType.CONTRACT_VIOLATION:
                     try:
                         self.emit(GraphEvent(
@@ -296,7 +310,8 @@ class EventBus:
                                 "offending_event_type": event.type.value,
                                 "violations": violations,
                                 "context": {"original_payload": str(event.payload)[:1000]} # Truncate
-                            }
+                            },
+                            _internal=True  # Prevent recursion by bypassing wildcard subscribers
                         ))
                     except Exception as emit_err:
                         logger.critical(f"[EventBus] FAILED TO EMIT CONTRACT_VIOLATION: {emit_err}")
@@ -324,17 +339,19 @@ class EventBus:
                     logger.error(f"[EventBus] Subscriber failed on {event.type}: {e}")
 
         # 2. Wildcard subscribers (e.g., logging, debuggers)
-        for callback in self._wildcard_subscribers:
-            try:
-                result = callback(event)
-                if inspect.isawaitable(result):
-                    try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(result)
-                    except RuntimeError:
-                        logger.error(f"[EventBus] Async wildcard handler called from sync context")
-            except Exception as e:
-                logger.error(f"[EventBus] Wildcard subscriber failed on {event.type}: {e}")
+        # Skip wildcard subscribers for internal/diagnostic events to prevent recursion loops
+        if not event._internal:
+            for callback in self._wildcard_subscribers:
+                try:
+                    result = callback(event)
+                    if inspect.isawaitable(result):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            loop.create_task(result)
+                        except RuntimeError:
+                            logger.error(f"[EventBus] Async wildcard handler called from sync context")
+                except Exception as e:
+                    logger.error(f"[EventBus] Wildcard subscriber failed on {event.type}: {e}")
 
     # --- Convenience Methods ---
 

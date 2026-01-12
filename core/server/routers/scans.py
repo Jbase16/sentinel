@@ -141,7 +141,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         
                     engine = ScannerEngine(session=session)
                     try:
-                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], session_id=session.id)
+                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], scan_id=session.id)
                         if state.cancel_requested.is_set():
                             return []
 
@@ -161,7 +161,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         return []
                     finally:
                         event_bus.emit_tool_completed(
-                            tool=tool, exit_code=exit_code, findings_count=len(findings), session_id=session.id
+                            tool=tool, exit_code=exit_code, findings_count=len(findings), scan_id=session.id
                         )
 
                 mission = await reasoning_engine.start_scan(
@@ -176,18 +176,19 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 state.scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
                 
                 duration = time.time() - start_time
-                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, session_id=session.id)
+                event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, scan_id=session.id)
 
             except asyncio.CancelledError:
                 state.scan_state["status"] = "cancelled"
                 duration = time.time() - start_time
-                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, session_id=session.id)
+                event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, scan_id=session.id)
             except Exception as e:
                 state.scan_state["status"] = "error"
                 logger.error(f"Scan error: {e}", exc_info=True)
                 event_bus.emit(GraphEvent(
                     type=GraphEventType.SCAN_FAILED,
-                    payload={"error": str(e), "target": req.target, "session_id": session.id}
+                    payload={"error": str(e), "target": req.target, "scan_id": session.id},
+                    scan_id=session.id
                 ))
 
         state.active_scan_task = asyncio.create_task(_runner())

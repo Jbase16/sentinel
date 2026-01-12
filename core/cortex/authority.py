@@ -309,7 +309,8 @@ class ScanAuthority:
         if self._event_bus:
             self._event_bus.emit_scan_phase_changed(
                 phase=phase.value,
-                previous_phase=previous.value if previous else None
+                previous_phase=previous.value if previous else None,
+                scan_id=self._session_id
             )
     
     def tool_started(self, tool: str, target: str, args: List[str] = None) -> None:
@@ -324,7 +325,7 @@ class ScanAuthority:
         
         # Emit outside lock
         if self._event_bus:
-            self._event_bus.emit_tool_started(tool=tool, target=target, args=args or [])
+            self._event_bus.emit_tool_started(tool=tool, target=target, args=args or [], scan_id=self._session_id)
     
     def tool_completed(self, tool: str, exit_code: int, findings_count: int) -> None:
         """Record tool completion."""
@@ -344,7 +345,8 @@ class ScanAuthority:
             self._event_bus.emit_tool_completed(
                 tool=tool,
                 exit_code=exit_code,
-                findings_count=findings_count
+                findings_count=findings_count,
+                scan_id=self._session_id
             )
     
     def complete_scan(self, status: str = "success") -> None:
@@ -361,7 +363,8 @@ class ScanAuthority:
             self._event_bus.emit_scan_completed(
                 status=status,
                 findings_count=findings,
-                duration_seconds=duration
+                duration_seconds=duration,
+                scan_id=self._session_id
             )
         
         self._transition_to(ScanState.COMPLETE, f"Scan completed: {status}")
@@ -373,7 +376,13 @@ class ScanAuthority:
         
         # Emit outside lock
         if self._event_bus:
-            self._event_bus.emit_scan_failed(error=error)
+            from core.cortex.events import GraphEvent
+            from core.contracts.events import EventType
+            self._event_bus.emit(GraphEvent(
+                type=EventType.SCAN_FAILED,
+                payload={"error": error, "scan_id": self._session_id},
+                scan_id=self._session_id
+            ))
         
         self._transition_to(ScanState.FAILED, f"Scan failed: {error}")
     
@@ -423,14 +432,14 @@ class ScanAuthority:
     def _emit_scan_started(
         self,
         target: str,
-        session_id: str,
+        scan_id: str,
         allowed_tools: List[str]
     ) -> None:
         """Emit scan_started event."""
         if self._event_bus:
             self._event_bus.emit_scan_started(
                 target=target,
-                session_id=session_id,
+                scan_id=scan_id,
                 allowed_tools=allowed_tools
             )
     

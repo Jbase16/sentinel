@@ -27,6 +27,9 @@
 		9369DFE67CE6BB7E573BBAB3 /* AuditFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A68494FDEACABC92B894B50 /* AuditFeedView.swift */; };
 		96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */; };
 		9648C16A2F1201D10088A303 /* BackendSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C1692F1201D10088A303 /* BackendSettingsView.swift */; };
+		9648C16E2F1495550088A303 /* BackendState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C16B2F1495550088A303 /* BackendState.swift */; };
+		9648C16F2F1495550088A303 /* ErrorClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C16C2F1495550088A303 /* ErrorClassifier.swift */; };
+		9648C1702F1495550088A303 /* RetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9648C16D2F1495550088A303 /* RetryBackoff.swift */; };
 		9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */; };
 		9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C910B6EF70385F75EC7BA /* PTYClient.swift */; };
 		A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */; };
@@ -75,6 +78,9 @@
 		81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelAPIClient.swift; sourceTree = "<group>"; };
 		8318D0791A1940E626D7A7ED /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
 		9648C1692F1201D10088A303 /* BackendSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendSettingsView.swift; sourceTree = "<group>"; };
+		9648C16B2F1495550088A303 /* BackendState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendState.swift; sourceTree = "<group>"; };
+		9648C16C2F1495550088A303 /* ErrorClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorClassifier.swift; sourceTree = "<group>"; };
+		9648C16D2F1495550088A303 /* RetryBackoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryBackoff.swift; sourceTree = "<group>"; };
 		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
 		AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamClient.swift; sourceTree = "<group>"; };
 		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
@@ -120,6 +126,9 @@
 				F69478BB4593A2ED44797763 /* Core (Python) */,
 				A39ECB073AF93C27FA90F973 /* Sources */,
 				73F5367697371FAE0E7DD69E /* Products */,
+				9648C16B2F1495550088A303 /* BackendState.swift */,
+				9648C16C2F1495550088A303 /* ErrorClassifier.swift */,
+				9648C16D2F1495550088A303 /* RetryBackoff.swift */,
 			);
 			sourceTree = "<group>";
 		};
@@ -399,6 +408,9 @@
 				854DB144D784ECD29694882E /* StatusComponents.swift in Sources */,
 				74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */,
 				B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */,
+				9648C16E2F1495550088A303 /* BackendState.swift in Sources */,
+				9648C16F2F1495550088A303 /* ErrorClassifier.swift in Sources */,
+				9648C1702F1495550088A303 /* RetryBackoff.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

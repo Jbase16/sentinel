@@ -72,7 +72,7 @@ class BackendManager: ObservableObject {
     private let startupRequestTimeout: TimeInterval = 1.5
     private let startupInitialBackoff: TimeInterval = 0.5
     private let startupMaxBackoff: TimeInterval = 5.0
-    private let healthCheckURL = URL(string: "http://127.0.0.1:8765/v1/ping")!
+    private let healthCheckURL = URL(string: "http://127.0.0.1:8765/v1/health")!
     private let startupFailureSignatures = [
         "ModuleNotFoundError: No module named 'uvicorn'"
     ]
@@ -100,7 +100,8 @@ class BackendManager: ObservableObject {
     func start() {
         Task {
             // Check if backend is already running externally
-            if await checkBackendHealth() {
+            let (reachable, status) = await checkBackendHealth()
+            if reachable, status == "ready" {
                 await MainActor.run {
                     self.backendState = .ready
                     self.status = "Core Connected (External)"
@@ -141,7 +142,7 @@ class BackendManager: ObservableObject {
     }
 
     private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async
-        -> Bool
+        -> (reachable: Bool, status: String?)
     {
         let requestURL = url ?? healthCheckURL
         var request = URLRequest(url: requestURL)
@@ -150,17 +151,17 @@ class BackendManager: ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             // Guard condition.
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return false }
-            // Verify it's actually our API
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return (false, nil) }
+            // Parse the health status
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                json["status"] as? String == "ok"
+                let status = json["status"] as? String
             {
-                return true
+                return (true, status)
             }
         } catch {
             // Connection refused or timeout
         }
-        return false
+        return (false, nil)
     }
 
     /// Monitors backend health and updates UI status
@@ -176,10 +177,10 @@ class BackendManager: ObservableObject {
                     continue
                 }
 
-                let healthy = await checkBackendHealth()
+                let (reachable, _) = await checkBackendHealth()
                 await MainActor.run {
                     // Conditional branch.
-                    if healthy {
+                    if reachable {
                         self.consecutiveFailures = 0
                         // Conditional branch.
                         if !self.isRunning {
@@ -371,8 +372,9 @@ class BackendManager: ObservableObject {
             let remaining = max(0, deadline.timeIntervalSinceNow)
             let requestTimeout = min(startupRequestTimeout, remaining)
 
-            // Conditional branch.
-            if await checkBackendHealth(timeoutInterval: requestTimeout) {
+            // Check health endpoint and parse readiness status
+            let (reachable, status) = await checkBackendHealth(timeoutInterval: requestTimeout)
+            if reachable, status == "ready" {
                 // TOKEN FRESHNESS CHECK:
                 // Ensure the token file has been updated SINCE we launched the process.
                 // This prevents race conditions where we connect using an old stale token
@@ -390,6 +392,11 @@ class BackendManager: ObservableObject {
                 } else {
                     print("[BackendManager] Health OK but Token Stale. Waiting for token write...")
                 }
+            } else if reachable, status == "starting" {
+                // Backend is reachable but still initializing - keep waiting
+                print(
+                    "[BackendManager] Backend reachable but status='starting', continuing to wait..."
+                )
             }
 
             if shouldAbortStartup() {
@@ -401,7 +408,8 @@ class BackendManager: ObservableObject {
             }
 
             // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
-            let sleepDuration = min(RetryBackoff.delayForAttempt(attempt), max(0, deadline.timeIntervalSinceNow))
+            let sleepDuration = min(
+                RetryBackoff.delayForAttempt(attempt), max(0, deadline.timeIntervalSinceNow))
             if sleepDuration > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(sleepDuration * 1_000_000_000))
             }
@@ -416,7 +424,10 @@ class BackendManager: ObservableObject {
             let timeoutError = NSError(
                 domain: NSURLErrorDomain,
                 code: NSURLErrorTimedOut,
-                userInfo: [NSLocalizedDescriptionKey: "Backend failed to start within \(Int(maxStartupDuration)) seconds"]
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Backend failed to start within \(Int(maxStartupDuration)) seconds"
+                ]
             )
             self.backendState = .failed(timeoutError)
             self.status = "Core Timeout (\(Int(maxStartupDuration))s) - Check Logs"
@@ -577,18 +588,18 @@ class BackendManager: ObservableObject {
 
     private func runPreflightChecks(python: URL, backendRoot: URL) async -> String? {
         let script = """
-        import json
-        import sys
-        import importlib.util
+            import json
+            import sys
+            import importlib.util
 
-        required = \(requiredPythonModules)
-        missing = [name for name in required if importlib.util.find_spec(name) is None]
-        payload = {
-            "python_version": sys.version.split()[0],
-            "missing": missing,
-        }
-        print(json.dumps(payload))
-        """
+            required = \(requiredPythonModules)
+            missing = [name for name in required if importlib.util.find_spec(name) is None]
+            payload = {
+                "python_version": sys.version.split()[0],
+                "missing": missing,
+            }
+            print(json.dumps(payload))
+            """
 
         let result = runPythonScript(python: python, backendRoot: backendRoot, script: script)
         guard result.exitCode == 0, let output = result.standardOutput,
@@ -605,7 +616,8 @@ class BackendManager: ObservableObject {
             let major = versionComponents[0]
             let minor = versionComponents[1]
             if major < minPythonMajor || (major == minPythonMajor && minor < minPythonMinor) {
-                return "Python \(minPythonMajor).\(minPythonMinor)+ required (found \(versionString))"
+                return
+                    "Python \(minPythonMajor).\(minPythonMinor)+ required (found \(versionString))"
             }
         }
 
