@@ -203,37 +203,46 @@ class InsightQueue:
     async def process_one(self, handler: Callable[[InsightPayload], Awaitable[None]]) -> bool:
         """
         Process one insight from the queue.
+        Optimized to acquire lock once for all stat updates to reduce contention.
         """
-        # Check circuit breaker
+        # Check circuit breaker (no lock needed - circuit breaker has its own lock)
         if not await self._circuit_breaker.acquire():
+            # Update circuit breaker state in stats
             async with self._lock:
                 self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
             return False
         
-        # Dequeue insight
+        # Dequeue insight (no lock needed - queue has its own lock)
         insight = await self.dequeue()
         if insight is None:
             return False
         
         # Process insight
         start = asyncio.get_event_loop().time()
+        success = False
+        failed = False
+        
         try:
             await handler(insight)
             await self._circuit_breaker.record_success()
-            async with self._lock:
-                self._stats.total_processed += 1
-            return True
+            success = True
         except Exception as e:
             await self._circuit_breaker.record_failure()
-            async with self._lock:
-                self._stats.total_failed += 1
+            failed = True
             logger.error(f"[InsightQueue] Failed to process insight {insight.insight_id}: {e}")
-            return False
         finally:
             duration = (asyncio.get_event_loop().time() - start) * 1000
+            
+            # Single lock acquisition for all stat updates
             async with self._lock:
+                if success:
+                    self._stats.total_processed += 1
+                elif failed:
+                    self._stats.total_failed += 1
                 self._stats.processing_time_ms += duration
                 self._stats.circuit_breaker_state = self._circuit_breaker.get_state()
+        
+        return success
     
     def get_stats(self) -> InsightQueueStats:
         """Get current queue statistics."""

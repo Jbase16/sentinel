@@ -160,6 +160,5 @@ class TestStrategosWalkAway:
         
         next_intent = brain._decide_next_step(INTENT_SURFACE_ENUMERATION)
         
-        # In bug bounty mode with no surface, should potentially terminate
-        # or move to a less aggressive phase
-        assert next_intent is not None or next_intent is None  # Either continues or stops
+        # In bug bounty mode with no surface, should terminate (walk away)
+        assert next_intent is None, f"Expected None (walk away) but got {next_intent}"
