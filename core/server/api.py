@@ -78,7 +78,6 @@ async def lifespan(app: FastAPI):
         "policy_watcher_ready": False,
         "nexus_ready": False,
         "cronus_ready": False,
-        "codex_ready": False,
     }
 
     setup_logging(config)
@@ -183,10 +182,6 @@ async def lifespan(app: FastAPI):
 
     _write_boot_manifest("ready")
 
-    # Initialize Codex (Graph Database)
-    codex_db.initialize()
-    app.state.boot_status["codex_ready"] = True
-
     # Initialize The Nervous System (Nexus)
     from core.cortex.manager import NexusManager
     nexus_manager = NexusManager()
@@ -243,7 +238,6 @@ async def lifespan(app: FastAPI):
         cronus_manager.stop()
         mimic_manager.stop()
         reasoning_engine.stop()
-        codex_db.close()
     except Exception as e:
         logger.error(f"[Shutdown] Manager cleanup failed: {e}")
 
@@ -372,7 +366,6 @@ async def health():
         "policy_watcher_ready": boot_status.get("policy_watcher_ready"),
         "nexus_ready": boot_status.get("nexus_ready"),
         "cronus_ready": boot_status.get("cronus_ready"),
-        "codex_ready": boot_status.get("codex_ready"),
     }
 
 

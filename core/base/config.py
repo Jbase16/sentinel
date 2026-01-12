@@ -1018,20 +1018,14 @@ def setup_logging(config: Optional[SentinelConfig] = None) -> None:
 
 
 # ============================================================================
-# Legacy Compatibility Aliases
+# Legacy Compatibility Aliases (DEPRECATED)
 # ============================================================================
-# These provide backward compatibility with old code that imported config values directly.
-# Example: Old code did "from core.config import OLLAMA_URL"
-# New code should use "get_config().ai.ollama_url" instead.
-#
-# We must evaluate these to actual values (not return property objects) because
-# module-level properties don't work like class properties in Python.
-
-_cfg = get_config()  # Get the singleton config
-AI_PROVIDER = _cfg.ai.provider  # Extract provider string for old imports
-OLLAMA_URL = _cfg.ai.ollama_url  # Extract URL for old imports
-AI_MODEL = _cfg.ai.model  # Extract model name for old imports
-AI_FALLBACK_ENABLED = _cfg.ai.fallback_enabled  # Extract fallback flag for old imports
+# Do NOT use these in new code. Use get_config() instead.
+# _cfg = get_config()
+# AI_PROVIDER = _cfg.ai.provider
+# OLLAMA_URL = _cfg.ai.ollama_url
+# AI_MODEL = _cfg.ai.model
+# AI_FALLBACK_ENABLED = _cfg.ai.fallback_enabled
 
 # Compatibility Alias
 AppConfig = SentinelConfig

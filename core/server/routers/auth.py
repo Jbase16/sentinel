@@ -32,8 +32,10 @@ class RateLimiter:
             self.requests[key].append(now)
             return True
 
-_rate_limiter = RateLimiter()
-_ai_rate_limiter = RateLimiter(requests_per_minute=10)
+# Initialize rate limiters with config values
+# Note: This executes at import time. configuration changes require restart.
+_rate_limiter = RateLimiter(requests_per_minute=get_config().security.rate_limit_api)
+_ai_rate_limiter = RateLimiter(requests_per_minute=get_config().security.rate_limit_ai)
 
 def get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")

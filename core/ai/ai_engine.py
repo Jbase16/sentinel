@@ -42,7 +42,7 @@ from typing import Dict, List, Optional, Generator, AsyncGenerator, Callable, An
 from core.data.findings_store import findings_store
 from core.data.killchain_store import killchain_store
 from core.data.evidence_store import EvidenceStore
-from core.base.config import AI_PROVIDER, OLLAMA_URL, AI_MODEL, AI_FALLBACK_ENABLED
+from core.base.config import get_config
 
 logger = logging.getLogger(__name__)
 

@@ -385,7 +385,7 @@ class CausalGraphBuilder:
         logger.info(f"[CausalGraph] Found {len(chains)} attack chains")
         return chains
 
-    def export_dto(self) -> Dict[str, Any]:
+    def export_dto(self, session_id: str = "unknown") -> Dict[str, Any]:
         """
         Export graph nodes and edges for API consumption (PressureGraphDTO).
         """
@@ -393,25 +393,47 @@ class CausalGraphBuilder:
         for node in self.graph.nodes():
             finding = self.findings_map.get(node)
             if finding:
+                sev_map = {"critical": 1.0, "high": 0.8, "medium": 0.5, "low": 0.2, "info": 0.0}
+                node_data = {
+                    "severity": sev_map.get(finding.severity.lower(), 0.1),
+                    "exposure": 0.5,
+                    "exploitability": 0.5,
+                    "privilege_gain": 0.0,
+                    "asset_value": 0.5,
+                    "pressure_source": "manual",
+                    "revision": 1,
+                    "description": str(finding.data.get("description", ""))
+                }
                 nodes.append({
                     "id": finding.id,
                     "label": finding.title,
                     "type": finding.type,
-                    "severity": finding.severity,
-                    "data": finding.data or {}
+                    "data": node_data
                 })
         
         edges = []
-        for source, target in self.graph.edges():
-            edges.append({
-                "source": source,
-                "target": target,
-                "type": "enables" # consistent with relationship
-            })
+        for u, v, data in self.graph.edges(data=True):
+             edge_data = {
+                "confidence": 1.0, 
+                "created_at": time.time()
+             }
+             edges.append({
+                "id": f"{u}-{v}",
+                "source": u,
+                "target": v,
+                "type": data.get("relationship", "enables"),
+                "weight": 1.0,
+                "data": edge_data
+             })
             
         return {
+            "session_id": session_id,
             "nodes": nodes,
-            "edges": edges
+            "edges": edges,
+            "count": {
+                "nodes": len(nodes),
+                "edges": len(edges)
+            }
         }
 
     def export_summary(self) -> Dict[str, Any]:
