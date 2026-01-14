@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Sandbox Disabled to allow spawning Python and reading Repo -->
-    <key>com.apple.security.app-sandbox</key>
-    <false/>
-    <!-- Network Access is default without sandbox, but keeping for clarity/completeness if ever re-enabled -->
-    <key>com.apple.security.network.client</key>
+
+    <!--
+        REQUIRED
+        Allows debugger-style process control.
+        Without this, task_for_pid / PTY / process inspection will ALWAYS fail.
+    -->
+    <key>com.apple.security.get-task-allow</key>
     <true/>
-    <key>com.apple.security.network.server</key>
+
+    <!--
+        REQUIRED
+        Allows debugger-class behavior (PTY, task ports, introspection).
+    -->
+    <key>com.apple.security.cs.debugger</key>
     <true/>
+
 </dict>
 </plist>

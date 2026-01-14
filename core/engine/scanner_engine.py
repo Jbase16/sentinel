@@ -893,7 +893,7 @@ class ScannerEngine:
         if args:
              # Basic sanity check on args
              for arg in args:
-                 if ";" in arg or "|" in arg:
+                 if ";" in arg or "|" in arg or "&" in arg or "&&" in arg or "||" in arg or "$(" in arg:
                      raise ValueError(f"Potentially unsafe argument: {arg}")
 
         self._pending_tasks.append({"tool": tool, "args": args})

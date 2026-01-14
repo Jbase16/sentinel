@@ -194,7 +194,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         state.active_scan_task = asyncio.create_task(_runner())
         return session.id
 
-@router.post("/start", dependencies=[Depends(verify_sensitive_token)])
+@router.post("/start", dependencies=[Depends(verify_sensitive_token)], status_code=202)
 async def start_scan(req: ScanRequest):
     session_id = await begin_scan_logic(req)
     return {"session_id": session_id, "status": "started"}
