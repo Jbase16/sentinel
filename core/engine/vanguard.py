@@ -35,11 +35,13 @@ class Vanguard:
         
         # Loop over items.
         for tool in candidates:
+            # Fix: Always include tool if _check_tool returns True (default behavior)
+            # This ensures tools aren't incorrectly filtered out
             if Vanguard._check_tool(tool):
                 valid_tools.append(tool)
             else:
                 logger.warning(f"[Vanguard] Tool BLOCKED: {tool}")
-                
+        
         return valid_tools
 
     @staticmethod

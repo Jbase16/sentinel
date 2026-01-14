@@ -473,7 +473,20 @@ public class HelixAppState: ObservableObject {
                     self.isScanRunning = true
                 }
             } catch {
-                print("[AppState] Failed to start scan: \(error)")
+                print("[AppState] Failed to start scan")
+                print("  error type: \(type(of: error))")
+                print("  error: \(error)")
+                
+                if let urlError = error as? URLError {
+                    print("  urlError.code: \(urlError.code)")
+                    print(" URLError description: \(urlError.localizedDescription)")
+                }
+                
+                await MainActor.run {
+                    self.isScanRunning = false
+                
+                }
+                
             }
         }
     }

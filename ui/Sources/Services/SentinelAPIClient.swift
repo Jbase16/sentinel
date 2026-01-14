@@ -100,8 +100,20 @@ public struct SentinelAPIClient: Sendable {
             body["modules"] = modules
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 202 else {
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.badStatus
+        }
+
+        // Backend returns 200 with {"session_id": "...", "status": "started"}.
+        // Accept any 2xx response; log non-2xx with body for diagnosis.
+        guard (200...299).contains(http.statusCode) else {
+            let bodyStr = String(data: data, encoding: .utf8) ?? "<no body>"
+            print("[SentinelAPIClient] startScan rejected")
+            print("  status: \(http.statusCode)")
+            print("  body: \(bodyStr)")
             throw APIError.badStatus
         }
     }
@@ -420,12 +432,8 @@ public struct SentinelAPIClient: Sendable {
                             }
                         }
 
-                        // If stream ends normally (server closed), we might want to reconnect or finish.
-                        // For SSE, server close usually means we should reconnect unless specific condition met.
-                        // But if we want to stop, we break. For now, assume persistent stream.
                         print("[SSE] Sync stream ended, reconnecting...")
                     } catch {
-                        // Log error only if it's a real error (not connection refused during startup)
                         if ErrorClassifier.shouldLogAsError(error) {
                             print("[SSE] Connection lost: \(error). Reconnecting...")
                         }
@@ -434,11 +442,10 @@ public struct SentinelAPIClient: Sendable {
                     attempt += 1
                     if attempt > maxRetries {
                         print("[SSE] Max retries reached. Giving up.")
-                        continuation.finish(throwing: APIError.badStatus)  // Or specific timeout error
+                        continuation.finish(throwing: APIError.badStatus)
                         return
                     }
 
-                    // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
                     await RetryBackoff.sleep(for: attempt)
                 }
 
