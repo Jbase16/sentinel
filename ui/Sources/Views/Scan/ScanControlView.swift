@@ -45,7 +45,9 @@ struct ScanControlView: View {
     @State private var toolSelectionMode: ToolSelectionMode = .scheduler
 
     private var isScanning: Bool {
-        appState.engineStatus?.scanRunning == true || appState.isScanRunning
+        // Prioritize event-driven state (isScanRunning) over backend status
+        // to ensure scan stops immediately when completion event is received
+        appState.isScanRunning
     }
 
     private var installedTools: [String] {

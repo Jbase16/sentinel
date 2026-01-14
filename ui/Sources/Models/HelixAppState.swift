@@ -162,7 +162,9 @@ public class HelixAppState: ObservableObject {
                     case .scanStarted:
                         self.isScanRunning = true
                         let target = event.payload["target"]?.stringValue ?? "unknown"
-                        let toolCount = (event.payload["modules"]?.value as? [Any])?.count ?? 0
+                        // Backend sends "allowed_tools" not "modules"
+                        let toolCount =
+                            (event.payload["allowed_tools"]?.value as? [Any])?.count ?? 0
                         self.apiLogItems.append(
                             LogItem(
                                 id: UUID(), text: "[Scan] started: \(target) (\(toolCount) tools)"))
