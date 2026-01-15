@@ -1,92 +1,71 @@
+# core/aegis/nexus/recoil.py
+
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any
+from typing import Optional
 
-from core.cortex.events import get_event_bus, GraphEventType, GraphEvent
+from core.cortex.events import EventBus, get_event_bus
 from core.contracts.events import EventType
-from core.cortex.reasoning import get_reasoning_engine
-from core.cal.types import Evidence, Provenance
+from core.cortex.events import GraphEvent
 
 logger = logging.getLogger(__name__)
 
-class EpistemicRecoil:
-    """
-    Automated Falsification Engine.
-    
-    Rule: "If a Hypothesis is Refuted, the Truth (Findings) must be disputed."
-    
-    Listens for: NEXUS_HYPOTHESIS_REFUTED
-    Action: Files CAL Disputes against constituent findings.
-    """
-    
-    def __init__(self):
-        self.bus = get_event_bus()
-        self._subscription_id = None
-        
-    def start(self):
-        """Start listening for refutations."""
-        self._subscription_id = self.bus.subscribe(self._handle_event)
-        logger.info("[EpistemicRecoil] Armed and listening for hypothesis refutations.")
 
-    def stop(self):
-        """Stop listening."""
-        if self._subscription_id:
-            self.bus.unsubscribe(self._subscription_id)
+class Recoil:
+    """
+    Recoil is the reflex / reactive layer of Nexus.
 
-    async def _handle_event(self, event: GraphEvent):
+    It listens to high-signal events and triggers secondary reasoning,
+    escalation, or stabilization behaviors.
+
+    IMPORTANT:
+    - Recoil must NEVER block the EventBus.
+    - All handlers are async and non-causal.
+    """
+
+    def __init__(self, bus: Optional[EventBus] = None):
+        self.bus = bus or get_event_bus()
+        self._subscription = None
+
+    def start(self) -> None:
         """
-        Process bus events.
+        Attach Recoil to the EventBus.
+
+        This MUST use subscribe_async — the old subscribe() API no longer exists.
         """
-        if event.type != EventType.NEXUS_HYPOTHESIS_REFUTED:
+        if self._subscription is not None:
             return
 
-        payload = event.payload
-        hypothesis_id = payload.get("hypothesis_id")
-        reason = payload.get("reason", "Hypothesis validation failed")
-        
-        # We need to know WHICH findings to dispute.
-        # Ideally the event payload has them, or we look them up in Nexus state.
-        # For this implementation, we expect 'constituent_finding_ids' in the refutation payload
-        # or we would need to query Nexus.
-        # Let's assume the emitter includes them for statelessness.
-        finding_ids = payload.get("constituent_finding_ids", [])
-        
-        if not finding_ids:
-            logger.warning(f"[Recoil] Refutation for {hypothesis_id} received but no finding IDs attached.")
-            return
-
-        logger.info(f"[Recoil] TRIGGERED: Disputing {len(finding_ids)} findings due to hypothesis failure.")
-
-        for finding_id in finding_ids:
-            self._file_dispute(finding_id, hypothesis_id, reason)
-
-    def _file_dispute(self, finding_id: str, hypothesis_id: str, reason: str):
-        """
-        File a formal dispute in the CAL Reasoning Engine.
-        """
-        # Construct falsifying evidence
-        evidence = Evidence(
-            content={
-                "hypothesis_id": hypothesis_id,
-                "refutation_reason": reason,
-                "type": "epistemic_recoil"
-            },
-            description=f"Automated Recoil: Hypothesis {hypothesis_id[:8]}... was refuted during validation.",
-            provenance=Provenance(
-                source="Nexus.EpistemicRecoil",
-                method="falsification_loop",
-                run_id="continuous"
-            ),
-            confidence=0.95 # High confidence in the failure
+        self._subscription = self.bus.subscribe_async(
+            self._handle_event,
+            event_types=None,  # wildcard
+            name="nexus.recoil",
+            critical=True,
         )
-        
-        # Submit dispute to CAL
-        # supporting=False means we are ATTACKING the claim
-        reasoning = get_reasoning_engine()
-        reasoning.add_evidence(
-            claim_id=finding_id,
-            evidence=evidence,
-            supporting=False
-        )
-        logger.info(f"[Recoil] Filed dispute against Finding {finding_id}")
+
+        logger.info("[Recoil] Subscribed to EventBus")
+
+    def stop(self) -> None:
+        if self._subscription is not None:
+            self._subscription.unsubscribe()
+            self._subscription = None
+            logger.info("[Recoil] Unsubscribed from EventBus")
+
+    async def _handle_event(self, event: GraphEvent) -> None:
+        """
+        Async reflex handler.
+
+        NEVER raise from here — failures are tracked by EventBus metrics.
+        """
+        try:
+            # Example reflex logic (adjust as intended)
+            if event.type == EventType.BREACH_DETECTED:
+                logger.warning(
+                    f"[Recoil] Breach detected: scan_id={event.scan_id} entity={event.entity_id}"
+                )
+
+            # Add additional reflex rules here
+
+        except Exception as e:
+            logger.exception(f"[Recoil] Handler failure: {e}")

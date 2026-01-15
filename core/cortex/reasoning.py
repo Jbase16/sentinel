@@ -59,8 +59,8 @@ class ReasoningEngine:
         )
         
         # Initialize Epistemic Recoil (Automated Falsification)
-        from core.aegis.nexus.recoil import EpistemicRecoil
-        self.recoil = EpistemicRecoil()
+        from core.aegis.nexus.recoil import Recoil
+        self.recoil = Recoil()
         self.recoil.start()
         
         logger.info("[CAL] ReasoningEngine initialized with global ReasoningSession")

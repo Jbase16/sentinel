@@ -23,8 +23,8 @@ INTEGRATION POINTS:
 - KnowledgeGraph: Stores primitive relationships and chains
 """
 
-from core.aegis.nexus.recoil import EpistemicRecoil
+from core.aegis.nexus.recoil import Recoil
 
 __all__ = [
-    "EpistemicRecoil",
+    "Recoil",
 ]
