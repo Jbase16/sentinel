@@ -30,36 +30,43 @@ struct AuditFeedView: View {
 }
 
 struct EventRow: View {
-    let event: EpistemicEvent
+    let event: GraphEvent
 
     var color: Color {
-        switch event.event_type {
-        case "promoted": return .green
-        case "suppressed": return .yellow
-        case "conflict": return .red
-        default: return .blue
+        switch event.eventType {
+        case .findingCreated, .findingConfirmed, .findingDiscovered: return .red
+        case .scanFailed, .breachDetected: return .purple
+        case .scanCompleted, .exploitValidated: return .green
+        case .decisionMade, .narrativeEmitted: return .blue
+        case .log: return .gray
+        case .toolStarted, .toolCompleted: return .orange
+        default: return .secondary
         }
     }
 
     var title: String {
-        switch event.event_type {
-        case "observed":
+        switch event.eventType {
+        case .toolStarted:
             return (event.payload["tool"]?.stringValue ?? "Unknown Tool").uppercased()
-        case "promoted":
+        case .findingCreated:
             return (event.payload["title"]?.stringValue ?? "Finding").uppercased()
         default:
-            return event.event_type.uppercased()
+            return event.type.uppercased()
         }
     }
 
     var details: String {
-        switch event.event_type {
-        case "observed":
+        switch event.eventType {
+        case .toolStarted:
             return event.payload["target"]?.stringValue ?? ""
-        case "promoted":
+        case .findingCreated:
             return event.payload["severity"]?.stringValue ?? ""
-        case "suppressed":
-            return event.payload["reason_code"]?.stringValue ?? ""
+        case .scanPhaseChanged:
+            return event.payload["phase"]?.stringValue ?? ""
+        case .decisionMade:
+            return event.payload["intent"]?.stringValue ?? ""
+        case .log:
+            return event.payload["line"]?.stringValue ?? event.payload["message"]?.stringValue ?? ""
         default:
             return ""
         }
@@ -79,9 +86,10 @@ struct EventRow: View {
                         .foregroundColor(color)
 
                     if !details.isEmpty {
-                        Text("• " + details)
+                        Text("• " + details.prefix(60))
                             .font(.custom("Menlo", size: 12))
                             .foregroundColor(.gray)
+                            .lineLimit(1)
                     }
 
                     Spacer()
@@ -91,9 +99,9 @@ struct EventRow: View {
                         .foregroundColor(.gray)
                 }
 
-                // Payload Dump (simplified)
-                if event.event_type == "observed" {
-                    Text((event.payload["raw_output"]?.stringValue ?? "").prefix(200))
+                // Payload Dump (simplified for specific types)
+                if event.eventType == .toolCompleted {
+                    Text((event.payload["output"]?.stringValue ?? "").prefix(200))
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.gray)
                         .lineLimit(3)
