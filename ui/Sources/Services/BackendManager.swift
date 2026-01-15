@@ -361,7 +361,6 @@ class BackendManager: ObservableObject {
 
         let deadline = Date().addingTimeInterval(maxStartupDuration)
         var attempt = 0
-        var backoff = startupInitialBackoff
 
         while Date() < deadline {
             if shouldAbortStartup() {

@@ -3,74 +3,7 @@ import Foundation
 
 // MARK: - Models
 
-// Reuse GraphEvent from EventStreamClient.swift - matches backend JSON structure
-// Note: This struct already includes entity_id as optional field
-public struct GraphEvent: Decodable, Identifiable, Equatable {
-    public let id: String
-    public let type: String
-    public let timestamp: Double
-    public let wall_time: String
-    public let sequence: Int
-    public let payload: [String: AnyCodable]
-    public let source: String?
-    public let epoch: String?
-
-    /// Event type as enum for pattern matching
-    public var eventType: GraphEventType {
-        GraphEventType(rawValue: type) ?? .unknown
-    }
-}
-
-/// All known event types from backend
-public enum GraphEventType: String, CaseIterable {
-    // Graph Structure
-    case nodeAdded = "node_added"
-    case nodeUpdated = "node_updated"
-    case nodeRemoved = "node_removed"
-    case edgeAdded = "edge_added"
-    case edgeUpdated = "edge_updated"
-
-    // Scan Lifecycle
-    case scanStarted = "scan_started"
-    case scanPhaseChanged = "scan_phase_changed"
-    case scanCompleted = "scan_completed"
-    case scanFailed = "scan_failed"
-
-    // Findings
-    case findingCreated = "finding_created"
-    case findingConfirmed = "finding_confirmed"
-    case findingDismissed = "finding_dismissed"
-    case findingDiscovered = "finding_discovered"
-
-    // Tool Execution
-    case toolStarted = "tool_started"
-    case toolCompleted = "tool_completed"
-
-    // Logging & Reasoning
-    case log = "log"
-    case narrativeEmitted = "narrative_emitted"
-    case decisionMade = "decision_made"
-    case actionNeeded = "action_needed"
-
-    // Trinity of Hardening Events
-    case circuitBreakerStateChanged = "circuit_breaker_state"
-    case exploitValidated = "exploit_validated"
-    case exploitRejected = "exploit_rejected"
-
-    // Cortex / Doppelganger Events
-    case breachDetected = "BREACH_DETECTED"
-    case identityEstablished = "IDENTITY_ESTABLISHED"
-
-    // Diagnostic / Governance Events
-    case contractViolation = "contract_violation"
-    case orphanEventDropped = "orphan_event_dropped"
-    case resourceGuardTrip = "resource_guard_trip"
-    case eventSilence = "event_silence"
-    case toolChurn = "tool_churn"
-
-    // Fallback
-    case unknown = "unknown"
-}
+// GraphEvent and GraphEventType are now imported from EventStreamClient.swift
 
 // MARK: - Client
 

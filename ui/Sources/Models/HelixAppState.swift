@@ -469,9 +469,9 @@ public class HelixAppState: ObservableObject {
         Task {
             do {
                 print("[AppState] About to call apiClient.startScan...")
-                let response = try await apiClient.startScan(
+                try await apiClient.startScan(
                     target: target, modules: modules, mode: mode.rawValue)
-                print("[AppState] apiClient.startScan succeeded, response: \(response)")
+                print("[AppState] apiClient.startScan succeeded")
                 await MainActor.run {
                     self.isScanRunning = true
                     print("[AppState] Set isScanRunning = true")
