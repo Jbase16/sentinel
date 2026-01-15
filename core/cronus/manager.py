@@ -1,3 +1,5 @@
+# core/cronus/manager.py
+
 """
 Cronus: Temporal Budget Enforcement Layer
 
@@ -13,7 +15,8 @@ from typing import Any, Dict, Optional
 
 from core.contracts.budget import Budget, BudgetOverrun
 from core.contracts.events import EventType
-from core.cortex.events import EventBus, GraphEvent, get_event_bus, SubscriptionHandle
+from core.cortex.events import EventBus, GraphEvent, get_event_bus
+from core.cortex.subscriptions import SubscriptionHandle, subscribe_safe
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +70,7 @@ class CronusSession:
 
 
 # ---------------------------------------------------------------------------
-# Cronus Manager
+# Cronus Manager (Coordinator)
 # ---------------------------------------------------------------------------
 
 class CronusManager:
@@ -80,14 +83,11 @@ class CronusManager:
     - Tear down sessions on SCAN_COMPLETED
     """
 
-    _bus: Optional[EventBus] = None
     _sessions: Dict[str, CronusSession] = {}
-    _subscriptions: list[SubscriptionHandle] = []
+    _bus: Optional[EventBus] = None
     _started: bool = False
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
+    _subs: list[SubscriptionHandle] = []
 
     @classmethod
     def start(cls) -> None:
@@ -96,11 +96,12 @@ class CronusManager:
 
         cls._bus = get_event_bus()
 
-        cls._subscriptions = [
-            cls._bus.subscribe_sync(cls._on_scan_started, [EventType.SCAN_STARTED], name="cronus.scan_started"),
-            cls._bus.subscribe_sync(cls._on_scan_completed, [EventType.SCAN_COMPLETED], name="cronus.scan_completed"),
-            cls._bus.subscribe_sync(cls._on_tool_started, [EventType.TOOL_STARTED], name="cronus.tool_started"),
-            cls._bus.subscribe_sync(cls._on_tool_completed, [EventType.TOOL_COMPLETED], name="cronus.tool_completed"),
+        # Subscribe using the single enforced entrypoint
+        cls._subs = [
+            subscribe_safe(cls._bus, cls._on_scan_started, event_types=[EventType.SCAN_STARTED], name="cronus.scan_started"),
+            subscribe_safe(cls._bus, cls._on_scan_completed, event_types=[EventType.SCAN_COMPLETED], name="cronus.scan_completed"),
+            subscribe_safe(cls._bus, cls._on_tool_started, event_types=[EventType.TOOL_STARTED], name="cronus.tool_started"),
+            subscribe_safe(cls._bus, cls._on_tool_completed, event_types=[EventType.TOOL_COMPLETED], name="cronus.tool_completed"),
         ]
 
         cls._started = True
@@ -108,13 +109,16 @@ class CronusManager:
 
     @classmethod
     def shutdown(cls) -> None:
-        for sub in cls._subscriptions:
-            sub.unsubscribe()
-        cls._subscriptions.clear()
-
         for session in list(cls._sessions.values()):
             session.shutdown()
         cls._sessions.clear()
+
+        for sub in cls._subs:
+            try:
+                sub.unsubscribe()
+            except Exception:
+                pass
+        cls._subs = []
 
         cls._started = False
         logger.info("[CronusManager] Shutdown complete")
@@ -124,27 +128,28 @@ class CronusManager:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _on_scan_started(cls, event: GraphEvent) -> None:
-        scan_id = event.scan_id
+    async def _on_scan_started(cls, event: GraphEvent) -> None:
+        scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id") or (event.payload or {}).get("session_id")
         payload = event.payload or {}
-
-        if not scan_id:
-            return
 
         budget = payload.get("budget")
         if not isinstance(budget, Budget):
-            logger.debug(
-                "[CronusManager] SCAN_STARTED without Budget; Cronus disabled for scan",
+            logger.warning(
+                "[CronusManager] SCAN_STARTED missing Budget; skipping CronusSession",
                 extra={"scan_id": scan_id},
             )
+            return
+
+        if not scan_id:
+            logger.warning("[CronusManager] SCAN_STARTED missing scan_id; skipping CronusSession")
             return
 
         cls._sessions[scan_id] = CronusSession(scan_id, budget)
         logger.info("[CronusManager] CronusSession created", extra={"scan_id": scan_id})
 
     @classmethod
-    def _on_scan_completed(cls, event: GraphEvent) -> None:
-        scan_id = event.scan_id
+    async def _on_scan_completed(cls, event: GraphEvent) -> None:
+        scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id") or (event.payload or {}).get("session_id")
         if not scan_id:
             return
 
@@ -154,44 +159,48 @@ class CronusManager:
             logger.info("[CronusManager] CronusSession closed", extra={"scan_id": scan_id})
 
     @classmethod
-    def _on_tool_started(cls, event: GraphEvent) -> None:
-        session = cls._sessions.get(event.scan_id)
+    async def _on_tool_started(cls, event: GraphEvent) -> None:
+        scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id") or (event.payload or {}).get("session_id")
+        if not scan_id:
+            return
+
+        session = cls._sessions.get(scan_id)
         if not session:
             return
 
         tool = (event.payload or {}).get("tool")
-        if not isinstance(tool, str) or not tool:
-            return
-
-        try:
-            session.on_tool_started(tool)
-        except BudgetOverrun as e:
-            logger.error("[CronusManager] Budget overrun on tool start", extra={"scan_id": event.scan_id})
-            cls._emit_budget_violation(event.scan_id, e)
+        if isinstance(tool, str) and tool:
+            try:
+                session.on_tool_started(tool)
+            except BudgetOverrun as e:
+                logger.error("[CronusManager] Budget overrun on tool start", extra={"scan_id": scan_id})
+                cls._emit_budget_violation(scan_id, e)
 
     @classmethod
-    def _on_tool_completed(cls, event: GraphEvent) -> None:
-        session = cls._sessions.get(event.scan_id)
+    async def _on_tool_completed(cls, event: GraphEvent) -> None:
+        scan_id = getattr(event, "scan_id", None) or (event.payload or {}).get("scan_id") or (event.payload or {}).get("session_id")
+        if not scan_id:
+            return
+
+        session = cls._sessions.get(scan_id)
         if not session:
             return
 
         payload = event.payload or {}
         tool = payload.get("tool")
-        findings = payload.get("findings_count", 0)
+        findings_raw = payload.get("findings", 0)
 
         try:
-            findings = int(findings or 0)
+            findings = int(findings_raw or 0)
         except Exception:
             findings = 0
 
-        if not isinstance(tool, str) or not tool:
-            return
-
-        try:
-            session.on_tool_completed(tool, findings)
-        except BudgetOverrun as e:
-            logger.error("[CronusManager] Budget overrun on tool completion", extra={"scan_id": event.scan_id})
-            cls._emit_budget_violation(event.scan_id, e)
+        if isinstance(tool, str) and tool:
+            try:
+                session.on_tool_completed(tool, findings)
+            except BudgetOverrun as e:
+                logger.error("[CronusManager] Budget overrun on tool completion", extra={"scan_id": scan_id})
+                cls._emit_budget_violation(scan_id, e)
 
     # ------------------------------------------------------------------
     # Violations
@@ -199,13 +208,12 @@ class CronusManager:
 
     @classmethod
     def _emit_budget_violation(cls, scan_id: str, error: BudgetOverrun) -> None:
-        if not cls._bus or not scan_id:
+        if not cls._bus:
             return
 
-        event_type = getattr(EventType, "BUDGET_OVERRUN", EventType.CONTRACT_VIOLATION)
+        event_type = getattr(EventType, "BUDGET_OVERRUN", None) or getattr(EventType, "CONTRACT_VIOLATION")
 
-        payload: Dict[str, Any] = {
-            "scan_id": scan_id,
+        payload = {
             "resource": getattr(error, "resource", "unknown"),
             "used": getattr(error, "used", None),
             "limit": getattr(error, "limit", None),
@@ -213,14 +221,7 @@ class CronusManager:
         }
 
         try:
-            cls._bus.emit(
-                GraphEvent(
-                    type=event_type,
-                    payload=payload,
-                    scan_id=scan_id,
-                    source="cronus",
-                    priority=0,
-                )
-            )
+            # GraphEvent signature varies; safest is the fields used elsewhere in your codebase:
+            cls._bus.emit(GraphEvent(type=event_type, payload={"scan_id": scan_id, **payload}))
         except Exception:
             logger.exception("[CronusManager] Failed to emit budget violation", extra={"scan_id": scan_id})

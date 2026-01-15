@@ -1,3 +1,5 @@
+# core/cortex/manager.py
+
 """
 core/cortex/manager.py
 NexusManager: The Kernel Scheduler for Reasoning.
@@ -8,13 +10,16 @@ This module provides the singleton manager that:
 3. Routes events safely to the correct session based on scan_id.
 """
 
+from __future__ import annotations
+
 import logging
 import time
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
-from core.cortex.events import EventBus, GraphEvent, get_event_bus
 from core.contracts.events import EventType
+from core.cortex.events import EventBus, GraphEvent, get_event_bus
 from core.cortex.session import NexusSession
+from core.cortex.subscriptions import SubscriptionHandle, subscribe_safe
 
 logger = logging.getLogger(__name__)
 
@@ -25,67 +30,61 @@ class NexusManager:
     """
 
     def __init__(self, event_bus: Optional[EventBus] = None):
-        self.bus: EventBus = event_bus or get_event_bus()
+        self.bus = event_bus or get_event_bus()
         self.sessions: Dict[str, NexusSession] = {}
-        self._subscription = None
+        self._subscription: Optional[SubscriptionHandle] = None
 
-    # ---------------------------------------------------------------------
-    # Lifecycle
-    # ---------------------------------------------------------------------
     def start(self) -> None:
-        """Start the manager and subscribe to the EventBus."""
+        """Start the manager and subscribe to events."""
         if self._subscription is not None:
             return
 
-        self._subscription = self.bus.subscribe_sync(
+        self._subscription = subscribe_safe(
+            self.bus,
             self._handle_event,
-            event_types=None,  # wildcard — routing logic enforces isolation
+            event_types=None,  # wildcard routing
             name="nexus.manager",
             critical=True,
         )
-
         logger.info("[NexusManager] Started and subscribed to EventBus")
 
     def stop(self) -> None:
         """Stop the manager and cleanup all sessions."""
-        if self._subscription is not None:
-            self._subscription.unsubscribe()
-            self._subscription = None
-
         self.close_all_sessions(reason="Shutdown")
-        logger.info("[NexusManager] Stopped")
+        if self._subscription is not None:
+            try:
+                self._subscription.unsubscribe()
+            finally:
+                self._subscription = None
 
     def close_all_sessions(self, reason: str = "") -> None:
         """Force close all active sessions."""
         for scan_id, session in list(self.sessions.items()):
-            session.shutdown()
-            del self.sessions[scan_id]
-
+            try:
+                session.shutdown()
+            finally:
+                self.sessions.pop(scan_id, None)
         if reason:
             logger.info(f"[NexusManager] Closed all sessions. Reason: {reason}")
 
-    # ---------------------------------------------------------------------
-    # Event Routing
-    # ---------------------------------------------------------------------
-    def _handle_event(self, event: GraphEvent) -> None:
+    async def _handle_event(self, event: GraphEvent) -> None:
         """
         Main Event Handler / Router.
 
-        Strict guarantees:
-        - Session lifecycle is driven ONLY by SCAN_STARTED / SCAN_COMPLETED
-        - All routed events MUST carry scan_id
-        - Orphans are detected and explicitly emitted
+        Strictly enforces isolation:
+        1. Extract scan_id from payload.
+        2. If missing -> Drop/Orphan/Violation.
+        3. Route to session.
         """
         try:
             event_type = event.type
-            scan_id = event.scan_id
+            payload = event.payload or {}
 
-            # -------------------------------------------------------------
-            # Lifecycle events
-            # -------------------------------------------------------------
+            # --- Global Lifecycle Events ---
             if event_type == EventType.SCAN_STARTED:
+                scan_id = payload.get("session_id") or payload.get("scan_id")
                 if not scan_id:
-                    self._emit_violation(event, "SCAN_STARTED missing scan_id")
+                    self._emit_violation(event, "Missing session_id/scan_id in SCAN_STARTED")
                     return
 
                 if scan_id in self.sessions:
@@ -93,85 +92,49 @@ class NexusManager:
                     return
 
                 self._create_session(scan_id)
-                self.sessions[scan_id].apply(event_type, event.payload, event.event_sequence)
+                self.sessions[scan_id].apply(event_type, payload, event.event_sequence)
                 return
 
             if event_type == EventType.SCAN_COMPLETED:
+                scan_id = payload.get("session_id") or payload.get("scan_id")
                 if not scan_id:
                     return
 
                 session = self.sessions.get(scan_id)
                 if session:
-                    session.apply(event_type, event.payload, event.event_sequence)
+                    session.apply(event_type, payload, event.event_sequence)
                     session.shutdown()
                     del self.sessions[scan_id]
                 return
 
-            # -------------------------------------------------------------
-            # Standard routed events
-            # -------------------------------------------------------------
+            # --- Routing Logic for Standard Events ---
+            scan_id = payload.get("scan_id") or payload.get("session_id") or getattr(event, "scan_id", None)
+
             if not scan_id:
-                # Global or malformed event — detect only meaningful orphans
-                if event_type in {
-                    EventType.TOOL_STARTED,
-                    EventType.TOOL_COMPLETED,
-                    EventType.FINDING_CREATED,
-                }:
-                    self._emit_orphan(event_type, None, "Missing scan_id on routable event")
+                # Drop truly global noise. Flag operational orphans.
+                if (
+                    "target" in payload
+                    or "tool" in payload
+                    or event_type in {EventType.TOOL_STARTED, EventType.FINDING_CREATED}
+                ):
+                    self._emit_orphan(event_type, None, "Missing scan_id in payload")
                 return
 
             session = self.sessions.get(scan_id)
             if session:
-                session.apply(event_type, event.payload, event.event_sequence)
+                session.apply(event_type, payload, event.event_sequence)
             else:
-                self._emit_orphan(
-                    event_type,
-                    scan_id,
-                    f"Session {scan_id} not found (late or zombie event)",
-                )
+                self._emit_orphan(event_type, scan_id, f"Session {scan_id} not found (zombie/late event)")
 
         except Exception as e:
-            logger.error("[NexusManager] Error handling event", exc_info=True)
-
-    # ---------------------------------------------------------------------
-    # Session Management
-    # ---------------------------------------------------------------------
-    def _create_session(self, scan_id: str) -> None:
-        """Initialize a new NexusSession."""
-        session = NexusSession(
-            scan_id=scan_id,
-            emit_fn=self._emit_from_session,
-        )
-        self.sessions[scan_id] = session
-
-        # Phase-0 invariant: context attachment is explicit and observable
-        self._emit_from_session(
-            EventType.NEXUS_CONTEXT_ATTACHED,
-            {
-                "scan_id": scan_id,
-                "timestamp": time.time(),
-                "mode": "omega",
-            },
-        )
-
-        logger.info(f"[NexusManager] Created session for scan_id={scan_id}")
-
-    # ---------------------------------------------------------------------
-    # Emission Helpers
-    # ---------------------------------------------------------------------
-    def _emit_from_session(self, event_type: EventType, payload: Dict[str, Any]) -> None:
-        """Emit events originating from a NexusSession."""
-        self.bus.emit(
-            GraphEvent(
-                type=event_type,
-                payload=payload,
-                scan_id=payload.get("scan_id"),
-                source="nexus",
-            )
-        )
+            logger.error(f"[NexusManager] Error handling event: {e}", exc_info=True)
 
     def _emit_orphan(self, original_type: EventType, scan_id: Optional[str], reason: str) -> None:
-        """Emit a diagnostic orphan event (internal, non-recursive)."""
+        """
+        Emit a diagnostic event for dropped orphans.
+
+        Marked _internal=True to prevent recursion loops.
+        """
         try:
             self.bus.emit(
                 GraphEvent(
@@ -183,16 +146,34 @@ class NexusManager:
                         "source_component": "NexusManager",
                         "mode": "omega",
                     },
-                    scan_id=scan_id,
-                    source="nexus",
                     _internal=True,
                 )
             )
         except Exception as e:
             logger.warning(f"[NexusManager] Failed to emit orphan event: {e}")
 
+    def _create_session(self, scan_id: str) -> None:
+        """Initialize a new NexusSession."""
+        session = NexusSession(scan_id=scan_id, emit_fn=self._emit_from_session)
+        self.sessions[scan_id] = session
+
+        # Emit Context Attached Event
+        self._emit_from_session(
+            EventType.NEXUS_CONTEXT_ATTACHED,
+            {"scan_id": scan_id, "timestamp": time.time(), "mode": "omega"},
+        )
+        logger.info(f"[NexusManager] Created session for scan_id={scan_id}")
+
+    def _emit_from_session(self, event_type: EventType, payload: Dict[str, Any]) -> None:
+        """Callback for sessions to emit events safely."""
+        self.bus.emit(GraphEvent(type=event_type, payload=payload))
+
     def _emit_violation(self, source_event: GraphEvent, reason: str) -> None:
-        """Emit a contract violation without recursion."""
+        """
+        Emit a contract violation for routing failures.
+
+        Marked _internal=True to prevent recursion loops.
+        """
         self.bus.emit(
             GraphEvent(
                 type=EventType.CONTRACT_VIOLATION,
@@ -201,8 +182,6 @@ class NexusManager:
                     "violations": [reason],
                     "context": {"router": "NexusManager"},
                 },
-                scan_id=source_event.scan_id,
-                source="nexus",
                 _internal=True,
             )
         )

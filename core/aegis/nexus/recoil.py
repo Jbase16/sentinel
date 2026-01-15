@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from core.cortex.events import EventBus, get_event_bus
+from core.cortex.events import EventBus, GraphEvent, get_event_bus
 from core.contracts.events import EventType
-from core.cortex.events import GraphEvent
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,11 @@ class Recoil:
         if self._subscription is not None:
             return
 
-        self._subscription = self.bus.subscribe_async(
+        subscribe_async = getattr(self.bus, "subscribe_async", None)
+        if subscribe_async is None:
+            raise RuntimeError("EventBus has no subscribe_async() method")
+
+        self._subscription = subscribe_async(
             self._handle_event,
             event_types=None,  # wildcard
             name="nexus.recoil",
@@ -48,8 +51,10 @@ class Recoil:
 
     def stop(self) -> None:
         if self._subscription is not None:
-            self._subscription.unsubscribe()
-            self._subscription = None
+            try:
+                self._subscription.unsubscribe()
+            finally:
+                self._subscription = None
             logger.info("[Recoil] Unsubscribed from EventBus")
 
     async def _handle_event(self, event: GraphEvent) -> None:
@@ -59,13 +64,18 @@ class Recoil:
         NEVER raise from here — failures are tracked by EventBus metrics.
         """
         try:
-            # Example reflex logic (adjust as intended)
-            if event.type == EventType.BREACH_DETECTED:
-                logger.warning(
-                    f"[Recoil] Breach detected: scan_id={event.scan_id} entity={event.entity_id}"
-                )
+            # -----------------------------------------------------------------
+            # IMPORTANT: No speculative EventTypes. If it isn't in the contract,
+            # it doesn't exist. Guard optional/legacy events explicitly.
+            # -----------------------------------------------------------------
 
-            # Add additional reflex rules here
+            # Example pattern for an optional event type:
+            # if hasattr(EventType, "BREACH_DETECTED") and event.type == EventType.BREACH_DETECTED:
+            #     logger.warning(f"[Recoil] Breach detected: scan_id={event.scan_id} entity={event.entity_id}")
+
+            # Add real reflex rules here, using ONLY contract-defined EventTypes.
+
+            return
 
         except Exception as e:
             logger.exception(f"[Recoil] Handler failure: {e}")
