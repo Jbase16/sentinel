@@ -88,6 +88,11 @@ public struct SentinelAPIClient: Sendable {
     // MARK: - Scan Operations
 
     /// Kick off a scan for a given target.
+    ///
+    /// NOTE:
+    /// Backend may return 202 (Accepted) OR 200 (OK) with a JSON body:
+    ///   {"session_id":"...","status":"started"}
+    /// Both are success.
     public func startScan(target: String, modules: [String] = [], mode: String = "standard")
         async throws
     {
@@ -107,15 +112,17 @@ public struct SentinelAPIClient: Sendable {
             throw APIError.badStatus
         }
 
-        // Backend returns 200 with {"session_id": "...", "status": "started"}.
-        // Accept any 2xx response; log non-2xx with body for diagnosis.
-        guard (200...299).contains(http.statusCode) else {
-            let bodyStr = String(data: data, encoding: .utf8) ?? "<no body>"
-            print("[SentinelAPIClient] startScan rejected")
-            print("  status: \(http.statusCode)")
-            print("  body: \(bodyStr)")
-            throw APIError.badStatus
+        // ✅ Accept BOTH 200 and 202 as success.
+        if http.statusCode == 200 || http.statusCode == 202 {
+            return
         }
+
+        // Everything else: log body for debugging.
+        let responseBody = String(data: data, encoding: .utf8) ?? "<no body>"
+        print("[SentinelAPIClient] startScan rejected")
+        print("  status: \(http.statusCode)")
+        print("  body: \(responseBody)")
+        throw APIError.badStatus
     }
 
     /// Request best-effort scan cancellation.
@@ -432,8 +439,10 @@ public struct SentinelAPIClient: Sendable {
                             }
                         }
 
+                        // If stream ends normally (server closed), we might want to reconnect or finish.
                         print("[SSE] Sync stream ended, reconnecting...")
                     } catch {
+                        // Log error only if it's a real error (not connection refused during startup)
                         if ErrorClassifier.shouldLogAsError(error) {
                             print("[SSE] Connection lost: \(error). Reconnecting...")
                         }
@@ -446,6 +455,7 @@ public struct SentinelAPIClient: Sendable {
                         return
                     }
 
+                    // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
                     await RetryBackoff.sleep(for: attempt)
                 }
 

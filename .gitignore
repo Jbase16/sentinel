@@ -21,6 +21,8 @@ xcuserdata/
 DerivedData/
 __pycache__/
 ui/.build/
+ui/build/
+build/
 venv/
 .analysis-venv/
 userdata/

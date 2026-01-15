@@ -77,3 +77,77 @@ class TestCoreAPI:
         data = response.json()
         ai = data.get("ai", {})
         assert "connected" in ai
+
+    @pytest.mark.asyncio
+    async def test_04_scan_start_malformed_url_single_slash(self, async_client):
+        """Test scan start rejects malformed URL with single slash (http:/localhost:3002)."""
+        response = await async_client.post(
+            "/v1/scans/start",
+            json={"target": "http:/localhost:3002"}
+        )
+        assert response.status_code == 422  # Pydantic validation error
+        data = response.json()
+        assert "detail" in data
+        assert any("missing scheme" in str(detail).lower() or "invalid target url" in str(detail).lower()
+                   for detail in data["detail"])
+
+    @pytest.mark.asyncio
+    async def test_05_scan_start_missing_scheme(self, async_client):
+        """Test scan start rejects URL without scheme."""
+        response = await async_client.post(
+            "/v1/scans/start",
+            json={"target": "localhost:3002"}
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert "detail" in data
+        assert any("missing scheme" in str(detail).lower() or "invalid target url" in str(detail).lower()
+                   for detail in data["detail"])
+
+    @pytest.mark.asyncio
+    async def test_06_scan_start_invalid_scheme(self, async_client):
+        """Test scan start rejects URL with invalid scheme."""
+        response = await async_client.post(
+            "/v1/scans/start",
+            json={"target": "ftp://example.com"}
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert "detail" in data
+        assert any("scheme must be http or https" in str(detail).lower()
+                   for detail in data["detail"])
+
+    @pytest.mark.asyncio
+    async def test_07_scan_start_missing_netloc(self, async_client):
+        """Test scan start rejects URL without network location."""
+        response = await async_client.post(
+            "/v1/scans/start",
+            json={"target": "http://"}
+        )
+        assert response.status_code == 422
+        data = response.json()
+        assert "detail" in data
+        assert any("missing network location" in str(detail).lower() or "invalid target url" in str(detail).lower()
+                   for detail in data["detail"])
+
+    @pytest.mark.asyncio
+    async def test_08_scan_start_valid_http_url(self, async_client):
+        """Test scan start accepts valid HTTP URL."""
+        response = await async_client.post(
+            "/v1/scans/start",
+            json={"target": "http://localhost:3002"}
+        )
+        # Should return 202 Accepted (scan started) or 422 if auth fails
+        # We're just checking it doesn't fail URL validation
+        assert response.status_code in (202, 401, 403)
+
+    @pytest.mark.asyncio
+    async def test_09_scan_start_valid_https_url(self, async_client):
+        """Test scan start accepts valid HTTPS URL."""
+        response = await async_client.post(
+            "/v1/scans/start",
+            json={"target": "https://example.com"}
+        )
+        # Should return 202 Accepted (scan started) or 422 if auth fails
+        # We're just checking it doesn't fail URL validation
+        assert response.status_code in (202, 401, 403)

@@ -465,28 +465,32 @@ public class HelixAppState: ObservableObject {
 
     /// Function startScan.
     func startScan(target: String, modules: [String], mode: ScanMode) {
+        print("[AppState] startScan invoked target=\(target) mode=\(mode.rawValue)")
         Task {
             do {
-                _ = try await apiClient.startScan(
+                print("[AppState] About to call apiClient.startScan...")
+                let response = try await apiClient.startScan(
                     target: target, modules: modules, mode: mode.rawValue)
+                print("[AppState] apiClient.startScan succeeded, response: \(response)")
                 await MainActor.run {
                     self.isScanRunning = true
+                    print("[AppState] Set isScanRunning = true")
                 }
             } catch {
                 print("[AppState] Failed to start scan")
                 print("  error type: \(type(of: error))")
                 print("  error: \(error)")
-                
+
                 if let urlError = error as? URLError {
                     print("  urlError.code: \(urlError.code)")
                     print(" URLError description: \(urlError.localizedDescription)")
                 }
-                
+
                 await MainActor.run {
                     self.isScanRunning = false
-                
+
                 }
-                
+
             }
         }
     }

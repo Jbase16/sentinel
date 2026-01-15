@@ -5,6 +5,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
@@ -29,11 +30,32 @@ class ScanRequest(BaseModel):
     def validate_target(cls, v: str) -> str:
         v = v.strip()
         if not v:
+            logger.warning("Scan start rejected: empty target")
             raise ValueError("Target cannot be empty")
         dangerous_patterns = [";", "&&", "||", "`", "$(", "\n", "\r"]
         for pattern in dangerous_patterns:
             if pattern in v:
+                logger.warning(f"Scan start rejected: dangerous character '{pattern}' in target: {v}")
                 raise ValueError(f"Invalid character in target: {pattern}")
+        
+        # Validate URL format
+        try:
+            parsed = urlparse(v)
+            if not parsed.scheme:
+                logger.warning(f"Scan start rejected: missing URL scheme in target: {v}")
+                raise ValueError("Invalid target URL: missing scheme (e.g., http:// or https://)")
+            if not parsed.netloc:
+                logger.warning(f"Scan start rejected: missing network location in target: {v}")
+                raise ValueError("Invalid target URL: missing network location")
+            if parsed.scheme not in ("http", "https"):
+                logger.warning(f"Scan start rejected: invalid scheme '{parsed.scheme}' in target: {v}")
+                raise ValueError("Invalid target URL: scheme must be http or https")
+        except ValueError:
+            raise
+        except Exception as e:
+            logger.warning(f"Scan start rejected: URL parsing error for target '{v}': {str(e)}")
+            raise ValueError(f"Invalid target URL: {str(e)}")
+        
         return v
 
     @field_validator("modules")
@@ -196,6 +218,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
 
 @router.post("/start", dependencies=[Depends(verify_sensitive_token)], status_code=202)
 async def start_scan(req: ScanRequest):
+    logger.info(f"Scan start request received for target: {req.target}")
     session_id = await begin_scan_logic(req)
     return {"session_id": session_id, "status": "started"}
 

@@ -35,7 +35,7 @@ enum ToolSelectionMode: String, CaseIterable, Identifiable {
 struct ScanControlView: View {
     @EnvironmentObject var appState: HelixAppState
     @StateObject var backend = BackendManager.shared
-    @State private var scanTarget: String = "http://testphp.vulnweb.com"
+    @State private var scanTarget: String = "http://localhost:3002"
     @FocusState private var isFocused: Bool
 
     // Scan Config
@@ -58,6 +58,11 @@ struct ScanControlView: View {
         VStack(spacing: 0) {
             // Connection status
             ConnectionStatusBanner()
+                .onAppear {
+                    print(
+                        "[ScanControlView] View appeared - appState: \(appState), backend.isRunning: \(backend.isRunning)"
+                    )
+                }
 
             // Permission Requests
             ActionRequestView()
@@ -139,7 +144,10 @@ struct ScanControlView: View {
                     }
                     .tint(.red)
                 } else {
-                    Button(action: startScan) {
+                    Button(action: {
+                        print("[ScanControlView] Start Scan button tapped!")
+                        startScan()
+                    }) {
                         Label("Start Scan", systemImage: "play.fill")
                     }
                     .disabled(
@@ -147,6 +155,11 @@ struct ScanControlView: View {
                             || !backend.isRunning
                             || (toolSelectionMode == .custom && selectedTools.isEmpty)
                     )
+                    .onAppear {
+                        print(
+                            "[ScanControlView] Button disabled state: scanTarget.isEmpty=\(scanTarget.isEmpty), backend.isRunning=\(backend.isRunning), customModeEmpty=\(toolSelectionMode == .custom && selectedTools.isEmpty)"
+                        )
+                    }
                 }
             }
             .padding()
@@ -168,8 +181,25 @@ struct ScanControlView: View {
     }
 
     private func startScan() {
+        print("[ScanControlView] startScan() called")
+        print("[ScanControlView] scanTarget.isEmpty: \(scanTarget.isEmpty)")
+        print("[ScanControlView] backend.isRunning: \(backend.isRunning)")
+        print("[ScanControlView] appState: \(appState)")
+
+        // Validate URL format
+        guard let url = URL(string: scanTarget) else {
+            print("[ScanControlView] Invalid URL format: \(scanTarget)")
+            return
+        }
+
+        guard url.scheme == "http" || url.scheme == "https" else {
+            print("[ScanControlView] Invalid URL scheme: \(url.scheme ?? "none")")
+            return
+        }
+
         // Conditional branch.
         if !scanTarget.isEmpty && backend.isRunning {
+            print("[ScanControlView] Guard passed, proceeding to start scan")
             // Conditional branch.
             if toolSelectionMode == .custom && selectedTools.isEmpty {
                 showToolConfig = true
@@ -183,8 +213,15 @@ struct ScanControlView: View {
             case .custom:
                 modules = Array(selectedTools)
             }
+            print(
+                "[ScanControlView] Calling appState.startScan(target=\(scanTarget), modules=\(modules), mode=\(selectedMode.rawValue))"
+            )
             appState.startScan(
                 target: scanTarget, modules: modules, mode: selectedMode)
+        } else {
+            print(
+                "[ScanControlView] Guard failed - scanTarget.isEmpty: \(scanTarget.isEmpty), backend.isRunning: \(backend.isRunning)"
+            )
         }
     }
 }
