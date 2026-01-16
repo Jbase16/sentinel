@@ -260,6 +260,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+@app.get("/health", include_in_schema=False)
+def health_alias():
+    return {
+        "status": "ok",
+        "api_file": __file__,
+        "pid": os.getpid(),
+        }
+
 
 # Exception handler
 @app.exception_handler(SentinelError)
