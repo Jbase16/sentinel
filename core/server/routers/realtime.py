@@ -77,7 +77,7 @@ async def sse_events_endpoint(request: Request):
     Compatible with existing Swift client.
     """
     store = get_event_store()
-    
+
     async def event_generator():
         try:
             # Check for Last-Event-ID header or query param
@@ -94,7 +94,7 @@ async def sse_events_endpoint(request: Request):
                         }
                 except ValueError:
                     pass
-            
+
             # Stream live events using async generator
             async for stored_event in store.subscribe():
                 yield {
@@ -104,6 +104,15 @@ async def sse_events_endpoint(request: Request):
                 }
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            import traceback
+            logger = logging.getLogger("core.server.routers.realtime")
+            logger.error(f"[SSE] Exception in event_generator: {e}\n{traceback.format_exc()}")
+            # Optionally, yield an error event for debugging
+            yield {
+                "event": "error",
+                "data": f"Internal server error: {e}"
+            }
 
     return EventSourceResponse(event_generator())
 

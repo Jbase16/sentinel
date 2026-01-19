@@ -79,8 +79,8 @@ class EventStore:
         self._subscribers: List[Tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = []
         self._subscribers_lock = threading.Lock()
         
-        # Auto-wire: Subscribe to the bus immediately
-        get_event_bus().subscribe(self.append)
+        # Auto-wire: Subscribe to the bus immediately (sync handler for GraphEvent)
+        get_event_bus().subscribe_sync(self.append)
 
     def append(self, event: GraphEvent) -> StoredEvent:
         """

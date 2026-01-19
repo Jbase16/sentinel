@@ -27,5 +27,6 @@
   },
   "editor.acceptSuggestionOnEnter": "on",
   "chat.agent.maxRequests": 50,
-  "git.ignoreLimitWarning": true
+  "git.ignoreLimitWarning": true,
+  "codium.codeCompletion.enable": false
 }
