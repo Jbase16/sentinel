@@ -256,6 +256,21 @@ class SentinelError(Exception):
         return cls(code, message, details, http_status)
 
 
+class ToolError(SentinelError):
+    """
+    Structured error for tool execution failures.
+    Preserves tool name, exit code, and stderr to retain context across layers.
+    """
+
+    def __init__(self, tool: str, exit_code: int, stderr: str, message: Optional[str] = None):
+        details = {"tool": tool, "exit_code": exit_code, "stderr": stderr}
+        super().__init__(
+            ErrorCode.TOOL_EXEC_FAILED,
+            message or f"Tool {tool} failed with exit code {exit_code}",
+            details=details,
+        )
+
+
 # ============================================================================
 # Critical Security Exceptions (Halt System Startup)
 # ============================================================================
@@ -423,4 +438,11 @@ def handle_error(error: Exception, context: Optional[str] = None) -> SentinelErr
 # Module-Level Exports
 # ============================================================================
 
-__all__ = ["ErrorCode", "SentinelError", "SentinelSecurityError", "CriticalSecurityBreach", "handle_error"]
+__all__ = [
+    "ErrorCode",
+    "SentinelError",
+    "ToolError",
+    "SentinelSecurityError",
+    "CriticalSecurityBreach",
+    "handle_error",
+]

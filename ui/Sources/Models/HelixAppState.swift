@@ -175,6 +175,15 @@ public class HelixAppState: ObservableObject {
                         self.refreshGraph()
                     case .scanFailed:
                         self.isScanRunning = false
+                        if let error = event.payload["error"]?.stringValue {
+                            let code = event.payload["error_code"]?.stringValue
+                            let details = event.payload["error_details"]?.value as? [String: Any]
+                            let detailText = details?.description ?? ""
+                            let prefix = code != nil ? "(\(code!)) " : ""
+                            let text = "🛑 [Scan] Failed: \(prefix)\(error) \(detailText)"
+                            self.apiLogs.append(text)
+                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        }
                         self.refreshResults()
                     case .scanPhaseChanged:
                         if let phase = event.payload["phase"]?.stringValue {
@@ -196,7 +205,22 @@ public class HelixAppState: ObservableObject {
                                 self.pendingActions.append(action)
                             }
                         }
-                    case .findingCreated, .findingConfirmed, .findingDismissed, .toolCompleted:
+                    case .findingCreated, .findingConfirmed, .findingDismissed:
+                        self.refreshResults()
+                        self.refreshGraph()
+                    case .toolCompleted:
+                        if let error = event.payload["error"]?.value as? [String: Any],
+                            let tool = error["tool"] as? String
+                        {
+                            let exitCode =
+                                (error["exit_code"] as? Int)
+                                ?? (error["exit_code"] as? NSNumber)?.intValue
+                                ?? -1
+                            let stderr = error["stderr"] as? String ?? "Unknown error"
+                            let text = "⚠️ [Tool] \(tool) failed (exit \(exitCode)): \(stderr)"
+                            self.apiLogs.append(text)
+                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        }
                         self.refreshResults()
                         self.refreshGraph()
 
@@ -266,6 +290,19 @@ public class HelixAppState: ObservableObject {
 
         // Connect unified event stream (provides sequence IDs)
         eventClient.connect()
+
+        eventClient.$isConnected
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] connected in
+                guard let self else { return }
+                guard !connected, self.isScanRunning else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    self.eventClient.reconnectNow()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     private func renderLiveLogLine(event: GraphEvent) -> String? {
@@ -297,9 +334,6 @@ public class HelixAppState: ObservableObject {
     func cancelScan() {
         Task {
             try? await apiClient.cancelScan()
-            await MainActor.run {
-                self.isScanRunning = false
-            }
             self.refreshStatus()
         }
     }
@@ -472,10 +506,6 @@ public class HelixAppState: ObservableObject {
                 try await apiClient.startScan(
                     target: target, modules: modules, mode: mode.rawValue)
                 print("[AppState] apiClient.startScan succeeded")
-                await MainActor.run {
-                    self.isScanRunning = true
-                    print("[AppState] Set isScanRunning = true")
-                }
             } catch {
                 print("[AppState] Failed to start scan")
                 print("  error type: \(type(of: error))")
@@ -484,11 +514,6 @@ public class HelixAppState: ObservableObject {
                 if let urlError = error as? URLError {
                     print("  urlError.code: \(urlError.code)")
                     print(" URLError description: \(urlError.localizedDescription)")
-                }
-
-                await MainActor.run {
-                    self.isScanRunning = false
-
                 }
 
             }

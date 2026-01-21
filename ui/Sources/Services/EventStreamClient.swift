@@ -197,6 +197,13 @@ public class EventStreamClient: ObservableObject {
         }
     }
 
+    /// Force reconnect by cancelling the current task and starting a new one.
+    func reconnectNow() {
+        disconnect()
+        reconnectAttempt = 0
+        connect()
+    }
+
     /// Stop consuming and disconnect
     nonisolated func disconnect() {
         Task { @MainActor in
@@ -323,6 +330,10 @@ public class EventStreamClient: ObservableObject {
                     print("[EventStreamClient] Raw JSON: \(json)")
                 }
             }
+        }
+
+        if !Task.isCancelled {
+            isConnected = false
         }
     }
 

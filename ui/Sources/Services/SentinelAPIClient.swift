@@ -51,6 +51,39 @@ public struct SentinelAPIClient: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    static func parseAPIError(data: Data, response: URLResponse?) -> APIError {
+        if let http = response as? HTTPURLResponse, http.statusCode == 401 {
+            return .unauthorized
+        }
+
+        guard !data.isEmpty,
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return .badStatus
+        }
+
+        let code = json["code"] as? String
+        let message = json["message"] as? String ?? "API Error"
+        let details = json["details"] as? [String: Any]
+
+        switch code {
+        case "TOOL_002", "TOOL_003":
+            let tool = details?["tool"] as? String ?? "unknown"
+            let exitCode = (details?["exit_code"] as? Int)
+                ?? (details?["exit_code"] as? NSNumber)?.intValue
+                ?? -1
+            let stderr = details?["stderr"] as? String ?? message
+            return .toolFailed(tool: tool, exitCode: exitCode, stderr: stderr)
+        case "SCAN_003":
+            let duration = (details?["duration"] as? TimeInterval)
+                ?? (details?["duration"] as? NSNumber)?.doubleValue
+                ?? 0
+            return .scanTimeout(duration: duration)
+        default:
+            return .serverError(code: code ?? "UNKNOWN", message: message)
+        }
+    }
+
     /// Create an authenticated URLRequest with the Bearer token.
     /// If no token is available, returns a request without auth (for backward compatibility).
     private func authenticatedRequest(url: URL, method: String = "GET") -> URLRequest {
@@ -109,7 +142,7 @@ public struct SentinelAPIClient: Sendable {
         let (data, response) = try await session.data(for: request)
 
         guard let http = response as? HTTPURLResponse else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
 
         // ✅ Accept BOTH 200 and 202 as success.
@@ -122,20 +155,22 @@ public struct SentinelAPIClient: Sendable {
         print("[SentinelAPIClient] startScan rejected")
         print("  status: \(http.statusCode)")
         print("  body: \(responseBody)")
-        throw APIError.badStatus
+        throw Self.parseAPIError(data: data, response: response)
     }
 
     /// Request best-effort scan cancellation.
     public func cancelScan() async throws {
         guard let url = URL(string: "/v1/scans/cancel", relativeTo: baseURL) else { return }
         let request = authenticatedRequest(url: url, method: "POST")
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus }
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         // Backend returns 409 when no scan is active; treat as a successful "already stopped".
         if http.statusCode == 202 || http.statusCode == 409 {
             return
         }
-        throw APIError.badStatus
+        throw Self.parseAPIError(data: data, response: response)
     }
 
     // MARK: - Status & Results
@@ -146,7 +181,7 @@ public struct SentinelAPIClient: Sendable {
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
         let decoded = try JSONDecoder().decode(LogBatch.self, from: data)
         return decoded.lines
@@ -158,7 +193,7 @@ public struct SentinelAPIClient: Sendable {
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
         return try JSONDecoder().decode(EngineStatus.self, from: data)
     }
@@ -172,7 +207,7 @@ public struct SentinelAPIClient: Sendable {
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
         return try JSONDecoder().decode(AIStatusResponse.self, from: data)
     }
@@ -183,13 +218,13 @@ public struct SentinelAPIClient: Sendable {
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
+            throw Self.parseAPIError(data: data, response: response)
         }
 
         if httpResponse.statusCode == 204 { return nil }
 
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw URLError(.badServerResponse)
+            throw Self.parseAPIError(data: data, response: response)
         }
 
         return try JSONDecoder().decode(SentinelResults.self, from: data)
@@ -200,9 +235,11 @@ public struct SentinelAPIClient: Sendable {
         guard let url = URL(string: "/v1/cortex/graph", relativeTo: baseURL) else { return nil }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { return nil }
+        guard let http = response as? HTTPURLResponse else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         if http.statusCode == 204 { return nil }
-        guard http.statusCode == 200 else { throw APIError.badStatus }
+        guard http.statusCode == 200 else { throw Self.parseAPIError(data: data, response: response) }
         return try JSONDecoder().decode(PressureGraphDTO.self, from: data)
     }
 
@@ -219,7 +256,9 @@ public struct SentinelAPIClient: Sendable {
         let body = ["tools": tools]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.badStatus }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         let decoded = try JSONDecoder().decode(InstallResponse.self, from: data)
         return decoded.results
     }
@@ -235,7 +274,9 @@ public struct SentinelAPIClient: Sendable {
         let body = ["tools": tools]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await session.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.badStatus }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         let decoded = try JSONDecoder().decode(InstallResponse.self, from: data)
         return decoded.results
     }
@@ -264,7 +305,7 @@ public struct SentinelAPIClient: Sendable {
         let request = authenticatedRequest(url: url, method: "POST")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
 
         let decoded = try? JSONDecoder().decode(GhostStartResponse.self, from: data)
@@ -279,7 +320,7 @@ public struct SentinelAPIClient: Sendable {
         let request = authenticatedRequest(url: url, method: "POST")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
 
         if let decoded = try? JSONDecoder().decode(GhostStopResponse.self, from: data) {
@@ -294,8 +335,11 @@ public struct SentinelAPIClient: Sendable {
             return false
         }
         let request = authenticatedRequest(url: url, method: "POST")
-        let (_, response) = try await session.data(for: request)
-        return (response as? HTTPURLResponse)?.statusCode == 200
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
+        return http.statusCode == 200
     }
 
     // MARK: - Mission Control
@@ -313,7 +357,10 @@ public struct SentinelAPIClient: Sendable {
         guard let finalURL = components.url else { throw APIError.badStatus }
 
         let request = authenticatedRequest(url: finalURL, method: "POST")
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         let response = try JSONDecoder().decode(MissionResponse.self, from: data)
         return response.mission_id
     }
@@ -335,7 +382,10 @@ public struct SentinelAPIClient: Sendable {
             let response: String
         }
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         let response = try JSONDecoder().decode(ChatResponse.self, from: data)
         return response.response
     }
@@ -392,7 +442,10 @@ public struct SentinelAPIClient: Sendable {
             let script_path: String
         }
 
-        let (data, _) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         let response = try JSONDecoder().decode(ForgeResponse.self, from: data)
         return response.script_path
     }
@@ -473,9 +526,9 @@ public struct SentinelAPIClient: Sendable {
             return
         }
         let request = authenticatedRequest(url: url, method: "POST")
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
     }
 
@@ -483,9 +536,9 @@ public struct SentinelAPIClient: Sendable {
     public func denyAction(id: String) async throws {
         guard let url = URL(string: "/v1/actions/\(id)/deny", relativeTo: baseURL) else { return }
         let request = authenticatedRequest(url: url, method: "POST")
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
     }
 
@@ -517,7 +570,7 @@ public struct SentinelAPIClient: Sendable {
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
         return try JSONDecoder().decode(ReportGenerateResponse.self, from: data)
     }
@@ -532,7 +585,7 @@ public struct SentinelAPIClient: Sendable {
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw APIError.badStatus
+            throw Self.parseAPIError(data: data, response: response)
         }
         return try JSONDecoder().decode(PoCResponse.self, from: data)
     }

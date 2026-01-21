@@ -102,6 +102,8 @@ class PressureGraphManager(Observable):
             
         nodes_data, edges_data = await self.db.load_graph_snapshot(self.session_id)
         if not nodes_data and not edges_data:
+            await self._hydrate_from_stores()
+            self._ensure_crown_jewels()
             return
             
         # Reconstruct nodes
@@ -145,6 +147,31 @@ class PressureGraphManager(Observable):
             self._initialize_engines()
             self.graph_updated.emit()
             logger.info(f"[GraphManager] Loaded {len(self.nodes)} nodes, {len(self.edges)} edges from DB.")
+
+        await self._hydrate_from_stores()
+        self._ensure_crown_jewels()
+
+    async def _hydrate_from_stores(self) -> None:
+        """Pull current data from stores if signals were missed."""
+        store = self._issues_store if self._issues_store else issues_store
+        if not store:
+            return
+
+        try:
+            issues = store.get_all()
+        except Exception:
+            return
+
+        updated = False
+        for issue in issues:
+            node = self._issue_to_pressure_node(issue)
+            if node.id not in self.nodes:
+                self.nodes[node.id] = node
+                updated = True
+
+        if updated:
+            self._initialize_engines()
+            self.graph_updated.emit()
 
     async def save_snapshot(self):
         """Persist current graph state to DB."""
@@ -329,6 +356,8 @@ class PressureGraphManager(Observable):
         
         # Re-initialize engines if needed
         self._initialize_engines()
+
+        self._ensure_crown_jewels()
         
         # Recompute if crown jewels are set
         if self.crown_jewel_ids:
@@ -698,6 +727,23 @@ class PressureGraphManager(Observable):
         """
         self.crown_jewel_ids = crown_jewel_ids
         self.recompute_pressure()
+
+    def _auto_detect_crown_jewels(self) -> Set[str]:
+        """Find assets marked as critical or inferred from node values."""
+        crown_jewels = set()
+        for node in self.nodes.values():
+            if node.type == "asset" and node.asset_value >= 8.0:
+                crown_jewels.add(node.id)
+        return crown_jewels
+
+    def _ensure_crown_jewels(self) -> None:
+        """Populate crown jewels automatically when none are set."""
+        if self.crown_jewel_ids:
+            return
+        detected = self._auto_detect_crown_jewels()
+        if detected:
+            self.crown_jewel_ids = detected
+            self.recompute_pressure()
     
     def recompute_pressure(self):
         """
