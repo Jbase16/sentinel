@@ -33,7 +33,13 @@ class PersonaCookie:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize cookie state."""
-        raise NotImplementedError("Wrapper-only: implementation deferred")
+        return {
+            "name": self.name,
+            "value": self.value,
+            "domain": self.domain,
+            "path": self.path,
+            "secure": self.secure,
+        }
 
 @dataclass(frozen=True)
 class PersonaIdentity:
@@ -43,7 +49,12 @@ class PersonaIdentity:
     permissions: Set[str] = field(default_factory=set)
 
     def to_dict(self) -> Dict[str, Any]:
-        raise NotImplementedError("Wrapper-only: implementation deferred")
+        """Serialize identity state."""
+        return {
+            "alias": self.alias,
+            "role": self.role,
+            "permissions": list(self.permissions),  # Convert set to list for JSON
+        }
 
 class SessionHandler(Protocol):
     """Interface for controlling a browser context or session container."""

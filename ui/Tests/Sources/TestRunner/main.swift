@@ -18,7 +18,14 @@ import SentinelForgeUI
 /// Struct TestRunner {.
 struct TestRunner {
     static func main() async {
-        print("--- Starting Swift Client Test ---")
+        print("===================================")
+        print("  SentinelForge Swift Test Suite  ")
+        print("===================================\n")
+
+        // Run critical path tests first
+        runCriticalPathTests()
+
+        print("--- Starting Integration Tests ---\n")
 
         func assert(_ condition: @autoclosure () -> Bool, _ message: String) {
             if !condition() {

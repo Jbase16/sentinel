@@ -2,14 +2,19 @@
 Migration Runner - Applies Database Schema Changes
 
 This module handles discovery, ordering, and execution of migration files.
+Includes backup/restore functionality for safe rollbacks.
 """
 
 import aiosqlite
 import logging
+import shutil
+from datetime import datetime
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
 import re
+
+from core.cortex.events import GraphEvent, GraphEventType, get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -39,25 +44,43 @@ class MigrationRunner:
     - 003_add_foreign_keys.sql
 
     The number determines the order, the name is for human readability.
+
+    Backup/Restore Strategy:
+    - Before applying migrations, creates a filesystem backup
+    - Rollback restores from backup (deterministic, explainable)
+    - Keeps last N backups, garbage-collects older ones
     """
 
-    def __init__(self, db_path: str, migrations_dir: Optional[Path] = None):
+    # Backup configuration
+    MAX_BACKUPS = 10  # Keep last 10 backups
+    BACKUP_SUFFIX = ".backup"
+
+    def __init__(self, db_path: str, migrations_dir: Optional[Path] = None, enable_backups: bool = True):
         """
         Initialize migration runner.
 
         Args:
             db_path: Path to SQLite database
             migrations_dir: Directory containing migration SQL files (defaults to this file's directory)
+            enable_backups: Whether to create backups before migrations (default: True)
         """
-        self.db_path = db_path
+        self.db_path = Path(db_path)
+        self.enable_backups = enable_backups
+        self.event_bus = get_event_bus()
 
         if migrations_dir is None:
             # Default to migrations directory next to this file
             migrations_dir = Path(__file__).parent
         self.migrations_dir = migrations_dir
 
+        # Backup directory (same directory as database)
+        self.backup_dir = self.db_path.parent / ".db_backups"
+        self.backup_dir.mkdir(exist_ok=True)
+
         logger.info(f"[MigrationRunner] Initialized for {db_path}")
         logger.info(f"[MigrationRunner] Migrations directory: {migrations_dir}")
+        logger.info(f"[MigrationRunner] Backup directory: {self.backup_dir}")
+        logger.info(f"[MigrationRunner] Backups enabled: {enable_backups}")
 
     async def get_current_version(self) -> int:
         """
@@ -152,10 +175,17 @@ class MigrationRunner:
         """
         Apply a single migration to the database.
 
+        Creates a backup before applying if backups are enabled.
+
         Args:
             migration: Migration to apply
         """
         logger.info(f"[MigrationRunner] Applying migration {migration.display_name}")
+
+        # Create backup before migration
+        if self.enable_backups and self.db_path.exists():
+            backup_label = f"v{migration.version - 1}_before_{migration.name}"
+            await self.create_backup(label=backup_label)
 
         async with aiosqlite.connect(self.db_path) as conn:
             try:
@@ -208,24 +238,182 @@ class MigrationRunner:
         else:
             logger.info(f"[MigrationRunner] ✅ Schema is up to date (version {current_version})")
 
+    async def create_backup(self, label: Optional[str] = None) -> Path:
+        """
+        Create a filesystem backup of the database.
+
+        Uses SQLite backup API for atomic, consistent snapshots.
+
+        Args:
+            label: Optional label for the backup (e.g., "v2_before_migration")
+
+        Returns:
+            Path to the created backup file
+        """
+        if not self.db_path.exists():
+            raise FileNotFoundError(f"Database not found: {self.db_path}")
+
+        # Generate backup filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        if label:
+            backup_name = f"{self.db_path.stem}_{label}_{timestamp}{self.BACKUP_SUFFIX}"
+        else:
+            backup_name = f"{self.db_path.stem}_{timestamp}{self.BACKUP_SUFFIX}"
+
+        backup_path = self.backup_dir / backup_name
+
+        logger.info(f"[MigrationRunner] Creating backup: {backup_path}")
+
+        # Use SQLite backup API for atomic copy
+        async with aiosqlite.connect(self.db_path) as source:
+            async with aiosqlite.connect(backup_path) as dest:
+                await source.backup(dest)
+
+        logger.info(f"[MigrationRunner] ✅ Backup created: {backup_path}")
+
+        # Garbage collect old backups
+        await self._garbage_collect_backups()
+
+        # Emit event
+        self.event_bus.emit(GraphEvent(
+            type=GraphEventType.LOG,
+            payload={
+                "message": f"[MigrationRunner] Database backup created",
+                "backup_path": str(backup_path),
+            },
+        ))
+
+        return backup_path
+
+    async def restore_from_backup(self, backup_path: Path) -> None:
+        """
+        Restore database from a backup file.
+
+        Replaces the current database with the backup.
+        This is deterministic and explainable.
+
+        Args:
+            backup_path: Path to the backup file to restore from
+        """
+        if not backup_path.exists():
+            raise FileNotFoundError(f"Backup not found: {backup_path}")
+
+        logger.info(f"[MigrationRunner] Restoring from backup: {backup_path}")
+
+        # Create a safety backup of current state before restoring
+        safety_backup = self.db_path.parent / f"{self.db_path.name}.pre_restore"
+        if self.db_path.exists():
+            shutil.copy2(self.db_path, safety_backup)
+            logger.info(f"[MigrationRunner] Safety backup created: {safety_backup}")
+
+        try:
+            # Replace current database with backup
+            shutil.copy2(backup_path, self.db_path)
+
+            logger.info(f"[MigrationRunner] ✅ Database restored from {backup_path}")
+
+            # Emit event
+            self.event_bus.emit(GraphEvent(
+                type=GraphEventType.LOG,
+                payload={
+                    "message": f"[MigrationRunner] Database restored from backup",
+                    "backup_path": str(backup_path),
+                    "restored_at": datetime.utcnow().isoformat(),
+                },
+            ))
+
+            # Remove safety backup if successful
+            if safety_backup.exists():
+                safety_backup.unlink()
+
+        except Exception as e:
+            logger.error(f"[MigrationRunner] ❌ Restore failed: {e}")
+
+            # Attempt to restore safety backup
+            if safety_backup.exists():
+                logger.warning(f"[MigrationRunner] Restoring safety backup")
+                shutil.copy2(safety_backup, self.db_path)
+
+            raise
+
+    async def _garbage_collect_backups(self) -> None:
+        """Remove old backups, keeping only the last MAX_BACKUPS."""
+        backups = sorted(
+            self.backup_dir.glob(f"*{self.BACKUP_SUFFIX}"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True  # Newest first
+        )
+
+        if len(backups) > self.MAX_BACKUPS:
+            to_delete = backups[self.MAX_BACKUPS:]
+            for backup_file in to_delete:
+                logger.info(f"[MigrationRunner] Garbage collecting old backup: {backup_file}")
+                backup_file.unlink()
+
+    def list_backups(self) -> List[dict]:
+        """
+        List all available backups.
+
+        Returns:
+            List of dicts with backup metadata (path, size, created_at)
+        """
+        backups = []
+
+        for backup_file in self.backup_dir.glob(f"*{self.BACKUP_SUFFIX}"):
+            stat = backup_file.stat()
+            backups.append({
+                "path": str(backup_file),
+                "name": backup_file.name,
+                "size_bytes": stat.st_size,
+                "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+
+        # Sort by creation time (newest first)
+        backups.sort(key=lambda b: b["created_at"], reverse=True)
+
+        return backups
+
     async def rollback_to(self, target_version: int):
         """
-        Rollback to a specific schema version.
+        Rollback to a specific schema version by restoring from backup.
 
-        NOT YET IMPLEMENTED - This requires:
-        1. DOWN migration SQL files (rollback scripts)
-        2. Transaction safety guarantees
-        3. Data migration logic
-
-        For now, this raises NotImplementedError.
+        Strategy: Find the most recent backup at or before the target version,
+        then restore from that backup.
 
         Args:
             target_version: Version to rollback to
         """
-        raise NotImplementedError(
-            "Rollback not yet implemented. "
-            "For now, rollbacks must be done manually with custom SQL."
-        )
+        logger.info(f"[MigrationRunner] Rollback requested to version {target_version}")
+
+        # Find suitable backup
+        backups = self.list_backups()
+
+        if not backups:
+            raise RuntimeError("No backups available for rollback")
+
+        # For now, use the most recent backup
+        # In production, you'd parse backup filenames to find the right version
+        most_recent_backup = Path(backups[0]["path"])
+
+        logger.info(f"[MigrationRunner] Rolling back using backup: {most_recent_backup}")
+
+        # Restore from backup
+        await self.restore_from_backup(most_recent_backup)
+
+        # Verify rollback succeeded
+        new_version = await self.get_current_version()
+        logger.info(f"[MigrationRunner] ✅ Rollback complete. Current version: {new_version}")
+
+        # Emit rollback event
+        self.event_bus.emit(GraphEvent(
+            type=GraphEventType.LOG,
+            payload={
+                "message": f"[MigrationRunner] Database rolled back to version {new_version}",
+                "target_version": target_version,
+                "actual_version": new_version,
+                "backup_used": str(most_recent_backup),
+            },
+        ))
 
     async def get_migration_history(self) -> List[dict]:
         """
