@@ -361,8 +361,8 @@ public struct SentinelAPIClient: Sendable {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw Self.parseAPIError(data: data, response: response)
         }
-        let response = try JSONDecoder().decode(MissionResponse.self, from: data)
-        return response.mission_id
+        let missionResponse = try JSONDecoder().decode(MissionResponse.self, from: data)
+        return missionResponse.mission_id
     }
 
     // MARK: - Chat & AI
@@ -386,8 +386,8 @@ public struct SentinelAPIClient: Sendable {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw Self.parseAPIError(data: data, response: response)
         }
-        let response = try JSONDecoder().decode(ChatResponse.self, from: data)
-        return response.response
+        let chatResponse = try JSONDecoder().decode(ChatResponse.self, from: data)
+        return chatResponse.response
     }
 
     /// Stream context-aware chat from Python backend (plain text chunks, not SSE)
@@ -446,8 +446,8 @@ public struct SentinelAPIClient: Sendable {
         guard (response as? HTTPURLResponse)?.statusCode == 200 else {
             throw Self.parseAPIError(data: data, response: response)
         }
-        let response = try JSONDecoder().decode(ForgeResponse.self, from: data)
-        return response.script_path
+        let forgeResponse = try JSONDecoder().decode(ForgeResponse.self, from: data)
+        return forgeResponse.script_path
     }
 
     // MARK: - Server-Sent Events

@@ -279,9 +279,21 @@ public class EventStreamClient: ObservableObject {
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
         // Guard condition.
-        guard let httpResponse = response as? HTTPURLResponse,
-            httpResponse.statusCode == 200
-        else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            print("[EventStreamClient] ERROR: Response is not HTTPURLResponse")
+            throw URLError(.badServerResponse)
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            print("[EventStreamClient] ERROR: Server returned status \(httpResponse.statusCode)")
+            print("[EventStreamClient] ERROR: Response headers: \(httpResponse.allHeaderFields)")
+
+            // Try to read error body if available
+            if let errorData = try? await URLSession.shared.data(for: request).0,
+               let errorString = String(data: errorData, encoding: .utf8) {
+                print("[EventStreamClient] ERROR: Response body: \(errorString)")
+            }
+
             throw URLError(.badServerResponse)
         }
 
