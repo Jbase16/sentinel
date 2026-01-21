@@ -438,10 +438,141 @@ class ScanCapsule:
         Returns:
             ReplayResult with comparison data
         """
-        raise NotImplementedError(
-            "Replay functionality not yet implemented. "
-            "This requires tool execution mocking and event replay infrastructure."
+        from core.ai.ai_engine import AIEngine
+        from core.epistemic.ledger import EvidenceLedger
+
+        start = time.time()
+        ledger = EvidenceLedger()
+        ai = AIEngine.instance()
+
+        replayed_findings = []
+
+        timeline = self._build_replay_timeline()
+        for entry in timeline:
+            if entry["kind"] != "tool_execution":
+                continue
+
+            tool_exec: ToolExecution = entry["data"]
+            metadata = dict(tool_exec.metadata or {})
+            metadata.setdefault("target", self.target)
+            metadata.setdefault("session_id", self.session_id)
+
+            observation = ledger.record_observation(
+                tool_name=tool_exec.tool_name,
+                tool_args=metadata.get("args", []),
+                target=self.target,
+                raw_output=tool_exec.stdout.encode("utf-8", errors="replace"),
+                exit_code=tool_exec.exit_code or 0,
+                timestamp_override=tool_exec.start_time,
+                session_id=self.session_id,
+            )
+
+            result = await ai.process_tool_output(
+                tool_name=tool_exec.tool_name,
+                stdout=tool_exec.stdout,
+                stderr=tool_exec.stderr,
+                rc=tool_exec.exit_code or 0,
+                metadata=metadata,
+                observation_id=observation.id,
+            )
+
+            for proposal in result.get("proposals", []):
+                finding = ledger.evaluate_and_promote(proposal)
+                if finding:
+                    replayed_findings.append(finding)
+
+        replayed_findings_dicts = [self._finding_to_dict(f) for f in replayed_findings]
+        differences = self._compare_findings(
+            original=self.findings,
+            replayed=replayed_findings_dicts,
         )
+
+        return ReplayResult(
+            success=len(differences) == 0,
+            original_findings_count=len(self.findings),
+            replayed_findings_count=len(replayed_findings_dicts),
+            differences=differences,
+            replay_duration=time.time() - start,
+        )
+
+    def _build_replay_timeline(self) -> List[Dict[str, Any]]:
+        """
+        Merge events, decisions, and tool executions into a single chronological timeline.
+        """
+        timeline: List[Dict[str, Any]] = []
+
+        for event in self.events:
+            timeline.append(
+                {
+                    "kind": "event",
+                    "timestamp": self._extract_timestamp(event),
+                    "data": event,
+                }
+            )
+
+        for decision in self.decisions:
+            timeline.append(
+                {
+                    "kind": "decision",
+                    "timestamp": self._extract_timestamp(decision),
+                    "data": decision,
+                }
+            )
+
+        for tool_exec in self.tool_executions:
+            timeline.append(
+                {
+                    "kind": "tool_execution",
+                    "timestamp": tool_exec.start_time or tool_exec.end_time or 0.0,
+                    "data": tool_exec,
+                }
+            )
+
+        timeline.sort(key=lambda entry: entry["timestamp"])
+        return timeline
+
+    def _extract_timestamp(self, payload: Dict[str, Any]) -> float:
+        for key in ("timestamp", "created_at", "time", "start_time"):
+            value = payload.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                try:
+                    return float(value)
+                except ValueError:
+                    continue
+        return 0.0
+
+    def _finding_to_dict(self, finding: Any) -> Dict[str, Any]:
+        return {
+            "id": getattr(finding, "id", None),
+            "title": getattr(finding, "title", ""),
+            "severity": getattr(finding, "severity", ""),
+            "description": getattr(finding, "description", ""),
+        }
+
+    def _compare_findings(
+        self,
+        original: List[Dict[str, Any]],
+        replayed: List[Dict[str, Any]],
+    ) -> List[str]:
+        def signature(item: Dict[str, Any]) -> str:
+            if item.get("id"):
+                return str(item["id"])
+            return f"{item.get('title')}|{item.get('severity')}|{item.get('description')}"
+
+        original_signatures = {signature(item) for item in original}
+        replayed_signatures = {signature(item) for item in replayed}
+
+        missing = original_signatures - replayed_signatures
+        unexpected = replayed_signatures - original_signatures
+
+        differences = []
+        for item in sorted(missing):
+            differences.append(f"Missing finding in replay: {item}")
+        for item in sorted(unexpected):
+            differences.append(f"Unexpected finding in replay: {item}")
+        return differences
 
 
 @dataclass

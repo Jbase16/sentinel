@@ -175,6 +175,15 @@ public class HelixAppState: ObservableObject {
                         self.refreshGraph()
                     case .scanFailed:
                         self.isScanRunning = false
+                        if let error = event.payload["error"]?.stringValue {
+                            let code = event.payload["error_code"]?.stringValue
+                            let details = event.payload["error_details"]?.value as? [String: Any]
+                            let detailText = details?.description ?? ""
+                            let prefix = code != nil ? "(\(code!)) " : ""
+                            let text = "🛑 [Scan] Failed: \(prefix)\(error) \(detailText)"
+                            self.apiLogs.append(text)
+                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        }
                         self.refreshResults()
                     case .scanPhaseChanged:
                         if let phase = event.payload["phase"]?.stringValue {
@@ -196,7 +205,22 @@ public class HelixAppState: ObservableObject {
                                 self.pendingActions.append(action)
                             }
                         }
-                    case .findingCreated, .findingConfirmed, .findingDismissed, .toolCompleted:
+                    case .findingCreated, .findingConfirmed, .findingDismissed:
+                        self.refreshResults()
+                        self.refreshGraph()
+                    case .toolCompleted:
+                        if let error = event.payload["error"]?.value as? [String: Any],
+                            let tool = error["tool"] as? String
+                        {
+                            let exitCode =
+                                (error["exit_code"] as? Int)
+                                ?? (error["exit_code"] as? NSNumber)?.intValue
+                                ?? -1
+                            let stderr = error["stderr"] as? String ?? "Unknown error"
+                            let text = "⚠️ [Tool] \(tool) failed (exit \(exitCode)): \(stderr)"
+                            self.apiLogs.append(text)
+                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        }
                         self.refreshResults()
                         self.refreshGraph()
 

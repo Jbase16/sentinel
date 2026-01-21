@@ -941,8 +941,17 @@ class EventBus:
             payload["scan_id"] = scan_id
         self.emit(GraphEvent(type=EventType.TOOL_STARTED, payload=payload, scan_id=scan_id, source="engine", priority=0))
 
-    def emit_tool_completed(self, tool: str, exit_code: int, findings_count: int, scan_id: Optional[str] = None) -> None:
+    def emit_tool_completed(
+        self,
+        tool: str,
+        exit_code: int,
+        findings_count: int,
+        scan_id: Optional[str] = None,
+        error: Optional[Dict[str, Any]] = None,
+    ) -> None:
         payload: Dict[str, Any] = {"tool": tool, "exit_code": exit_code, "findings_count": findings_count}
+        if error:
+            payload["error"] = error
         if scan_id:
             payload["scan_id"] = scan_id
         self.emit(GraphEvent(type=EventType.TOOL_COMPLETED, payload=payload, scan_id=scan_id, source="engine", priority=0))

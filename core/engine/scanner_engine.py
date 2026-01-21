@@ -43,6 +43,7 @@ from core.toolkit.tools import TOOLS, get_tool_command, get_installed_tools
 from core.base.task_router import TaskRouter
 from core.cortex.correlator import GraphCorrelator
 from core.base.config import get_config
+from core.errors import ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -595,6 +596,7 @@ class ScannerEngine:
         self.session = session
 
         self._last_results: List[dict] = []
+        self._last_tool_error: Optional[Dict[str, Any]] = None
 
         # Deterministic, bounded fingerprint cache (deque + set)
         self._fingerprint_cache_max = 10000
@@ -1186,6 +1188,8 @@ class ScannerEngine:
         else:
             cmd, stdin_input = get_tool_command(tool, target, meta_override)
 
+        self._last_tool_error = None
+
         await queue.put(f"--- Running {tool} ({exec_id}) ---")
 
         try:
@@ -1202,6 +1206,7 @@ class ScannerEngine:
                 proc.stdin.close()
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
+            self._last_tool_error = ToolError(tool=tool, exit_code=127, stderr=msg).details
 
             if self._active_transaction and self._active_transaction.is_active:
                 self._active_transaction.add_evidence(
@@ -1215,6 +1220,7 @@ class ScannerEngine:
             return []
         except Exception as exc:
             msg = f"[{tool}] failed to start: {exc}"
+            self._last_tool_error = ToolError(tool=tool, exit_code=-1, stderr=str(exc)).details
 
             if self._active_transaction and self._active_transaction.is_active:
                 self._active_transaction.add_evidence(
@@ -1317,6 +1323,16 @@ class ScannerEngine:
         # Accounting only (limit already enforced during read)
         self.resource_guard.account_disk(output_bytes)
 
+        if timed_out_reason:
+            self._last_tool_error = ToolError(
+                tool=tool,
+                exit_code=124,
+                stderr=f"timeout:{timed_out_reason}",
+            ).details
+        elif exit_code not in (0, None) and not (cancel_flag and cancel_flag.is_set()):
+            tail = "\n".join(output_lines[-10:])
+            self._last_tool_error = ToolError(tool=tool, exit_code=exit_code, stderr=tail).details
+
         ev_meta = {
             "target": target,
             "exec_id": exec_id,
@@ -1383,6 +1399,11 @@ class ScannerEngine:
         if host.startswith("www."):
             host = host[4:]
         return host
+
+    def consume_last_tool_error(self) -> Optional[Dict[str, Any]]:
+        error = self._last_tool_error
+        self._last_tool_error = None
+        return error
 
     def queue_task(self, tool: str, args: List[str] | None = None) -> None:
         """

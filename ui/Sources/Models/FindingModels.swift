@@ -263,8 +263,35 @@ public struct AIStatusResponse: Decodable {
 
 // MARK: - Errors
 
-public enum APIError: Error {
+public enum APIError: Error, Equatable {
     case badStatus
     case unauthorized
     case tokenNotFound
+    case toolFailed(tool: String, exitCode: Int, stderr: String)
+    case scanTimeout(duration: TimeInterval)
+    case connectionRefused
+    case serverError(code: String, message: String)
+
+    var userMessage: String {
+        switch self {
+        case .badStatus:
+            return "API Error: unexpected server response."
+        case .unauthorized:
+            return "Unauthorized. Please restart Sentinel to refresh credentials."
+        case .tokenNotFound:
+            return "Authentication token missing. Restart the backend to regenerate."
+        case .toolFailed(let tool, let exitCode, _):
+            return "Tool '\(tool)' failed (exit code \(exitCode)). Check installation and permissions."
+        case .scanTimeout(let duration):
+            return "Scan exceeded timeout of \(Int(duration))s. Target may be slow or unreachable."
+        case .connectionRefused:
+            return "Cannot connect to backend. Make sure Sentinel is running."
+        case .serverError(_, let message):
+            return message
+        }
+    }
+}
+
+extension APIError: LocalizedError {
+    public var errorDescription: String? { userMessage }
 }

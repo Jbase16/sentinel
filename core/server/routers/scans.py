@@ -156,6 +156,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 async def dispatch_tool(tool: str) -> List[Dict]:
                     findings = []
                     exit_code = 0
+                    tool_error: Optional[Dict[str, Any]] = None
                     
                     if tool not in allowed_tools:
                         session.log(f"⚠️ [Security] Tool '{tool}' blocked")
@@ -173,7 +174,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             session.log(log_line)
 
                         findings = engine.get_last_results() or []
+                        tool_error = engine.consume_last_tool_error()
                         exit_code = 130 if state.cancel_requested.is_set() else 0
+                        if tool_error and "exit_code" in tool_error:
+                            exit_code = int(tool_error["exit_code"])
                         return findings
                     except asyncio.CancelledError:
                         state.cancel_requested.set()
@@ -183,7 +187,11 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         return []
                     finally:
                         event_bus.emit_tool_completed(
-                            tool=tool, exit_code=exit_code, findings_count=len(findings), scan_id=session.id
+                            tool=tool,
+                            exit_code=exit_code,
+                            findings_count=len(findings),
+                            scan_id=session.id,
+                            error=tool_error,
                         )
 
                 mission = await reasoning_engine.start_scan(
@@ -207,11 +215,17 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             except Exception as e:
                 state.scan_state["status"] = "error"
                 logger.error(f"Scan error: {e}", exc_info=True)
-                event_bus.emit(GraphEvent(
-                    type=GraphEventType.SCAN_FAILED,
-                    payload={"error": str(e), "target": req.target, "scan_id": session.id},
-                    scan_id=session.id
-                ))
+                payload = {"error": str(e), "target": req.target, "scan_id": session.id}
+                if isinstance(e, SentinelError):
+                    payload["error_code"] = e.code.value
+                    payload["error_details"] = e.details
+                event_bus.emit(
+                    GraphEvent(
+                        type=GraphEventType.SCAN_FAILED,
+                        payload=payload,
+                        scan_id=session.id,
+                    )
+                )
 
         state.active_scan_task = asyncio.create_task(_runner())
         return session.id
