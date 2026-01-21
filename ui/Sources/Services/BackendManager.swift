@@ -13,6 +13,7 @@
 
 import AppKit
 import Foundation
+import Network
 
 enum BackendConfigKeys {
     static let backendRuntime = "backend.runtime"
@@ -80,6 +81,10 @@ class BackendManager: ObservableObject {
     private let bundledPythonRelativePath = "PythonRuntime/bin/python3"
     private let minPythonMajor = 3
     private let minPythonMinor = 10
+    private let requiredSystemTools = [
+        "nmap",
+        "httpx",
+    ]
     private let requiredPythonModules = [
         "fastapi",
         "uvicorn",
@@ -233,6 +238,12 @@ class BackendManager: ObservableObject {
         }
         print("[BackendManager] Python: \(python.path)")
         resetStartupState()
+
+        let environmentIssues = await validateEnvironment(python: python, backendRoot: repoPath)
+        if !environmentIssues.isEmpty {
+            recordStartupFailure("Preflight failed: \(environmentIssues.joined(separator: "; "))")
+            return
+        }
 
         if let preflightError = await runPreflightChecks(python: python, backendRoot: repoPath) {
             recordStartupFailure(preflightError)
@@ -626,6 +637,75 @@ class BackendManager: ObservableObject {
         }
 
         return nil
+    }
+
+    private func validateEnvironment(python: URL, backendRoot: URL) async -> [String] {
+        var errors: [String] = []
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
+
+        if !fileManager.fileExists(atPath: python.path) {
+            errors.append("Python runtime missing at \(python.path)")
+        }
+
+        if !isPortAvailable(8765) {
+            errors.append("Port 8765 already in use")
+        }
+
+        let pathValue = buildToolSearchPath(home: home)
+        for tool in requiredSystemTools where !isToolInstalled(tool, pathValue: pathValue) {
+            errors.append("Required tool missing: \(tool)")
+        }
+
+        return errors
+    }
+
+    private func buildToolSearchPath(home: URL) -> String {
+        let extraPaths = [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin",
+            "\(home.path)/go/bin",
+            "\(home.path)/.local/bin",
+        ]
+        let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        return (extraPaths + [currentPath]).joined(separator: ":")
+    }
+
+    private func isPortAvailable(_ port: UInt16) -> Bool {
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return false }
+        do {
+            let listener = try NWListener(using: .tcp, on: endpointPort)
+            listener.cancel()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func isToolInstalled(_ tool: String, pathValue: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+        process.arguments = [tool]
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = pathValue
+        process.environment = env
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+
+        process.waitUntilExit()
+        return process.terminationStatus == 0
     }
 
     private func runPythonScript(python: URL, backendRoot: URL, script: String)

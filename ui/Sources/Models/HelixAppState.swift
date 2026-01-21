@@ -266,6 +266,19 @@ public class HelixAppState: ObservableObject {
 
         // Connect unified event stream (provides sequence IDs)
         eventClient.connect()
+
+        eventClient.$isConnected
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] connected in
+                guard let self else { return }
+                guard !connected, self.isScanRunning else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    self.eventClient.reconnectNow()
+                }
+            }
+            .store(in: &cancellables)
     }
 
     private func renderLiveLogLine(event: GraphEvent) -> String? {
@@ -297,9 +310,6 @@ public class HelixAppState: ObservableObject {
     func cancelScan() {
         Task {
             try? await apiClient.cancelScan()
-            await MainActor.run {
-                self.isScanRunning = false
-            }
             self.refreshStatus()
         }
     }
@@ -472,10 +482,6 @@ public class HelixAppState: ObservableObject {
                 try await apiClient.startScan(
                     target: target, modules: modules, mode: mode.rawValue)
                 print("[AppState] apiClient.startScan succeeded")
-                await MainActor.run {
-                    self.isScanRunning = true
-                    print("[AppState] Set isScanRunning = true")
-                }
             } catch {
                 print("[AppState] Failed to start scan")
                 print("  error type: \(type(of: error))")
@@ -484,11 +490,6 @@ public class HelixAppState: ObservableObject {
                 if let urlError = error as? URLError {
                     print("  urlError.code: \(urlError.code)")
                     print(" URLError description: \(urlError.localizedDescription)")
-                }
-
-                await MainActor.run {
-                    self.isScanRunning = false
-
                 }
 
             }
