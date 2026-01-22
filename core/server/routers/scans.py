@@ -207,11 +207,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, scan_id=session.id)
+                
+                # Persist final session state including logs
+                Database.instance().save_session(session.to_dict())
 
             except asyncio.CancelledError:
                 state.scan_state["status"] = "cancelled"
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, scan_id=session.id)
+                
+                # Persist final session state including logs
+                Database.instance().save_session(session.to_dict())
+                
             except Exception as e:
                 state.scan_state["status"] = "error"
                 logger.error(f"Scan error: {e}", exc_info=True)
@@ -226,6 +233,9 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         scan_id=session.id,
                     )
                 )
+                
+                # Persist final session state including logs
+                Database.instance().save_session(session.to_dict())
 
         state.active_scan_task = asyncio.create_task(_runner())
         return session.id
@@ -320,6 +330,16 @@ async def get_scan_results():
     findings = await db.get_findings(session_id)
     issues = await db.get_issues(session_id)
     evidence = await db.get_evidence(session_id)
+    
+    # Fetch logs from session record
+    session_data = await db.get_session(session_id)
+    logs = []
+    if session_data and session_data.get("logs"):
+        import json
+        try:
+            logs = json.loads(session_data["logs"])
+        except Exception:
+            logs = []
 
     # Build response matching Swift SentinelResults structure
     from core.cortex.causal_graph import get_graph_dto_for_session
@@ -338,7 +358,7 @@ async def get_scan_results():
                 "findings": len(findings),
                 "issues": len(issues),
                 "killchain_edges": graph_dto.get("count", {}).get("edges", 0),
-                "logs": 0,
+                "logs": len(logs),
                 "phase_results": {},
             }
         },
@@ -354,7 +374,7 @@ async def get_scan_results():
             "recommended_phases": []
         },
         "phase_results": {},
-        "logs": []
+        "logs": logs
     }
 
     return result

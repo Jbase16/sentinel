@@ -197,6 +197,10 @@ class ScanSession:
         Returns:
             Dictionary with session metadata and statistics
         """
+        with self._logs_lock:
+            # Convert deque to list for serialization
+            logs_list = list(self.logs)
+
         return {
             "id": self.id,  # Unique session identifier
             "target": self.target,  # What we're scanning
@@ -204,5 +208,6 @@ class ScanSession:
             "findings_count": len(self.findings.get_all()),  # How many vulnerabilities found
             "issues_count": len(self.issues.get_all()),  # How many confirmed exploits
             "start_time": self.start_time,  # When scan began (Unix timestamp)
-            "ghost_active": self.ghost is not None  # Is proxy running?
+            "ghost_active": self.ghost is not None,  # Is proxy running?
+            "logs": logs_list  # Include logs for persistence
         }
