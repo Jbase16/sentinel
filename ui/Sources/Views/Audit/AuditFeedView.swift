@@ -1,13 +1,18 @@
 import SwiftUI
+import Combine
 
 struct AuditFeedView: View {
-    @StateObject private var client = LedgerStreamClient()
+    // Use the shared EventStreamClient (likely from Environment in a real app, but instantiating here for now to match pattern)
+    // Ideally this should be injected, but we will instantiate it here to replace the Zombie Ledger client.
+    // NOTE: In production, this should come from @EnvironmentObject var eventClient: EventStreamClient
+    @StateObject private var client = EventStreamClient()
+    @State private var events: [GraphEvent] = []
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("EPISTEMIC LEDGER API")
+                Text("EPISTEMIC LEDGER API (SSE)")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundColor(.gray)
@@ -20,12 +25,19 @@ struct AuditFeedView: View {
             .background(Color.black.opacity(0.2))
 
             // List
-            List(client.events) { event in
+            List(events) { event in
                 EventRow(event: event)
             }
             .listStyle(.plain)
         }
         .background(Color(red: 0.05, green: 0.05, blue: 0.08))
+        .onAppear {
+            client.connect()
+        }
+        .onReceive(client.eventPublisher) { event in
+            events.insert(event, at: 0)
+            if events.count > 200 { events.removeLast() }
+        }
     }
 }
 

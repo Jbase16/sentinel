@@ -44,11 +44,14 @@ class StoredEvent:
         # Extract source from payload if available, otherwise use default
         source = self.event.payload.get("source", "strategos")
 
+        # Handle type safely (Enum vs String)
+        safe_type = self.event.type.value if hasattr(self.event.type, "value") else str(self.event.type)
+
         return json.dumps({
             "id": event_id,
             "sequence": self.sequence,
-            "type": self.event.type.value,
-            "event_type": self.event.type.value,
+            "type": safe_type,
+            "event_type": safe_type,
             "payload": self.event.payload,
             "timestamp": self.event.timestamp,
             "wall_time": wall_time,

@@ -662,13 +662,25 @@ class Database:
     # Read methods
     # ----------------------------
     async def get_findings(self, session_id: Optional[str] = None) -> List[Dict]:
-        query = "SELECT data FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
+        query = "SELECT id, data, strftime('%s', timestamp) FROM findings WHERE session_id = ? ORDER BY timestamp DESC"
         params: Tuple[Any, ...] = (session_id,)
         if session_id is None:
-            query = "SELECT data FROM findings ORDER BY timestamp DESC"
+            query = "SELECT id, data, strftime('%s', timestamp) FROM findings ORDER BY timestamp DESC"
             params = ()
         rows = await self.fetch_all(query, params)
-        return [json.loads(row[0]) for row in rows]
+        
+        results = []
+        for row in rows:
+            try:
+                data = json.loads(row[1])
+                # Ensure id is present (from DB primary key)
+                data["id"] = row[0]
+                # Ensure created_at is present as a float timestamp for Swift compatibility
+                data["created_at"] = float(row[2]) if row[2] else 0.0
+                results.append(data)
+            except Exception as e:
+                logger.error(f"[Database] Failed to parse finding: {e}")
+        return results
 
     async def get_all_findings(self) -> List[Dict]:
         return await self.get_findings(None)

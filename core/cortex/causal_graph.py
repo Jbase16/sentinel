@@ -402,7 +402,12 @@ class CausalGraphBuilder:
                     "asset_value": 0.5,
                     "pressure_source": "manual",
                     "revision": 1,
-                    "description": str(finding.data.get("description", ""))
+                    "description": str(finding.data.get("description", "")),
+                    # Physics Properties (Defaults for UI)
+                    "mass": 1.0,
+                    "charge": 30.0,
+                    "temperature": 0.0,
+                    "structural": False
                 }
                 nodes.append({
                     "id": finding.id,

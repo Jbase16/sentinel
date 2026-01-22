@@ -128,6 +128,29 @@ class GraphEvent:
 
     _internal: bool = False
 
+    def to_dict(self) -> Dict[str, Any]:
+        from datetime import datetime
+        return {
+            "id": str(self.event_sequence),
+            "schema_version": self.schema_version,
+            "payload_schema_version": self.payload_schema_version,
+            "type": self.type.value if hasattr(self.type, "value") else str(self.type),
+            "timestamp": self.timestamp,
+            "wall_time": datetime.fromtimestamp(self.timestamp).isoformat(),
+            "sequence": self.event_sequence,
+            "event_sequence": self.event_sequence,
+            "run_id": self.run_id,
+            "source": self.source,
+            "scan_id": self.scan_id,
+            "entity_id": self.entity_id,
+            "priority": self.priority,
+            "internal": self._internal,
+            "payload": self.payload,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False, separators=(",", ":"), default=str)
+
 
 @dataclass(frozen=True)
 class SubscriptionHandle:
@@ -848,11 +871,15 @@ class EventBus:
     # -------------------------------------------------------------------------
     @staticmethod
     def to_dict(event: GraphEvent) -> Dict[str, Any]:
+        from datetime import datetime
         return {
+            "id": str(event.event_sequence),
             "schema_version": event.schema_version,
             "payload_schema_version": event.payload_schema_version,
-            "type": event.type.value,
+            "type": event.type.value if hasattr(event.type, "value") else str(event.type),
             "timestamp": event.timestamp,
+            "wall_time": datetime.fromtimestamp(event.timestamp).isoformat(),
+            "sequence": event.event_sequence,
             "event_sequence": event.event_sequence,
             "run_id": event.run_id,
             "source": event.source,

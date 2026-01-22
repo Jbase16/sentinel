@@ -322,6 +322,9 @@ async def get_scan_results():
     evidence = await db.get_evidence(session_id)
 
     # Build response matching Swift SentinelResults structure
+    from core.cortex.causal_graph import get_graph_dto_for_session
+    graph_dto = await get_graph_dto_for_session(session_id)
+
     result = {
         "scan": {
             "target": scan_state.get("target"),
@@ -334,7 +337,7 @@ async def get_scan_results():
             "counts": {
                 "findings": len(findings),
                 "issues": len(issues),
-                "killchain_edges": 0,
+                "killchain_edges": graph_dto.get("count", {}).get("edges", 0),
                 "logs": 0,
                 "phase_results": {},
             }
@@ -342,7 +345,14 @@ async def get_scan_results():
         "findings": findings,
         "issues": issues,
         "evidence": evidence,
-        "killchain": None,
+        # Map the graph DTO to the 'killchain' field expected by UI
+        # Note: UI expects 'edges' and 'attackPaths' in Killchain struct
+        "killchain": {
+            "edges": graph_dto.get("edges", []),
+            "attack_paths": [], # TODO: Implement path finding export in CausalGraph
+            "degraded_paths": [],
+            "recommended_phases": []
+        },
         "phase_results": {},
         "logs": []
     }
