@@ -442,3 +442,15 @@ class PTYManager:
         if not session:
             return
         session.detach_listener(callback)
+
+    def write_input(self, session_id: str, data: str) -> None:
+        """Write input to a PTY session."""
+        session = self.get_session(session_id)
+        if session:
+            session.write(data)
+
+    def resize(self, session_id: str, cols: int, rows: int) -> None:
+        """Resize a PTY session."""
+        session = self.get_session(session_id)
+        if session:
+            session.resize(rows, cols)

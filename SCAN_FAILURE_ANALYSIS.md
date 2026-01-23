@@ -12,7 +12,7 @@
 
 ### What Happened
 
-When you ran Sentinel against the MegaShop vulnerable lab (`http://localhost:3002`), the scan completed with 0 findings. The log showed:
+When you ran Sentinel against the custom vulnerable target (`http://localhost:3002`), the scan completed with 0 findings. The log showed:
 
 ```
 [Scan] started: http://localhost:3002 (0 tools)
@@ -305,17 +305,17 @@ result = not all(gate in tags_incomplete for gate in gates)
 assert result == True, "Gate check should fail when tags missing"
 ```
 
-### 3. Run Scan Against MegaShop
+### 3. Run Scan Against Target
 
 ```bash
-# Start the lab
-cd /Users/jason/sentinel-lab-v2
-./start.sh
+# Start your custom lab if needed
 
 # Run Sentinel
-sentinel scan --target http://localhost:3002 --mode comprehensive
+curl -X POST "http://127.0.0.1:8765/v1/scans/start" \
+     -H "Content-Type: application/json" \
+     -d '{"target": "http://localhost:3002", "mode": "comprehensive"}'
 
-# Expected: Should now detect 20+ vulnerabilities
+# Expected: Should now detect vulnerabilities
 ```
 
 ### 4. Check Logs for Tool Execution
@@ -408,36 +408,34 @@ def test_vulnerability_scanning_executes():
 
 ```
 Phase 1: Passive Recon
-  ✓ subfinder (found 3 subdomains)
-  ✓ dnsx (resolved 3 IPs)
+  ✓ subfinder (found subdomains)
+  ✓ dnsx (resolved IPs)
 
 Phase 2: Active Live Check
   ✓ httpx (confirmed 1 live HTTP target)
-  ✓ whatweb (identified Flask 2.3.0)
-  ✓ wafw00f (no WAF detected)
+  ✓ whatweb (identified Tech Stack)
+  ✓ wafw00f (WAF check)
 
 Phase 3: Surface Enumeration
-  ✓ nmap (found ports 3002, 5432, 6379, 27017, 9200)
-  ✓ feroxbuster (discovered 25 endpoints)
+  ✓ nmap (found ports 3002, 22, 5000)
+  ✓ feroxbuster (discovered endpoints)
 
 Phase 4: Vulnerability Scanning  ← THIS SHOULD NOW RUN
-  ✓ nuclei (detected SQL injection, XSS, SSRF)
-  ✓ nikto (found exposed admin panels, debug endpoints)
+  ✓ nuclei (detected vulnerabilities)
+  ✓ nikto (server config issues)
 
 Phase 5: Heavy Artillery
   ✓ masscan (deep port scan)
 ```
 
-### Expected Findings
+### Expected Findings (Custom Target)
 
-**Minimum 20+ findings including:**
-- SQL Injection (search endpoint)
-- Command Injection (ping utility)
-- SSRF (fetch-url endpoint)
-- Stored XSS (comments)
-- Exposed databases (PostgreSQL, MongoDB, Redis)
-- Weak authentication (JWT algorithm confusion)
-- Information disclosure (debug endpoints)
+Based on your target structure:
+- **Exposed Git Config:** `.git/config` (Status 200)
+- **Directory Listing:** `/admin` (403), `/login` (405)
+- **Open Ports:** 22 (SSH), 5000 (RTSP), 5432 (Postgres), 5900 (VNC)
+- **Missing Headers:** HSTS, CSP
+- **SSRF Indicators:** Potentially via `http://localhost:3002` access
 
 ---
 
@@ -511,6 +509,6 @@ Fixes: #0-findings-bug"
 
 If the fix doesn't work or you see other issues, check:
 1. Restart Sentinel to reload CAL policies
-2. Verify MegaShop lab is running: `docker ps | grep sentinel-lab`
+2. Verify Target lab is running
 3. Check logs for "Executing tool" or "Tool blocked" messages
 4. Run with debug logging: `export LOG_LEVEL=DEBUG`
