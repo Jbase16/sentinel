@@ -195,9 +195,10 @@ async def terminal_websocket_pty(
     async def output_reader(data: bytes):
         try:
             text = data.decode(errors="replace")
+            logger.debug(f"[PTY] Sending output: {repr(text[:100])} to websocket")
             await websocket.send_text(text)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[PTY] Failed to send output: {e}")
 
     # Register listener
     listener_id = pty_mgr.attach_listener(session_id, output_reader)
@@ -221,7 +222,9 @@ async def terminal_websocket_pty(
                 if msg_type == "input":
                     # User typed something
                     payload = data.get("data", "")
+                    logger.debug(f"[PTY] Received input: {repr(payload)} for session {session_id}")
                     pty_mgr.write_input(session_id, payload)
+                    logger.debug(f"[PTY] Input written to session {session_id}")
                     
                 elif msg_type == "resize":
                     # Terminal resize event
@@ -241,4 +244,4 @@ async def terminal_websocket_pty(
     except Exception as e:
         logger.error(f"[PTY] Error in handler: {e}")
     finally:
-        pty_mgr.detach_listener(session_id, listener_id)
+        pty_mgr.detach_listener(session_id, output_reader)
