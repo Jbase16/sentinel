@@ -432,8 +432,13 @@ class Database:
     async def _save_session_impl(self, session_data: Dict[str, Any]):
         await self._execute_internal(
             """
-            INSERT OR REPLACE INTO sessions (id, target, status, start_time, logs)
+            INSERT INTO sessions (id, target, status, start_time, logs)
             VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                target=excluded.target,
+                status=excluded.status,
+                start_time=excluded.start_time,
+                logs=excluded.logs
         """,
             (
                 session_data["id"],
