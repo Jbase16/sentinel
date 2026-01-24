@@ -69,7 +69,12 @@ struct ScanControlView: View {
 
             // Scan Progress Header
             if isScanning {
-                ScanProgressHeader(logCount: appState.apiLogItems.count)
+                ScanProgressHeader(
+                    logCount: appState.apiLogItems.count,
+                    nodeCount: appState.cortexStream.nodes.count,
+                    edgeCount: appState.cortexStream.edges.count,
+                    startedAt: appState.scanProjection.progress.startedAt
+                )
             }
 
             // Header / Input
@@ -284,7 +289,10 @@ struct ToolSelectionView: View {
 /// Struct ScanProgressHeader.
 struct ScanProgressHeader: View {
     let logCount: Int
-    @State private var elapsedTime: Int = 0
+    let nodeCount: Int
+    let edgeCount: Int
+    let startedAt: Date?
+    @State private var currentTime = Date()
     @State private var timer: Timer?
 
     var body: some View {
@@ -303,8 +311,20 @@ struct ScanProgressHeader: View {
 
             IndeterminateProgressBar(color: .blue)
 
-            HStack {
-                Text("\(logCount) log entries")
+            HStack(spacing: 16) {
+                Text("\(logCount) logs")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("•")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("\(nodeCount) nodes")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("•")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("\(edgeCount) edges")
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 Spacer()
@@ -316,7 +336,7 @@ struct ScanProgressHeader: View {
         .background(Color.blue.opacity(0.1))
         .onAppear {
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-                elapsedTime += 1
+                currentTime = Date()
             }
         }
         .onDisappear {
@@ -325,8 +345,12 @@ struct ScanProgressHeader: View {
     }
 
     private var formattedTime: String {
-        let mins = elapsedTime / 60
-        let secs = elapsedTime % 60
+        guard let startedAt = startedAt else {
+            return "00:00"
+        }
+        let elapsed = Int(currentTime.timeIntervalSince(startedAt))
+        let mins = elapsed / 60
+        let secs = elapsed % 60
         return String(format: "%02d:%02d", mins, secs)
     }
 }

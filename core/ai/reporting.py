@@ -54,7 +54,7 @@ class ReportComposer:
     AI-driven 'Investigative Journalist' for security reporting.
     Generates semantic narratives rather than just listing bugs.
     """
-    
+
     SECTIONS = [
         "executive_summary",
         "attack_narrative",
@@ -63,11 +63,12 @@ class ReportComposer:
         "remediation_roadmap"
     ]
 
-    def __init__(self):
+    def __init__(self, session=None):
         """Function __init__."""
         self.ai = AIEngine.instance()
+        self.session = session
 
-    def generate_section(self, section_name: str, context_override: Optional[Dict] = None) -> str:
+    async def generate_section(self, section_name: str, context_override: Optional[Dict] = None) -> str:
         """
         Generates a specific section of the report using the LLM.
         """
@@ -76,7 +77,7 @@ class ReportComposer:
             return f"Error: Unknown section '{section_name}'"
 
         context = context_override or self._gather_context()
-        
+
         prompts = {
             "executive_summary": self._prompt_exec_summary,
             "attack_narrative": self._prompt_attack_narrative,
@@ -84,7 +85,7 @@ class ReportComposer:
             "risk_assessment": self._prompt_risk,
             "remediation_roadmap": self._prompt_remediation
         }
-        
+
         prompt_fn = prompts.get(section_name)
         # Conditional branch.
         if not prompt_fn:
@@ -102,8 +103,49 @@ class ReportComposer:
             "Focus on business impact and attack chains, not just list of bugs. "
             "Use Markdown formatting."
         )
-        
-        return self.ai.client.generate_text(user_prompt, system_prompt) or "AI Generation failed."
+
+        result = await self.ai.client.generate_text(user_prompt, system_prompt)
+        return result or "AI Generation failed."
+
+    async def generate_async(self, report_type: str = "full", format: str = "markdown") -> str:
+        """
+        Generate a complete report asynchronously.
+
+        Args:
+            report_type: Type of report ('full', 'executive', 'technical')
+            format: Output format ('markdown', 'json')
+
+        Returns:
+            Complete report content as string
+        """
+        logger.info(f"[ReportComposer] Generating {report_type} report in {format} format")
+
+        # Determine which sections to include
+        sections_to_generate = self.SECTIONS
+        if report_type == "executive":
+            sections_to_generate = ["executive_summary", "risk_assessment"]
+        elif report_type == "technical":
+            sections_to_generate = ["technical_findings", "attack_narrative", "remediation_roadmap"]
+
+        # Generate all sections
+        full_report = ""
+        for section in sections_to_generate:
+            logger.info(f"[ReportComposer] Generating section: {section}")
+            section_content = await self.generate_section(section)
+            full_report += f"\n\n{section_content}"
+
+        # Format output
+        if format == "json":
+            return json.dumps({
+                "type": report_type,
+                "generated_at": datetime.utcnow().isoformat(),
+                "sections": {
+                    section: await self.generate_section(section)
+                    for section in sections_to_generate
+                }
+            }, indent=2)
+
+        return full_report.strip()
 
     def _gather_context(self) -> Dict:
         """Function _gather_context."""
@@ -179,22 +221,23 @@ class ReportComposer:
 
 
 # Legacy wrapper for backward compatibility
-def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
+async def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
     """Function create_report_bundle."""
     composer = ReportComposer()
     full_report = ""
     # Loop over items.
     for section in composer.SECTIONS:
-        full_report += composer.generate_section(section) + "\n\n"
-    
+        section_content = await composer.generate_section(section)
+        full_report += section_content + "\n\n"
+
     os.makedirs(base_dir, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     bundle_dir = os.path.join(base_dir, f"bundle-{timestamp}")
     os.makedirs(bundle_dir, exist_ok=True)
-    
+
     md_path = os.path.join(bundle_dir, "report.md")
     # Context-managed operation.
     with open(md_path, "w") as f:
         f.write(full_report)
-        
+
     return ReportBundle(bundle_dir, md_path, "")

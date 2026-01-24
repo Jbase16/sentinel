@@ -444,7 +444,25 @@ public class HelixAppState: ObservableObject {
             do {
                 if let results = try await apiClient.fetchResults() {
                     await MainActor.run {
-                        self.apiResults = results
+                        // Defensive merge: Don't overwrite existing findings with empty/incomplete data
+                        // during an active scan. This prevents findings from disappearing when the
+                        // backend returns a partial snapshot.
+                        let currentFindingsCount = self.apiResults?.findings?.count ?? 0
+                        let newFindingsCount = results.findings?.count ?? 0
+
+                        // Only update if:
+                        // 1. We have no current results yet, OR
+                        // 2. New results have >= findings count (never go backwards), OR
+                        // 3. Scan is not running (allow full replacement when scan is complete)
+                        if self.apiResults == nil
+                            || newFindingsCount >= currentFindingsCount
+                            || !self.isScanRunning {
+                            self.apiResults = results
+                        } else {
+                            print(
+                                "[AppState] Ignoring partial results refresh: current=\(currentFindingsCount), new=\(newFindingsCount)"
+                            )
+                        }
                     }
                 }
             } catch {

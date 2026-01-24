@@ -61,7 +61,7 @@ class HeadlessRunner:
             
             # Generate Report
             print("[*] Generating AI Report...")
-            bundle = create_report_bundle()
+            bundle = await create_report_bundle()
             print(f"[+] Report saved to: {bundle.markdown_path}")
             
         except KeyboardInterrupt:

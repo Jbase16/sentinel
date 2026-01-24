@@ -223,53 +223,63 @@ class CausalGraphBuilder:
         Infer causal dependencies from finding types and targets.
 
         This uses heuristics to discover implicit relationships:
-        - "Open port" enables "Service vulnerability"
-        - "Authentication bypass" enables "Privilege escalation"
-        - "File read" enables "Credential theft"
+        - "Reconnaissance" enables "Service discovery"
+        - "Service discovery" enables "Vulnerability identification"
+        - "Connectivity" enables "Service access"
+        - "Open port" enables "Service exploitation"
         """
         # Group findings by target
         by_target: Dict[str, List[Finding]] = defaultdict(list)
         for f in findings:
             by_target[f.target].append(f)
 
-        # Heuristic rules for inferring dependencies
+        # Heuristic rules for inferring dependencies (updated to match actual scan output)
         for target, target_findings in by_target.items():
-            # Rule 1: Open ports enable service attacks
-            open_ports = [f for f in target_findings if 'port' in f.type.lower() or 'service' in f.type.lower()]
-            service_vulns = [f for f in target_findings if any(word in f.type.lower() for word in ['injection', 'xss', 'rce', 'exploit'])]
+            # Rule 1: Reconnaissance (DNS/subdomain) enables service discovery
+            recon_findings = [f for f in target_findings if any(word in f.type.lower() for word in
+                ['dns', 'subdomain', 'enumeration', 'dns record'])]
+            service_findings = [f for f in target_findings if any(word in f.type.lower() for word in
+                ['port', 'open_port', 'service', 'unidentified_service'])]
 
-            for port_finding in open_ports:
-                for vuln_finding in service_vulns:
-                    # Port enables vulnerability (if not already linked)
-                    if port_finding.id not in vuln_finding.requires:
-                        vuln_finding.requires.append(port_finding.id)
+            for recon_finding in recon_findings:
+                for service_finding in service_findings:
+                    if recon_finding.id not in service_finding.requires:
+                        service_finding.requires.append(recon_finding.id)
 
-            # Rule 2: Auth bypass enables privilege escalation
-            auth_bypass = [f for f in target_findings if any(word in f.type.lower() for word in ['auth', 'login', 'bypass', 'credential'])]
-            priv_esc = [f for f in target_findings if 'priv' in f.type.lower() or 'escalation' in f.type.lower()]
+            # Rule 2: Connectivity enables port scanning and service discovery
+            connectivity_findings = [f for f in target_findings if 'connectivity' in f.type.lower()]
+            port_findings = [f for f in target_findings if any(word in f.type.lower() for word in
+                ['port', 'open_port', 'service'])]
 
-            for auth_finding in auth_bypass:
-                for esc_finding in priv_esc:
-                    if auth_finding.id not in esc_finding.requires:
-                        esc_finding.requires.append(auth_finding.id)
+            for conn_finding in connectivity_findings:
+                for port_finding in port_findings:
+                    if conn_finding.id not in port_finding.requires:
+                        port_finding.requires.append(conn_finding.id)
 
-            # Rule 3: Information disclosure enables targeted attacks
-            info_disclosure = [f for f in target_findings if any(word in f.type.lower() for word in ['disclosure', 'leak', 'exposure', 'directory'])]
-            targeted_attacks = [f for f in target_findings if any(word in f.type.lower() for word in ['injection', 'xss', 'csrf', 'rce'])]
+            # Rule 3: Open ports/services enable vulnerability discovery
+            service_findings_all = [f for f in target_findings if any(word in f.type.lower() for word in
+                ['port', 'open_port', 'service', 'unidentified_service'])]
+            vuln_findings = [f for f in target_findings if any(word in f.type.lower() for word in
+                ['vuln', 'vulnerability', 'injection', 'xss', 'rce', 'exploit'])]
 
-            for info_finding in info_disclosure:
-                for attack_finding in targeted_attacks:
-                    if info_finding.id not in attack_finding.requires:
-                        attack_finding.requires.append(info_finding.id)
+            for service_finding in service_findings_all:
+                for vuln_finding in vuln_findings:
+                    if service_finding.id not in vuln_finding.requires:
+                        vuln_finding.requires.append(service_finding.id)
 
-            # Rule 4: File read enables credential access
-            file_read = [f for f in target_findings if 'file' in f.type.lower() and ('read' in f.type.lower() or 'traversal' in f.type.lower())]
-            cred_access = [f for f in target_findings if any(word in f.type.lower() for word in ['password', 'credential', 'secret', 'token'])]
+            # Rule 4: Generic vulnerability findings depend on any reconnaissance
+            generic_vulns = [f for f in target_findings if f.type.lower() in ['vulnerability', 'vuln']]
+            all_recon = [f for f in target_findings if any(word in f.type.lower() for word in
+                ['dns', 'subdomain', 'port', 'service', 'connectivity', 'enumeration'])]
 
-            for file_finding in file_read:
-                for cred_finding in cred_access:
-                    if file_finding.id not in cred_finding.requires:
-                        cred_finding.requires.append(file_finding.id)
+            for vuln_finding in generic_vulns:
+                # Link to the most relevant recon finding (prefer service over DNS)
+                if all_recon:
+                    # Prefer service/port findings for vulnerabilities
+                    service_recon = [f for f in all_recon if 'service' in f.type.lower() or 'port' in f.type.lower()]
+                    best_recon = service_recon[0] if service_recon else all_recon[0]
+                    if best_recon.id not in vuln_finding.requires:
+                        vuln_finding.requires.append(best_recon.id)
 
         logger.info(f"[CausalGraph] Inferred dependencies using {4} heuristic rules")
 
@@ -565,10 +575,16 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
     Build a causal graph from findings and return DTO (nodes/edges).
     """
     from core.data.db import Database
+
     db = Database.instance()
     await db.init()
     findings = await db.get_findings(session_id)
-    
+
+    logger.info(f"[CausalGraph] Building graph for session {session_id} with {len(findings)} findings")
+
     builder = CausalGraphBuilder()
     builder.build(findings)
-    return builder.export_dto()
+
+    logger.info(f"[CausalGraph] Built graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges")
+
+    return builder.export_dto(session_id=session_id)
