@@ -73,13 +73,14 @@ async def generate_insights(
 async def get_current_graph():
     """
     Get the Causal/Pressure Graph for the active or most recent session.
+    Returns 204 No Content if no session exists yet (graceful handling during scan startup).
     """
     from core.server.state import get_state
     from fastapi.responses import Response
-    
+
     state = get_state()
     session_id = state.scan_state.get("session_id")
-    
+
     if not session_id:
          # Fallback to most recent session in DB
          from core.data.db import Database
@@ -87,11 +88,23 @@ async def get_current_graph():
          rows = await db.fetch_all("SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1", ())
          if rows:
              session_id = rows[0][0]
-             
+
     if not session_id:
+        # Return 204 No Content instead of error during scan initialization
+        # This prevents "badStatus" errors when UI polls before session is ready
         return Response(status_code=204)
-        
-    return await get_graph_dto_for_session(session_id)
+
+    try:
+        return await get_graph_dto_for_session(session_id)
+    except Exception as e:
+        logger.warning(f"[Graph] Failed to build graph for session {session_id}: {e}")
+        # Return empty graph instead of error to prevent UI crashes
+        return {
+            "session_id": session_id,
+            "nodes": [],
+            "edges": [],
+            "count": {"nodes": 0, "edges": 0}
+        }
 
 
 # ---------------------------------------------------------------------------

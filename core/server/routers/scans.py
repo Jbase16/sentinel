@@ -307,6 +307,7 @@ async def get_scan_results():
 
     if not session_id:
         # No active scan - try to get the most recent session from database
+        # IMPORTANT: Query sessions table which persists beyond in-memory session destruction
         recent_sessions = await db.fetch_all(
             "SELECT id, target, status, start_time FROM sessions ORDER BY start_time DESC LIMIT 1",
             ()
@@ -325,11 +326,14 @@ async def get_scan_results():
             "finished_at": None,
             "modules": []
         }
+        logger.info(f"[Results] Using most recent session from DB: {session_id}")
 
     # Fetch from database
+    logger.info(f"[Results] Fetching results for session_id={session_id}")
     findings = await db.get_findings(session_id)
     issues = await db.get_issues(session_id)
     evidence = await db.get_evidence(session_id)
+    logger.info(f"[Results] Retrieved {len(findings)} findings, {len(issues)} issues, {len(evidence)} evidence")
     
     # Fetch logs from session record
     session_data = await db.get_session(session_id)

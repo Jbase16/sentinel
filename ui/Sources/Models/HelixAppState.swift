@@ -48,6 +48,9 @@ public class HelixAppState: ObservableObject {
     /// Scan running state
     @Published var isScanRunning: Bool = false
 
+    /// Scan start time (for timer display)
+    @Published var scanStartTime: Date? = nil
+
     /// Log items
     @Published var apiLogItems: [LogItem] = []
 
@@ -161,6 +164,7 @@ public class HelixAppState: ObservableObject {
                     switch event.eventType {
                     case .scanStarted:
                         self.isScanRunning = true
+                        self.scanStartTime = Date(timeIntervalSince1970: event.timestamp)
                         let target = event.payload["target"]?.stringValue ?? "unknown"
                         // Backend sends "allowed_tools" not "modules"
                         let toolCount =
@@ -168,7 +172,14 @@ public class HelixAppState: ObservableObject {
                         self.apiLogItems.append(
                             LogItem(
                                 id: UUID(), text: "[Scan] started: \(target) (\(toolCount) tools)"))
-                        self.refreshGraph()
+                        // Delay graph refresh to allow session initialization to complete
+                        // Prevents "badStatus" error when graph endpoint is called before session is ready
+                        Task {
+                            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms delay
+                            await MainActor.run {
+                                self.refreshGraph()
+                            }
+                        }
                     case .scanCompleted:
                         self.isScanRunning = false
                         self.refreshResults()
@@ -322,10 +333,14 @@ public class HelixAppState: ObservableObject {
                     )
                     cortexStream.updateFromPressureGraph(graph)
                 } else {
-                    print("[AppState] Graph refresh returned nil (204 No Content)")
+                    // 204 No Content is normal during scan initialization
+                    // Session may not be fully created yet
+                    print("[AppState] Graph refresh returned nil (204 No Content - session not ready yet)")
                 }
             } catch {
-                print("[AppState] Failed to refresh graph: \(error)")
+                // Don't log errors as warnings during scan startup
+                // The session initialization race condition is expected
+                print("[AppState] Graph refresh failed (expected during scan startup): \(error)")
             }
         }
     }
@@ -452,15 +467,20 @@ public class HelixAppState: ObservableObject {
 
                         // Only update if:
                         // 1. We have no current results yet, OR
-                        // 2. New results have >= findings count (never go backwards), OR
-                        // 3. Scan is not running (allow full replacement when scan is complete)
-                        if self.apiResults == nil
+                        // 2. New results have > 0 findings (always accept non-empty data), OR
+                        // 3. New results have >= findings count (never go backwards), OR
+                        // 4. Scan is not running (allow full replacement when scan is complete)
+                        let shouldUpdate = self.apiResults == nil
+                            || newFindingsCount > 0  // NEW: Always accept non-zero findings
                             || newFindingsCount >= currentFindingsCount
-                            || !self.isScanRunning {
+                            || !self.isScanRunning
+
+                        if shouldUpdate {
                             self.apiResults = results
+                            print("[AppState] Results updated: \(newFindingsCount) findings")
                         } else {
                             print(
-                                "[AppState] Ignoring partial results refresh: current=\(currentFindingsCount), new=\(newFindingsCount)"
+                                "[AppState] Ignoring empty results: current=\(currentFindingsCount), new=\(newFindingsCount)"
                             )
                         }
                     }
@@ -609,8 +629,10 @@ public class HelixAppState: ObservableObject {
         switch event.eventType {
         case .scanStarted:
             isScanRunning = true
+            scanStartTime = Date(timeIntervalSince1970: event.timestamp)
         case .scanCompleted, .scanFailed:
             isScanRunning = false
+            scanStartTime = nil
         case .breachDetected:
             let target = event.payload["target_node_id"]?.stringValue ?? "unknown"
             self.activeBreachTarget = target

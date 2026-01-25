@@ -36,6 +36,7 @@ from typing import List, Dict, Set, Tuple, Any, Optional
 from dataclasses import dataclass
 from collections import defaultdict
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -573,6 +574,7 @@ async def build_causal_graph_for_session(session_id: str) -> Dict[str, Any]:
 async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
     """
     Build a causal graph from findings and return DTO (nodes/edges).
+    Includes both causal graph edges AND persisted edges from the database.
     """
     from core.data.db import Database
 
@@ -580,11 +582,37 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
     await db.init()
     findings = await db.get_findings(session_id)
 
-    logger.info(f"[CausalGraph] Building graph for session {session_id} with {len(findings)} findings")
+    logger.info(f"[CausalGraph] Building graph from {len(findings)} findings")
 
     builder = CausalGraphBuilder()
     builder.build(findings)
 
-    logger.info(f"[CausalGraph] Built graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges")
+    logger.info(f"[CausalGraph] Built causal graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges")
 
-    return builder.export_dto(session_id=session_id)
+    # Get the base DTO from causal graph
+    dto = builder.export_dto(session_id=session_id)
+
+    # Load persisted edges from database (includes killchain, recon, and correlator edges)
+    db_nodes, db_edges = await db.load_graph_snapshot(session_id)
+
+    if db_edges:
+        logger.info(f"[CausalGraph] Adding {len(db_edges)} persisted edges from database")
+
+        # Merge database edges with causal graph edges
+        all_edges = list(dto.get("edges", []))
+        existing_edge_ids = {e.get('id') for e in all_edges}
+
+        for db_edge in db_edges:
+            edge_id = db_edge.get("id")
+            # Only add if not already present (avoid duplicates)
+            if edge_id not in existing_edge_ids:
+                all_edges.append(db_edge)
+                existing_edge_ids.add(edge_id)
+
+        dto["edges"] = all_edges
+        dto["count"]["edges"] = len(all_edges)
+        logger.info(f"[CausalGraph] Final graph: {dto['count']['nodes']} nodes, {dto['count']['edges']} edges")
+    else:
+        logger.info(f"[CausalGraph] No persisted edges found in database for session {session_id}")
+
+    return dto

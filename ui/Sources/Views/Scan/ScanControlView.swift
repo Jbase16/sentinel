@@ -73,7 +73,7 @@ struct ScanControlView: View {
                     logCount: appState.apiLogItems.count,
                     nodeCount: appState.cortexStream.nodes.count,
                     edgeCount: appState.cortexStream.edges.count,
-                    startedAt: appState.scanProjection.progress.startedAt
+                    startedAt: appState.scanStartTime
                 )
             }
 

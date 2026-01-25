@@ -523,7 +523,9 @@ class ScanTransaction:
                 if implied_edges:
                     combined_edges.extend(implied_edges)
 
-            self._engine.session.killchain.replace_all(combined_edges, persist=False)
+            # CRITICAL: Use persist=True to trigger pressure graph persistence
+            # This emits edges_changed signal → PressureGraphManager → save_graph_snapshot
+            self._engine.session.killchain.replace_all(combined_edges, persist=True)
             logger.info(
                 f"[ScanTransaction] UI PUBLISH COMPLETE {self._scan_id}: issues={len(self._staged_issues)} "
                 f"killchain_edges={len(combined_edges)}"
@@ -801,7 +803,9 @@ class ScannerEngine:
                                 await self._queue.put(f"[{exec_id}] task error: {exc}")
                             del self._running_tasks[exec_id]
 
-                        if not done and local_cancel.is_set():
+                        # Check for cancellation after every iteration, not just when no tasks completed
+                        # This ensures the stop button works reliably even during long-running tools
+                        if local_cancel.is_set():
                             await self._queue.put("[scanner] Cancellation detected - terminating running tools...")
                             for exec_id, proc in list(self._procs.items()):
                                 if proc and proc.returncode is None:
