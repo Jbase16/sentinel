@@ -367,6 +367,7 @@ async def get_scan_results():
             "status": scan_state.get("status"),
             "started_at": scan_state.get("started_at"),
             "finished_at": scan_state.get("finished_at"),
+            "session_id": session_id,
         },
         "summary": {
             "counts": {

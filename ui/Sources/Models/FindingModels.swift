@@ -39,12 +39,14 @@ public struct ScanSummary: Decodable {
     public let finishedAt: String?
     public let durationMs: Int?
     public let error: String?
+    public let sessionId: String?
 
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
         case startedAt = "started_at"
         case finishedAt = "finished_at"
         case durationMs = "duration_ms"
+        case sessionId = "session_id"
     }
 }
 
@@ -208,12 +210,14 @@ public struct ScanStateDTO: Decodable {
     public let finishedAt: String?
     public let durationMs: Int?
     public let error: String?
+    public let sessionId: String?
 
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
         case startedAt = "started_at"
         case finishedAt = "finished_at"
         case durationMs = "duration_ms"
+        case sessionId = "session_id"
     }
 }
 
@@ -281,7 +285,8 @@ public enum APIError: Error, Equatable {
         case .tokenNotFound:
             return "Authentication token missing. Restart the backend to regenerate."
         case .toolFailed(let tool, let exitCode, _):
-            return "Tool '\(tool)' failed (exit code \(exitCode)). Check installation and permissions."
+            return
+                "Tool '\(tool)' failed (exit code \(exitCode)). Check installation and permissions."
         case .scanTimeout(let duration):
             return "Scan exceeded timeout of \(Int(duration))s. Target may be slow or unreachable."
         case .connectionRefused:

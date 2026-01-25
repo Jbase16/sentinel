@@ -215,9 +215,12 @@ struct ReportComposerView: View {
 
         // Ensure we have a session to report on
         // Try active scan session first, then fallback to results
-        let sessionID =
-            appState.apiResults?.scan?.session_id
-            ?? appState.engineStatus?.scan_state?["session_id"] as? String
+
+        var sessionID: String? = appState.apiResults?.scan?.sessionId
+
+        if sessionID == nil {
+            sessionID = appState.engineStatus?.scanState?.sessionId
+        }
 
         guard let validSessionID = sessionID else {
             // TODO: show failure UI
