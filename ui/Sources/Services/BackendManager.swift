@@ -102,24 +102,41 @@ class BackendManager: ObservableObject {
     private var startupFailureMessage: String?
     private var startupAbortRequested: Bool = false
     private var isStopping: Bool = false
+    
+    /// Track if we spawned the backend or attached to an existing one
+    private var ownsBackendProcess = false
+    
+    /// Dev override to prevent spawning/killing
+    private let allowExternalBackend = ProcessInfo.processInfo.environment["SENTINEL_EXTERNAL_BACKEND"] == "1"
 
     /// Function start.
     func start() {
         Task {
             // Check if backend is already running externally
-            let (reachable, status) = await checkBackendHealth()
-            if reachable, status == "ready" {
+            if await backendAlreadyRunning() {
+                print("[BackendManager] Existing backend detected — attaching instead of spawning")
                 await MainActor.run {
                     self.backendState = .ready
                     self.status = "Core Connected (External)"
                     self.isRunning = true
                     NotificationCenter.default.post(name: .backendReady, object: nil)
                 }
+                // We do NOT own this process, so we won't kill it on exit
+                self.ownsBackendProcess = false
                 startHealthMonitor()
+                return
+            }
+            
+            if allowExternalBackend {
+                print("[BackendManager] External backend required but not found. Waiting...")
+                await MainActor.run {
+                    self.status = "Waiting for External Core..."
+                }
                 return
             }
 
             // Launch our own server
+            self.ownsBackendProcess = true
             await launchIntegratedServer()
         }
     }
@@ -131,6 +148,11 @@ class BackendManager: ObservableObject {
 
         // Conditional branch.
         if let p = process, p.isRunning {
+            guard ownsBackendProcess else {
+                print("[BackendManager] Skipping termination — backend not owned by app")
+                return
+            }
+            
             startupStateQueue.sync {
                 self.isStopping = true
             }
@@ -146,6 +168,22 @@ class BackendManager: ObservableObject {
         isRunning = false
         backendState = .stopped
         status = "Core Stopped"
+    }
+    
+    private func backendAlreadyRunning() async -> Bool {
+        var request = URLRequest(url: healthCheckURL)
+        request.timeoutInterval = 0.5
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse {
+                return http.statusCode == 200
+            }
+        } catch {
+            return false
+        }
+
+        return false
     }
 
     private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async
