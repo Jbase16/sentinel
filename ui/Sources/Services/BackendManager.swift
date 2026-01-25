@@ -112,8 +112,11 @@ class BackendManager: ObservableObject {
     /// Function start.
     func start() {
         Task {
+            let isRunning = await backendAlreadyRunning()
+            await MainActor.run { self.appendLogLine("[BackendManager] backendAlreadyRunning check: \(isRunning)") }
+            
             // Check if backend is already running externally
-            if await backendAlreadyRunning() {
+            if isRunning {
                 print("[BackendManager] Existing backend detected — attaching instead of spawning")
                 await MainActor.run {
                     self.backendState = .ready
@@ -825,6 +828,23 @@ class BackendManager: ObservableObject {
             logRingBuffer.removeFirst(logRingBuffer.count - maxLogLines)
         }
         lastCoreLogs = logRingBuffer
+        
+        // DEBUG: Write to file
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
+        let logFile = home.appendingPathComponent(".sentinelforge/ui_backend_debug.log")
+        
+        if !fileManager.fileExists(atPath: logFile.path) {
+            fileManager.createFile(atPath: logFile.path, contents: nil)
+        }
+        
+        if let handle = try? FileHandle(forWritingTo: logFile) {
+            handle.seekToEndOfFile()
+            if let data = "\(Date()): \(line)\n".data(using: .utf8) {
+                handle.write(data)
+            }
+            handle.closeFile()
+        }
     }
 
     private func readBootManifest() -> [String: Any]? {
