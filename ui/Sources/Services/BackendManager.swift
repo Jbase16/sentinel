@@ -102,19 +102,22 @@ class BackendManager: ObservableObject {
     private var startupFailureMessage: String?
     private var startupAbortRequested: Bool = false
     private var isStopping: Bool = false
-    
+
     /// Track if we spawned the backend or attached to an existing one
     private var ownsBackendProcess = false
-    
+
     /// Dev override to prevent spawning/killing
-    private let allowExternalBackend = ProcessInfo.processInfo.environment["SENTINEL_EXTERNAL_BACKEND"] == "1"
+    private let allowExternalBackend =
+        ProcessInfo.processInfo.environment["SENTINEL_EXTERNAL_BACKEND"] == "1"
 
     /// Function start.
     func start() {
         Task {
             let isRunning = await backendAlreadyRunning()
-            await MainActor.run { self.appendLogLine("[BackendManager] backendAlreadyRunning check: \(isRunning)") }
-            
+            await MainActor.run {
+                self.appendLogLine("[BackendManager] backendAlreadyRunning check: \(isRunning)")
+            }
+
             // Check if backend is already running externally
             if isRunning {
                 print("[BackendManager] Existing backend detected — attaching instead of spawning")
@@ -129,7 +132,7 @@ class BackendManager: ObservableObject {
                 startHealthMonitor()
                 return
             }
-            
+
             if allowExternalBackend {
                 print("[BackendManager] External backend required but not found. Waiting...")
                 await MainActor.run {
@@ -155,7 +158,7 @@ class BackendManager: ObservableObject {
                 print("[BackendManager] Skipping termination — backend not owned by app")
                 return
             }
-            
+
             startupStateQueue.sync {
                 self.isStopping = true
             }
@@ -172,7 +175,7 @@ class BackendManager: ObservableObject {
         backendState = .stopped
         status = "Core Stopped"
     }
-    
+
     private func backendAlreadyRunning() async -> Bool {
         var request = URLRequest(url: healthCheckURL)
         request.timeoutInterval = 0.5
@@ -193,16 +196,22 @@ class BackendManager: ObservableObject {
         -> (reachable: Bool, status: String?)
     {
         let requestURL = url ?? healthCheckURL
-        if shouldSkipLocalHealthProbe(for: requestURL) {
-            return (false, nil)
-        }
+
+        // BYPASS: The "port available" check (shouldSkipLocalHealthProbe) is unreliable
+        // and frequently reports the port as "free" (and thus the backend as "down")
+        // even when the server is actually listening. We rely on URLSession to tell the truth.
+
         var request = URLRequest(url: requestURL)
         request.timeoutInterval = timeoutInterval  // Allow more time for slow responses
-        // Do-catch block.
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            // Guard condition.
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return (false, nil) }
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                print(
+                    "[BackendManager] Health probe failed: Status \((response as? HTTPURLResponse)?.statusCode ?? 0)"
+                )
+                return (false, nil)
+            }
             // Parse the health status
             if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                 let status = json["status"] as? String
@@ -210,23 +219,13 @@ class BackendManager: ObservableObject {
                 return (true, status)
             }
         } catch {
-            // Connection refused or timeout
+            // Log the actual error to help diagnosis
+            print("[BackendManager] Health probe failed: \(error.localizedDescription)")
         }
         return (false, nil)
     }
 
-    private func shouldSkipLocalHealthProbe(for url: URL) -> Bool {
-        guard let host = url.host?.lowercased() else { return false }
-        let isLoopbackHost = host == "127.0.0.1" || host == "localhost" || host == "::1"
-        guard isLoopbackHost else { return false }
-        guard let portValue = url.port,
-            portValue > 0,
-            portValue <= Int(UInt16.max)
-        else {
-            return false
-        }
-        return isPortAvailable(UInt16(portValue))
-    }
+    // REMOVED: shouldSkipLocalHealthProbe - unreliable on macOS 14+ / Docker environments
 
     /// Monitors backend health and updates UI status
     private func startHealthMonitor() {
@@ -828,16 +827,16 @@ class BackendManager: ObservableObject {
             logRingBuffer.removeFirst(logRingBuffer.count - maxLogLines)
         }
         lastCoreLogs = logRingBuffer
-        
+
         // DEBUG: Write to file
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
         let logFile = home.appendingPathComponent(".sentinelforge/ui_backend_debug.log")
-        
+
         if !fileManager.fileExists(atPath: logFile.path) {
             fileManager.createFile(atPath: logFile.path, contents: nil)
         }
-        
+
         if let handle = try? FileHandle(forWritingTo: logFile) {
             handle.seekToEndOfFile()
             if let data = "\(Date()): \(line)\n".data(using: .utf8) {
