@@ -66,3 +66,34 @@ async def generate_report(
         "format": format,
         "content": report_content
     }
+
+@router.post("/generate-section", dependencies=[Depends(verify_token)])
+async def generate_section(
+    session_id: str = Body(..., embed=True),
+    section: str = Body(..., embed=True),
+    context: Dict[str, Any] = Body(None, embed=True)
+):
+    """
+    Generate a specific section of a security report.
+    """
+    state = get_state()
+    session = await state.get_session(session_id)
+    
+    # If session not found in memory, we still want to allow reporting 
+    # if the data exists in the database (persisted session).
+    # For now, if session is None, ReportComposer might fallback to skeletal data or error.
+    # Ideally, we should resuscitate the session context from DB here.
+    
+    composer = ReportComposer(session)
+    
+    # Check if section is valid
+    if section not in composer.SECTIONS:
+         raise SentinelError(ErrorCode.INVALID_REQUEST, f"Invalid section name: {section}")
+         
+    content = await composer.generate_section(section, context_override=context)
+    
+    return {
+        "session_id": session_id,
+        "section": section,
+        "content": content
+    }

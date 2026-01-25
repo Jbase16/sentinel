@@ -69,13 +69,15 @@ public struct SentinelAPIClient: Sendable {
         switch code {
         case "TOOL_002", "TOOL_003":
             let tool = details?["tool"] as? String ?? "unknown"
-            let exitCode = (details?["exit_code"] as? Int)
+            let exitCode =
+                (details?["exit_code"] as? Int)
                 ?? (details?["exit_code"] as? NSNumber)?.intValue
                 ?? -1
             let stderr = details?["stderr"] as? String ?? message
             return .toolFailed(tool: tool, exitCode: exitCode, stderr: stderr)
         case "SCAN_003":
-            let duration = (details?["duration"] as? TimeInterval)
+            let duration =
+                (details?["duration"] as? TimeInterval)
                 ?? (details?["duration"] as? NSNumber)?.doubleValue
                 ?? 0
             return .scanTimeout(duration: duration)
@@ -239,7 +241,9 @@ public struct SentinelAPIClient: Sendable {
             throw Self.parseAPIError(data: data, response: response)
         }
         if http.statusCode == 204 { return nil }
-        guard http.statusCode == 200 else { throw Self.parseAPIError(data: data, response: response) }
+        guard http.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
         return try JSONDecoder().decode(PressureGraphDTO.self, from: data)
     }
 
@@ -625,5 +629,46 @@ public struct SentinelAPIClient: Sendable {
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
+    }
+
+    /// Generate a specific report section using the AI
+    public func generateReportSection(sessionID: String, section: String) async throws -> String {
+        guard let url = URL(string: "/v1/ai/generate-section", relativeTo: baseURL) else {
+            throw URLError(.badURL)
+        }
+
+        var request = authenticatedRequest(url: url, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let payload: [String: Any] = [
+            "session_id": sessionID,
+            "section": section,
+        ]
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+
+        if httpResponse.statusCode != 200 {
+            // Try to parse error
+            let body = String(data: data, encoding: .utf8) ?? ""
+            print(
+                "[SentinelAPIClient] generateReportSection failed: \(httpResponse.statusCode) - \(body)"
+            )
+            throw URLError(.badServerResponse)
+        }
+
+        // Expecting { "content": "markdown..." }
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let content = json["content"] as? String
+        {
+            return content
+        }
+
+        return "Error: Could not parse response"
     }
 }

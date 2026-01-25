@@ -20,27 +20,27 @@ struct ReportComposerView: View {
     @State private var generationProgress: String = ""
     @State private var elapsedTime: Int = 0
     @State private var timer: Timer?
-    
+
     let sections = [
         ("Executive Summary", "executive_summary"),
         ("Attack Narrative", "attack_narrative"),
         ("Technical Findings", "technical_findings"),
         ("Risk Assessment", "risk_assessment"),
-        ("Remediation Roadmap", "remediation_roadmap")
+        ("Remediation Roadmap", "remediation_roadmap"),
     ]
-    
+
     var body: some View {
         VStack(spacing: 0) {
             // Connection status
             ConnectionStatusBanner()
-            
+
             HSplitView {
                 // Left Pane: Outline
                 VStack(alignment: .leading) {
                     Text("Report Outline")
                         .font(.headline)
                         .padding()
-                    
+
                     List(sections, id: \.1) { (title, key) in
                         HStack {
                             Image(systemName: "doc.text")
@@ -50,7 +50,9 @@ struct ReportComposerView: View {
                             if appState.reportIsGenerating && appState.selectedSection == key {
                                 ProgressView()
                                     .scaleEffect(0.6)
-                            } else if appState.reportContent[key] != nil && !appState.reportContent[key]!.isEmpty {
+                            } else if appState.reportContent[key] != nil
+                                && !appState.reportContent[key]!.isEmpty
+                            {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundColor(.green)
                                     .font(.caption)
@@ -61,25 +63,30 @@ struct ReportComposerView: View {
                         .onTapGesture {
                             appState.selectedSection = key
                         }
-                        .background(appState.selectedSection == key ? Color.blue.opacity(0.2) : Color.clear)
+                        .background(
+                            appState.selectedSection == key ? Color.blue.opacity(0.2) : Color.clear
+                        )
                         .cornerRadius(6)
                     }
                     .listStyle(.sidebar)
-                    
+
                     Spacer()
-                    
+
                     // Progress summary
                     VStack(alignment: .leading, spacing: 4) {
-                        let completed = sections.filter { appState.reportContent[$0.1] != nil && !appState.reportContent[$0.1]!.isEmpty }.count
+                        let completed = sections.filter {
+                            appState.reportContent[$0.1] != nil
+                                && !appState.reportContent[$0.1]!.isEmpty
+                        }.count
                         Text("\(completed) / \(sections.count) sections complete")
                             .font(.caption)
                             .foregroundColor(.secondary)
-                        
+
                         ProgressView(value: Double(completed), total: Double(sections.count))
                             .progressViewStyle(.linear)
                     }
                     .padding(.horizontal)
-                    
+
                     Button(action: generateAll) {
                         HStack {
                             // Conditional branch.
@@ -87,7 +94,9 @@ struct ReportComposerView: View {
                                 ProgressView()
                                     .scaleEffect(0.7)
                             }
-                            Text(appState.reportIsGenerating ? "Generating..." : "Generate Full Report")
+                            Text(
+                                appState.reportIsGenerating
+                                    ? "Generating..." : "Generate Full Report")
                             // Conditional branch.
                             if !appState.reportIsGenerating {
                                 Image(systemName: "wand.and.stars")
@@ -101,7 +110,7 @@ struct ReportComposerView: View {
                 }
                 .frame(minWidth: 200, maxWidth: 300)
                 .background(Color(NSColor.controlBackgroundColor))
-                
+
                 // Right Pane: Editor
                 VStack(spacing: 0) {
                     // Header with status
@@ -109,9 +118,9 @@ struct ReportComposerView: View {
                         Text(sectionTitle(for: appState.selectedSection))
                             .font(.title2)
                             .bold()
-                        
+
                         Spacer()
-                        
+
                         // Conditional branch.
                         if appState.reportIsGenerating {
                             HStack(spacing: 8) {
@@ -123,7 +132,7 @@ struct ReportComposerView: View {
                                     .scaleEffect(0.7)
                             }
                         }
-                        
+
                         Button(action: { generateSection(appState.selectedSection) }) {
                             HStack(spacing: 4) {
                                 // Conditional branch.
@@ -140,26 +149,30 @@ struct ReportComposerView: View {
                     }
                     .padding()
                     .background(Color(NSColor.windowBackgroundColor))
-                    
+
                     // Progress bar when generating
                     if appState.reportIsGenerating {
                         IndeterminateProgressBar(color: .purple)
                     }
-                    
+
                     Divider()
-                    
+
                     // Content area
                     ZStack {
-                        TextEditor(text: Binding(
-                            get: { appState.reportContent[appState.selectedSection] ?? "" },
-                            set: { appState.reportContent[appState.selectedSection] = $0 }
-                        ))
+                        TextEditor(
+                            text: Binding(
+                                get: { appState.reportContent[appState.selectedSection] ?? "" },
+                                set: { appState.reportContent[appState.selectedSection] = $0 }
+                            )
+                        )
                         .font(.system(.body, design: .monospaced))
                         .padding()
                         .background(Color(NSColor.textBackgroundColor))
-                        
+
                         // Empty state
-                        if (appState.reportContent[appState.selectedSection] ?? "").isEmpty && !appState.reportIsGenerating {
+                        if (appState.reportContent[appState.selectedSection] ?? "").isEmpty
+                            && !appState.reportIsGenerating
+                        {
                             EmptyStateView(
                                 icon: "doc.text",
                                 title: "No Content Yet",
@@ -185,39 +198,57 @@ struct ReportComposerView: View {
             }
         }
     }
-    
+
     private var formattedTime: String {
         let mins = elapsedTime / 60
         let secs = elapsedTime % 60
         return String(format: "%02d:%02d", mins, secs)
     }
-    
+
     private func sectionTitle(for key: String) -> String {
         sections.first(where: { $0.1 == key })?.0 ?? "Unknown"
     }
-    
+
     private func generateSection(_ key: String) {
         // Prevent overlapping generations
         if appState.reportIsGenerating { return }
-        
-        appState.reportIsGenerating = true
-        
-        Task {
-            // Simulate async generation work; replace with real backend call when available
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            let title = sectionTitle(for: key)
-            let placeholder = """
-            # \(title)
 
-            This section was generated by SentinelForge. Replace this placeholder with real content once the AI backend is wired.
-            """
-            await MainActor.run {
-                appState.reportContent[key] = placeholder
-                appState.reportIsGenerating = false
+        // Ensure we have a session to report on
+        // Try active scan session first, then fallback to results
+        let sessionID =
+            appState.apiResults?.scan?.session_id
+            ?? appState.engineStatus?.scan_state?["session_id"] as? String
+
+        guard let validSessionID = sessionID else {
+            // TODO: show failure UI
+            print("No active session ID found for reporting")
+            return
+        }
+
+        appState.reportIsGenerating = true
+
+        Task {
+            do {
+                let content = try await appState.apiClient.generateReportSection(
+                    sessionID: validSessionID,
+                    section: key
+                )
+
+                await MainActor.run {
+                    appState.reportContent[key] = content
+                    appState.reportIsGenerating = false
+                }
+            } catch {
+                print("Report generation failed: \(error)")
+                await MainActor.run {
+                    appState.reportContent[key] =
+                        "Error generating content: \(error.localizedDescription)"
+                    appState.reportIsGenerating = false
+                }
             }
         }
     }
-    
+
     private func generateAll() {
         Task {
             for (_, key) in sections {
