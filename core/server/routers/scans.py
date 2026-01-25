@@ -128,7 +128,9 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         session.set_external_log_sink(_log_sink_sync)
         await state.register_session(session.id, session)
 
-        Database.instance().save_session(session.to_dict())
+        db = Database.instance()
+        await db.init()
+        await db.blackbox.enqueue(db._save_session_impl, session.to_dict())
 
         installed_tools = list(get_installed_tools().keys())
         requested_tools = list(dict.fromkeys(req.modules or []))
@@ -209,7 +211,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, scan_id=session.id)
                 
                 # Persist final session state including logs
-                Database.instance().save_session(session.to_dict())
+                db = Database.instance()
+                await db.init()
+                await db.blackbox.enqueue(db._save_session_impl, session.to_dict())
+                await db.blackbox.flush()
 
             except asyncio.CancelledError:
                 state.scan_state["status"] = "cancelled"
@@ -217,7 +222,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, scan_id=session.id)
                 
                 # Persist final session state including logs
-                Database.instance().save_session(session.to_dict())
+                db = Database.instance()
+                await db.init()
+                await db.blackbox.enqueue(db._save_session_impl, session.to_dict())
+                await db.blackbox.flush()
                 
             except Exception as e:
                 state.scan_state["status"] = "error"
@@ -235,7 +243,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 )
                 
                 # Persist final session state including logs
-                Database.instance().save_session(session.to_dict())
+                db = Database.instance()
+                await db.init()
+                await db.blackbox.enqueue(db._save_session_impl, session.to_dict())
+                await db.blackbox.flush()
 
         state.active_scan_task = asyncio.create_task(_runner())
         return session.id

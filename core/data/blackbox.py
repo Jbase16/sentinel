@@ -106,6 +106,15 @@ class BlackBox:
         await self._queue.put((func, args, kwargs, future))
         return await future
 
+    async def flush(self) -> None:
+        """
+        Wait until all queued write operations have completed.
+        Safe to call at lifecycle boundaries.
+        """
+        if self._worker_task is None:
+            return
+        await self._queue.join()
+
     def fire_and_forget(self, func: Callable[..., Awaitable[Any]], *args, **kwargs) -> None:
         """
         Schedule a write without waiting for it.
