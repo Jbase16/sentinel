@@ -73,6 +73,8 @@ class BackendManager: ObservableObject {
     private let startupRequestTimeout: TimeInterval = 1.5
     private let startupInitialBackoff: TimeInterval = 0.5
     private let startupMaxBackoff: TimeInterval = 5.0
+    private let bootManifestWaitMax: TimeInterval = 3.0  // Wait for manifest before /health
+    private let bootManifestPollInterval: TimeInterval = 0.1
     private let healthCheckURL = URL(string: "http://127.0.0.1:8765/v1/health")!
     private let startupFailureSignatures = [
         "ModuleNotFoundError: No module named 'uvicorn'"
@@ -150,6 +152,9 @@ class BackendManager: ObservableObject {
         -> (reachable: Bool, status: String?)
     {
         let requestURL = url ?? healthCheckURL
+        if shouldSkipLocalHealthProbe(for: requestURL) {
+            return (false, nil)
+        }
         var request = URLRequest(url: requestURL)
         request.timeoutInterval = timeoutInterval  // Allow more time for slow responses
         // Do-catch block.
@@ -167,6 +172,19 @@ class BackendManager: ObservableObject {
             // Connection refused or timeout
         }
         return (false, nil)
+    }
+
+    private func shouldSkipLocalHealthProbe(for url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        let isLoopbackHost = host == "127.0.0.1" || host == "localhost" || host == "::1"
+        guard isLoopbackHost else { return false }
+        guard let portValue = url.port,
+            portValue > 0,
+            portValue <= Int(UInt16.max)
+        else {
+            return false
+        }
+        return isPortAvailable(UInt16(portValue))
     }
 
     /// Monitors backend health and updates UI status
@@ -370,6 +388,9 @@ class BackendManager: ObservableObject {
             self.backendState = .starting
         }
 
+        // Avoid spamming /health before the core has written its boot manifest.
+        await waitForBootManifest()
+
         let deadline = Date().addingTimeInterval(maxStartupDuration)
         var attempt = 0
 
@@ -442,6 +463,22 @@ class BackendManager: ObservableObject {
             self.backendState = .failed(timeoutError)
             self.status = "Core Timeout (\(Int(maxStartupDuration))s) - Check Logs"
             self.isRunning = false
+        }
+    }
+
+    private func waitForBootManifest() async {
+        guard bootManifestURL != nil else { return }
+        let deadline = Date().addingTimeInterval(bootManifestWaitMax)
+        while Date() < deadline {
+            if shouldAbortStartup() {
+                return
+            }
+            if readBootManifest() != nil {
+                return
+            }
+            try? await Task.sleep(
+                nanoseconds: UInt64(bootManifestPollInterval * 1_000_000_000)
+            )
         }
     }
 
