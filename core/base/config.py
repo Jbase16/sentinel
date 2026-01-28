@@ -202,16 +202,18 @@ class LogConfig:
     # False = only print to console (logs disappear when program closes)
     file_enabled: bool = True
 
-    # Name of the log file (stored in the base_dir)
-    file_name: str = "sentinel.log"
+    # Directory for log files (inside base_dir)
+    # Each scan creates its own log file: {target}-{date}.log
+    # System-wide logs go to system.log
+    log_dir: str = "logs"
 
-    # Maximum size of a single log file before rotation (in megabytes)
-    # When file hits 10 MB, it gets renamed to sentinel.log.1 and a new file starts
+    # Name of the system log file (for non-scan events like startup/shutdown)
+    system_log_name: str = "system.log"
+
+    # Maximum size of system.log before rotation (in megabytes)
     max_file_size_mb: int = 10
 
-    # How many old log files to keep after rotation
-    # 5 = keep 5 old files (total ~50 MB of logs: 10 MB × 5 = 50 MB)
-    # Oldest file gets deleted when we exceed this limit
+    # How many old system.log files to keep after rotation
     backup_count: int = 5
 
 
@@ -984,7 +986,8 @@ def setup_logging(config: Optional[SentinelConfig] = None) -> None:
     """
     Configure Python's logging system based on our settings.
 
-    Sets up console and file logging with rotation.
+    Sets up console logging and system.log for app-wide events.
+    Per-scan logs are handled separately by ScanSession.
     Call this once at application startup.
 
     Args:
@@ -996,13 +999,18 @@ def setup_logging(config: Optional[SentinelConfig] = None) -> None:
     # Start with a console handler (prints logs to terminal)
     handlers: List[logging.Handler] = [logging.StreamHandler()]
 
-    # If file logging is enabled, add a rotating file handler
+    # If file logging is enabled, write system-wide logs to logs/system.log
     if cfg.log.file_enabled:
         from logging.handlers import RotatingFileHandler
-        log_path = cfg.storage.base_dir / cfg.log.file_name
-        # RotatingFileHandler automatically creates new files when size limit is hit
+
+        # Create logs directory if it doesn't exist
+        log_dir = cfg.storage.base_dir / cfg.log.log_dir
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # System log for non-scan events (startup, shutdown, config errors)
+        system_log_path = log_dir / cfg.log.system_log_name
         file_handler = RotatingFileHandler(
-            log_path,
+            system_log_path,
             maxBytes=cfg.log.max_file_size_mb * 1024 * 1024,  # Convert MB to bytes
             backupCount=cfg.log.backup_count,  # How many old files to keep
         )

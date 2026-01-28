@@ -209,7 +209,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, scan_id=session.id)
-                
+
+                # Close per-scan log file
+                session.close_log_file()
+
                 # Persist final session state including logs
                 db = Database.instance()
                 await db.init()
@@ -220,13 +223,16 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 state.scan_state["status"] = "cancelled"
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, scan_id=session.id)
-                
+
+                # Close per-scan log file
+                session.close_log_file()
+
                 # Persist final session state including logs
                 db = Database.instance()
                 await db.init()
                 await db.blackbox.enqueue(db._save_session_impl, session.to_dict())
                 await db.blackbox.flush()
-                
+
             except Exception as e:
                 state.scan_state["status"] = "error"
                 logger.error(f"Scan error: {e}", exc_info=True)
@@ -241,7 +247,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         scan_id=session.id,
                     )
                 )
-                
+
+                # Close per-scan log file
+                session.close_log_file()
+
                 # Persist final session state including logs
                 db = Database.instance()
                 await db.init()

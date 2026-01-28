@@ -19,8 +19,10 @@
 
 import uuid
 import time
+import re
+from pathlib import Path
 from threading import Lock
-from typing import Dict, Deque
+from typing import Dict, Deque, Optional
 from collections import deque
 import logging
 
@@ -30,6 +32,57 @@ from core.data.killchain_store import KillchainStore  # Tracks attack progressio
 from core.data.evidence_store import EvidenceStore  # Stores raw tool outputs
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_target_for_filename(target: str) -> str:
+    """
+    Convert a target URL/domain into a valid filename component.
+
+    Minimal sanitization - keeps target readable while making it filesystem-safe.
+    Examples:
+        "https://example.com/api" -> "example.com_api"
+        "localhost:3002" -> "localhost:3002"
+        "192.168.1.1" -> "192.168.1.1"
+    """
+    # Strip protocol prefix
+    result = re.sub(r'^https?://', '', target)
+    # Replace filesystem-invalid characters with underscore
+    result = re.sub(r'[/\\]', '_', result)
+    # Strip trailing underscores/dots
+    result = result.strip('_.')
+    return result
+
+
+def _generate_scan_log_path(target: str, log_dir: Path) -> Path:
+    """
+    Generate a unique log file path for a scan session.
+
+    Format: {target}-{M-DD-YY}.log
+    If file exists, adds counter: {target}-{M-DD-YY} (2).log
+
+    Args:
+        target: The scan target (URL, domain, IP)
+        log_dir: Directory where log files are stored
+
+    Returns:
+        Path to the log file (unique, doesn't overwrite existing)
+    """
+    sanitized = _sanitize_target_for_filename(target)
+    date_str = time.strftime("%-m-%d-%y")  # e.g., "1-26-26"
+
+    base_name = f"{sanitized}-{date_str}"
+    log_path = log_dir / f"{base_name}.log"
+
+    # If file exists, add counter suffix like macOS does
+    if log_path.exists():
+        counter = 2
+        while True:
+            log_path = log_dir / f"{base_name} ({counter}).log"
+            if not log_path.exists():
+                break
+            counter += 1
+
+    return log_path
 
 # Max logs to keep in memory per session
 MAX_SESSION_LOGS = 5000
@@ -86,14 +139,20 @@ class ScanSession:
         # Capped to avoid memory exhaustion on long-running scans
         self.logs: Deque[str] = deque(maxlen=MAX_SESSION_LOGS)
         self._log_overflow_warned = False
-        
+
         # Thread lock to prevent concurrent access corruption
         # Multiple threads might try to write logs at the same time, lock prevents conflicts
         self._logs_lock = Lock()
-        
+
         # Optional external log sink (function to call when new log is added)
         # Used to stream logs to UI in real-time (WebSocket, SSE, etc.)
         self._external_log_sink = None  # Will be set by ScanOrchestrator if needed
+
+        # Per-scan log file - each scan gets its own file in logs/
+        # Format: {target}-{date}.log (e.g., localhost:3002-1-26-26.log)
+        self._log_file: Optional[Path] = None
+        self._log_file_handle = None
+        self._init_log_file()
         
         # Ghost Protocol: Network traffic interceptor (proxy)
         # Captures HTTP/HTTPS traffic for analysis (like Burp Suite's proxy)
@@ -117,6 +176,63 @@ class ScanSession:
     def session_id(self) -> str:
         """Alias for self.id for compatibility with scanner_engine."""
         return self.id
+
+    def _init_log_file(self) -> None:
+        """
+        Initialize the per-scan log file.
+
+        Creates a log file in ~/.sentinelforge/logs/ with the format:
+        {target}-{M-DD-YY}.log (e.g., localhost:3002-1-26-26.log)
+        """
+        try:
+            from core.base.config import get_config
+            cfg = get_config()
+
+            if not cfg.log.file_enabled:
+                return
+
+            # Get log directory path
+            log_dir = cfg.storage.base_dir / cfg.log.log_dir
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate unique log file path
+            self._log_file = _generate_scan_log_path(self.target, log_dir)
+
+            # Open file for writing (append mode in case session is resumed)
+            self._log_file_handle = open(self._log_file, 'a', encoding='utf-8')
+
+            # Write session header
+            header = f"=== Scan Session: {self.id} ===\n"
+            header += f"Target: {self.target}\n"
+            header += f"Started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            header += "=" * 50 + "\n"
+            self._log_file_handle.write(header)
+            self._log_file_handle.flush()
+
+            logger.info(f"Session log file: {self._log_file}")
+        except Exception as e:
+            logger.warning(f"Failed to create session log file: {e}")
+            self._log_file = None
+            self._log_file_handle = None
+
+    def close_log_file(self) -> None:
+        """
+        Close the per-scan log file.
+
+        Call this when the scan session ends to flush and close the file handle.
+        """
+        if self._log_file_handle:
+            try:
+                # Write session footer
+                footer = "\n" + "=" * 50 + "\n"
+                footer += f"Session ended: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                footer += f"Status: {self.status}\n"
+                self._log_file_handle.write(footer)
+                self._log_file_handle.close()
+            except Exception as e:
+                logger.warning(f"Error closing session log file: {e}")
+            finally:
+                self._log_file_handle = None
 
     def start_ghost(self, port: int = 8080):
         """
@@ -172,7 +288,15 @@ class ScanSession:
                 self.logs.append(f"[{timestamp}] WARNING: Log limit ({MAX_SESSION_LOGS}) reached. Older logs will be dropped.")
                 self._log_overflow_warned = True
             self.logs.append(entry)
-            
+
+            # Write to per-scan log file
+            if self._log_file_handle:
+                try:
+                    self._log_file_handle.write(entry + "\n")
+                    self._log_file_handle.flush()
+                except Exception:
+                    pass  # Don't let file errors break logging
+
         # If UI is subscribed, send the log there too (real-time streaming)
         if self._external_log_sink:
             self._external_log_sink(entry)
