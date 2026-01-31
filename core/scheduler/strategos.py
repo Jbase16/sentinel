@@ -74,6 +74,7 @@ from core.scheduler.decisions import (
     DecisionType,
     DecisionPoint,
     create_decision_context,
+    get_decision_ledger,
 )
 from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.policy import ScopePolicy, RiskPolicy, Verdict
@@ -509,9 +510,9 @@ class Strategos:
         self._tool_semaphore = asyncio.Semaphore(self.context.max_concurrent)
 
         # Decision context
-        self._decision_ctx = create_decision_context(
+        self._decision_ctx = DecisionContext(
             event_bus=self._event_bus,
-            ledger=self._decision_ledger,
+            ledger=get_decision_ledger(),
             narrator=self._narrator,
             scan_id=self.context.scan_id,
             source="strategos",
@@ -595,6 +596,47 @@ class Strategos:
                 else:
                     await self._dispatch_tools_async(tools_to_run, intent=current_intent)
                     await self._wait_for_intent_completion()
+
+                # MANDATORY DECISION POINT: Assessment
+                # Even if we engaged no tools or found nothing, we must commit to an assessment.
+                # This ensures the Decision Ledger is never empty and explicitly records "Status Quo" choices.
+                if self._current_intent_decision:
+                    with self._decision_ctx.nested(self._current_intent_decision):
+                        has_findings = len(self.context.findings) > 0
+                        has_new_surface = self.context.surface_delta_this_intent > 0
+                        
+                        # Logic for assessment
+                        if mode == ScanMode.PASSIVE:
+                            chosen_action = "MAINTAIN_PASSIVE_SCOPE"
+                            rationale = "Passive mode restriction prevents escalation despite findings." if has_findings else "No triggers for escalation in passive mode."
+                            suppressed = ["ESCALATE_TO_ACTIVE"] if has_findings else []
+                        elif has_findings or has_new_surface:
+                             chosen_action = "CONTINUE_ENGAGEMENT"
+                             rationale = f"Novel surface or findings detected ({self.context.findings_this_intent} new)."
+                             suppressed = ["ABORT_ENGAGEMENT"]
+                        else:
+                            chosen_action = "CONCLUDE_PHASE"
+                            rationale = "No significant findings or surface expansion."
+                            suppressed = ["ESCALATE_INTENSITY"]
+
+                        # Explicitly cite evidence
+                        evidence_pkg = {
+                            "findings_total": len(self.context.findings),
+                            "findings_new": self.context.findings_this_intent,
+                            "surface_new": self.context.surface_delta_this_intent,
+                            "mode": mode.value
+                        }
+
+                        self._decision_ctx.choose(
+                             decision_type=DecisionType.ASSESSMENT,
+                             chosen=chosen_action,
+                             reason=rationale,
+                             alternatives=["ESCALATE", "ABORT", "MAINTAIN"],
+                             suppressed=suppressed,
+                             context={"intent": current_intent, "phase": new_phase},
+                             evidence=evidence_pkg,
+                             confidence=1.0 
+                        )
 
                 next_intent = self._decide_next_step(current_intent)
                 if next_intent is None:

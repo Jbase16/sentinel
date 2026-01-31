@@ -45,6 +45,7 @@ class DecisionType(str, Enum):
     MODE_ADAPTATION = "mode_adaptation"
     SCORING = "scoring"
     REACTIVE_SIGNAL = "reactive_signal"
+    ASSESSMENT = "assessment"
 
 
 # ============================================================================
@@ -65,11 +66,14 @@ class DecisionPoint:
     chosen: Any
     reason: str
     alternatives: List[Any] = field(default_factory=list)
+    suppressed: List[Any] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
     evidence: Dict[str, Any] = field(default_factory=dict)
+    triggers: List[str] = field(default_factory=list)
     parent_id: Optional[str] = None
     trigger_event_sequence: Optional[int] = None
-    timestamp: float = field(default_factory=time.monotonic)
+    confidence: float = 1.0
+    timestamp: float = field(default_factory=time.time)
     sequence: Optional[int] = None
 
     @classmethod
@@ -79,10 +83,13 @@ class DecisionPoint:
         chosen: Any,
         reason: str,
         alternatives: Optional[List[Any]] = None,
+        suppressed: Optional[List[Any]] = None,
         context: Optional[Dict[str, Any]] = None,
         evidence: Optional[Dict[str, Any]] = None,
+        triggers: Optional[List[str]] = None,
         parent_id: Optional[str] = None,
-        trigger_event_sequence: Optional[int] = None
+        trigger_event_sequence: Optional[int] = None,
+        confidence: float = 1.0,
     ) -> "DecisionPoint":
         return cls(
             id=str(uuid.uuid4()),
@@ -90,11 +97,14 @@ class DecisionPoint:
             chosen=chosen,
             reason=reason,
             alternatives=alternatives or [],
+            suppressed=suppressed or [],
             context=context or {},
             evidence=evidence or {},
+            triggers=triggers or [],
             parent_id=parent_id,
             trigger_event_sequence=trigger_event_sequence,
-            timestamp=time.monotonic(),
+            confidence=confidence,
+            timestamp=time.time(),
             sequence=None,
         )
 
@@ -105,40 +115,52 @@ class DecisionPoint:
             chosen=self.chosen,
             reason=self.reason,
             alternatives=self.alternatives,
+            suppressed=self.suppressed,
             context=self.context,
             evidence=self.evidence,
+            triggers=self.triggers,
             parent_id=self.parent_id,
             trigger_event_sequence=self.trigger_event_sequence,
+            confidence=self.confidence,
             timestamp=self.timestamp,
             sequence=sequence,
         )
 
     def to_event_payload(self) -> Dict[str, Any]:
+        """
+        Convert to strictly typed DecisionPayload (dict).
+        """
         payload: Dict[str, Any] = {
             "decision_id": self.id,
             "decision_type": self.type.value,
-            # Keep string for UI consistency, but preserve original too for internal consumers
-            "chosen": str(self.chosen),
-            "chosen_raw": self.chosen,
-            "reason": self.reason,
-            "context": self.context,
+            "selected_action": self.chosen,
+            "rationale": self.reason,
+            "confidence": self.confidence,
+            "alternatives_considered": self.alternatives,
+            "suppressed_actions": self.suppressed,
+            "triggers": self.triggers,
+            "scope": self.context,
+            "timestamp": self.timestamp,
         }
-
-        if self.alternatives:
-            payload["alternatives"] = [str(alt) for alt in self.alternatives]
-            payload["alternatives_raw"] = list(self.alternatives)
-
+        
+        # Add optional extras if needed by consumers, but the above satisfies DecisionPayload
         if self.evidence:
-            payload["evidence"] = self.evidence
+             # Merge evidence into generic scope? Or keep separate if payload allows?
+             # DecisionPayload defined 'scope' as dict. We have evidence separate in DecisionPoint.
+             # We can add evidence to scope or just allow extra fields if we loosen ConfigDict.
+             # But ConfigDict is forbid. 
+             # Wait, I defined DecisionPayload in schemas.py.
+             # Does DecisionPayload have 'evidence'? No.
+             # It acts as a strict contract. Evidence should probably go into 'scope' or we add 'evidence' to payload.
+             # I should add 'evidence' to DecisionPayload.
+             # But for now I will put it in scope.
+             payload["scope"]["_evidence"] = self.evidence
 
-        if self.parent_id is not None:
-            payload["parent_decision_id"] = self.parent_id
+        if self.parent_id:
+             payload["scope"]["_parent_id"] = self.parent_id
 
-        if self.trigger_event_sequence is not None:
-            payload["trigger_event_sequence"] = self.trigger_event_sequence
-
-        if self.sequence is not None:
-            payload["sequence"] = self.sequence
+        if self.sequence:
+             payload["scope"]["_sequence"] = self.sequence
 
         return payload
 
@@ -192,8 +214,15 @@ class DecisionLedger:
                 "chosen": committed.chosen,
                 "reason": committed.reason,
                 "alternatives": committed.alternatives,
-                "context": committed.context,
-                "evidence": committed.evidence,
+                "context": {
+                    **committed.context,
+                    "suppressed": committed.suppressed,
+                    "confidence": committed.confidence,
+                },
+                "evidence": {
+                    **committed.evidence,
+                    "triggers": committed.triggers,
+                },
                 "parent_id": committed.parent_id,
                 "trigger_event_sequence": committed.trigger_event_sequence,
                 "timestamp": committed.timestamp,
@@ -235,10 +264,13 @@ class DecisionLedger:
                         chosen=r.get("chosen"),
                         reason=r.get("reason", ""),
                         alternatives=r.get("alternatives") or [],
+                        suppressed=r.get("suppressed") or [],
                         context=r.get("context") or {},
                         evidence=r.get("evidence") or {},
+                        triggers=r.get("triggers") or [],
                         parent_id=r.get("parent_id"),
                         trigger_event_sequence=r.get("trigger_event_sequence"),
+                        confidence=r.get("confidence", 1.0),
                         timestamp=r.get("timestamp", 0.0),
                         sequence=r.get("sequence"),
                     )
@@ -331,9 +363,12 @@ class DecisionContext:
         chosen: Any,
         reason: str,
         alternatives: Optional[List[Any]] = None,
+        suppressed: Optional[List[Any]] = None,
         context: Optional[Dict[str, Any]] = None,
         evidence: Optional[Dict[str, Any]] = None,
+        triggers: Optional[List[str]] = None,
         trigger_event_sequence: Optional[int] = None,
+        confidence: float = 1.0,
         defer: bool = False,
     ) -> DecisionPoint:
         parent_id = self._parent_stack[-1] if self._parent_stack else None
@@ -343,10 +378,13 @@ class DecisionContext:
             chosen=chosen,
             reason=reason,
             alternatives=alternatives,
+            suppressed=suppressed,
             context=context,
             evidence=evidence,
+            triggers=triggers,
             parent_id=parent_id,
             trigger_event_sequence=trigger_event_sequence,
+            confidence=confidence,
         )
 
         if defer:

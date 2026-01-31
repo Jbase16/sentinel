@@ -260,6 +260,37 @@ class HypothesisPayload(EventPayload):
     
 
 # ---------------------------------------------------------------------------
+# Decision Layer (Strategos)
+# ---------------------------------------------------------------------------
+
+class DecisionPayload(EventPayload):
+    """
+    Payload for DECISION_MADE.
+    Represents a concrete, reputable strategic commitment by the system.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    # Identity
+    decision_id: str = Field(..., description="Unique ID of the decision")
+    scan_id: Optional[str] = Field(None, description="Scope: Scan ID")
+    
+    # Core Logic
+    decision_type: str = Field(..., description="Type of decision (e.g. intent_transition, tool_selection)")
+    selected_action: Any = Field(..., description="The option that was chosen")
+    rationale: str = Field(..., description="Why this option was chosen")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in this decision")
+    
+    # Context & Options
+    alternatives_considered: List[Any] = Field(default_factory=list, description="Options that were available")
+    suppressed_actions: List[Any] = Field(default_factory=list, description="Options explicitly rejected/suppressed")
+    
+    # Causality
+    triggers: List[str] = Field(default_factory=list, description="IDs of events/findings that triggered this decision")
+    scope: Dict[str, Any] = Field(default_factory=dict, description="Scope/Context (phase, target, etc)")
+    timestamp: float = Field(default_factory=time.time, description="When decision was made")
+
+
+# ---------------------------------------------------------------------------
 # Cronus (Time Machine)
 # ---------------------------------------------------------------------------
 

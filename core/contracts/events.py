@@ -44,7 +44,9 @@ from core.contracts.schemas import (
     MimicAnalysisCompletedPayload,
     HypothesisPayload,
     InsightPayload,
-    InsightActionType
+    InsightPayload,
+    InsightActionType,
+    DecisionPayload
 )
 
 logger = logging.getLogger(__name__)
@@ -494,12 +496,7 @@ class EventContract:
         cls._schemas[EventType.DECISION_MADE] = EventSchema(
             event_type=EventType.DECISION_MADE,
             description="Strategos made a strategic decision.",
-            fields=[
-                FieldSpec("intent", str, required=True),
-                FieldSpec("reason", str, required=True),
-                FieldSpec("context", dict, required=False),
-                FieldSpec("source", str, required=False),
-            ]
+            model=DecisionPayload
         )
 
         cls._schemas[EventType.NARRATIVE_EMITTED] = EventSchema(

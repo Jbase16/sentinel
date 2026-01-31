@@ -39,6 +39,7 @@ from core.data.killchain_store import killchain_store
 from core.data.risk import risk_engine
 from core.cortex.reasoning import reasoning_engine
 from core.ai.ai_engine import AIEngine
+from core.scheduler.decisions import get_decision_ledger, DecisionType
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,12 @@ class ReportComposer:
             "Use Markdown formatting."
         )
 
-        result = await self.ai.client.generate_text(user_prompt, system_prompt)
-        return result or "AI Generation failed."
+        try:
+            result = await self.ai.client.generate_text(user_prompt, system_prompt)
+            return result or "AI Generation failed (Empty response)."
+        except Exception as e:
+            logger.error(f"[ReportComposer] AI generation failed for {section_name}: {e}")
+            return self._fallback_content(section_name, context)
 
     async def generate_async(self, report_type: str = "full", format: str = "markdown") -> str:
         """
@@ -149,12 +154,21 @@ class ReportComposer:
 
     def _gather_context(self) -> Dict:
         """Function _gather_context."""
+        ledger = get_decision_ledger()
+        # Filter for high-level decisions to avoid flooding context
+        decisions = [
+            d.to_event_payload() 
+            for d in ledger.get_all() 
+            if d.type in (DecisionType.INTENT_TRANSITION, DecisionType.PHASE_TRANSITION, DecisionType.ASSESSMENT)
+        ]
+        
         return {
             "findings": findings_store.get_all(),
             "issues": issues_store.get_all(),
             "risk": risk_engine.get_scores(),
             "killchain": killchain_store.get_all(),
-            "reasoning": reasoning_engine.analyze()
+            "reasoning": reasoning_engine.analyze(),
+            "decisions": decisions
         }
 
     # --- Prompts ---
@@ -162,12 +176,21 @@ class ReportComposer:
     def _prompt_exec_summary(self, ctx: Dict) -> str:
         """Function _prompt_exec_summary."""
         issues = ctx.get("issues", [])
+        decisions = ctx.get("decisions", [])
+        
+        # Summarize key decisions
+        decision_summary = "Key Strategic Decisions:\n" + "\n".join([
+            f"- [{d['decision_type']}] {d['selected_action']}: {d['rationale']}"
+            for d in decisions[-5:] # Last 5 major decisions
+        ])
+
         return (
             f"Write an Executive Summary for a security assessment.\n"
             f"Context: Found {len(issues)} confirmed issues. "
-            f"Top risks: {', '.join([i.get('title', '') for i in issues[:3]])}.\n"
-            "Summarize the overall security posture, highlight the most critical risks, and "
-            "explain the potential business impact of these vulnerabilities being exploited."
+            f"Top risks: {', '.join([i.get('title', '') for i in issues[:3]])}.\n\n"
+            f"{decision_summary}\n\n"
+            "Summarize the overall security posture and Strategos' decision-making process. "
+            "Explain *why* the system took the actions it did (e.g. why it escalated or maintained scope)."
         )
 
     def _prompt_attack_narrative(self, ctx: Dict) -> str:

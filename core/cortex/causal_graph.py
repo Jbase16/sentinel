@@ -32,6 +32,7 @@ Fix Impact of 1: 2 attack paths disabled (1→2 and 1→2→3)
 """
 
 import networkx as nx
+import json
 from typing import List, Dict, Set, Tuple, Any, Optional
 from dataclasses import dataclass
 from collections import defaultdict
@@ -136,6 +137,46 @@ class CausalGraphBuilder:
 
         logger.info(f"[CausalGraph] Built graph: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
         return self.graph
+
+    def build_decisions(self, decisions: List[Dict[str, Any]]) -> None:
+        """
+        Add decision nodes and edges to the graph.
+        """
+        import json
+        for d in decisions:
+            label = f"[{d.get('type','DECISION')}] {d.get('chosen','Unknown')}"
+            node_data = {
+                "reason": d.get("reason"),
+                "confidence": d.get("context", {}).get("confidence", 1.0),
+                "timestamp": d.get("timestamp"),
+                # Physics for UI
+                "mass": 2.0,
+                "charge": 40.0,
+                "color": "#9C27B0" # Purple for decisions
+            }
+            
+            self.graph.add_node(
+                d["id"],
+                type="decision",
+                title=label, # Use title for UI label consistency
+                severity="info", # Decisions aren't vulns
+                target=d.get("context", {}).get("target", "system"),
+                data=node_data
+            )
+
+            # Link triggers (Evidence -> Decision)
+            # Triggers are finding IDs or event IDs.
+            # We assume triggers in evidence['triggers']
+            evidence = d.get("evidence", {})
+            triggers = evidence.get("triggers", [])
+            for trigger_id in triggers:
+                if trigger_id in self.graph:
+                     self.graph.add_edge(trigger_id, d["id"], relationship="triggered")
+
+            # Link parent (Decision -> Decision)
+            parent_id = d.get("parent_id")
+            if parent_id and parent_id in self.graph:
+                self.graph.add_edge(parent_id, d["id"], relationship="caused")
 
     def update_from_event(self, event: Any): # Type: EpistemicEvent
         """
@@ -403,6 +444,8 @@ class CausalGraphBuilder:
         nodes = []
         for node in self.graph.nodes():
             finding = self.findings_map.get(node)
+            graph_attrs = self.graph.nodes[node]
+            
             if finding:
                 sev_map = {"critical": 1.0, "high": 0.8, "medium": 0.5, "low": 0.2, "info": 0.0}
                 node_data = {
@@ -423,7 +466,37 @@ class CausalGraphBuilder:
                 nodes.append({
                     "id": finding.id,
                     "label": finding.title,
-                    "type": finding.type,
+                    "type": "decision" if finding.type == "decision" else finding.type,
+                    "data": node_data
+                })
+            else:
+                # Fallback for Decision Nodes or other non-finding nodes
+                # Use attributes stored directly on graph node
+                node_type = graph_attrs.get("type", "unknown")
+                node_label = graph_attrs.get("title", str(node))
+                node_data_raw = graph_attrs.get("data", {})
+                
+                # Check for physics attributes in data or root attrs
+                mass = node_data_raw.get("mass", 1.0)
+                charge = node_data_raw.get("charge", 30.0)
+                
+                # Construct data block
+                node_data = {
+                    "severity": 0.0, 
+                    "exposure": 0.5,
+                    "exploitability": 0.5, 
+                    "description": node_data_raw.get("reason", ""),
+                    "mass": mass,
+                    "charge": charge,
+                    "structural": False
+                }
+                # Merge rest of data
+                node_data.update({k: v for k, v in node_data_raw.items() if k not in node_data})
+
+                nodes.append({
+                    "id": node,
+                    "label": node_label,
+                    "type": node_type,
                     "data": node_data
                 })
         
@@ -512,10 +585,17 @@ class CausalGraphBuilder:
         # Add nodes with labels and colors
         for node in self.graph.nodes():
             finding = self.findings_map.get(node)
+            graph_attrs = self.graph.nodes[node]
+            
             if finding:
                 color = severity_colors.get(finding.severity.lower(), '#CCCCCC')
                 label = finding.title.replace('"', '\\"')[:50]  # Truncate long titles
                 output.write(f'  "{node}" [label="{label}", fillcolor="{color}"];\n')
+            else:
+                 # Fallback
+                 color = graph_attrs.get("data", {}).get("color", "#CCCCCC")
+                 label = graph_attrs.get("title", str(node)).replace('"', '\\"')[:50]
+                 output.write(f'  "{node}" [label="{label}", fillcolor="{color}"];\n')
 
         # Add edges
         for source, target in self.graph.edges():
@@ -614,5 +694,35 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
         logger.info(f"[CausalGraph] Final graph: {dto['count']['nodes']} nodes, {dto['count']['edges']} edges")
     else:
         logger.info(f"[CausalGraph] No persisted edges found in database for session {session_id}")
+
+    # Fetch decisions and add to graph
+    try:
+        # Use json_extract to filter by scan_id/session_id
+        decision_rows = await db.fetch_all(
+            "SELECT id, type, chosen, reason, evidence, parent_id, timestamp, context FROM decisions WHERE json_extract(context, '$.scan_id') = ? OR json_extract(context, '$.session_id') = ?",
+            (session_id, session_id)
+        )
+        decisions = []
+        for row in decision_rows:
+            decisions.append({
+                "id": row[0],
+                "type": row[1],
+                "chosen": row[2],
+                "reason": row[3],
+                "evidence": json.loads(row[4]) if row[4] else {},
+                "parent_id": row[5],
+                "timestamp": row[6],
+                "context": json.loads(row[7]) if row[7] else {}
+            })
+        
+        if decisions:
+            logger.info(f"[CausalGraph] Adding {len(decisions)} decisions to graph")
+            builder.build_decisions(decisions)
+            
+            # Re-export DTO to include decision nodes/edges
+            dto = builder.export_dto(session_id=session_id)
+            
+    except Exception as e:
+        logger.warning(f"[CausalGraph] Failed to add decisions: {e}")
 
     return dto

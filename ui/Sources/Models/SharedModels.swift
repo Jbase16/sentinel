@@ -185,3 +185,43 @@ public struct ChatThread: Identifiable, Codable, Hashable {
         streamBuffer = ""
     }
 }
+
+// MARK: - Decisions
+
+public struct Decision: Identifiable, Codable, Equatable {
+    public let id: String
+    public let scanId: String?
+    public let type: String
+    public let selectedAction: String
+    public let rationale: String
+    public let confidence: Double
+    public let alternatives: [String]?
+    public let suppressed: [String]?
+    public let timestamp: Date
+    // Simplified evidence map for UI display (keys + stringified values)
+    public let evidence: [String: String]?
+
+    public init(
+        id: String,
+        scanId: String?,
+        type: String,
+        selectedAction: String,
+        rationale: String,
+        confidence: Double,
+        alternatives: [String]?,
+        suppressed: [String]?,
+        timestamp: Date,
+        evidence: [String: String]?
+    ) {
+        self.id = id
+        self.scanId = scanId
+        self.type = type
+        self.selectedAction = selectedAction
+        self.rationale = rationale
+        self.confidence = confidence
+        self.alternatives = alternatives
+        self.suppressed = suppressed
+        self.timestamp = timestamp
+        self.evidence = evidence
+    }
+}

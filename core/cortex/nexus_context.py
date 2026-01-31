@@ -47,7 +47,7 @@ class NexusContext:
         self.bus = get_event_bus()
         self._emitted_hypotheses: Set[str] = set()
         self._active_hypotheses: Dict[str, Set[str]] = {}  # hyp_id -> set(finding_ids)
-        self.bus.subscribe(self._handle_event)
+        self.bus.subscribe_async(self._handle_event)
 
     # ---------------------------------------------------------------------
     # Event Handling
