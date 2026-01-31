@@ -152,6 +152,7 @@ class ScanSession:
         # Format: {target}-{date}.log (e.g., localhost:3002-1-26-26.log)
         self._log_file: Optional[Path] = None
         self._log_file_handle = None
+        self._logging_handler: Optional[logging.FileHandler] = None
         self._init_log_file()
         
         # Ghost Protocol: Network traffic interceptor (proxy)
@@ -209,6 +210,12 @@ class ScanSession:
             self._log_file_handle.write(header)
             self._log_file_handle.flush()
 
+            # Attach a handler to Python's root logger so all logger.info() etc.
+            # calls throughout the codebase also write to this scan's log file
+            self._logging_handler = logging.FileHandler(self._log_file, mode='a', encoding='utf-8')
+            self._logging_handler.setFormatter(logging.Formatter(cfg.log.format))
+            logging.getLogger().addHandler(self._logging_handler)
+
             logger.info(f"Session log file: {self._log_file}")
         except Exception as e:
             logger.warning(f"Failed to create session log file: {e}")
@@ -221,6 +228,16 @@ class ScanSession:
 
         Call this when the scan session ends to flush and close the file handle.
         """
+        # Remove the logging handler from root logger first
+        if self._logging_handler:
+            try:
+                logging.getLogger().removeHandler(self._logging_handler)
+                self._logging_handler.close()
+            except Exception:
+                pass
+            finally:
+                self._logging_handler = None
+
         if self._log_file_handle:
             try:
                 # Write session footer

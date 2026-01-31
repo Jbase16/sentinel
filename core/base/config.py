@@ -40,7 +40,7 @@ class AIConfig:
     ollama_url: str = "http://localhost:11434"
     model: str = "sentinel-9b-god-tier"
     fallback_enabled: bool = True
-    request_timeout: float = 300.0
+    request_timeout: float = 30.0
     max_concurrent_requests: int = 2
 
 # Security & Access Control Configuration
