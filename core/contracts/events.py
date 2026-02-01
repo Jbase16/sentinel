@@ -46,8 +46,11 @@ from core.contracts.schemas import (
     InsightPayload,
     InsightPayload,
     InsightActionType,
-    DecisionPayload
+    DecisionPayload,
+    EventSchema, 
+    FieldSpec 
 )
+from core.contracts.audit import SystemSelfAudit
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +513,12 @@ class EventContract:
                 FieldSpec("decision_id", str, required=False),
                 FieldSpec("decision_type", str, required=False),
             ]
+        )
+        
+        cls._schemas[EventType.SYSTEM_SELF_AUDIT_CREATED] = EventSchema(
+            event_type=EventType.SYSTEM_SELF_AUDIT_CREATED,
+            description="Post-scan system self-audit artifact created.",
+            model=SystemSelfAudit
         )
 
         # ----------------------------------------------------------------
