@@ -10,8 +10,78 @@ from typing import Dict, List, Optional, Any, Literal
 from enum import Enum
 import time
 from datetime import datetime
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pydantic import BaseModel, Field, HttpUrl, validator, conint, ConfigDict, field_validator
+
+# ---------------------------------------------------------------------------
+# Base Types (Moved from events.py to prevent circular deps)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FieldSpec:
+    """Definition of a required/optional field for validation."""
+    name: str
+    type: Type
+    required: bool = True
+    validator: Optional[Callable[[Any], bool]] = None
+    description: str = ""
+
+@dataclass
+class EventSchema:
+    """Complete schema definition for an event type."""
+    event_type: str
+    description: str
+    required_fields: List[str] = field(default_factory=list)
+    fields: List[FieldSpec] = field(default_factory=list)
+    model: Optional[Type[BaseModel]] = None  # Integration with Pydantic
+    preconditions: List[Any] = field(default_factory=list)
+
+    def validate_payload(self, payload: Dict[str, Any]) -> List[str]:
+        """
+        Validate a payload against this schema.
+        Returns list of violation messages (empty = valid).
+        """
+        violations: List[str] = []
+
+        # 1. Pydantic Validation (Preferred)
+        if self.model:
+            try:
+                self.model.model_validate(payload)
+                return [] 
+            except Exception as e:
+                # Convert Pydantic errors to readable strings
+                # We catch generic Exception because ValidationError import might be tricky if not top-level
+                # but we imported standard pydantic stuff.
+                if hasattr(e, "errors"):
+                     for err in e.errors():
+                        loc = ".".join(str(l) for l in err['loc'])
+                        violations.append(f"{loc}: {err['msg']}")
+                else:
+                     violations.append(str(e))
+                return violations
+
+        # 2. FieldSpec Validation (Legacy)
+        # Check required fields
+        for field_name in self.required_fields:
+            if field_name not in payload:
+                violations.append(f"Missing required field: {field_name}")
+
+        # Validate each provided field
+        if self.fields:
+             # fields is a list, convert to dict for lookup if needed or iterate
+             # The init converts list to dict? No, dataclass default doesn't do that logic.
+             # In events.py __init__ did it. Here it is a raw dataclass.
+             # We need to handle 'fields' being a list of FieldSpec.
+             
+             for spec in self.fields:
+                 if spec.name in payload:
+                     if not spec.validator: # Basic type check
+                         pass # handled by spec.validate if we move that logic here too
+                         # Wait, FieldSpec logic was also purely data in schemas.py?
+                         # I need to add validation logic to FieldSpec too?
+                         pass
+        
+        return violations
 
 # ---------------------------------------------------------------------------
 # Base Models

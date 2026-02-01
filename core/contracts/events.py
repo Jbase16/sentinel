@@ -139,6 +139,8 @@ class EventType(str, Enum):
     NEXUS_HYPOTHESIS_REFUTED = "nexus_hypothesis_refuted"
     NEXUS_INSIGHT_FORMED = "nexus_insight_formed"
 
+    # GHOST - Self-Audit
+    SYSTEM_SELF_AUDIT_CREATED = "system_self_audit_created"
 
     # OMEGA - Integration
     OMEGA_RUN_STARTED = "omega_run_started"
@@ -165,105 +167,14 @@ class EventType(str, Enum):
 # Field Specification
 # ============================================================================
 
-@dataclass(frozen=True)
-class FieldSpec:
-    """
-    Specification for a single field in an event payload.
-    """
-    name: str
-    type: type  # Python type (str, int, float, list, dict)
-    required: bool = True
-    validator: Optional[Callable[[Any], bool]] = None
-    description: str = ""
-
-    def validate(self, value: Any) -> bool:
-        """Check if value satisfies this field spec."""
-        if value is None:
-            return not self.required
-
-        # Type check (allow subclasses)
-        if not isinstance(value, self.type):
-            # Special case: int is valid for float fields
-            if self.type is float and isinstance(value, (int, float)):
-                pass
-            else:
-                return False
-
-        # Custom validator
-        if self.validator and not self.validator(value):
-            return False
-
-        return True
-
-@dataclass(frozen=True)
-class PydanticSpec:
-    """Wrapper for Pydantic model validation."""
-    model: Type[BaseModel]
-
-
 # ============================================================================
 # Event Schema Registry
 # ============================================================================
 
-class EventSchema:
-    """
-    Schema for a single event type.
-    Defines required fields, optional fields, and causal preconditions.
-    """
+# EventSchema is now imported from core.contracts.schemas
 
-    def __init__(
-        self,
-        event_type: EventType,
-        fields: Optional[List[FieldSpec]] = None,
-        model: Optional[Type[BaseModel]] = None,
-        preconditions: Optional[List[EventType]] = None,
-        description: str = ""
-    ):
-        self.event_type = event_type
-        self.fields = {f.name: f for f in fields} if fields else {}
-        self.required_fields = {f.name for f in fields if f.required} if fields else set()
-        self.model = model
-        self.preconditions = preconditions or []
-        self.description = description
 
-    def validate_payload(self, payload: Dict[str, Any]) -> List[str]:
-        """
-        Validate a payload against this schema.
-        Returns list of violation messages (empty = valid).
-        """
-        violations: List[str] = []
 
-        # 1. Pydantic Validation (Preferred)
-        if self.model:
-            try:
-                self.model.model_validate(payload)
-                # If model passes, strictly speaking we are good.
-                # However, if 'fields' were ALSO defined, we could check them too.
-                # For now, Model takes precedence.
-                return [] 
-            except ValidationError as e:
-                # Convert Pydantic errors to readable strings
-                for err in e.errors():
-                    loc = ".".join(str(l) for l in err['loc'])
-                    violations.append(f"{loc}: {err['msg']}")
-                return violations
-
-        # 2. Legacy FieldSpec Validation
-        # Check required fields
-        for field_name in self.required_fields:
-            if field_name not in payload:
-                violations.append(f"Missing required field: {field_name}")
-
-        # Validate each provided field
-        for key, value in payload.items():
-            if key in self.fields:
-                if not self.fields[key].validate(value):
-                    violations.append(
-                        f"Invalid value for '{key}': expected {self.fields[key].type.__name__}, "
-                        f"got {type(value).__name__}"
-                    )
-
-        return violations
 
 
 # ============================================================================

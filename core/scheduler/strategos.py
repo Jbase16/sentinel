@@ -63,6 +63,7 @@ from core.scheduler.intents import (
     INTENT_VULN_SCANNING,
     INTENT_HEAVY_ARTILLERY,
 )
+from core.cortex.nexus_context import NexusContext
 from core.scheduler.events import ToolCompletedEvent, MissionTerminatedEvent
 from core.cortex.events import EventBus, GraphEvent, get_run_id
 from core.contracts.schemas import InsightPayload, InsightActionType, InsightQueueStats
@@ -683,6 +684,26 @@ class Strategos:
                 f"dropped={stats.dropped_count}, "
                 f"breaker={stats.circuit_breaker_state}"
             )
+            
+            # Phase 7: System Self-Audit
+            # Deterministic, replayable artifact emission
+            if self.context and not self._stop_requested: # Only audit completed scans? Or all? User said "scan end".
+                 # Even cancelled scans should be audited for what happened.
+                 try:
+                     # For replay determinism, we need the event sequence number.
+                     # EventBus tracks this in persistence, but we don't have a direct handle to "last sequence ID" here cleanly.
+                     # We'll rely on the AuditBuilder to just use 0 or fetch from ledger if possible, 
+                     # or let NexusContext handle it via bus state if it knew it. 
+                     # For now, pass 0 or current timestamp-derived sequence. 
+                     # Replay determinism relies on the INPUTS being the same.
+                     # We will pass a placeholder sequence since Strategos doesn't track sequence IDs directly.
+                     NexusContext.instance().audit_scan(
+                         scan_id=self.context.scan_id,
+                         session_id=get_run_id(),
+                         sequence_end=0 # TODO: Get real sequence number from persistence layer
+                     )
+                 except Exception as e:
+                     logger.error(f"[Strategos] Failed to emit System Self-Audit: {e}")
 
         reason = "Mission Complete. All intents exhausted or Walk Away triggered."
         if self._stop_requested:

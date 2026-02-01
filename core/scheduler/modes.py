@@ -26,6 +26,7 @@ class ScanMode(Enum):
     STANDARD = "standard"
     BUG_BOUNTY = "bug_bounty"
     STEALTH = "stealth"
+    PASSIVE = "passive"
 
 @dataclass
 class ToolOverlay:
