@@ -197,9 +197,10 @@ public struct Decision: Identifiable, Codable, Equatable {
     public let confidence: Double
     public let alternatives: [String]?
     public let suppressed: [String]?
+    public let sequence: Int?
+    public let triggers: [String]?
     public let timestamp: Date
-    // Simplified evidence map for UI display (keys + stringified values)
-    public let evidence: [String: String]?
+    public let evidence: [String: AnyCodable]?
 
     public init(
         id: String,
@@ -210,8 +211,10 @@ public struct Decision: Identifiable, Codable, Equatable {
         confidence: Double,
         alternatives: [String]?,
         suppressed: [String]?,
+        sequence: Int?,
+        triggers: [String]?,
         timestamp: Date,
-        evidence: [String: String]?
+        evidence: [String: AnyCodable]?
     ) {
         self.id = id
         self.scanId = scanId
@@ -221,7 +224,22 @@ public struct Decision: Identifiable, Codable, Equatable {
         self.confidence = confidence
         self.alternatives = alternatives
         self.suppressed = suppressed
+        self.sequence = sequence
+        self.triggers = triggers
         self.timestamp = timestamp
         self.evidence = evidence
+    }
+
+    public static func == (lhs: Decision, rhs: Decision) -> Bool {
+        // Approximate equality check since AnyCodable is not strictly Equatable automatically
+        // without some boilerplate, but for UI dedup ID is enough.
+        // We will conform strict logic if Equatable conformance fails compile.
+        // AnyCodable is not Equatable in the file provided above,
+        // so we must remove derived Equatable or implement it manually.
+        // Or we can rely on ID.
+        // Actually SharedModels says `struct Decision: ... Equatable`.
+        // If AnyCodable isn't Equatable, this crashes.
+        // Let's drop Equatable for now or implement it based on ID.
+        return lhs.id == rhs.id
     }
 }

@@ -54,6 +54,9 @@ public class HelixAppState: ObservableObject {
     /// Log items
     @Published var apiLogItems: [LogItem] = []
 
+    /// Decisions
+    @Published var decisions: [Decision] = []
+
     // Services
     let eventClient = EventStreamClient()
     let apiClient: SentinelAPIClient
@@ -163,6 +166,7 @@ public class HelixAppState: ObservableObject {
                     // Update scan-running state from the authoritative scan lifecycle events.
                     switch event.eventType {
                     case .scanStarted:
+                        self.decisions.removeAll()  // Clear old decisions
                         self.isScanRunning = true
                         self.scanStartTime = Date(timeIntervalSince1970: event.timestamp)
                         let target = event.payload["target"]?.stringValue ?? "unknown"
@@ -175,7 +179,7 @@ public class HelixAppState: ObservableObject {
                         // Delay graph refresh to allow session initialization to complete
                         // Prevents "badStatus" error when graph endpoint is called before session is ready
                         Task {
-                            try? await Task.sleep(nanoseconds: 500_000_000) // 500ms delay
+                            try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms delay
                             await MainActor.run {
                                 self.refreshGraph()
                             }
@@ -203,13 +207,55 @@ public class HelixAppState: ObservableObject {
                             self.apiLogItems.append(LogItem(id: UUID(), text: text))
                         }
                     case .decisionMade:
-                        if let intent = event.payload["intent"]?.stringValue,
-                            let reason = event.payload["reason"]?.stringValue
-                        {
-                            let text = "🧠 [Decision] \(intent) → \(reason)"
-                            self.apiLogs.append(text)
-                            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+                        // Extract rich decision data
+                        let payload = event.payload
+                        let id = payload["decision_id"]?.stringValue ?? UUID().uuidString
+                        let type = payload["decision_type"]?.stringValue ?? "unknown"
+                        let action = payload["selected_action"]?.stringValue ?? "unknown"
+                        let reason = payload["rationale"]?.stringValue ?? "No rationale provided"
+                        let conf = payload["confidence"]?.doubleValue ?? 1.0
+
+                        // Lists need safer casting from AnyCodable array
+                        let alts = (payload["alternatives_considered"]?.value as? [Any])?.map {
+                            "\($0)"
                         }
+                        let supp = (payload["suppressed_actions"]?.value as? [Any])?.map { "\($0)" }
+                        let triggers = (payload["triggers"]?.value as? [Any])?.map { "\($0)" }
+
+                        // Sequence might be mixed type
+                        let seq =
+                            payload["scope"]?.dictValue?["_sequence"] as? Int
+                            ?? (payload["scope"]?.dictValue?["_sequence"] as? Double).map {
+                                Int($0)
+                            }
+
+                        // Evidence
+                        let evidence = payload["evidence"]?.dictValue?.reduce(
+                            into: [String: AnyCodable]()
+                        ) {
+                            $0[$1.key] = AnyCodable($1.value)
+                        }
+
+                        let decision = Decision(
+                            id: id,
+                            scanId: payload["scan_id"]?.stringValue,
+                            type: type,
+                            selectedAction: action,
+                            rationale: reason,
+                            confidence: conf,
+                            alternatives: alts,
+                            suppressed: supp,
+                            sequence: seq,
+                            triggers: triggers,
+                            timestamp: Date(timeIntervalSince1970: event.timestamp),
+                            evidence: evidence
+                        )
+
+                        self.decisions.insert(decision, at: 0)  // Newest first for UI stream? Or append? Plan said "List". Default to newest top for "Live Feed".
+
+                        let text = "🧠 [Decision] \(type) → \(action)"
+                        self.apiLogs.append(text)
+                        self.apiLogItems.append(LogItem(id: UUID(), text: text))
                     case .actionNeeded:
                         if let action = self.decodeAction(from: event.payload) {
                             if !self.pendingActions.contains(where: { $0.id == action.id }) {
@@ -335,7 +381,9 @@ public class HelixAppState: ObservableObject {
                 } else {
                     // 204 No Content is normal during scan initialization
                     // Session may not be fully created yet
-                    print("[AppState] Graph refresh returned nil (204 No Content - session not ready yet)")
+                    print(
+                        "[AppState] Graph refresh returned nil (204 No Content - session not ready yet)"
+                    )
                 }
             } catch {
                 // Don't log errors as warnings during scan startup
@@ -470,7 +518,8 @@ public class HelixAppState: ObservableObject {
                         // 2. New results have > 0 findings (always accept non-empty data), OR
                         // 3. New results have >= findings count (never go backwards), OR
                         // 4. Scan is not running (allow full replacement when scan is complete)
-                        let shouldUpdate = self.apiResults == nil
+                        let shouldUpdate =
+                            self.apiResults == nil
                             || newFindingsCount > 0  // NEW: Always accept non-zero findings
                             || newFindingsCount >= currentFindingsCount
                             || !self.isScanRunning
@@ -598,6 +647,7 @@ public class HelixAppState: ObservableObject {
         isScanRunning = false
         activeBreachTarget = nil
         pendingActions.removeAll()
+        decisions.removeAll()
         // Note: We don't reset `allEvents`, that's our source of truth!
 
         // 2. Re-apply events up to cursor

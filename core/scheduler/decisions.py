@@ -139,12 +139,13 @@ class DecisionPoint:
             "alternatives_considered": self.alternatives,
             "suppressed_actions": self.suppressed,
             "triggers": self.triggers,
+            "evidence": self.evidence,
             "scope": self.context,
             "timestamp": self.timestamp,
         }
         
         # Add optional extras if needed by consumers, but the above satisfies DecisionPayload
-        if self.evidence:
+        # if self.evidence:
              # Merge evidence into generic scope? Or keep separate if payload allows?
              # DecisionPayload defined 'scope' as dict. We have evidence separate in DecisionPoint.
              # We can add evidence to scope or just allow extra fields if we loosen ConfigDict.
@@ -154,7 +155,7 @@ class DecisionPoint:
              # It acts as a strict contract. Evidence should probably go into 'scope' or we add 'evidence' to payload.
              # I should add 'evidence' to DecisionPayload.
              # But for now I will put it in scope.
-             payload["scope"]["_evidence"] = self.evidence
+             # payload["scope"]["_evidence"] = self.evidence
 
         if self.parent_id:
              payload["scope"]["_parent_id"] = self.parent_id

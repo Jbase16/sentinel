@@ -286,6 +286,7 @@ class DecisionPayload(EventPayload):
     
     # Causality
     triggers: List[str] = Field(default_factory=list, description="IDs of events/findings that triggered this decision")
+    evidence: Dict[str, Any] = Field(default_factory=dict, description="Supporting data (metrics, errors, etc)")
     scope: Dict[str, Any] = Field(default_factory=dict, description="Scope/Context (phase, target, etc)")
     timestamp: float = Field(default_factory=time.time, description="When decision was made")
 

@@ -41,7 +41,7 @@ struct DashboardView: View {
                         statusText: appState.aiStatus?.model ?? "Offline",
                         icon: "cpu"
                     )
-                    
+
                     // Ghost Protocol
                     Button(action: { appState.toggleGhost() }) {
                         SystemStatusCard(
@@ -92,7 +92,6 @@ struct DashboardView: View {
                         .font(.headline)
                         .padding(.horizontal)
 
-                    // Conditional branch.
                     if let issues = appState.apiResults?.issues, !issues.isEmpty {
                         ForEach(issues.prefix(5).indices, id: \.self) { idx in
                             let issue = issues[idx]
@@ -108,6 +107,10 @@ struct DashboardView: View {
                             .padding(.horizontal)
                     }
                 }
+
+                // Decision Stream (New)
+                DecisionStreamView(decisions: appState.decisions)
+                    .padding(.horizontal)
 
                 // Tool Health
                 VStack(alignment: .leading) {

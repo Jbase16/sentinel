@@ -164,11 +164,11 @@ class CausalGraphBuilder:
                 data=node_data
             )
 
-            # Link triggers (Evidence -> Decision)
+            # Link triggers (Evidence/Triggers -> Decision)
             # Triggers are finding IDs or event IDs.
-            # We assume triggers in evidence['triggers']
+            # Prefer first-class triggers field, fall back to evidence hack
             evidence = d.get("evidence", {})
-            triggers = evidence.get("triggers", [])
+            triggers = d.get("triggers") or evidence.get("triggers", [])
             for trigger_id in triggers:
                 if trigger_id in self.graph:
                      self.graph.add_edge(trigger_id, d["id"], relationship="triggered")

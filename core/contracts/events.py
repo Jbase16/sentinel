@@ -497,6 +497,9 @@ class EventContract:
             event_type=EventType.DECISION_MADE,
             description="Strategos made a strategic decision.",
             model=DecisionPayload
+            # NOTE: Decision causality (trigger validity, scan_id context) is enforced 
+            # at the Strategos layer, not the EventContract layer. 
+            # We trust Strategos to emit only valid decisions.
         )
 
         cls._schemas[EventType.NARRATIVE_EMITTED] = EventSchema(
