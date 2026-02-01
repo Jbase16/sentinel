@@ -165,7 +165,13 @@ struct DecisionRow: View {
                                     Text("\(key):")
                                         .font(.caption)
                                         .bold()
-                                    Text("\(String(describing: evidence[key]?.value ?? ""))")
+
+                                    let rawValue = String(describing: evidence[key]?.value ?? "")
+                                    let displayValue =
+                                        rawValue.count > 200
+                                        ? String(rawValue.prefix(200)) + "..." : rawValue
+
+                                    Text(displayValue)
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                         .lineLimit(3)

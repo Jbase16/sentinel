@@ -251,7 +251,15 @@ public class HelixAppState: ObservableObject {
                             evidence: evidence
                         )
 
-                        self.decisions.insert(decision, at: 0)  // Newest first for UI stream? Or append? Plan said "List". Default to newest top for "Live Feed".
+                        self.decisions.append(decision)
+
+                        // Enforce Monotonic Ordering: Sort by (Sequence || Int.max), then Timestamp
+                        self.decisions.sort {
+                            let seq1 = $0.sequence ?? Int.max
+                            let seq2 = $1.sequence ?? Int.max
+                            if seq1 != seq2 { return seq1 < seq2 }
+                            return $0.timestamp < $1.timestamp
+                        }
 
                         let text = "🧠 [Decision] \(type) → \(action)"
                         self.apiLogs.append(text)

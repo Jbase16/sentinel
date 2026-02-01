@@ -188,7 +188,7 @@ public struct ChatThread: Identifiable, Codable, Hashable {
 
 // MARK: - Decisions
 
-public struct Decision: Identifiable, Codable, Equatable {
+public struct Decision: Identifiable, Codable {
     public let id: String
     public let scanId: String?
     public let type: String
@@ -228,18 +228,5 @@ public struct Decision: Identifiable, Codable, Equatable {
         self.triggers = triggers
         self.timestamp = timestamp
         self.evidence = evidence
-    }
-
-    public static func == (lhs: Decision, rhs: Decision) -> Bool {
-        // Approximate equality check since AnyCodable is not strictly Equatable automatically
-        // without some boilerplate, but for UI dedup ID is enough.
-        // We will conform strict logic if Equatable conformance fails compile.
-        // AnyCodable is not Equatable in the file provided above,
-        // so we must remove derived Equatable or implement it manually.
-        // Or we can rely on ID.
-        // Actually SharedModels says `struct Decision: ... Equatable`.
-        // If AnyCodable isn't Equatable, this crashes.
-        // Let's drop Equatable for now or implement it based on ID.
-        return lhs.id == rhs.id
     }
 }
