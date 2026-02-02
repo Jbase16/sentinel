@@ -917,15 +917,10 @@ class EventBus:
     # -------------------------------------------------------------------------
     def emit_decision_made(
         self,
-        intent: str,
-        reason: str,
-        context: Dict[str, Any],
-        source: str = "strategos",
+        payload: Dict[str, Any],
         scan_id: Optional[str] = None,
+        source: str = "strategos",
     ) -> None:
-        payload: Dict[str, Any] = {"intent": intent, "reason": reason, "context": context, "source": source}
-        if scan_id:
-            payload["scan_id"] = scan_id
         self.emit(GraphEvent(type=EventType.DECISION_MADE, payload=payload, scan_id=scan_id, source=source, priority=0))
 
     def emit_narrative_emitted(

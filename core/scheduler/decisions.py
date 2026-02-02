@@ -435,29 +435,12 @@ class DecisionContext:
                     previous_phase=previous_phase,
                 )
 
-        # Generic "decision made" event
-        # Map intent transition to intent string for older UI semantics
-        intent = decision.chosen if decision.type == DecisionType.INTENT_TRANSITION else decision.type.value
-
-        try:
-            self._event_bus.emit_decision_made(
-                intent=intent,
-                reason=decision.reason,
-                context=payload.get("context", {}),
-                scan_id=self._scan_id,
-                source=self._source,
-                payload=payload,
-            )
-        except TypeError:
-            # Back-compat older signature
-            self._event_bus.emit_decision_made(
-                intent=intent,
-                reason=decision.reason,
-                context=payload.get("context", {}),
-                source=self._source,
-            )
-        except Exception:
-            pass
+        # Generic "decision made" event — pass the contract-compliant payload directly
+        self._event_bus.emit_decision_made(
+            payload=payload,
+            scan_id=self._scan_id,
+            source=self._source,
+        )
 
     def flush(self) -> List[DecisionPoint]:
         committed: List[DecisionPoint] = []

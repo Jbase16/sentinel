@@ -699,11 +699,13 @@ class TestEventSequenceCounter:
 
         # Emit some events
         for i in range(3):
-            bus.emit_decision_made(
-                intent=f"test_{i}",
-                reason="testing",
-                context={}
-            )
+            bus.emit_decision_made(payload={
+                "decision_id": f"test_{i}",
+                "decision_type": "test",
+                "selected_action": "noop",
+                "rationale": "testing",
+                "confidence": 1.0,
+            })
 
         assert bus.last_event_sequence == 3
 
