@@ -619,10 +619,14 @@ class ScannerEngine:
         self._procs: Dict[str, asyncio.subprocess.Process] = {}
 
         # Resource guard
-        scan_config = get_config().scan
+        config = get_config()
+        scan_config = config.scan
         # We allow 10x the per-tool limit for the global scan aggregation
         global_max_findings = scan_config.max_findings_per_tool * 10
-        self.resource_guard = ResourceGuard(max_findings=global_max_findings, max_disk_mb=1000)
+        self.resource_guard = ResourceGuard(
+            max_findings=global_max_findings,
+            max_disk_mb=config.storage.max_scan_output_mb,
+        )
 
         # Transaction state
         self._active_transaction: Optional[ScanTransaction] = None

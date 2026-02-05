@@ -117,6 +117,10 @@ class StorageConfig:
     # 100 MB is enough for most tool outputs but prevents huge files
     max_evidence_size_mb: int = 100
 
+    # Maximum total output the scanner may buffer per scan (in MB)
+    # Bounds memory/disk usage from tool output aggregation
+    max_scan_output_mb: int = 1000
+
     # Property: Computed path to the database file
     # @property makes this look like a regular attribute but it's calculated dynamically
     @property
@@ -560,7 +564,11 @@ class SentinelConfig:
         )
 
         base_dir = Path(os.getenv("SENTINEL_DATA_DIR", str(Path.home() / ".sentinelforge")))
-        storage = StorageConfig(base_dir=base_dir)
+        storage = StorageConfig(
+            base_dir=base_dir,
+            max_evidence_size_mb=int(os.getenv("SENTINEL_MAX_EVIDENCE_MB", "100")),
+            max_scan_output_mb=int(os.getenv("SENTINEL_MAX_SCAN_OUTPUT_MB", "1000")),
+        )
 
         scan = ScanConfig(
             max_concurrent_tools=int(os.getenv("SENTINEL_MAX_CONCURRENT_TOOLS", "2")),

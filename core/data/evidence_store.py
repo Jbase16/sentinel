@@ -98,14 +98,37 @@ class EvidenceStore(Observable):
 
     def add_evidence(self, tool: str, raw_output: str, metadata: dict, persist: bool = True, session_id: str = None):
         """Function add_evidence."""
+        try:
+            from core.base.config import get_config
+            max_mb = get_config().storage.max_evidence_size_mb
+        except Exception:
+            max_mb = 100
+
+        max_bytes = max_mb * 1024 * 1024
+        if raw_output is None:
+            raw_output = ""
+        if not isinstance(raw_output, str):
+            raw_output = str(raw_output)
+        raw_bytes = raw_output.encode("utf-8", errors="ignore")
+        truncated = False
+        if len(raw_bytes) > max_bytes:
+            raw_output = raw_bytes[:max_bytes].decode("utf-8", errors="ignore")
+            truncated = True
+
         self._counter += 1
         eid = self._counter
 
+        meta = metadata if isinstance(metadata, dict) else {}
         evidence_data = {
             "id": eid,
             "tool": tool,
             "raw_output": raw_output,
-            "metadata": metadata,
+            "metadata": {
+                **meta,
+                "evidence_truncated": truncated,
+                "evidence_bytes": len(raw_bytes),
+                "evidence_max_bytes": max_bytes,
+            },
             "summary": None,
             "findings": []
         }

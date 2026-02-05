@@ -48,7 +48,11 @@ def get_rate_limiter() -> RateLimiter:
     global _rate_limiter
     if _rate_limiter is None:
         config = get_config()
-        limit = getattr(config.security, "rate_limit_api", 60)
+        limit = getattr(
+            config.security,
+            "rate_limit_requests_per_minute",
+            getattr(config.security, "rate_limit_api", 60),
+        )
         _rate_limiter = RateLimiter(requests_per_minute=limit)
         logger.info(
             "API rate limiter initialized",
@@ -61,7 +65,11 @@ def get_ai_rate_limiter() -> RateLimiter:
     global _ai_rate_limiter
     if _ai_rate_limiter is None:
         config = get_config()
-        limit = getattr(config.security, "rate_limit_ai", 30)
+        limit = getattr(
+            config.security,
+            "rate_limit_ai_per_minute",
+            getattr(config.security, "rate_limit_ai", 30),
+        )
         _ai_rate_limiter = RateLimiter(requests_per_minute=limit)
         logger.info(
             "AI rate limiter initialized",

@@ -110,8 +110,15 @@ class Database:
             await runner.run_migrations()
 
         except Exception as e:
-            logger.warning(f"[Database] Migration runner failed (non-fatal): {e}")
-            # Non-fatal - database can still function with base schema
+            allow_unsafe = os.getenv("SENTINEL_ALLOW_MIGRATION_FAILURE", "false").lower() == "true"
+            if allow_unsafe:
+                logger.warning(
+                    f"[Database] Migration runner failed (unsafe override enabled): {e}"
+                )
+                # Non-fatal only when explicitly allowed for local/dev recovery.
+                return
+            logger.error(f"[Database] Migration runner failed: {e}")
+            raise
 
     async def close(self):
         if self._db_connection:

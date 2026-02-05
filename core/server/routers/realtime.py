@@ -6,7 +6,7 @@ import json
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, Request
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, Request, Depends
 from starlette.websockets import WebSocketState
 
 from sse_starlette.sse import EventSourceResponse
@@ -14,12 +14,22 @@ from sse_starlette.sse import EventSourceResponse
 from core.base.config import get_config, is_network_exposed
 from core.cortex.event_store import get_event_store
 from core.engine.pty_manager import PTYManager
-from core.server.routers.auth import is_origin_allowed
+from core.server.routers.auth import is_origin_allowed, verify_token
 
 router = APIRouter(prefix="/ws", tags=["realtime"])
 sse_router = APIRouter(tags=["events"])
 
 logger = logging.getLogger(__name__)
+
+def _redact_headers(headers: dict) -> dict:
+    redacted = {}
+    for key, value in headers.items():
+        if key.lower() in ("authorization", "cookie", "x-api-key"):
+            redacted[key] = "<redacted>"
+        else:
+            redacted[key] = value
+    return redacted
+
 
 async def validate_websocket_connection(
     websocket: WebSocket,
@@ -31,7 +41,7 @@ async def validate_websocket_connection(
     config = get_config()
     
     logger.info(f"[WebSocket] {endpoint_name} - Connection attempt from {websocket.client}")
-    logger.debug(f"[WebSocket] {endpoint_name} - Headers: {dict(websocket.headers)}")
+    logger.debug(f"[WebSocket] {endpoint_name} - Headers: {_redact_headers(dict(websocket.headers))}")
     
     # Origin Check
     origin = websocket.headers.get("origin")
@@ -41,9 +51,19 @@ async def validate_websocket_connection(
         await websocket.close(code=4403, reason="Unauthorized")
         return False
 
+    # Endpoint-specific guardrails
+    if endpoint_name == "/ws/pty":
+        if not config.security.terminal_enabled:
+            logger.warning(f"[WebSocket] {endpoint_name} denied: terminal disabled")
+            await websocket.close(code=4403, reason="Terminal disabled")
+            return False
+
     # Auth Check
     is_exposed = is_network_exposed(config.api_host)
     require_auth = is_exposed or config.security.require_auth
+
+    if endpoint_name == "/ws/pty" and config.security.terminal_require_auth:
+        require_auth = True
     
     logger.debug(f"[WebSocket] {endpoint_name} - is_exposed: {is_exposed}, require_auth: {require_auth}")
 
@@ -70,12 +90,18 @@ async def validate_websocket_connection(
 
     return True
 
-@sse_router.get("/stream")
+@sse_router.get("/stream", dependencies=[Depends(verify_token)])
 async def sse_events_endpoint(request: Request):
     """
     Server-Sent Events (SSE) stream for system events.
     Compatible with existing Swift client.
     """
+    config = get_config()
+
+    origin = request.headers.get("origin")
+    if origin and not is_origin_allowed(origin, config.security.allowed_origins):
+        raise HTTPException(status_code=403, detail="Origin not allowed")
+
     store = get_event_store()
 
     async def event_generator():

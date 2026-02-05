@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 
 from core.server.state import get_state
-from core.server.routers.auth import verify_sensitive_token
+from core.server.routers.auth import verify_sensitive_token, verify_token
 from core.errors import SentinelError, ErrorCode
 from core.data.db import Database
 
@@ -279,11 +279,11 @@ async def cancel_scan():
         state.active_scan_task.cancel()
         return Response(status_code=202)
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(verify_token)])
 async def get_scan_status():
     return get_state().scan_state
 
-@router.get("/sessions/{session_id}/findings")
+@router.get("/sessions/{session_id}/findings", dependencies=[Depends(verify_token)])
 async def get_session_findings(session_id: str):
     """
     Retrieve all findings for a specific session.
@@ -293,7 +293,7 @@ async def get_session_findings(session_id: str):
     findings = await db.get_findings(session_id)
     return {"session_id": session_id, "findings": findings, "count": len(findings)}
 
-@router.get("/sessions/{session_id}/evidence")
+@router.get("/sessions/{session_id}/evidence", dependencies=[Depends(verify_token)])
 async def get_session_evidence(session_id: str):
     """
     Retrieve all evidence for a specific session.
@@ -302,7 +302,7 @@ async def get_session_evidence(session_id: str):
     evidence = await db.get_evidence(session_id)
     return {"session_id": session_id, "evidence": evidence, "count": len(evidence)}
 
-@router.get("/sessions/{session_id}/issues")
+@router.get("/sessions/{session_id}/issues", dependencies=[Depends(verify_token)])
 async def get_session_issues(session_id: str):
     """
     Retrieve all issues for a specific session.
@@ -311,7 +311,7 @@ async def get_session_issues(session_id: str):
     issues = await db.get_issues(session_id)
     return {"session_id": session_id, "issues": issues, "count": len(issues)}
 
-@router.get("/results")
+@router.get("/results", dependencies=[Depends(verify_token)])
 async def get_scan_results():
     """
     Get complete scan results for the active or most recent scan session.
