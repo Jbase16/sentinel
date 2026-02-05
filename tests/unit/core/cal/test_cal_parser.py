@@ -53,9 +53,21 @@ def test_condition_eval():
     assert c2.evaluate(context, tool) is True
     
     # Test replacement
-    c3 = Condition("tool.phase IS NOT EMPTY") # should become != []
-    # But evaluating "2 != []" is True in Python. 
+    c3 = Condition("tool.phase IS NOT EMPTY")
+    assert c3.evaluate(context, tool) is True
     # Let's test a list.
     tool_list = {"tags": []}
     c_list = Condition("tool.tags IS EMPTY")
     assert c_list.evaluate(context, tool_list) is True
+
+def test_collection_subset_compare():
+    from core.cal.parser import Condition
+
+    context = {"knowledge": {"tags": ["a", "b", "c"]}}
+    tool = {"gates": ["a", "b"]}
+
+    c = Condition("tool.gates <= context.knowledge.tags")
+    assert c.evaluate(context, tool) is True
+
+    tool2 = {"gates": ["a", "x"]}
+    assert c.evaluate(context, tool2) is False

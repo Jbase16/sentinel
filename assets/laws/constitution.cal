@@ -11,7 +11,7 @@ Law PassiveBeforeActive {
 Law EvidenceGates {
     Claim: "Tools require prerequisite evidence"
     When: tool.gates IS NOT EMPTY
-    And:  not all([gate in context.knowledge.tags for gate in tool.gates])
+    And:  not (tool.gates <= context.knowledge.tags)
     Then: DENY "Missing Prerequisite: {tool.gates}"
 }
 

@@ -1359,6 +1359,22 @@ class ScannerEngine:
             ev_store.add_evidence(tool, output_text, ev_meta)
 
         try:
+            # Guard: don't classify output from failed tools — error messages
+            # get misclassified as findings by the LLM (e.g. "connection refused" → "Open Redirect")
+            if exit_code != 0:
+                logger.info(f"[{exec_id}] Tool exited {exit_code}, skipping classification")
+                # Still record observation for audit trail, but no findings
+                try:
+                    router = TaskRouter.instance()
+                    await router.handle_tool_output(
+                        tool_name=tool, stdout=output_text, stderr="",
+                        rc=exit_code,
+                        metadata={"target": target, "exec_id": exec_id, "skipped_classification": True},
+                    )
+                except Exception:
+                    pass
+                return []
+
             findings = ScannerBridge.classify(tool, target, output_text)
 
             try:

@@ -200,28 +200,35 @@ class TaskRouter(Observable):
                 exit_code=rc
             )
             
-            # STEP 1: Send output to AIEngine for semantic analysis
-            # AIEngine return PROPOSALS, not final findings.
-            result = await self.ai.process_tool_output(
-                tool_name=tool_name,
-                stdout=stdout,
-                stderr=stderr,
-                rc=rc,
-                metadata=metadata,
-                observation_id=observation.id, # Cite the evidence
-            )
-            
-            proposals = result.get("proposals", [])
-            promoted_findings = []
-            
-            # STEP 2: Epistemic Gatekeeping (The Inversion)
-            # Pass proposals to Ledger for validation and promotion
-            for proposal in proposals:
-                finding = self.ledger.evaluate_and_promote(proposal)
-                if finding:
-                    promoted_findings.append(finding)
-                else:
-                    logger.info(f"[TaskRouter] Logic Refusal: Proposal '{proposal.title}' rejected by Ledger.")
+            # Guard: don't send failed tool output through AI — error messages
+            # get misclassified as vulnerability findings
+            if rc != 0:
+                logger.info(f"[TaskRouter] Tool {tool_name} failed (rc={rc}), skipping AI analysis")
+                result = {"summary": f"Tool {tool_name} failed with exit code {rc}", "proposals": [], "next_steps": []}
+                promoted_findings = []
+            else:
+                # STEP 1: Send output to AIEngine for semantic analysis
+                # AIEngine return PROPOSALS, not final findings.
+                result = await self.ai.process_tool_output(
+                    tool_name=tool_name,
+                    stdout=stdout,
+                    stderr=stderr,
+                    rc=rc,
+                    metadata=metadata,
+                    observation_id=observation.id, # Cite the evidence
+                )
+
+                proposals = result.get("proposals", [])
+                promoted_findings = []
+
+                # STEP 2: Epistemic Gatekeeping (The Inversion)
+                # Pass proposals to Ledger for validation and promotion
+                for proposal in proposals:
+                    finding = self.ledger.evaluate_and_promote(proposal)
+                    if finding:
+                        promoted_findings.append(finding)
+                    else:
+                        logger.info(f"[TaskRouter] Logic Refusal: Proposal '{proposal.title}' rejected by Ledger.")
             
         except Exception as e:
             # AIEngine analysis failed (LLM offline, parsing error, etc.)

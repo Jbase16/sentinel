@@ -18,6 +18,8 @@ import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
+from core.cal.safe_eval import safe_eval, UnsafeExpression
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -27,40 +29,23 @@ class Condition:
     def evaluate(self, context: Any, tool: Dict) -> bool:
         """
         Evaluate the condition against the context.
-        Security Note: Uses restricted eval or simple parsing.
-        For V1, we will implement a safe sub-set evaluator.
+        Security Note: Uses a strict, non-executing AST evaluator.
         """
-        # Simplistic Safe Eval for V1:
-        # Replace 'context.x' with local var access
-        # This is a placeholder for a robust AST walker later.
-        
-        # Mapping for eval scope
-        # Wrap BOTH context and tool to support dot notation (context.x, tool.phase)
-        safe_scope = {
-            "context": _DictWrapper(context) if isinstance(context, dict) else context,
-            "tool": _DictWrapper(tool) if isinstance(tool, dict) else tool,
-            "all": all,
-            "any": any,
-            "len": len,
-            "int": int,
-            "float": float,
-            "str": str,
-        }
-        
         # Operators map for custom CAL syntax "IS NOT EMPTY" etc.
         expr = self.raw_expression
         # Regex to handle "IS NOT EMPTY" and "IS EMPTY" on attributes
-        # e.g. "tool.gates IS NOT EMPTY" -> "len(tool.gates) > 0"
-        expr = re.sub(r'(\S+)\s+IS\s+NOT\s+EMPTY', r'len(\1) > 0', expr)
-        expr = re.sub(r'(\S+)\s+IS\s+EMPTY', r'len(\1) == 0', expr)
+        # e.g. "tool.gates IS NOT EMPTY" -> "tool.gates"
+        #      "tool.gates IS EMPTY"     -> "not (tool.gates)"
+        expr = re.sub(r'(\S+)\s+IS\s+NOT\s+EMPTY', r'(\1)', expr)
+        expr = re.sub(r'(\S+)\s+IS\s+EMPTY', r'not (\1)', expr)
         expr = expr.replace("NOT IN", "not in") # Pythonic  
         # 'IN' is already pythonic
         
         try:
-            # DANGEROUS: eval() usage. 
-            # Mitigation: In a real production system, we'd build an AST visitor.
-            # For this prototype agent, we trust the internal Constitution.
-            return bool(eval(expr, {"__builtins__": {}}, safe_scope))
+            return bool(safe_eval(expr, context, tool))
+        except UnsafeExpression as e:
+            logger.error(f"[CAL] Unsafe expression rejected for '{expr}': {e}")
+            return False
         except Exception as e:
             logger.error(f"[CAL] Eval failed for '{expr}': {e}")
             return False

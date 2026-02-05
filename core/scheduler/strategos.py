@@ -444,6 +444,22 @@ class Strategos:
             except Exception:
                 pass
 
+    async def _probe_target(self, target: str) -> bool:
+        """Quick TCP connectivity probe to verify target is reachable."""
+        from urllib.parse import urlparse
+        parsed = urlparse(target)
+        host = parsed.hostname or target
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            _, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port), timeout=3.0
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except (asyncio.TimeoutError, OSError):
+            return False
+
     def _maybe_progress_log(self, force: bool = False) -> None:
         if not self.context:
             return
@@ -527,6 +543,21 @@ class Strategos:
         self._insight_processor_task = asyncio.create_task(self._process_pending_insights())
 
         try:
+            # === PHASE 0: Target Viability Gate ===
+            # Hard invariant: target must be reachable before ANY tools run.
+            # Without this, Phase 1 DNS tools produce noise findings that trick
+            # the assessment into advancing through all 5 phases on a dead target.
+            if not await self._probe_target(target):
+                self._emit_log(f"[Strategos] ABORT: Target {target} is not reachable. No tools will be dispatched.")
+                if self._decision_ctx:
+                    self._decision_ctx.choose(
+                        decision_type=DecisionType.EARLY_TERMINATION,
+                        chosen="TARGET_UNREACHABLE",
+                        reason=f"Target {target} failed TCP connectivity probe on declared port",
+                        context={"target": target, "mode": mode.value},
+                    )
+                self._terminated = True
+
             while not self._terminated and not self._stop_requested:
                 new_phase = self._get_phase_for_intent(current_intent)
                 if new_phase != self.context.phase_index:
@@ -603,7 +634,7 @@ class Strategos:
                 # This ensures the Decision Ledger is never empty and explicitly records "Status Quo" choices.
                 if self._current_intent_decision:
                     with self._decision_ctx.nested(self._current_intent_decision):
-                        has_findings = len(self.context.findings) > 0
+                        has_findings = self.context.findings_this_intent > 0
                         has_new_surface = self.context.surface_delta_this_intent > 0
                         
                         # Logic for assessment
@@ -636,8 +667,11 @@ class Strategos:
                              suppressed=suppressed,
                              context={"intent": current_intent, "phase": new_phase},
                              evidence=evidence_pkg,
-                             confidence=1.0 
+                             confidence=1.0
                         )
+
+                        # Store assessment outcome so _decide_next_step can read it
+                        self.context.knowledge["last_assessment"] = chosen_action
 
                 next_intent = self._decide_next_step(current_intent)
                 if next_intent is None:
@@ -766,6 +800,25 @@ class Strategos:
         raw = raw.strip()
         if not raw:
             return None
+
+        # For localhost targets, only count surface that matches the declared port.
+        # Without this, nmap finding "localhost:22" (SSH) counts as surface for a
+        # scan targeting localhost:3003, polluting the attack surface model.
+        if self.context and self.context.target:
+            from core.toolkit.normalizer import is_localhost_target
+            if is_localhost_target(self.context.target):
+                declared_parsed = urlparse(self.context.target)
+                declared_port = declared_parsed.port
+                if declared_port:
+                    finding_port = None
+                    if "://" in raw:
+                        try:
+                            finding_port = urlparse(raw).port
+                        except Exception:
+                            pass
+                    # If finding references a different port, it's host surface, not target surface
+                    if finding_port is not None and finding_port != declared_port:
+                        return None
 
         if "://" not in raw:
             host = raw.lower().rstrip(".")
@@ -1065,10 +1118,19 @@ class Strategos:
                 self.context.findings.append(finding)
                 self.context.findings_this_intent += 1
 
-                surface_key = self._surface_key(finding)
-                if surface_key and surface_key not in self.context.surface_seen:
-                    self.context.surface_seen.add(surface_key)
-                    self.context.surface_delta_this_intent += 1
+                # Non-service finding types are metadata, not attack surface.
+                # Counting them as surface tricks the assessment into continuing
+                # through phases when no real target surface has been discovered.
+                _NON_SURFACE_TYPES = {
+                    "DNS Record", "connectivity", "service_unavailable",
+                    "permissions", "tool_version", "subdomain",
+                }
+                finding_type = finding.get("type", "")
+                if finding_type not in _NON_SURFACE_TYPES:
+                    surface_key = self._surface_key(finding)
+                    if surface_key and surface_key not in self.context.surface_seen:
+                        self.context.surface_seen.add(surface_key)
+                        self.context.surface_delta_this_intent += 1
 
                 tags = list(finding.get("tags", []))
                 finding_type = finding.get("type", "")
@@ -1193,6 +1255,15 @@ class Strategos:
         candidates = [t for t in candidates if t in available_tools]
         candidates = [t for t in candidates if t not in self.context.completed_tools_per_intent.get(intent, set())]
 
+        # Filter tools incompatible with target type (e.g. amass on localhost)
+        from core.toolkit.normalizer import is_private_target
+        from core.toolkit.registry import TOOLS_REQUIRING_PUBLIC_DOMAIN, TOOLS_REQUIRING_ROOT
+        if is_private_target(self.context.target):
+            candidates = [t for t in candidates if t not in TOOLS_REQUIRING_PUBLIC_DOMAIN]
+        import os
+        if os.geteuid() != 0:
+            candidates = [t for t in candidates if t not in TOOLS_REQUIRING_ROOT]
+
         scored: List[Tuple[str, int]] = []
         rejected_count = 0
         reasons: Dict[str, List[str]] = {}
@@ -1283,6 +1354,25 @@ class Strategos:
             return INTENT_PASSIVE_RECON
 
         mode = self.context.knowledge.get("mode", ScanMode.STANDARD)
+
+        # If assessment concluded the phase (no new findings/surface), stop advancing.
+        # Without this gate, the scan unconditionally progresses through all 5 phases
+        # even when producing zero meaningful results.
+        last_assessment = self.context.knowledge.get("last_assessment", "CONTINUE_ENGAGEMENT")
+        if last_assessment == "CONCLUDE_PHASE":
+            self._emit_log(f"[Strategos] Assessment concluded phase at {current_intent}. Terminating scan.")
+            if self._decision_ctx:
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.EARLY_TERMINATION,
+                    chosen="CONCLUDE_SCAN",
+                    reason=f"No significant findings or surface expansion during {current_intent}",
+                    context={"from": current_intent, "mode": mode.value},
+                    evidence={
+                        "findings_this_intent": self.context.findings_this_intent,
+                        "surface_delta": self.context.surface_delta_this_intent,
+                    },
+                )
+            return None  # Terminates the scan
 
         if current_intent == INTENT_PASSIVE_RECON:
             next_intent = INTENT_ACTIVE_LIVE_CHECK

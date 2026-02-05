@@ -1,4 +1,5 @@
 """Module normalizer: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/normalizer.py."""
+import ipaddress
 import socket
 from urllib.parse import urlparse, urlunparse
 
@@ -82,3 +83,20 @@ def normalize_target(raw: str, mode: str) -> str:
     if mode == "ip":
         return extract_ip(raw)
     return ensure_url(raw)
+
+
+def is_localhost_target(target: str) -> bool:
+    """Check if target resolves to loopback."""
+    host = extract_host(target).lower()
+    return host in ("localhost", "localhost.localdomain", "::1") or host.startswith("127.")
+
+
+def is_private_target(target: str) -> bool:
+    """Check if target is localhost or RFC1918 private address space."""
+    if is_localhost_target(target):
+        return True
+    host = extract_host(target)
+    try:
+        return ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False

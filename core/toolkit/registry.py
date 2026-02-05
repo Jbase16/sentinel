@@ -350,6 +350,11 @@ _tool_data = [
 for tool in _tool_data:
     TOOLS.register(tool)
 
+# Tools that require a public domain name (useless against localhost/RFC1918)
+TOOLS_REQUIRING_PUBLIC_DOMAIN = {"amass", "subfinder", "dnsx", "assetfinder"}
+# Tools that require root/sudo privileges
+TOOLS_REQUIRING_ROOT = {"masscan"}
+
 
 def get_tool_command(name: str, target: str, override: Optional[ToolDefinition] = None) -> tuple[List[str], str | None]:
     """
@@ -378,6 +383,13 @@ def get_tool_command(name: str, target: str, override: Optional[ToolDefinition] 
             cmd.append(part.replace("{target}", normalized))
         elif part is not None:  # Filter out None values
             cmd.append(part)
+
+    # Resolve binary to absolute path so subprocess finds it even when
+    # the binary lives in /opt/homebrew/bin or a venv but not system PATH
+    if cmd and not cmd[0].startswith('/'):
+        resolved = find_binary(tdef.binary_name or cmd[0])
+        if resolved:
+            cmd[0] = resolved
 
     # If tool uses stdin, the normalized target is piped via stdin
     stdin_input = normalized if tdef.stdin_input else None
