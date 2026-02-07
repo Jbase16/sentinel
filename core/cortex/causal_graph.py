@@ -38,8 +38,28 @@ from dataclasses import dataclass
 from collections import defaultdict
 import logging
 import time
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class EnablementStrength(float, Enum):
+    """Strength of enablement relationship between capabilities."""
+    DIRECT = 2.0
+    INDIRECT = 1.0
+    WEAK = 0.5
+
+
+# How much attacker effort is replaced by discovering each finding class.
+EFFORT_ELIMINATED_BY_CAPABILITY: Dict[str, float] = {
+    "credential_exposure": 9.0,
+    "source_code": 8.0,
+    "topology": 7.0,
+    "confirmed_injection": 6.0,
+    "stack_disclosure": 4.0,
+    "port_disclosure": 3.0,
+    "partial_info": 2.0,
+}
 
 
 @dataclass
@@ -73,6 +93,7 @@ class PressurePoint:
     attack_paths_blocked: int  # Total paths disabled if this is fixed
     downstream_findings: List[str]  # All findings reachable from this one
     centrality_score: float  # Betweenness centrality (measures choke-point importance)
+    enablement_score: float = 0.0  # Information leverage score, separate from centrality.
 
 
 class CausalGraphBuilder:
@@ -86,6 +107,8 @@ class CausalGraphBuilder:
     def __init__(self):
         self.graph: nx.DiGraph = nx.DiGraph()
         self.findings_map: Dict[str, Finding] = {}
+        self._inferred_enablement_edges: List[Dict[str, Any]] = []
+        self._chain_dependency_pairs: Set[Tuple[str, str]] = set()
 
     def build(self, findings: List[Dict[str, Any]]) -> nx.DiGraph:
         """
@@ -99,16 +122,43 @@ class CausalGraphBuilder:
         """
         logger.info(f"[CausalGraph] Building graph from {len(findings)} findings")
 
+        # Fresh build each invocation to avoid stale nodes/edges from prior sessions.
+        self.graph.clear()
+        self.findings_map.clear()
+        self._inferred_enablement_edges = []
+        self._chain_dependency_pairs = set()
+
         # Convert dicts to Finding objects
         findings_obj = []
         for f in findings:
+            raw_data = f.get('data', {})
+            if not isinstance(raw_data, dict):
+                raw_data = {}
+
+            # Keep backward compatibility with existing `data` usage, but retain
+            # top-level fields needed for capability-aware graph inference.
+            merged_data = dict(raw_data)
+            for key in (
+                "confirmation_level",
+                "capability_types",
+                "base_score",
+                "score",
+                "raw_score",
+                "tags",
+                "description",
+                "value",
+                "metadata",
+            ):
+                if key in f and key not in merged_data:
+                    merged_data[key] = f.get(key)
+
             finding = Finding(
                 id=f.get('id', ''),
                 type=f.get('type', 'unknown'),
                 severity=f.get('severity', 'unknown'),
                 title=f.get('title', f.get('type', 'Untitled')),
                 target=f.get('target', ''),
-                data=f.get('data', {}),
+                data=merged_data,
                 requires=f.get('requires', []),
                 enables=f.get('enables', [])
             )
@@ -116,7 +166,10 @@ class CausalGraphBuilder:
             self.findings_map[finding.id] = finding
 
         # Phase 1: Infer dependencies from finding types
-        self._infer_dependencies(findings_obj)
+        enablement_edges = self._infer_dependencies(findings_obj)
+        enablement_lookup: Dict[Tuple[str, str], Dict[str, Any]] = {
+            (edge.get("source", ""), edge.get("target", "")): edge for edge in enablement_edges
+        }
 
         # Phase 2: Build graph from explicit and inferred dependencies
         for finding in findings_obj:
@@ -133,7 +186,29 @@ class CausalGraphBuilder:
             for prerequisite_id in finding.requires:
                 if prerequisite_id in self.findings_map:
                     # Edge from prerequisite TO this finding (prerequisite enables this)
-                    self.graph.add_edge(prerequisite_id, finding.id, relationship='enables')
+                    edge_key = (prerequisite_id, finding.id)
+                    enablement_edge = enablement_lookup.get(edge_key)
+                    relationship = "enables"
+                    edge_attrs: Dict[str, Any] = {}
+
+                    if enablement_edge is not None:
+                        # Preserve existing chain semantics where already present.
+                        if edge_key not in self._chain_dependency_pairs:
+                            relationship = "enablement"
+                        edge_attrs.update({
+                            "strength": float(enablement_edge.get("strength", 0.0)),
+                            "enablement_class": enablement_edge.get("enablement_class", "partial_info"),
+                            "effort_replaced": float(enablement_edge.get("effort_replaced", 0.0)),
+                            "enabled_at": float(enablement_edge.get("enabled_at", time.time())),
+                            "enablement_edge": True,
+                        })
+
+                    self.graph.add_edge(
+                        prerequisite_id,
+                        finding.id,
+                        relationship=relationship,
+                        **edge_attrs,
+                    )
 
         logger.info(f"[CausalGraph] Built graph: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
         return self.graph
@@ -257,10 +332,30 @@ class CausalGraphBuilder:
                 if existing.target == new_finding.target:
                      if 'port' in existing.type.lower() or 'service' in existing.type.lower():
                          self.graph.add_edge(existing.id, new_finding.id, relationship='enables')
-                         
-        # (Other rules omitted for brevity/speed in this patch, can extend later)
+
+        # Rule 5 (incremental): Information enablement edges for new finding.
+        # Check if the new finding is a confirmed info/access finding that enables
+        # existing findings, OR if existing info/access findings enable this one.
+        all_findings_for_target = [
+            f for f in self.findings_map.values()
+            if f.target == new_finding.target
+        ]
+        if all_findings_for_target:
+            edges = self._infer_information_enablement_edges(all_findings_for_target)
+            for edge in edges:
+                src, tgt = edge.get("source"), edge.get("target")
+                if src and tgt and not self.graph.has_edge(src, tgt):
+                    self.graph.add_edge(
+                        src, tgt,
+                        relationship="enablement",
+                        strength=float(edge.get("strength", 0.0)),
+                        enablement_class=edge.get("enablement_class", "partial_info"),
+                        effort_replaced=float(edge.get("effort_replaced", 0.0)),
+                        enabled_at=float(edge.get("enabled_at", time.time())),
+                        enablement_edge=True,
+                    )
     
-    def _infer_dependencies(self, findings: List[Finding]):
+    def _infer_dependencies(self, findings: List[Finding]) -> List[Dict[str, Any]]:
         """
         Infer causal dependencies from finding types and targets.
 
@@ -270,6 +365,9 @@ class CausalGraphBuilder:
         - "Connectivity" enables "Service access"
         - "Open port" enables "Service exploitation"
         """
+        self._inferred_enablement_edges = []
+        self._chain_dependency_pairs = set()
+
         # Group findings by target
         by_target: Dict[str, List[Finding]] = defaultdict(list)
         for f in findings:
@@ -323,7 +421,223 @@ class CausalGraphBuilder:
                     if best_recon.id not in vuln_finding.requires:
                         vuln_finding.requires.append(best_recon.id)
 
-        logger.info(f"[CausalGraph] Inferred dependencies using {4} heuristic rules")
+        # Capture pre-Phase-2 chain edges so we do not overload existing semantics.
+        self._chain_dependency_pairs = {
+            (source_id, finding.id)
+            for finding in findings
+            for source_id in finding.requires
+        }
+
+        # Rule 5 (Phase 2): Information/access findings enable downstream capabilities.
+        enablement_edges = self._infer_information_enablement_edges(findings)
+        for edge in enablement_edges:
+            source_id = edge.get("source")
+            target_id = edge.get("target")
+            if not source_id or not target_id:
+                continue
+            target_finding = self.findings_map.get(target_id)
+            if target_finding and source_id not in target_finding.requires:
+                target_finding.requires.append(source_id)
+
+        self._inferred_enablement_edges = enablement_edges
+        logger.info(
+            "[CausalGraph] Inferred dependencies using 5 heuristic rules (%d enablement edges)",
+            len(enablement_edges),
+        )
+        return enablement_edges
+
+    @staticmethod
+    def _finding_capability_types(finding: Finding) -> List[str]:
+        raw = finding.data.get("capability_types", [])
+        if isinstance(raw, str):
+            values = [raw]
+        elif isinstance(raw, list):
+            values = raw
+        else:
+            values = []
+        normalized = [str(v).strip().lower() for v in values if str(v).strip()]
+        return normalized or ["execution"]
+
+    @staticmethod
+    def _finding_confirmation_level(finding: Finding) -> str:
+        return str(finding.data.get("confirmation_level", "probable")).strip().lower()
+
+    @staticmethod
+    def _finding_base_score(finding: Finding) -> float:
+        for key in ("base_score", "score", "raw_score"):
+            value = finding.data.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    @staticmethod
+    def _finding_tags(finding: Finding) -> Set[str]:
+        tags = finding.data.get("tags", [])
+        if isinstance(tags, str):
+            tags = [tags]
+        if not isinstance(tags, list):
+            return set()
+        return {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+
+    @staticmethod
+    def _finding_text_blob(finding: Finding) -> str:
+        parts = [
+            finding.type,
+            finding.title,
+            finding.data.get("description"),
+            finding.data.get("value"),
+            finding.data.get("evidence_summary"),
+        ]
+        return " ".join(str(part) for part in parts if part).lower()
+
+    def _infer_information_enablement_edges(self, findings: List[Finding]) -> List[Dict[str, Any]]:
+        """
+        Create enablement edges from confirmed information/access findings
+        to findings that become easier to exploit with that information.
+        """
+        edges: List[Dict[str, Any]] = []
+        seen_pairs: Set[Tuple[str, str]] = set()
+
+        by_target: Dict[str, List[Finding]] = defaultdict(list)
+        for finding in findings:
+            by_target[finding.target].append(finding)
+
+        for target, target_findings in by_target.items():
+            info_findings = [
+                finding
+                for finding in target_findings
+                if self._finding_confirmation_level(finding) == "confirmed"
+                and self._finding_base_score(finding) >= 5.0
+                and any(
+                    capability in {"information", "access"}
+                    for capability in self._finding_capability_types(finding)
+                )
+            ]
+
+            for info_finding in info_findings:
+                source_id = info_finding.id
+                if not source_id:
+                    continue
+
+                capability_types = self._finding_capability_types(info_finding)
+                enablement_class = self._classify_enablement(info_finding)
+                strength = self._enablement_strength(capability_types, enablement_class)
+                effort = EFFORT_ELIMINATED_BY_CAPABILITY.get(enablement_class, 2.0)
+
+                for candidate in target_findings:
+                    target_id = candidate.id
+                    if not target_id or target_id == source_id:
+                        continue
+                    if candidate.target != target:
+                        continue  # Explicit cross-target guard.
+
+                    if not self._would_benefit_from(candidate, enablement_class, capability_types):
+                        continue
+
+                    pair = (source_id, target_id)
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+
+                    edges.append({
+                        "source": source_id,
+                        "target": target_id,
+                        "type": "enablement",
+                        "strength": float(strength),
+                        "enablement_class": enablement_class,
+                        "effort_replaced": float(effort),
+                        "enabled_at": time.time(),
+                    })
+
+        return edges
+
+    def _classify_enablement(self, finding: Finding) -> str:
+        """
+        Classify what form of attacker leverage this finding provides.
+        """
+        finding_type = str(finding.type).lower()
+        tags = self._finding_tags(finding)
+        text = self._finding_text_blob(finding)
+
+        # Use shared credential indicators (single source of truth).
+        from core.data.constants import CREDENTIAL_INDICATORS
+        if "secret-leak" in tags or "credential" in finding_type:
+            return "credential_exposure"
+        if any(indicator in text for indicator in CREDENTIAL_INDICATORS):
+            return "credential_exposure"
+        if "backup-leak" in tags and any(indicator in text for indicator in CREDENTIAL_INDICATORS):
+            return "credential_exposure"
+
+        if "git" in finding_type or "source" in finding_type or ".git" in text:
+            return "source_code"
+
+        if "private-ip" in tags or "topology" in finding_type or "internal ip" in text:
+            return "topology"
+
+        if any(tag in tags for tag in ("sqli", "injection", "rce")):
+            return "confirmed_injection"
+
+        if "error-leakage" in tags or "stack" in finding_type or "traceback" in text:
+            return "stack_disclosure"
+
+        if "port" in finding_type or "service" in finding_type:
+            return "port_disclosure"
+
+        return "partial_info"
+
+    @staticmethod
+    def _enablement_strength(
+        capability_types: List[str],
+        enablement_class: str,
+    ) -> EnablementStrength:
+        """
+        Determine edge strength for the inferred enablement.
+        """
+        if enablement_class in ("credential_exposure", "source_code"):
+            return EnablementStrength.DIRECT
+        if enablement_class in ("topology", "confirmed_injection"):
+            return EnablementStrength.INDIRECT
+        return EnablementStrength.WEAK
+
+    @staticmethod
+    def _would_benefit_from(
+        target_finding: Finding,
+        enablement_class: str,
+        source_capability_types: List[str],
+    ) -> bool:
+        """
+        Heuristic check: can this target finding benefit from source information?
+        """
+        target_type = str(target_finding.type).lower()
+        raw_tags = target_finding.data.get("tags", [])
+        if isinstance(raw_tags, str):
+            raw_tags = [raw_tags]
+        target_tags = {str(tag).strip().lower() for tag in raw_tags if str(tag).strip()}
+
+        if enablement_class == "credential_exposure":
+            return any(token in target_type for token in ("auth", "login", "admin", "session")) or any(
+                tag in target_tags for tag in ("auth", "login", "admin")
+            )
+
+        if enablement_class == "topology":
+            return "ssrf" in target_type or "cloud" in target_type or any(
+                tag in target_tags for tag in ("ssrf", "cloud")
+            )
+
+        if enablement_class == "source_code":
+            return any(token in target_type for token in ("injection", "sqli", "rce", "lfi", "ssrf")) or any(
+                tag in target_tags for tag in ("injection", "sqli", "rce", "lfi", "ssrf")
+            )
+
+        # Access capability generally lowers effort for all findings on the same target.
+        if "access" in source_capability_types:
+            return True
+
+        return False
 
     def identify_pressure_points(self, top_n: int = 10) -> List[PressurePoint]:
         """
@@ -361,6 +675,11 @@ class CausalGraphBuilder:
 
             # Attack paths blocked: count of simple paths from this node to leaves
             attack_paths_blocked = len(downstream) + 1  # +1 for the node itself
+            enablement_score = sum(
+                float(data.get("strength", 0.0))
+                for _, _, data in self.graph.out_edges(node, data=True)
+                if data.get("relationship") == "enablement" or data.get("enablement_edge")
+            )
 
             # Only consider nodes with impact
             if out_degree > 0 or len(downstream) > 0:
@@ -373,7 +692,8 @@ class CausalGraphBuilder:
                         out_degree=out_degree,
                         attack_paths_blocked=attack_paths_blocked,
                         downstream_findings=downstream,
-                        centrality_score=centrality.get(node, 0.0)
+                        centrality_score=centrality.get(node, 0.0),
+                        enablement_score=enablement_score,
                     ))
 
         # Sort by attack paths blocked (descending), then by centrality
@@ -403,7 +723,11 @@ class CausalGraphBuilder:
         except:
             return 0
 
-    def get_attack_chains(self, max_length: int = 5) -> List[List[str]]:
+    def get_attack_chains(
+        self,
+        max_length: int = 5,
+        include_metrics: bool = False,
+    ) -> Any:
         """
         Find all attack chains (simple paths from roots to leaves).
 
@@ -413,10 +737,11 @@ class CausalGraphBuilder:
             max_length: Maximum chain length to consider
 
         Returns:
-            List of chains, where each chain is a list of finding IDs
+            If include_metrics=False (default): list of chains.
+            If include_metrics=True: dict with chains + per-node metrics.
         """
         if not self.graph:
-            return []
+            return {"chains": [], "nodes": []} if include_metrics else []
 
         # Find root nodes (no incoming edges)
         roots = [n for n in self.graph.nodes() if self.graph.in_degree(n) == 0]
@@ -435,7 +760,28 @@ class CausalGraphBuilder:
                     continue
 
         logger.info(f"[CausalGraph] Found {len(chains)} attack chains")
-        return chains
+        if not include_metrics:
+            return chains
+
+        try:
+            centrality = nx.betweenness_centrality(self.graph)
+        except Exception:
+            centrality = {node: 0.0 for node in self.graph.nodes()}
+
+        node_summaries: List[Dict[str, Any]] = []
+        for node in self.graph.nodes():
+            enablement_score = sum(
+                float(data.get("strength", 0.0))
+                for _, _, data in self.graph.out_edges(node, data=True)
+                if data.get("relationship") == "enablement" or data.get("enablement_edge")
+            )
+            node_summaries.append({
+                "node_id": node,
+                "centrality_score": float(centrality.get(node, 0.0)),
+                "enablement_score": enablement_score,
+            })
+
+        return {"chains": chains, "nodes": node_summaries}
 
     def export_dto(self, session_id: str = "unknown") -> Dict[str, Any]:
         """
@@ -504,14 +850,19 @@ class CausalGraphBuilder:
         for u, v, data in self.graph.edges(data=True):
              edge_data = {
                 "confidence": 1.0, 
-                "created_at": time.time()
+                "created_at": data.get("enabled_at", time.time()),
              }
+             if data.get("enablement_edge"):
+                 edge_data.update({
+                     "enablement_class": data.get("enablement_class", "partial_info"),
+                     "effort_replaced": float(data.get("effort_replaced", 0.0)),
+                 })
              edges.append({
                 "id": f"{u}-{v}",
                 "source": u,
                 "target": v,
                 "type": data.get("relationship", "enables"),
-                "weight": 1.0,
+                "weight": float(data.get("strength", 1.0)),
                 "data": edge_data
              })
             
@@ -547,6 +898,7 @@ class CausalGraphBuilder:
                     "out_degree": p.out_degree,
                     "attack_paths_blocked": p.attack_paths_blocked,
                     "centrality_score": round(p.centrality_score, 3),
+                    "enablement_score": round(p.enablement_score, 3),
                     "recommendation": f"Fixing this will block {p.attack_paths_blocked} attack paths"
                 }
                 for p in pressure_points

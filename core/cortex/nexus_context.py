@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 from core.data.findings_store import findings_store
@@ -12,6 +12,8 @@ from core.cortex.events import get_event_bus, GraphEvent
 from core.contracts.events import EventContract, EventType, ContractViolation
 
 logger = logging.getLogger(__name__)
+
+from core.data.constants import INFORMATION_HYPOTHESIS_CONFIDENCE
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,21 @@ class NexusInsight:
     description: str
     severity: str
     related_findings: List[str]  # Finding IDs
+
+
+@dataclass
+class NexusCorrelation:
+    """
+    Finding-to-finding correlation shape for information enablement synthesis.
+    """
+    source_finding_id: str
+    source_finding_type: str
+    target_finding_id: Optional[str]
+    correlation_type: str  # "enablement", "chain", "singleton"
+    confidence: float
+    enabled_actions: List[str]
+    enablement_edges: List[str]
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class NexusContext:
@@ -313,6 +330,50 @@ class NexusContext:
             self._emitted_hypotheses.add(hyp_id)
             self._active_hypotheses[hyp_id] = set(finding_ids)
 
+        # Rule 3: Confirmed information/access findings imply actionable enablement.
+        RULE_ID_INFO = "rule_information_enablement"
+        RULE_VERSION_INFO = "1.0"
+        rule_3_findings = [
+            finding
+            for finding in findings
+            if str(finding.get("confirmation_level", "probable")).strip().lower() == "confirmed"
+            and any(
+                capability in {"information", "access"}
+                for capability in self._extract_capability_types(finding)
+            )
+            and self._extract_base_score(finding) >= 5.0
+        ]
+
+        for finding in rule_3_findings:
+            finding_ids = self._extract_finding_ids([finding])
+            if not finding_ids:
+                continue
+
+            hyp_id = self._generate_hypothesis_id(finding_ids, RULE_ID_INFO, RULE_VERSION_INFO)
+            if hyp_id in self._emitted_hypotheses:
+                continue
+
+            confidence = self._confidence_for_information_finding(finding)
+            explanation = self._enablement_explanation(finding)
+            finding_type = str(finding.get("type", "information finding")).strip()
+
+            paths.append([
+                "Information Enablement",
+                finding_type,
+                "Targeted Exploitation Path",
+            ])
+
+            self._emit_hypothesis_formed(
+                hypothesis_id=hyp_id,
+                constituent_finding_ids=finding_ids,
+                rule_id=RULE_ID_INFO,
+                rule_version=RULE_VERSION_INFO,
+                confidence=confidence,
+                explanation=explanation,
+            )
+            self._emitted_hypotheses.add(hyp_id)
+            self._active_hypotheses[hyp_id] = set(finding_ids)
+
         return paths
 
     def generate_recommendations(self) -> List[Dict[str, Any]]:
@@ -367,6 +428,97 @@ class NexusContext:
                 ids.append(fid.strip())
         # Contract expects list; schema says “sorted list” in description, so do it.
         return sorted(set(ids))
+
+    @staticmethod
+    def _extract_capability_types(finding: Dict[str, Any]) -> List[str]:
+        raw_capability_types = finding.get("capability_types", [])
+        if isinstance(raw_capability_types, str):
+            values = [raw_capability_types]
+        elif isinstance(raw_capability_types, list):
+            values = raw_capability_types
+        else:
+            values = []
+        normalized = [str(item).strip().lower() for item in values if str(item).strip()]
+        return normalized or ["execution"]
+
+    @staticmethod
+    def _extract_base_score(finding: Dict[str, Any]) -> float:
+        for key in ("base_score", "score", "raw_score"):
+            value = finding.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return 0.0
+
+    def _confidence_for_information_finding(self, finding: Dict[str, Any]) -> float:
+        """
+        Map finding type/content into a conservative information-enablement confidence.
+        """
+        finding_type = str(finding.get("type", "")).lower()
+        raw_tags = finding.get("tags", [])
+        if isinstance(raw_tags, str):
+            raw_tags = [raw_tags]
+        tags = {str(tag).strip().lower() for tag in raw_tags if str(tag).strip()}
+        content = " ".join(
+            str(part)
+            for part in (
+                finding.get("value"),
+                finding.get("description"),
+                finding.get("title"),
+                finding.get("evidence_summary"),
+            )
+            if part
+        ).lower()
+
+        credential_indicators = ("password", "api_key", "apikey", "secret", "token", "aws_access_key_id")
+        if "secret-leak" in tags or "credential" in finding_type:
+            return INFORMATION_HYPOTHESIS_CONFIDENCE["credential_exposure"]
+        if "backup-leak" in tags and any(ind in content for ind in credential_indicators):
+            return INFORMATION_HYPOTHESIS_CONFIDENCE["source_code_secrets"]
+        if "private-ip" in tags or any(tag in tags for tag in ("topology", "internal")):
+            return INFORMATION_HYPOTHESIS_CONFIDENCE["internal_topology"]
+        if "backup-leak" in tags:
+            return INFORMATION_HYPOTHESIS_CONFIDENCE["backup_config"]
+        return INFORMATION_HYPOTHESIS_CONFIDENCE["backup_config"]
+
+    def _enablement_explanation(self, finding: Dict[str, Any]) -> str:
+        """
+        Explain what attacker effort is reduced by this information finding.
+        """
+        finding_type = str(finding.get("type", "")).lower()
+        raw_tags = finding.get("tags", [])
+        if isinstance(raw_tags, str):
+            raw_tags = [raw_tags]
+        tags = {str(tag).strip().lower() for tag in raw_tags if str(tag).strip()}
+        target = str(finding.get("target", "unknown"))
+
+        if "secret-leak" in tags or "credential" in finding_type:
+            return (
+                f"Confirmed credential exposure on {target} enables direct authenticated access "
+                "without brute-force effort."
+            )
+        if "backup-leak" in tags:
+            return (
+                f"Confirmed backup/source artifact exposure on {target} reveals application structure "
+                "that enables targeted endpoint and secret exploitation."
+            )
+        if "private-ip" in tags:
+            return (
+                f"Confirmed internal topology exposure on {target} enables targeted SSRF and "
+                "lateral movement toward private infrastructure."
+            )
+        if "git" in finding_type:
+            return (
+                f"Confirmed git metadata exposure on {target} enables repository intelligence "
+                "and targeted exploit path selection."
+            )
+        return (
+            f"Confirmed information exposure on {target} reduces attacker uncertainty and enables "
+            "higher-probability follow-up exploitation."
+        )
 
     @staticmethod
     def _guess_confidence_from_id(_: str) -> float:

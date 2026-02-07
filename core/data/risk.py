@@ -46,11 +46,7 @@ SEVERITY_WEIGHTS = {
     "INFO": 0.5,
 }
 
-CONFIRMATION_MULTIPLIERS = {
-    "confirmed": 1.0,
-    "probable": 0.7,
-    "hypothesized": 0.4,
-}
+from core.data.constants import CONFIRMATION_MULTIPLIERS
 
 
 class RiskEngine(Observable):

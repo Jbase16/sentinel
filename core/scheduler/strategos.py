@@ -1071,6 +1071,8 @@ class Strategos:
 
         if action_type == InsightActionType.HIGH_VALUE_TARGET:
             await self._handle_high_value_target(insight)
+        elif action_type == InsightActionType.CONFIRMED_EXPOSURE:
+            await self._handle_confirmed_exposure(insight)
         elif action_type == InsightActionType.CRITICAL_PATH:
             await self._handle_critical_path(insight)
         elif action_type == InsightActionType.CONFIRMED_VULN:
@@ -1112,6 +1114,29 @@ class Strategos:
 
         await self._emit_reaction_decision(insight)
         self._emit_log(f"[Strategos] ⚠ High-value target discovered: {insight.target} (confidence: {insight.confidence})")
+
+    async def _handle_confirmed_exposure(self, insight: InsightPayload) -> None:
+        if not self.context:
+            return
+
+        async with self.context.lock:
+            self.context.knowledge.setdefault("confirmed_exposures", [])
+            self.context.knowledge["confirmed_exposures"].append(
+                {
+                    "target": insight.target,
+                    "insight_id": insight.insight_id,
+                    "finding_type": insight.details.get("finding_type"),
+                    "confidence": insight.confidence,
+                    "details": insight.details,
+                    "discovered_at": insight.created_at,
+                }
+            )
+
+        await self._emit_reaction_decision(insight)
+        self._emit_log(
+            f"[Strategos] Confirmed exposure discovered: {insight.target} "
+            f"(confidence: {insight.confidence})"
+        )
 
     async def _handle_critical_path(self, insight: InsightPayload) -> None:
         if not self.context:
@@ -1260,7 +1285,7 @@ class Strategos:
                                 payload=insight.model_dump(),
                                 scan_id=self.context.scan_id,
                                 source="strategos",
-                                priority=2,
+                                priority=int(insight.priority),
                             )
                         )
                     except Exception as e:
@@ -1280,42 +1305,120 @@ class Strategos:
         if not self.context:
             return None
 
-        finding_type = finding.get("type", "unknown")
+        finding_type_raw = finding.get("type", "unknown")
+        finding_type = str(finding_type_raw).strip().lower()
         target = finding.get("asset") or finding.get("target") or "unknown"
-        base_priority = self._normalize_insight_priority(finding.get("priority", 5))
+        has_confirmation_field = "confirmation_level" in finding
+        has_capability_field = "capability_types" in finding and finding.get("capability_types") is not None
+
+        raw_capability_types = finding.get("capability_types", [])
+        if isinstance(raw_capability_types, str):
+            capability_types = [raw_capability_types.strip().lower()]
+        elif isinstance(raw_capability_types, list):
+            capability_types = [str(cap).strip().lower() for cap in raw_capability_types if str(cap).strip()]
+        else:
+            capability_types = []
+
+        # Backward-compatible mapping for legacy findings without capability typing.
+        if not capability_types:
+            if finding_type in {"admin_panel", "config_exposure", "git_exposure"}:
+                capability_types = ["information"]
+            elif finding_type in {"sqli", "rce", "lfi", "ssrf"}:
+                capability_types = ["execution"]
+            else:
+                capability_types = ["execution"]
+
+        confirmation_level = str(finding.get("confirmation_level", "probable")).strip().lower()
+        if confirmation_level not in {"confirmed", "probable", "hypothesized"}:
+            confirmation_level = "probable"
 
         action_type: Optional[InsightActionType] = None
         confidence = 0.5
         summary = ""
-        priority = base_priority
+        priority = self._normalize_insight_priority(finding.get("priority", 5))
 
-        # High Value Targets
-        if finding_type in ["admin_panel", "config_exposure", "git_exposure"]:
-            action_type = InsightActionType.HIGH_VALUE_TARGET
-            confidence = 0.9
-            summary = f"High Value Target discovered: {finding_type} at {target}"
-            priority = 0  # top
-
-        # Likely vulns (scanner-derived)
-        elif finding_type in ["sqli", "rce", "lfi", "ssrf"]:
-            action_type = InsightActionType.CONFIRMED_VULN
-            confidence = 0.8
-            summary = f"Possible Critical Vulnerability: {finding_type} at {target}"
-            priority = 0
-
-        # WAF
-        elif finding_type == "waf_detected":
+        # Security boundary findings still follow explicit deterministic mapping.
+        if finding_type == "waf_detected":
             action_type = InsightActionType.WAF_DETECTED
             confidence = 1.0
             summary = f"WAF Detected: {finding.get('details', {}).get('waf_name', 'Generic')}"
             priority = 3
 
-        # Auth boundaries
         elif finding_type in ["login_page", "401_unauthorized", "403_forbidden"]:
             action_type = InsightActionType.AUTH_REQUIRED
             confidence = 1.0
             summary = f"Authentication Boundary found at {target}"
             priority = 4
+
+        # Backward compatibility: preserve pre-Phase-2 behavior when neither new
+        # confirmation nor capability fields are present on the finding.
+        elif not has_confirmation_field and not has_capability_field and finding_type in {
+            "admin_panel",
+            "config_exposure",
+            "git_exposure",
+        }:
+            action_type = InsightActionType.HIGH_VALUE_TARGET
+            confidence = 0.9
+            summary = f"High Value Target discovered: {finding_type_raw} at {target}"
+            priority = 0
+
+        elif not has_confirmation_field and not has_capability_field and finding_type in {
+            "sqli",
+            "rce",
+            "lfi",
+            "ssrf",
+        }:
+            action_type = InsightActionType.CONFIRMED_VULN
+            confidence = 0.8
+            summary = f"Possible Critical Vulnerability: {finding_type_raw} at {target}"
+            priority = 0
+
+        else:
+            if confirmation_level == "confirmed":
+                priority = 0
+                if "access" in capability_types:
+                    action_type = InsightActionType.CONFIRMED_EXPOSURE
+                    confidence = 0.95
+                    summary = f"Confirmed Access Capability: {finding_type_raw} at {target}"
+                elif "information" in capability_types and "access" not in capability_types:
+                    action_type = InsightActionType.HIGH_VALUE_TARGET
+                    confidence = 0.90
+                    summary = f"High Value Information Target: {finding_type_raw} at {target}"
+                elif "execution" in capability_types:
+                    action_type = InsightActionType.CONFIRMED_VULN
+                    confidence = 0.85
+                    summary = f"Confirmed Vulnerability: {finding_type_raw} at {target}"
+            elif confirmation_level == "hypothesized":
+                # +2 deprioritization relative to confirmed findings.
+                priority = 2
+                if "access" in capability_types:
+                    action_type = InsightActionType.CONFIRMED_EXPOSURE
+                    confidence = 0.50
+                    summary = f"Possible Access Exposure (unconfirmed): {finding_type_raw} at {target}"
+                elif "execution" in capability_types:
+                    action_type = InsightActionType.CONFIRMED_VULN
+                    confidence = 0.40
+                    summary = f"Possible Vulnerability (unconfirmed): {finding_type_raw} at {target}"
+                else:
+                    action_type = InsightActionType.HIGH_VALUE_TARGET
+                    confidence = 0.50
+                    summary = f"Possible Information Target (unconfirmed): {finding_type_raw} at {target}"
+            else:
+                # PROBABLE tier: priority 1 (between confirmed=0 and hypothesized=2).
+                # Guard order mirrors CONFIRMED branch: access → information → execution.
+                priority = 1
+                if "access" in capability_types:
+                    action_type = InsightActionType.CONFIRMED_EXPOSURE
+                    confidence = 0.75
+                    summary = f"Probable Access Exposure: {finding_type_raw} at {target}"
+                elif "information" in capability_types and "access" not in capability_types:
+                    action_type = InsightActionType.HIGH_VALUE_TARGET
+                    confidence = 0.70
+                    summary = f"Probable Information Target: {finding_type_raw} at {target}"
+                elif "execution" in capability_types:
+                    action_type = InsightActionType.CONFIRMED_VULN
+                    confidence = 0.65
+                    summary = f"Probable Vulnerability: {finding_type_raw} at {target}"
 
         if not action_type:
             return None
@@ -1330,6 +1433,8 @@ class Strategos:
             "vuln_type": details.get("vuln_type") or finding_type,
             "auth_type": details.get("auth_type"),
             "waf_name": details.get("waf_name"),
+            "capability_types": capability_types,
+            "confirmation_level": confirmation_level,
         }
         sanitized_details = {k: v for k, v in sanitized_details.items() if v is not None}
 

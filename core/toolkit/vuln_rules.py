@@ -98,19 +98,7 @@ TextAccumulator = Callable[[List[dict]], List[dict]]
 
 RULES_FILE = Path(__file__).parents[1] / "cortex" / "rules.yaml"
 
-CREDENTIAL_INDICATORS = [
-    "password", "passwd", "secret", "token", "api_key", "apikey",
-    "aws_access_key", "aws_secret", "private_key", "authorization",
-    "database_url", "db_password", "smtp_password", "redis_url",
-    "mongodb_uri", "connection_string", "client_secret",
-    "jdbc:", "mysql://", "postgres://", "mongodb+srv://",
-]
-
-CONFIRMATION_MULTIPLIERS = {
-    "confirmed": 1.0,
-    "probable": 0.7,
-    "hypothesized": 0.4,
-}
+from core.data.constants import CREDENTIAL_INDICATORS, CONFIRMATION_MULTIPLIERS
 
 
 def _pluck_text(finding: dict) -> str:
@@ -195,6 +183,11 @@ def _derive_issue_confirmation(evidence: List[dict]) -> str:
             min_level = min(min_level, level_order[cl])
 
     if not has_any:
+        # OPTION A (locked in): Default to "confirmed" when no confirmation data
+        # exists on any supporting finding. This guarantees zero regression for
+        # legacy data that predates Phase 1 — pre-existing issues keep their
+        # original effective scores (multiplier = 1.0). Do not change this to
+        # "probable" without verifying the full scan corpus still ranks correctly.
         return "confirmed"
 
     reverse = {2: "confirmed", 1: "probable", 0: "hypothesized"}
@@ -481,6 +474,7 @@ class VulnRule:
             # RiskEngine.recalculate() applies a SEPARATE multiplier to ASSET-LEVEL
             # ranking (which target needs attention first). These serve different
             # consumers and are intentionally independent.
+            # Do not remove one thinking the other covers it.
             enriched.append({
                 "id": issue_id,
                 "rule_id": self.id,

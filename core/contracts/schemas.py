@@ -243,6 +243,7 @@ class InsightActionType(str, Enum):
     
     # Vulnerability Discovery
     CONFIRMED_VULN = "confirmed_vuln"  # Vulnerability validated
+    CONFIRMED_EXPOSURE = "confirmed_exposure"  # Confirmed access capability (credential/session exposure)
     POTENTIAL_VULN = "potential_vuln"  # Vulnerability candidate
     
     # Surface Expansion
@@ -290,7 +291,7 @@ class InsightPayload(BaseModel):
     created_at: float = Field(default_factory=time.time, description="Creation timestamp")
     
     # Priority
-    priority: int = Field(default=5, ge=1, le=10, description="Priority (1=highest, 10=lowest)")
+    priority: int = Field(default=5, ge=0, le=9, description="Priority (0=highest, 9=lowest)")
 
 
 @dataclass
