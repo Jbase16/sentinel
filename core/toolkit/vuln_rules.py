@@ -98,6 +98,20 @@ TextAccumulator = Callable[[List[dict]], List[dict]]
 
 RULES_FILE = Path(__file__).parents[1] / "cortex" / "rules.yaml"
 
+CREDENTIAL_INDICATORS = [
+    "password", "passwd", "secret", "token", "api_key", "apikey",
+    "aws_access_key", "aws_secret", "private_key", "authorization",
+    "database_url", "db_password", "smtp_password", "redis_url",
+    "mongodb_uri", "connection_string", "client_secret",
+    "jdbc:", "mysql://", "postgres://", "mongodb+srv://",
+]
+
+CONFIRMATION_MULTIPLIERS = {
+    "confirmed": 1.0,
+    "probable": 0.7,
+    "hypothesized": 0.4,
+}
+
 
 def _pluck_text(finding: dict) -> str:
     """
@@ -140,6 +154,51 @@ def _pluck_text(finding: dict) -> str:
         if isinstance(val, str):
             parts.append(val)
     return " ".join(parts).lower()
+
+
+def _build_content_string(evidence: List[dict]) -> str:
+    """Concatenate all text fields from evidence findings for content inspection."""
+    parts = []
+    # Loop over items.
+    for item in evidence:
+        for key in ("type", "message", "proof", "evidence", "value", "description", "technical_details"):
+            val = item.get(key)
+            if isinstance(val, str):
+                parts.append(val)
+        # Also check nested metadata
+        meta = item.get("metadata", {})
+        if isinstance(meta, dict):
+            for val in meta.values():
+                if isinstance(val, str):
+                    parts.append(val)
+    return " ".join(parts).lower()
+
+
+def _derive_issue_confirmation(evidence: List[dict]) -> str:
+    """
+    Derive the confirmation level of an issue from its supporting findings.
+
+    Uses the LOWEST confirmation level among supporting findings
+    (conservative: an issue is only as confirmed as its weakest evidence).
+
+    Falls back to "confirmed" if no confirmation data exists on any finding.
+    """
+    level_order = {"confirmed": 2, "probable": 1, "hypothesized": 0}
+    min_level = 2  # Start at highest (confirmed)
+    has_any = False
+
+    # Loop over items.
+    for item in evidence:
+        cl = item.get("confirmation_level")
+        if cl and cl in level_order:
+            has_any = True
+            min_level = min(min_level, level_order[cl])
+
+    if not has_any:
+        return "confirmed"
+
+    reverse = {2: "confirmed", 1: "probable", 0: "hypothesized"}
+    return reverse[min_level]
 
 
 def _extract_paths(text: str) -> List[str]:
@@ -371,6 +430,7 @@ class VulnRule:
     base_score: float
     remediation: str
     matcher: TextAccumulator = field(repr=False)
+    capability_types: List[str] = field(default_factory=lambda: ["execution"])
 
     def apply(self, findings: List[dict]) -> List[dict]:
         """
@@ -411,12 +471,26 @@ class VulnRule:
             target = match.get("target", "unknown")
             evidence = match.get("evidence", [])
             issue_id = match.get("id") or f"{self.id}:{target}:{idx}"
+            confirmation = _derive_issue_confirmation(evidence)
+            multiplier = CONFIRMATION_MULTIPLIERS.get(confirmation, 0.7)
+            raw_score = match.get("score", self.base_score)
+            effective_score = round(raw_score * multiplier, 2)
+
+            # COMPOUND MULTIPLIER NOTE:
+            # This multiplier applies to ISSUE-LEVEL ranking (which issue outranks which).
+            # RiskEngine.recalculate() applies a SEPARATE multiplier to ASSET-LEVEL
+            # ranking (which target needs attention first). These serve different
+            # consumers and are intentionally independent.
             enriched.append({
                 "id": issue_id,
                 "rule_id": self.id,
                 "title": self.title,
                 "severity": match.get("severity", self.severity),
-                "score": match.get("score", self.base_score),
+                "score": effective_score,
+                "raw_score": raw_score,
+                "confirmation_level": confirmation,
+                "confirmation_multiplier": multiplier,
+                "capability_types": self.capability_types,
                 "target": target,
                 "description": match.get("description", self.description),
                 "impact": match.get("impact", ""),
@@ -1204,12 +1278,25 @@ def _match_backup_rule(findings: List[dict]) -> List[dict]:
     matches = matcher(findings)
     # Loop over items.
     for match in matches:
-        match.setdefault(
-            "impact",
-            "Backup or source artifacts exposed publicly provide full application source and secrets.",
-        )
-        match.setdefault("severity", "HIGH")
-        match.setdefault("score", 7.7)
+        # Content-aware escalation: inspect evidence for credential indicators
+        content = _build_content_string(match.get("evidence", []))
+        has_credentials = any(ind in content for ind in CREDENTIAL_INDICATORS)
+
+        if has_credentials:
+            match["severity"] = "CRITICAL"
+            match["score"] = 9.5
+            match["impact"] = (
+                "Backup or source artifacts expose credentials or secrets, "
+                "enabling direct unauthorized access to backend systems."
+            )
+            match.setdefault("tags", []).append("credential-in-backup")
+        else:
+            match.setdefault("severity", "HIGH")
+            match.setdefault("score", 7.7)
+            match.setdefault(
+                "impact",
+                "Backup or source artifacts exposed publicly provide full application source and secrets.",
+            )
     return matches
 
 
@@ -1329,6 +1416,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=9.0,
         remediation="Block metadata access from public workloads and introduce SSRF protections.",
+        capability_types=["execution", "access"],
         matcher=_match_metadata,
     ),
     VulnRule(
@@ -1340,6 +1428,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=6.2,
         remediation="Disable developer utilities or restrict them to internal networks.",
+        capability_types=["information", "execution"],
         matcher=_match_dev_surfaces,
     ),
     VulnRule(
@@ -1373,6 +1462,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=4.5,
         remediation="Scrub internal references from responses destined for public clients.",
+        capability_types=["information"],
         matcher=_match_private_ip,
     ),
     VulnRule(
@@ -1384,6 +1474,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=5.5,
         remediation="Return generic error pages and capture details server-side only.",
+        capability_types=["information"],
         matcher=_match_verbose_errors,
     ),
     VulnRule(
@@ -1395,6 +1486,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=6.8,
         remediation="Disable introspection in production deployments and require authorization tokens.",
+        capability_types=["information"],
         matcher=_match_graphql,
     ),
     VulnRule(
@@ -1417,6 +1509,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["supply-chain"],
         base_score=9.5,
         remediation="Revoke compromised credentials, rotate secrets, and audit logs for abuse.",
+        capability_types=["access"],
         matcher=_match_secret_exposure,
     ),
     VulnRule(
@@ -1461,6 +1554,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=9.2,
         remediation="Restrict outbound requests, validate URLs, and block metadata endpoints.",
+        capability_types=["execution"],
         matcher=_match_ssrf_chain,
     ),
     VulnRule(
@@ -1505,6 +1599,7 @@ _LEGACY_RULES: List[VulnRule] = [
         families=["exposure"],
         base_score=7.7,
         remediation="Remove backup artifacts from web roots and rotate any embedded secrets.",
+        capability_types=["information", "access"],
         matcher=_match_backup_rule,
     ),
     VulnRule(

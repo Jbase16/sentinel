@@ -138,9 +138,13 @@ class OMEGARiskCalculator:
             payload={
                 "message": "[OMEGA] Calculating risk score",
                 "cronus": cronus_score.value,
+                "cronus_confidence": cronus_score.confidence,
                 "mimic": mimic_score.value,
+                "mimic_confidence": mimic_score.confidence,
                 "nexus": nexus_score.value,
+                "nexus_confidence": nexus_score.confidence,
                 "nexus_fired": nexus_fired,
+                "confidence_applied": True,
             },
         ))
 
@@ -167,10 +171,12 @@ class OMEGARiskCalculator:
             ))
 
         # Calculate weighted score
+        # NOTE: Phase 1 does not modify pillar confidence values.
+        # Confirmation weighting is handled at issue and asset levels only.
         omega_score = (
-            w_cronus * cronus_score.value +
-            w_mimic * mimic_score.value +
-            w_nexus * nexus_score.value
+            w_cronus * cronus_score.value * cronus_score.confidence +
+            w_mimic * mimic_score.value * mimic_score.confidence +
+            w_nexus * nexus_score.value * nexus_score.confidence
         )
 
         # Classify risk level

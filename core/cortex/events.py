@@ -947,6 +947,24 @@ class EventBus:
             payload["scan_id"] = scan_id
         self.emit(GraphEvent(type=EventType.SCAN_PHASE_CHANGED, payload=payload, scan_id=scan_id, source="engine", priority=0))
 
+    def emit_scan_recon_skipped(
+        self,
+        target: str,
+        reason: str,
+        target_classification: str,
+        intent: str,
+        scan_id: Optional[str] = None,
+    ) -> None:
+        payload: Dict[str, Any] = {
+            "target": target,
+            "reason": reason,
+            "target_classification": target_classification,
+            "intent": intent,
+        }
+        if scan_id:
+            payload["scan_id"] = scan_id
+        self.emit(GraphEvent(type=EventType.SCAN_RECON_SKIPPED, payload=payload, scan_id=scan_id, source="engine", priority=0))
+
     def emit_scan_started(self, target: str, allowed_tools: List[str], scan_id: str) -> None:
         payload: Dict[str, Any] = {"target": target, "allowed_tools": allowed_tools, "scan_id": scan_id}
         self.emit(GraphEvent(type=EventType.SCAN_STARTED, payload=payload, scan_id=scan_id, source="engine", priority=0))

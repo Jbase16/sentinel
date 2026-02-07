@@ -46,6 +46,12 @@ SEVERITY_WEIGHTS = {
     "INFO": 0.5,
 }
 
+CONFIRMATION_MULTIPLIERS = {
+    "confirmed": 1.0,
+    "probable": 0.7,
+    "hypothesized": 0.4,
+}
+
 
 class RiskEngine(Observable):
     """Class RiskEngine."""
@@ -67,7 +73,14 @@ class RiskEngine(Observable):
             asset = issue.get("target") or issue.get("asset") or "unknown"
             severity = str(issue.get("severity", "INFO")).upper()
             weight = SEVERITY_WEIGHTS.get(severity, 0.5)
-            scores[asset] += weight
+            # Confirmation-weighted scoring
+            # COMPOUND MULTIPLIER NOTE:
+            # This multiplier applies to ASSET-LEVEL ranking (which target needs
+            # attention first). VulnRule.apply() applies a SEPARATE multiplier to
+            # ISSUE-LEVEL ranking. Both are needed — see note in VulnRule.apply().
+            confirmation = issue.get("confirmation_level")
+            multiplier = CONFIRMATION_MULTIPLIERS.get(confirmation, 1.0) if confirmation else 1.0
+            scores[asset] += weight * multiplier
         self._scores = dict(scores)
         self.scores_changed.emit()
 

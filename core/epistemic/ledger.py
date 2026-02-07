@@ -32,6 +32,12 @@ class LifecycleState(str, Enum):
     INVALIDATED = "invalidated" # Was Promoted, now false (Time travel)
 
 
+class ConfirmationLevel(str, Enum):
+    CONFIRMED = "confirmed"
+    PROBABLE = "probable"
+    HYPOTHESIZED = "hypothesized"
+
+
 
 @dataclass(frozen=True)
 class ToolContext:
@@ -79,6 +85,7 @@ class Finding:
     description: str
     remediation: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    confirmation_level: str = "probable"  # Default preserves existing behavior
 
 
 @dataclass(frozen=True)
@@ -122,6 +129,7 @@ class FindingProposal:
     citations: List[Citation]
     source: str = "ai"
     metadata: Dict[str, Any] = field(default_factory=dict)
+    confirmation_level: Optional[str] = None  # Derived by Ledger if not set
 
 
 class EvidenceLedger:
@@ -269,18 +277,50 @@ class EvidenceLedger:
         if not valid_citations:
             logger.warning(f"[EvidenceLedger] Rejected proposal '{proposal.title}': No valid citations found.")
             return None
+
+        # Derive confirmation level
+        #
+        # IMPORTANT (Rev 2 — epistemic rigor):
+        # The source check fires BEFORE the citation quality check. This is deliberate.
+        # Even if an AI proposal cites a valid tool observation, the CLAIM is still
+        # speculative. The tool observation is confirmed evidence, but the AI's
+        # interpretation of what that evidence means is a hypothesis.
+        # ConfirmationLevel refers to CLAIM certainty, not EVIDENCE existence.
+        # Do not reorder these checks.
+        if proposal.confirmation_level:
+            # Caller explicitly set it — trust it
+            derived_confirmation = proposal.confirmation_level
+        elif proposal.source in ("ai", "neural_strategy"):
+            derived_confirmation = ConfirmationLevel.HYPOTHESIZED.value
+        elif proposal.source == "heuristic":
+            derived_confirmation = ConfirmationLevel.PROBABLE.value
+        else:
+            # Source is a tool name or unknown — check if citations reference real tool observations
+            has_tool_observation = any(
+                self._observations.get(c.observation_id) is not None
+                and self._observations[c.observation_id].tool.name
+                for c in valid_citations
+            )
+            derived_confirmation = (
+                ConfirmationLevel.CONFIRMED.value if has_tool_observation
+                else ConfirmationLevel.PROBABLE.value
+            )
             
         # 2. Promote
+        metadata = dict(proposal.metadata or {})
+        metadata.pop("confirmation_level", None)
         return self.promote_finding(
             title=proposal.title,
             severity=proposal.severity,
             citations=valid_citations,
             description=proposal.description,
-            **proposal.metadata
+            confirmation_level=derived_confirmation,
+            **metadata
         )
 
     def promote_finding(self, title: str, severity: str, citations: List[Citation], 
-                       description: str, timestamp_override: Optional[float] = None, **kwargs) -> Finding:
+                       description: str, confirmation_level: str = "probable",
+                       timestamp_override: Optional[float] = None, **kwargs) -> Finding:
         """
         Internal promotion logic.
         """
@@ -302,7 +342,8 @@ class EvidenceLedger:
             severity=severity,
             citations=citations,
             description=description,
-            metadata=kwargs
+            metadata=kwargs,
+            confirmation_level=confirmation_level,
         )
         
         self._findings[find_id] = finding
@@ -316,7 +357,8 @@ class EvidenceLedger:
                 "severity": severity,
                 "citations": [asdict(c) for c in citations],
                 "description": description,
-                "metadata": kwargs
+                "metadata": kwargs,
+                "confirmation_level": confirmation_level,
             },
             timestamp_override=timestamp_override
         )
@@ -549,6 +591,7 @@ class EvidenceLedger:
             "value": finding.description, 
             "description": finding.description,
             "citations": [asdict(c) for c in finding.citations],
-            "metadata": finding.metadata
+            "metadata": finding.metadata,
+            "confirmation_level": finding.confirmation_level,
         }
         findings_store.add_finding(finding_dict, persist=False)

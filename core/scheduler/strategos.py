@@ -43,6 +43,7 @@ from typing import List, Dict, Any, Callable, Awaitable, Optional, Set, Literal,
 import time
 import itertools
 from dataclasses import dataclass, field
+from enum import Enum
 from urllib.parse import urlparse
 import uuid
 
@@ -91,6 +92,12 @@ DEFAULT_EVENT_QUEUE_MAXSIZE = 1024
 DEFAULT_TOOL_TIMEOUT_SECONDS = 300.0  # 5 min safe default; tool-specific overrides if available
 DEFAULT_CANCEL_GRACE_SECONDS = 2.5    # short grace before hard-cancel
 PROGRESS_LOG_THROTTLE_SECONDS = 0.5   # avoid spam under high event volume
+
+
+class ReconSkipReason(str, Enum):
+    LOCAL_OR_IP_TARGET = "LOCAL_OR_IP_TARGET"
+    FILE_TARGET = "FILE_TARGET"
+    NO_RECON_TOOLS_AVAILABLE = "NO_RECON_TOOLS_AVAILABLE"
 
 
 def _clamp_int(value: int, lo: int, hi: int) -> int:
@@ -487,6 +494,70 @@ class Strategos:
             pass
         return DEFAULT_TOOL_TIMEOUT_SECONDS
 
+    def _determine_recon_skip_reason(self, target_classification: Any) -> Optional[ReconSkipReason]:
+        """
+        Decide whether passive recon should be skipped, and why.
+        This is the single authoritative guard for recon skip logic.
+        """
+        from core.toolkit.normalizer import TargetClassification
+
+        if target_classification in (TargetClassification.IP, TargetClassification.LOOPBACK):
+            return ReconSkipReason.LOCAL_OR_IP_TARGET
+        if target_classification == TargetClassification.FILE:
+            return ReconSkipReason.FILE_TARGET
+        return None
+
+    def _emit_recon_skipped(
+        self,
+        reason: ReconSkipReason,
+        target: str,
+        target_classification: Any,
+        available_tools: List[str],
+    ) -> None:
+        """
+        Emit a first-class recon-skipped outcome (decision + event + log).
+        """
+        if not self.context:
+            return
+
+        self.context.knowledge["recon_skipped"] = True
+        self.context.knowledge["recon_skip_reason"] = reason.value
+        self.context.knowledge["recon_satisfied"] = True
+
+        classification_value = target_classification.value if hasattr(target_classification, "value") else str(target_classification)
+        self._emit_log(f"[Strategos] Recon skipped: {reason.value} (target_classification={classification_value})")
+
+        if self._event_bus:
+            try:
+                self._event_bus.emit_scan_recon_skipped(
+                    target=target,
+                    reason=reason.value,
+                    target_classification=classification_value,
+                    intent=INTENT_PASSIVE_RECON,
+                    scan_id=self.context.scan_id,
+                )
+            except Exception as e:
+                logger.debug(f"[Strategos] Failed to emit recon skipped event: {e}")
+
+        if self._decision_ctx and self._current_intent_decision:
+            with self._decision_ctx.nested(self._current_intent_decision):
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.TOOL_SELECTION,
+                    chosen="SKIP_RECON",
+                    reason=f"Recon skipped: {reason.value}",
+                    alternatives=available_tools,
+                    context={
+                        "intent": INTENT_PASSIVE_RECON,
+                        "target": target,
+                        "target_classification": classification_value,
+                        "skipped": True,
+                    },
+                    evidence={
+                        "reason": reason.value,
+                        "available_tools": available_tools,
+                    },
+                )
+
     async def run_mission(
         self,
         target: str,
@@ -517,6 +588,11 @@ class Strategos:
             existing_tags = set()
         existing_tags.update({"protocol:http", "protocol:https"})
         self.context.knowledge["tags"] = existing_tags
+
+        # Target classification is a first-class control-flow input.
+        from core.toolkit.normalizer import classify_target
+        target_classification = classify_target(target)
+        self.context.knowledge["target_classification"] = target_classification.value
 
         self._terminated = False
         self._stop_requested = False
@@ -609,12 +685,36 @@ class Strategos:
                     },
                 )
 
-                tools_to_run = self._select_tools(current_intent, available_tools, mode)
+                tools_to_run: List[str] = []
+                recon_skipped = False
+                recon_skip_reason: Optional[ReconSkipReason] = None
+
+                if current_intent == INTENT_PASSIVE_RECON:
+                    # Recon is domain-centric; for IP/loopback/file targets it is meaningless.
+                    # Skip recon explicitly and proceed to active/HTTP phases.
+                    recon_skip_reason = self._determine_recon_skip_reason(target_classification)
+                    if recon_skip_reason is None:
+                        tools_to_run = self._select_tools(current_intent, available_tools, mode)
+                        if not tools_to_run:
+                            recon_skip_reason = ReconSkipReason.NO_RECON_TOOLS_AVAILABLE
+                    if recon_skip_reason is not None:
+                        recon_skipped = True
+                        self._emit_recon_skipped(
+                            reason=recon_skip_reason,
+                            target=target,
+                            target_classification=target_classification,
+                            available_tools=available_tools,
+                        )
+                else:
+                    tools_to_run = self._select_tools(current_intent, available_tools, mode)
 
                 if self._stop_requested:
                     break
 
-                if not tools_to_run:
+                if recon_skipped:
+                    # Recon intentionally skipped; do not treat as failure or "no tools" error.
+                    pass
+                elif not tools_to_run:
                     self._emit_log(f"[Strategos] No tools available for {current_intent}. Skipping.")
                     with self._decision_ctx.nested(self._current_intent_decision):
                         self._decision_ctx.choose(
@@ -636,9 +736,13 @@ class Strategos:
                     with self._decision_ctx.nested(self._current_intent_decision):
                         has_findings = self.context.findings_this_intent > 0
                         has_new_surface = self.context.surface_delta_this_intent > 0
-                        
+
                         # Logic for assessment
-                        if mode == ScanMode.PASSIVE:
+                        if current_intent == INTENT_PASSIVE_RECON and recon_skipped:
+                            chosen_action = "CONTINUE_ENGAGEMENT"
+                            rationale = f"Recon skipped ({recon_skip_reason.value}); proceeding to active phases."
+                            suppressed = ["CONCLUDE_PHASE"]
+                        elif mode == ScanMode.PASSIVE:
                             chosen_action = "MAINTAIN_PASSIVE_SCOPE"
                             rationale = "Passive mode restriction prevents escalation despite findings." if has_findings else "No triggers for escalation in passive mode."
                             suppressed = ["ESCALATE_TO_ACTIVE"] if has_findings else []

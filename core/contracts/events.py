@@ -72,6 +72,7 @@ class EventType(str, Enum):
     SCAN_COMPLETED = "scan_completed"
     SCAN_FAILED = "scan_failed"
     SCAN_PHASE_CHANGED = "scan_phase_changed"
+    SCAN_RECON_SKIPPED = "scan_recon_skipped"
 
     # Tool Execution
     TOOL_STARTED = "tool_started"
@@ -334,6 +335,18 @@ class EventContract:
                 FieldSpec("scan_id", str, required=True),
                 FieldSpec("phase", str, required=True),
                 FieldSpec("previous_phase", str, required=False),
+            ]
+        )
+
+        cls._schemas[EventType.SCAN_RECON_SKIPPED] = EventSchema(
+            event_type=EventType.SCAN_RECON_SKIPPED,
+            description="Passive recon was intentionally skipped with a deterministic reason.",
+            fields=[
+                FieldSpec("scan_id", str, required=True),
+                FieldSpec("target", str, required=True),
+                FieldSpec("reason", str, required=True),
+                FieldSpec("target_classification", str, required=True),
+                FieldSpec("intent", str, required=True),
             ]
         )
 

@@ -1,7 +1,61 @@
 """Module normalizer: inline documentation for /Users/jason/Developer/sentinelforge/core/toolkit/normalizer.py."""
 import ipaddress
+import os
 import socket
+from enum import Enum
 from urllib.parse import urlparse, urlunparse
+
+
+class TargetClassification(str, Enum):
+    DOMAIN = "domain"
+    IP = "ip"
+    LOOPBACK = "loopback"
+    FILE = "file"
+
+
+def is_file_target(target: str) -> bool:
+    """
+    Detect explicit file targets.
+    Only treats file:// URLs or existing absolute paths as file targets.
+    """
+    candidate = (target or "").strip()
+    if not candidate:
+        return False
+
+    try:
+        parsed = urlparse(candidate)
+    except Exception:
+        parsed = None
+
+    if parsed and parsed.scheme == "file":
+        return True
+
+    if os.path.isabs(candidate) and os.path.isfile(candidate):
+        return True
+
+    return False
+
+
+def classify_target(target: str) -> TargetClassification:
+    """
+    Classify a scan target for control-flow decisions.
+
+    NOTE: Use this at scan start to determine whether DNS recon is meaningful.
+    """
+    if is_file_target(target):
+        return TargetClassification.FILE
+
+    if is_localhost_target(target):
+        return TargetClassification.LOOPBACK
+
+    host = extract_host(target)
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback:
+            return TargetClassification.LOOPBACK
+        return TargetClassification.IP
+    except ValueError:
+        return TargetClassification.DOMAIN
 
 
 def ensure_url(target: str) -> str:
