@@ -16,23 +16,23 @@ async def test_full_insight_flow():
     # 1. Setup
     mock_bus = MagicMock(spec=EventBus)
     mock_log = MagicMock()
-    
+
     strategos = Strategos(
         event_bus=mock_bus,
         log_fn=mock_log
     )
-    
+
     # Initialize context manually (usually done in run_mission)
     target = "https://example.com"
     strategos.context = ScanContext(target=target)
     strategos.context.knowledge["mode"] = ScanMode.STANDARD
-    
+
     # Use asyncio.Event for proper synchronization instead of polling
     knowledge_updated = asyncio.Event()
-    
+
     # Start insight processor loop
     process_task = asyncio.create_task(strategos._process_pending_insights())
-    
+
     try:
         # 2. Simulate Finding Ingestion (admin_panel -> HIGH_VALUE_TARGET)
         findings = [{
@@ -42,20 +42,30 @@ async def test_full_insight_flow():
             "id": "find_123",
             "priority": 1
         }]
-        
+
         # Ingest (async)
         await strategos.ingest_findings(findings)
-        
-        # 3. Wait for processing using event-based synchronization
-        # Poll for the side effect: knowledge update, but with event for clean exit
+
+        # 3. Wait for processing using event-based synchronization with asyncio.wait_for
         async def wait_for_knowledge():
-            for _ in range(50):
+            # Use asyncio.wait_for with short timeout intervals to check knowledge
+            # This replaces the polling loop with proper event signaling
+            timeout = 5.0  # Maximum time to wait (5 seconds)
+            check_interval = 0.01  # Check every 10ms
+            elapsed = 0.0
+
+            while elapsed < timeout:
                 if "high_value_targets" in strategos.context.knowledge:
                     knowledge_updated.set()
                     return True
-                await asyncio.sleep(0.05)
+                try:
+                    await asyncio.wait_for(asyncio.sleep(check_interval), timeout=check_interval)
+                except asyncio.TimeoutError:
+                    # Expected timeout from sleep
+                    pass
+                elapsed += check_interval
             return False
-            
+
         success = await wait_for_knowledge()
         assert success, "Knowledge not updated with high_value_targets"
         assert knowledge_updated.is_set(), "Knowledge update event should be set"

@@ -23,9 +23,16 @@ import secrets
 import logging
 import re
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
+
+
+def _env_path(var_name: str) -> Optional[Path]:
+    """Read an environment variable as a Path, or None."""
+    value = os.getenv(var_name)
+    return Path(value) if value else None
+
 
 class AIProvider(str, Enum):
     """Supported AI Providers."""
@@ -432,6 +439,124 @@ class OmegaConfig:
     max_exploit_chains: int = 10
 
 
+@dataclass(frozen=True)
+class CapabilityModelConfig:
+    """Configuration for attacker capability model."""
+    time_to_impact_weight: float = 0.40
+    uncertainty_reduction_weight: float = 0.30
+    effort_eliminated_weight: float = 0.30
+
+    # Feature gate for Phase 3-Lite scoring.
+    three_axis_enabled: bool = False
+
+    effort_eliminated_by_capability: Dict[str, float] = field(
+        default_factory=lambda: {
+            "credential_exposure": 9.0,
+            "source_code": 8.0,
+            "topology": 7.0,
+            "confirmed_injection": 6.0,
+            "stack_disclosure": 4.0,
+            "port_disclosure": 3.0,
+            "partial_info": 2.0,
+        }
+    )
+
+    @staticmethod
+    def _validate_weights(tti: float, ur: float, ee: float) -> None:
+        """Verify three-axis weights sum to 1.0 (within tolerance)."""
+        total = tti + ur + ee
+        if abs(total - 1.0) > 0.01:
+            raise ValueError(
+                f"Three-axis weights must sum to 1.0, got {total:.3f} "
+                f"(tti={tti}, ur={ur}, ee={ee})"
+            )
+
+    @classmethod
+    def from_env_and_yaml(cls, yaml_path: Optional[Path] = None) -> "CapabilityModelConfig":
+        """
+        Load config from environment variables, optionally overlaying YAML values.
+
+        Priority (highest wins):
+          1. Environment variables (SENTINEL_CM_*)
+          2. YAML file values
+          3. Dataclass defaults
+        """
+        kwargs: Dict[str, Any] = {}
+        logger = logging.getLogger(__name__)
+
+        config_file = yaml_path or _env_path("SENTINEL_CM_CONFIG_FILE")
+        if config_file and config_file.exists():
+            try:
+                import yaml
+
+                with open(config_file, encoding="utf-8") as handle:
+                    data = yaml.safe_load(handle) or {}
+
+                effort = data.get("effort_eliminated")
+                if isinstance(effort, dict):
+                    kwargs["effort_eliminated_by_capability"] = {
+                        str(key): float(value)
+                        for key, value in effort.items()
+                    }
+
+                for yaml_key, attr_name in [
+                    ("time_to_impact_weight", "time_to_impact_weight"),
+                    ("uncertainty_reduction_weight", "uncertainty_reduction_weight"),
+                    ("effort_eliminated_weight", "effort_eliminated_weight"),
+                    ("three_axis_enabled", "three_axis_enabled"),
+                ]:
+                    if yaml_key not in data:
+                        continue
+                    raw_value = data[yaml_key]
+                    if isinstance(raw_value, bool):
+                        kwargs[attr_name] = raw_value
+                    elif attr_name == "three_axis_enabled":
+                        lowered = str(raw_value).strip().lower()
+                        if lowered in ("true", "1", "yes"):
+                            kwargs[attr_name] = True
+                        elif lowered in ("false", "0", "no"):
+                            kwargs[attr_name] = False
+                    else:
+                        kwargs[attr_name] = float(raw_value)
+            except Exception as exc:
+                logger.warning(
+                    "[CapabilityModelConfig] Failed to load YAML from %s: %s",
+                    config_file,
+                    exc,
+                )
+
+        three_axis = os.getenv("SENTINEL_CM_THREE_AXIS_ENABLED", "").strip().lower()
+        if three_axis in ("true", "1", "yes"):
+            kwargs["three_axis_enabled"] = True
+        elif three_axis in ("false", "0", "no"):
+            kwargs["three_axis_enabled"] = False
+
+        for env_var, attr_name in [
+            ("SENTINEL_CM_TTI_WEIGHT", "time_to_impact_weight"),
+            ("SENTINEL_CM_UR_WEIGHT", "uncertainty_reduction_weight"),
+            ("SENTINEL_CM_EE_WEIGHT", "effort_eliminated_weight"),
+        ]:
+            value = os.getenv(env_var)
+            if value is None:
+                continue
+            try:
+                kwargs[attr_name] = float(value)
+            except ValueError:
+                logger.warning(
+                    "[CapabilityModelConfig] Ignoring invalid float env %s=%r",
+                    env_var,
+                    value,
+                )
+
+        instance = cls(**kwargs)
+        cls._validate_weights(
+            instance.time_to_impact_weight,
+            instance.uncertainty_reduction_weight,
+            instance.effort_eliminated_weight,
+        )
+        return instance
+
+
 # ============================================================================
 # Master Configuration Container
 # ============================================================================
@@ -469,6 +594,9 @@ class SentinelConfig:
 
     # OMEGA module settings (orchestration of all three pillars)
     omega: OmegaConfig = field(default_factory=OmegaConfig)
+
+    # Capability model settings (Phase 3-Lite)
+    capability_model: CapabilityModelConfig = field(default_factory=CapabilityModelConfig)
 
     # Debug mode: enables extra logging and development features
     # False = production mode (clean output, fast)
@@ -635,6 +763,8 @@ class SentinelConfig:
             max_exploit_chains=int(os.getenv("SENTINEL_OMEGA_MAX_CHAINS", "10")),
         )
 
+        capability_model = CapabilityModelConfig.from_env_and_yaml()
+
         return cls(
             ai=ai,
             security=security,
@@ -646,6 +776,7 @@ class SentinelConfig:
             mimic=mimic,
             nexus=nexus,
             omega=omega,
+            capability_model=capability_model,
             debug=os.getenv("SENTINEL_DEBUG", "false").lower() == "true",
             api_host=os.getenv("SENTINEL_API_HOST", "127.0.0.1"),
             api_port=int(os.getenv("SENTINEL_API_PORT", "8765")),

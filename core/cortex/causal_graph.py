@@ -62,6 +62,21 @@ EFFORT_ELIMINATED_BY_CAPABILITY: Dict[str, float] = {
 }
 
 
+def _get_effort_eliminated_table() -> Dict[str, float]:
+    """
+    Get effort elimination values from config, with hardcoded fallback.
+    """
+    try:
+        from core.base.config import get_config
+
+        table = get_config().capability_model.effort_eliminated_by_capability
+        if isinstance(table, dict) and table:
+            return {str(key): float(value) for key, value in table.items()}
+    except Exception:
+        pass
+    return dict(EFFORT_ELIMINATED_BY_CAPABILITY)
+
+
 @dataclass
 class Finding:
     """Simplified Finding structure for graph analysis."""
@@ -212,6 +227,168 @@ class CausalGraphBuilder:
 
         logger.info(f"[CausalGraph] Built graph: {self.graph.number_of_nodes()} nodes, {self.graph.number_of_edges()} edges")
         return self.graph
+
+    def enrich_from_issues(self, issues: List[Dict[str, Any]]) -> int:
+        """
+        Overlay VulnRule-enriched metadata from issues onto raw findings,
+        then re-run enablement edge inference.
+
+        The pipeline stores raw findings (without confirmation_level,
+        capability_types, or score) separately from VulnRule-enriched issues.
+        CausalGraph only receives raw findings, so Rule 5 filters reject
+        everything.  This method bridges the gap by matching issues back to
+        findings and copying enrichment fields, then re-running
+        _infer_information_enablement_edges().
+
+        Matching strategy (3 tiers):
+          1. SHA256 hash of each evidence dict in supporting_findings — same
+             algorithm save_finding_txn() used to generate finding.id.
+          2. (target, tool, type) tuple match between evidence dicts and findings.
+          3. Target URL prefix match (issue.target is prefix of finding.target
+             or vice versa), picking the highest-scored issue when ambiguous.
+
+        Returns:
+            Number of new enablement edges added.
+        """
+        import hashlib as _hl
+
+        if not issues:
+            logger.debug("[CausalGraph] enrich_from_issues: no issues provided")
+            return 0
+
+        logger.info(
+            "[CausalGraph] enrich_from_issues: %d issues, %d findings in graph",
+            len(issues), len(self.findings_map),
+        )
+
+        # --- Tier 1: SHA256 hash of supporting_finding dicts ---
+        # save_finding_txn() computes finding.id = sha256(json.dumps(f, sort_keys=True))
+        # and does NOT write the id back into the dict.  The evidence dicts in
+        # supporting_findings are the same dicts (JSON round-tripped), so
+        # recomputing the hash should yield the same finding ID.
+        hash_to_issue: Dict[str, Dict[str, Any]] = {}
+        for issue in issues:
+            for sf in issue.get("supporting_findings", []):
+                if isinstance(sf, dict):
+                    try:
+                        blob = json.dumps(sf, sort_keys=True)
+                        h = _hl.sha256(blob.encode()).hexdigest()
+                        hash_to_issue[h] = issue
+                    except (TypeError, ValueError):
+                        continue
+
+        # --- Tier 2: (target, tool, type) tuple lookup ---
+        evidence_key_to_issue: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        for issue in issues:
+            for sf in issue.get("supporting_findings", []):
+                if isinstance(sf, dict):
+                    key = (
+                        str(sf.get("target", "")).strip().lower(),
+                        str(sf.get("tool", "")).strip().lower(),
+                        str(sf.get("type", "")).strip().lower(),
+                    )
+                    if key[0]:
+                        evidence_key_to_issue[key] = issue
+
+        # --- Tier 3: target prefix lookup ---
+        issues_by_target: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for issue in issues:
+            t = str(issue.get("target", "")).strip().lower()
+            if t:
+                issues_by_target[t].append(issue)
+
+        enriched_count = 0
+        tier_stats = {"hash": 0, "key": 0, "prefix": 0}
+        for finding in self.findings_map.values():
+            # Tier 1: hash match
+            matched_issue = hash_to_issue.get(finding.id)
+            if matched_issue:
+                tier_stats["hash"] += 1
+
+            # Tier 2: (target, tool, type) match
+            if matched_issue is None:
+                f_key = (
+                    str(finding.target).strip().lower(),
+                    str(finding.data.get("tool", "")).strip().lower(),
+                    str(finding.type).strip().lower(),
+                )
+                matched_issue = evidence_key_to_issue.get(f_key)
+                if matched_issue:
+                    tier_stats["key"] += 1
+
+            # Tier 3: target prefix match — pick highest-scored issue
+            if matched_issue is None:
+                f_target = str(finding.target).strip().lower()
+                best_issue = None
+                best_score = -1.0
+                for issue_target, issue_list in issues_by_target.items():
+                    if f_target.startswith(issue_target) or issue_target.startswith(f_target):
+                        for candidate in issue_list:
+                            s = float(candidate.get("score", 0))
+                            if s > best_score:
+                                best_score = s
+                                best_issue = candidate
+                if best_issue is not None:
+                    matched_issue = best_issue
+                    tier_stats["prefix"] += 1
+
+            if matched_issue is None:
+                continue
+
+            # Overlay enrichment fields onto finding.data (non-destructive)
+            for key in ("confirmation_level", "capability_types", "score",
+                        "raw_score", "confirmation_multiplier"):
+                if key in matched_issue and key not in finding.data:
+                    finding.data[key] = matched_issue[key]
+
+            enriched_count += 1
+
+        logger.info(
+            "[CausalGraph] enrich_from_issues matched %d/%d findings "
+            "(tier1_hash=%d, tier2_key=%d, tier3_prefix=%d)",
+            enriched_count, len(self.findings_map),
+            tier_stats["hash"], tier_stats["key"], tier_stats["prefix"],
+        )
+
+        if enriched_count == 0:
+            return 0
+
+        # Re-run enablement edge inference with enriched metadata
+        findings_list = list(self.findings_map.values())
+        new_edges = self._infer_information_enablement_edges(findings_list)
+
+        if not new_edges:
+            logger.info(
+                "[CausalGraph] Enriched %d findings but Rule 5 produced 0 enablement edges",
+                enriched_count,
+            )
+            return 0
+
+        # Apply the new enablement edges to the graph
+        for edge in new_edges:
+            source_id = edge["source"]
+            target_id = edge["target"]
+            if source_id in self.findings_map and target_id in self.findings_map:
+                if not self.graph.has_edge(source_id, target_id):
+                    self.graph.add_edge(
+                        source_id,
+                        target_id,
+                        relationship="enablement",
+                        strength=float(edge.get("strength", 0.0)),
+                        enablement_class=edge.get("enablement_class", "partial_info"),
+                        effort_replaced=float(edge.get("effort_replaced", 0.0)),
+                        enabled_at=float(edge.get("enabled_at", time.time())),
+                        enablement_edge=True,
+                    )
+
+        self._inferred_enablement_edges.extend(new_edges)
+
+        logger.info(
+            "[CausalGraph] Enriched %d findings from issues, inferred %d enablement edges",
+            enriched_count,
+            len(new_edges),
+        )
+        return len(new_edges)
 
     def build_decisions(self, decisions: List[Dict[str, Any]]) -> None:
         """
@@ -526,7 +703,8 @@ class CausalGraphBuilder:
                 capability_types = self._finding_capability_types(info_finding)
                 enablement_class = self._classify_enablement(info_finding)
                 strength = self._enablement_strength(capability_types, enablement_class)
-                effort = EFFORT_ELIMINATED_BY_CAPABILITY.get(enablement_class, 2.0)
+                effort_table = _get_effort_eliminated_table()
+                effort = effort_table.get(enablement_class, 2.0)
 
                 for candidate in target_findings:
                     target_id = candidate.id
@@ -992,12 +1170,14 @@ async def build_causal_graph_for_session(session_id: str) -> Dict[str, Any]:
     db = Database.instance()
     await db.init()
 
-    # Get findings for this session
+    # Get findings and issues for this session
     findings = await db.get_findings(session_id)
+    issues = await db.get_issues(session_id)
 
     # Build graph
     builder = CausalGraphBuilder()
     builder.build(findings)
+    builder.enrich_from_issues(issues)
 
     # Return summary
     return builder.export_summary()
@@ -1014,10 +1194,17 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
     await db.init()
     findings = await db.get_findings(session_id)
 
+    issues = await db.get_issues(session_id)
     logger.info(f"[CausalGraph] Building graph from {len(findings)} findings")
 
     builder = CausalGraphBuilder()
     builder.build(findings)
+
+    # Overlay VulnRule-enriched metadata from issues so Rule 5 can
+    # see confirmation_level, capability_types, and score.
+    enablement_count = builder.enrich_from_issues(issues)
+    if enablement_count:
+        logger.info(f"[CausalGraph] Issue enrichment produced {enablement_count} enablement edges")
 
     logger.info(f"[CausalGraph] Built causal graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges")
 

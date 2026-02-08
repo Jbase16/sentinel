@@ -32,7 +32,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, List, Any
 
 from core.utils.observer import Observable, Signal
 from core.data.issues_store import issues_store
@@ -83,6 +83,76 @@ class RiskEngine(Observable):
     def get_scores(self) -> Dict[str, float]:
         """Function get_scores."""
         return dict(self._scores)
+
+    def compute_three_axis_priority(self, issue: Dict[str, Any]) -> Dict[str, float]:
+        """
+        Compute read-only three-axis priority for an issue.
+
+        This method does not mutate self._scores and does not emit signals.
+        """
+        from core.base.config import get_config
+
+        capability_model = get_config().capability_model
+        confirmation = str(issue.get("confirmation_level", "confirmed")).strip().lower()
+
+        raw_capability_types = issue.get("capability_types", ["execution"])
+        if isinstance(raw_capability_types, str):
+            capability_types: List[str] = [raw_capability_types]
+        elif isinstance(raw_capability_types, list):
+            capability_types = [str(cap).strip().lower() for cap in raw_capability_types if str(cap).strip()]
+        else:
+            capability_types = ["execution"]
+        if not capability_types:
+            capability_types = ["execution"]
+
+        # Axis 1: Time-to-impact
+        time_to_impact = self._compute_time_to_impact(confirmation, capability_types)
+
+        # Axis 2: Uncertainty reduction (read-only, metadata-driven).
+        uncertainty_reduction = min(10.0, float(issue.get("enablement_score", 0.0)))
+
+        # Axis 3: Effort eliminated from configured table.
+        enablement_class = str(issue.get("enablement_class", "partial_info")).strip()
+        effort_eliminated = float(
+            capability_model.effort_eliminated_by_capability.get(enablement_class, 2.0)
+        )
+
+        priority_composite = (
+            capability_model.time_to_impact_weight * time_to_impact
+            + capability_model.uncertainty_reduction_weight * uncertainty_reduction
+            + capability_model.effort_eliminated_weight * effort_eliminated
+        )
+
+        return {
+            "time_to_impact": round(time_to_impact, 2),
+            "uncertainty_reduction": round(uncertainty_reduction, 2),
+            "effort_eliminated": round(effort_eliminated, 2),
+            "priority_composite": round(priority_composite, 2),
+        }
+
+    @staticmethod
+    def _compute_time_to_impact(
+        confirmation: str,
+        capability_types: List[str],
+    ) -> float:
+        """Score how quickly an attacker can act on a finding."""
+        if confirmation == "confirmed":
+            if "access" in capability_types:
+                return 10.0
+            if "execution" in capability_types:
+                return 9.0
+            if "information" in capability_types:
+                return 8.0
+            return 8.0
+        if confirmation == "probable":
+            if "execution" in capability_types:
+                return 6.0
+            return 5.0
+        if confirmation == "hypothesized":
+            if "execution" in capability_types:
+                return 3.0
+            return 2.0
+        return 5.0
 
 
 risk_engine = RiskEngine()

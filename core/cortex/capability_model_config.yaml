@@ -1,0 +1,27 @@
+# SentinelForge: Capability Model Configuration
+# =============================================
+# This file defines tunable values for the attacker capability model.
+# All values can be overridden by environment variables (SENTINEL_CM_*).
+#
+# To use this file, set:
+#   SENTINEL_CM_CONFIG_FILE=/path/to/this/file.yaml
+
+# Feature flag: enable three-axis priority scoring in RiskEngine.
+# When false, RiskEngine behavior remains Phase 2 compatible.
+three_axis_enabled: false
+
+# Three-axis ranking weights (must sum to 1.0)
+time_to_impact_weight: 0.40
+uncertainty_reduction_weight: 0.30
+effort_eliminated_weight: 0.30
+
+# Effort elimination values map directly to enablement classes from
+# CausalGraph._classify_enablement().
+effort_eliminated:
+  credential_exposure: 9.0
+  source_code: 8.0
+  topology: 7.0
+  confirmed_injection: 6.0
+  stack_disclosure: 4.0
+  port_disclosure: 3.0
+  partial_info: 2.0

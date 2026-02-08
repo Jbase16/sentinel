@@ -40,6 +40,7 @@ import threading
 from typing import Dict, List, Optional, Generator, AsyncGenerator, Callable, Any
 
 from core.data.findings_store import findings_store
+from core.data.issues_store import issues_store
 from core.data.killchain_store import killchain_store
 from core.data.evidence_store import EvidenceStore
 from core.base.config import get_config
@@ -442,12 +443,14 @@ class AIEngine:
 
     async def stream_chat(self, question: str) -> AsyncGenerator[str, None]:
         """
-        Stream answer to a natural-language question based on stored evidence & findings.
+        Stream answer to a natural-language question based on stored
+        evidence, findings, enriched issues, and causal graph data.
         """
         self.ensure_client()
         question = (question or "").strip()
         findings = findings_store.get_all()
-        
+        issues = issues_store.get_all()
+
         # Self-Knowledge Manifesto
         manifesto = (
             "SYSTEM IDENTITY:\n"
@@ -463,21 +466,90 @@ class AIEngine:
             "- Be concise, technical, and objective.\n"
             "- If you see vulnerabilities, explain the business impact.\n"
             "- If asked about the app, explain your role within SentinelForge.\n"
+            "- ALWAYS reference specific findings and issues from the scan context when answering.\n"
+            "- Distinguish between CONFIRMED findings (directly observed), PROBABLE findings (likely based on evidence), "
+            "and HYPOTHESIZED findings (inferred from patterns).\n"
+            "- When discussing attack chains, reference the specific enablement relationships between findings.\n"
         )
-        
-        # Conditional branch.
+
         if self.client:
             context_block = ""
-            if findings:
-                context_block = "LIVE SCAN CONTEXT:\n"
+            if findings or issues:
+                # --- Raw findings context ---
+                context_block = "LIVE SCAN CONTEXT — RAW FINDINGS:\n"
                 for f in findings[:30]:
-                    context_block += f"- [{f.get('severity')}] {f.get('type')}: {f.get('message') or f.get('value')}\n"
-                
+                    context_block += (
+                        f"- [{f.get('severity')}] {f.get('type')}: "
+                        f"{f.get('message') or f.get('value')}"
+                        f" (target: {f.get('target', 'unknown')}"
+                        f", tool: {f.get('tool', 'unknown')})\n"
+                    )
+
+                # --- Enriched issues context ---
+                if issues:
+                    context_block += "\nENRICHED ISSUES (from VulnRule analysis):\n"
+                    context_block += (
+                        "(Each issue is derived from one or more raw findings. "
+                        "confirmation_level indicates evidence quality: "
+                        "confirmed = directly observed, probable = likely based on evidence, "
+                        "hypothesized = inferred from patterns. "
+                        "capability_types indicate what the finding enables: "
+                        "information = data exposure, access = auth bypass, "
+                        "execution = code execution, evasion = detection bypass.)\n"
+                    )
+                    for issue in issues[:20]:
+                        conf = issue.get("confirmation_level", "unknown")
+                        caps = ", ".join(issue.get("capability_types", []))
+                        score = issue.get("score", "?")
+                        raw_score = issue.get("raw_score", "?")
+                        mult = issue.get("confirmation_multiplier", "?")
+                        n_evidence = len(issue.get("supporting_findings", []))
+                        context_block += (
+                            f"- [{conf.upper()}] {issue.get('title', 'Untitled')} "
+                            f"(score: {score}, raw: {raw_score}, multiplier: {mult}, "
+                            f"capabilities: [{caps}], "
+                            f"target: {issue.get('target', 'unknown')}, "
+                            f"evidence_count: {n_evidence})\n"
+                        )
+
+                # --- Causal graph summary ---
+                try:
+                    from core.cortex.causal_graph import CausalGraphBuilder
+                    builder = CausalGraphBuilder()
+                    builder.build(findings)
+                    n_enablement = builder.enrich_from_issues(issues)
+                    summary = builder.export_summary()
+                    context_block += (
+                        f"\nCAUSAL GRAPH SUMMARY:\n"
+                        f"- Nodes: {summary.get('nodes_count', 0)}, "
+                        f"Edges: {summary.get('edges_count', 0)} "
+                        f"(including {n_enablement} enablement edges)\n"
+                        f"- Attack chains: {summary.get('attack_chains_count', 0)}, "
+                        f"Longest chain: {summary.get('longest_chain_length', 0)} steps\n"
+                    )
+                    for pp in summary.get("top_pressure_points", [])[:3]:
+                        context_block += (
+                            f"- Pressure Point: {pp['finding_title']} "
+                            f"(severity: {pp['severity']}, "
+                            f"blocks {pp['attack_paths_blocked']} attack paths, "
+                            f"centrality: {pp['centrality_score']})\n"
+                        )
+                    chains = summary.get("sample_attack_chains", [])
+                    if chains:
+                        context_block += "- Sample attack chains:\n"
+                        for chain in chains[:3]:
+                            context_block += f"  * {' → '.join(chain)}\n"
+                except Exception as exc:
+                    logger.debug("[AIEngine] Could not build causal graph for chat: %s", exc)
+
                 system_prompt = (
                     f"{manifesto}\n"
                     "INSTRUCTION:\n"
-                    "Use the provided Live Scan Context to answer the user's question. "
-                    "Connect findings to potential attack paths.\n\n"
+                    "Use the provided Live Scan Context, Enriched Issues, and Causal Graph Summary "
+                    "to answer the user's question. "
+                    "Always cite specific findings by name and target. "
+                    "Distinguish between confirmed, probable, and hypothesized findings. "
+                    "Reference attack chains and enablement relationships when discussing risk.\n\n"
                     "COMMAND PROTOCOL:\n"
                     "To execute a tool or install software, you MUST use this format on a new line:\n"
                     ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n\n"
@@ -494,9 +566,9 @@ class AIEngine:
                     "To execute a tool or install software, you MUST use this format on a new line:\n"
                     ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n"
                 )
-            
+
             user_prompt = f"{context_block}\n\nUser Question: {question}"
-            
+
             async for chunk in self.client.stream_generate(user_prompt, system_prompt):
                 yield chunk
             return

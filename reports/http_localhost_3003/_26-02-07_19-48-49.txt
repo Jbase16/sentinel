@@ -1,0 +1,7 @@
+# Dirsearch started Sat Feb  7 19:48:49 2026 as: /Users/jason/Developer/sentinelforge/.venv/bin/dirsearch -u http://localhost:3003 -w /Users/jason/Developer/sentinelforge/assets/wordlists/emergency.txt -q
+
+301   169B   http://localhost:3003/admin    -> REDIRECTS TO: http://localhost/admin/
+404    22B   http://localhost:3003/api/v1
+301   169B   http://localhost:3003/api    -> REDIRECTS TO: http://localhost/api/
+405   153B   http://localhost:3003/login
+200   244B   http://localhost:3003/.git/config
