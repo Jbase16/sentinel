@@ -376,18 +376,52 @@ class ContinuousMonitor:
         """
         Perform an incremental scan (only scan changed assets).
 
-        NOT YET IMPLEMENTED - This requires:
-        1. Asset inventory (what to scan)
-        2. Change detection (what changed since baseline)
-        3. Selective tool execution (only scan changed parts)
+        Current implementation is a conservative compatibility layer:
+        - It selects the most recent persisted session for this target.
+        - It loads that session into ScanState.
+        - If a baseline exists, it computes a delta and triggers alerts.
 
-        For now, this just raises NotImplementedError.
-        Returns new ScanState from a full scan.
+        This does not yet launch selective tool execution itself, but it no
+        longer hard-fails and provides deterministic incremental monitoring
+        behavior over completed scan sessions.
         """
-        raise NotImplementedError(
-            "Incremental scanning not yet implemented. "
-            "Use check_for_changes() with a new full scan session for now."
+        from core.data.db import Database
+
+        db = Database.instance()
+        await db.init()
+
+        normalized_target = self.target.strip().lower()
+        session_rows = await db.fetch_all(
+            "SELECT id, target FROM sessions ORDER BY start_time DESC LIMIT 200"
         )
+
+        selected_session_id: Optional[str] = None
+        for row in session_rows:
+            session_id = str(row[0]) if len(row) > 0 else ""
+            session_target = str(row[1]).strip().lower() if len(row) > 1 else ""
+            if not session_id:
+                continue
+            if not normalized_target or normalized_target in session_target or session_target in normalized_target:
+                selected_session_id = session_id
+                break
+
+        if not selected_session_id:
+            raise ValueError(f"No persisted session found for target '{self.target}'")
+
+        current = await ScanState.from_session(selected_session_id)
+
+        if self.baseline:
+            delta = self.diff(self.baseline, current)
+            if delta.should_alert(self.alert_threshold):
+                await self.alert_team(delta)
+
+        logger.info(
+            "[ContinuousMonitor] incremental_scan target=%s session=%s findings=%d",
+            self.target,
+            selected_session_id,
+            current.total_findings,
+        )
+        return current
 
 
 # ============================================================================

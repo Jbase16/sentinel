@@ -99,10 +99,17 @@ class ReportComposer:
 
         user_prompt = prompt_fn(context)
         system_prompt = (
-            "You are a Senior Security Consultant writing a high-stakes penetration testing report. "
+            "You are a Senior Security Consultant writing a penetration testing report. "
             "Your tone is professional, authoritative, and concise. "
-            "Focus on business impact and attack chains, not just list of bugs. "
-            "Use Markdown formatting."
+            "Focus on business impact and attack chains, not just lists of bugs. "
+            "Use Markdown formatting.\n\n"
+            "CRITICAL CONSTRAINTS:\n"
+            "- ONLY cite findings, numbers, and details from the provided scan data.\n"
+            "- NEVER invent, estimate, or inflate vulnerability counts.\n"
+            "- If data is limited, say so honestly — do not pad with generic content.\n"
+            "- Do NOT mention internal tool names (Strategos, CAL, Cortex, Ledger, "
+            "ScanOrchestrator, VulnRule) — these are implementation details.\n"
+            "- Distinguish between CONFIRMED, PROBABLE, and HYPOTHESIZED findings."
         )
 
         try:
@@ -112,7 +119,12 @@ class ReportComposer:
             logger.error(f"[ReportComposer] AI generation failed for {section_name}: {e}")
             return self._fallback_content(section_name, context)
 
-    async def generate_async(self, report_type: str = "full", format: str = "markdown") -> str:
+    async def generate_async(
+        self,
+        report_type: str = "full",
+        format: str = "markdown",
+        context_override: Optional[Dict] = None,
+    ) -> str:
         """
         Generate a complete report asynchronously.
 
@@ -136,7 +148,7 @@ class ReportComposer:
         full_report = ""
         for section in sections_to_generate:
             logger.info(f"[ReportComposer] Generating section: {section}")
-            section_content = await self.generate_section(section)
+            section_content = await self.generate_section(section, context_override=context_override)
             full_report += f"\n\n{section_content}"
 
         # Format output
@@ -145,7 +157,7 @@ class ReportComposer:
                 "type": report_type,
                 "generated_at": datetime.utcnow().isoformat(),
                 "sections": {
-                    section: await self.generate_section(section)
+                    section: await self.generate_section(section, context_override=context_override)
                     for section in sections_to_generate
                 }
             }, indent=2)
@@ -153,87 +165,227 @@ class ReportComposer:
         return full_report.strip()
 
     def _gather_context(self) -> Dict:
-        """Function _gather_context."""
-        ledger = get_decision_ledger()
-        # Filter for high-level decisions to avoid flooding context
-        decisions = [
-            d.to_event_payload() 
-            for d in ledger.get_all() 
-            if d.type in (DecisionType.INTENT_TRANSITION, DecisionType.PHASE_TRANSITION, DecisionType.ASSESSMENT)
-        ]
-        
-        return {
-            "findings": findings_store.get_all(),
-            "issues": issues_store.get_all(),
-            "risk": risk_engine.get_scores(),
-            "killchain": killchain_store.get_all(),
-            "reasoning": reasoning_engine.analyze(),
-            "decisions": decisions
+        """Collect all available context for report generation.
+
+        Reads from session stores when a session is attached, otherwise global
+        stores (findings, issues, risk, killchain, reasoning).
+        Each source is fetched defensively — a single store failure won't
+        take down the whole report.
+        """
+        ctx: Dict = {
+            "findings": [],
+            "issues": [],
+            "risk": {},
+            "killchain": [],
+            "reasoning": {},
+            "decisions": [],
         }
+        try:
+            if self.session:
+                ctx["findings"] = self.session.findings.get_all()
+            else:
+                ctx["findings"] = findings_store.get_all()
+        except Exception as exc:
+            logger.warning("[ReportComposer] findings_store.get_all() failed: %s", exc)
+        try:
+            if self.session:
+                ctx["issues"] = self.session.issues.get_all()
+            else:
+                ctx["issues"] = issues_store.get_all()
+        except Exception as exc:
+            logger.warning("[ReportComposer] issues_store.get_all() failed: %s", exc)
+        try:
+            ctx["risk"] = risk_engine.get_scores()
+        except Exception as exc:
+            logger.warning("[ReportComposer] risk_engine.get_scores() failed: %s", exc)
+        try:
+            if self.session:
+                ctx["killchain"] = self.session.killchain.get_all()
+            else:
+                ctx["killchain"] = killchain_store.get_all()
+        except Exception as exc:
+            logger.warning("[ReportComposer] killchain_store.get_all() failed: %s", exc)
+        try:
+            ctx["reasoning"] = reasoning_engine.analyze()
+        except Exception as exc:
+            logger.warning("[ReportComposer] reasoning_engine.analyze() failed: %s", exc)
+        try:
+            ledger = get_decision_ledger()
+            ctx["decisions"] = [
+                d.to_event_payload()
+                for d in ledger.get_all()
+                if d.type in (DecisionType.INTENT_TRANSITION, DecisionType.PHASE_TRANSITION, DecisionType.ASSESSMENT)
+            ]
+        except Exception as exc:
+            logger.warning("[ReportComposer] decision_ledger failed: %s", exc)
+        return ctx
+
+    # --- Helpers ---
+
+    @staticmethod
+    def _format_issues_block(issues: list, limit: int = 20) -> str:
+        """Format enriched issues into a compact text block for prompts."""
+        if not issues:
+            return "(No enriched issues available.)\n"
+        lines = []
+        for issue in issues[:limit]:
+            conf = issue.get("confirmation_level", "unknown").upper()
+            caps = ", ".join(issue.get("capability_types", []))
+            score = issue.get("score", "?")
+            target = issue.get("target", "unknown")
+            n_evidence = len(issue.get("supporting_findings", []))
+            lines.append(
+                f"- [{conf}] {issue.get('title', 'Untitled')} "
+                f"(score: {score}, capabilities: [{caps}], "
+                f"target: {target}, evidence_count: {n_evidence})"
+            )
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _format_findings_block(findings: list, limit: int = 30) -> str:
+        """Format raw findings into a compact text block for prompts."""
+        if not findings:
+            return "(No raw findings available.)\n"
+        lines = []
+        for f in findings[:limit]:
+            lines.append(
+                f"- [{f.get('severity', '?')}] {f.get('type', 'unknown')}: "
+                f"{f.get('message') or f.get('value', '')} "
+                f"(target: {f.get('target', 'unknown')}, tool: {f.get('tool', 'unknown')})"
+            )
+        return "\n".join(lines) + "\n"
+
+    def _build_graph_summary(self, findings: list, issues: list) -> str:
+        """Build a causal graph summary string for report prompts."""
+        try:
+            from core.cortex.causal_graph import CausalGraphBuilder
+            builder = CausalGraphBuilder()
+            builder.build(findings)
+            n_enablement = builder.enrich_from_issues(issues)
+            summary = builder.export_summary()
+            parts = [
+                f"Nodes: {summary.get('nodes_count', 0)}, "
+                f"Edges: {summary.get('edges_count', 0)} "
+                f"({n_enablement} enablement edges)",
+                f"Attack chains: {summary.get('attack_chains_count', 0)}, "
+                f"Longest chain: {summary.get('longest_chain_length', 0)} steps",
+            ]
+            for pp in summary.get("top_pressure_points", [])[:5]:
+                parts.append(
+                    f"Pressure Point: {pp['finding_title']} "
+                    f"(severity: {pp['severity']}, "
+                    f"blocks {pp['attack_paths_blocked']} attack paths, "
+                    f"centrality: {pp['centrality_score']})"
+                )
+            chains = summary.get("sample_attack_chains", [])
+            for chain in chains[:3]:
+                parts.append(f"Chain: {' → '.join(chain)}")
+            return "\n".join(f"- {p}" for p in parts) + "\n"
+        except Exception as exc:
+            logger.debug("[ReportComposer] Graph summary failed: %s", exc)
+            return "(Causal graph unavailable.)\n"
 
     # --- Prompts ---
 
     def _prompt_exec_summary(self, ctx: Dict) -> str:
-        """Function _prompt_exec_summary."""
         issues = ctx.get("issues", [])
-        decisions = ctx.get("decisions", [])
-        
-        # Summarize key decisions
-        decision_summary = "Key Strategic Decisions:\n" + "\n".join([
-            f"- [{d['decision_type']}] {d['selected_action']}: {d['rationale']}"
-            for d in decisions[-5:] # Last 5 major decisions
-        ])
+        findings = ctx.get("findings", [])
+        issues_block = self._format_issues_block(issues, limit=10)
+        graph_block = self._build_graph_summary(findings, issues)
 
         return (
-            f"Write an Executive Summary for a security assessment.\n"
-            f"Context: Found {len(issues)} confirmed issues. "
-            f"Top risks: {', '.join([i.get('title', '') for i in issues[:3]])}.\n\n"
-            f"{decision_summary}\n\n"
-            "Summarize the overall security posture and Strategos' decision-making process. "
-            "Explain *why* the system took the actions it did (e.g. why it escalated or maintained scope)."
+            "Write an Executive Summary for a penetration test report.\n\n"
+            "STRICT RULES:\n"
+            "- ONLY reference findings and issues listed below. Do NOT invent findings.\n"
+            "- Use EXACT counts from the data. Do NOT hallucinate numbers.\n"
+            "- Do NOT mention internal system names (Strategos, CAL, Cortex, Ledger).\n"
+            "- Write for a CISO audience: business impact, not tool names.\n\n"
+            f"SCAN DATA — {len(issues)} enriched issues, {len(findings)} raw findings:\n"
+            f"{issues_block}\n"
+            f"CAUSAL GRAPH:\n{graph_block}\n"
+            "Summarize the overall security posture. Highlight the most critical risks "
+            "and the key attack paths that connect them. Keep it under 300 words."
         )
 
     def _prompt_attack_narrative(self, ctx: Dict) -> str:
-        """Function _prompt_attack_narrative."""
-        chains = ctx.get("reasoning", {}).get("attack_paths", [])
-        # Conditional branch.
-        if not chains:
-            return "No complete attack chains were verified. Describe individual vectors found."
-        
-        chain_text = "\n".join([" -> ".join(path) for path in chains[:5]])
+        issues = ctx.get("issues", [])
+        findings = ctx.get("findings", [])
+        issues_block = self._format_issues_block(issues)
+        graph_block = self._build_graph_summary(findings, issues)
+
         return (
-            f"Write an Attack Narrative describing how an attacker could compromise the target.\n"
-            f"Observed Attack Chains:\n{chain_text}\n"
-            "Tell the story of the attack. How does one finding lead to another? "
-            "Connect the dots between recon, initial access, and impact."
+            "Write an Attack Narrative for a penetration test report.\n\n"
+            "STRICT RULES:\n"
+            "- ONLY describe attack paths that exist in the causal graph below.\n"
+            "- Reference specific findings by name and target.\n"
+            "- Do NOT invent exploitation steps that aren't supported by the evidence.\n"
+            "- Distinguish CONFIRMED findings from PROBABLE and HYPOTHESIZED ones.\n\n"
+            f"ENRICHED ISSUES:\n{issues_block}\n"
+            f"CAUSAL GRAPH (attack chains and enablement relationships):\n{graph_block}\n"
+            "Tell the story: how could an attacker chain these findings together? "
+            "Start from initial reconnaissance and trace through to maximum impact. "
+            "For each step, cite the specific finding and its confirmation level."
         )
 
     def _prompt_technical(self, ctx: Dict) -> str:
-        """Function _prompt_technical."""
         findings = ctx.get("findings", [])
+        issues = ctx.get("issues", [])
+        findings_block = self._format_findings_block(findings)
+        issues_block = self._format_issues_block(issues)
+
         return (
-            f"Draft the Technical Findings section.\n"
-            f"Raw Data: {len(findings)} findings available.\n"
-            "Group these findings logically (e.g., by vulnerability class or affected asset). "
-            "For the top 5 most severe findings, provide technical depth: evidence, reproduction steps, and root cause."
+            "Draft the Technical Findings section of a penetration test report.\n\n"
+            "STRICT RULES:\n"
+            "- ONLY describe findings listed below. Do NOT invent vulnerabilities.\n"
+            "- Use EXACT severity levels and targets from the data.\n"
+            "- Group by vulnerability class or affected asset.\n"
+            "- For each finding: describe what was found, where, severity, and evidence.\n\n"
+            f"RAW FINDINGS ({len(findings)} total):\n{findings_block}\n"
+            f"ENRICHED ISSUES ({len(issues)} total):\n{issues_block}\n"
+            "For each issue, provide: description, affected target, severity, "
+            "confirmation level, and supporting evidence summary."
         )
 
     def _prompt_risk(self, ctx: Dict) -> str:
-        """Function _prompt_risk."""
         scores = ctx.get("risk", {})
+        issues = ctx.get("issues", [])
+        findings = ctx.get("findings", [])
+        issues_block = self._format_issues_block(issues)
+        graph_block = self._build_graph_summary(findings, issues)
+
         return (
-            f"Provide a Risk Assessment based on these asset scores: {json.dumps(scores, indent=2)}\n"
-            "Explain *why* certain assets are high risk. Factor in data sensitivity and exposure."
+            "Provide a Risk Assessment for a penetration test report.\n\n"
+            "STRICT RULES:\n"
+            "- Base risk ratings ONLY on the findings and scores provided below.\n"
+            "- Do NOT invent risk scores or asset values.\n"
+            "- Reference specific findings when explaining risk levels.\n\n"
+            f"ASSET RISK SCORES: {json.dumps(scores, indent=2)}\n\n"
+            f"ENRICHED ISSUES:\n{issues_block}\n"
+            f"CAUSAL GRAPH:\n{graph_block}\n"
+            "Explain which assets are at highest risk and why, based on the "
+            "combination of confirmed vulnerabilities, attack chain exposure, "
+            "and capability types (information, access, execution, evasion)."
         )
 
     def _prompt_remediation(self, ctx: Dict) -> str:
-        """Function _prompt_remediation."""
-        recs = ctx.get("reasoning", {}).get("recommended_phases", [])
+        issues = ctx.get("issues", [])
+        findings = ctx.get("findings", [])
+        issues_block = self._format_issues_block(issues)
+        graph_block = self._build_graph_summary(findings, issues)
+
         return (
-            "Draft a Remediation Roadmap.\n"
-            f"System recommendations: {json.dumps(recs)}\n"
-            "Prioritize fixes based on impact. Suggest immediate 'stop the bleeding' fixes "
-            "versus long-term architectural hardening."
+            "Draft a Remediation Roadmap for a penetration test report.\n\n"
+            "STRICT RULES:\n"
+            "- ONLY recommend fixes for findings listed below.\n"
+            "- Prioritize by: (1) pressure points that block the most attack paths, "
+            "(2) confirmed findings before probable/hypothesized, "
+            "(3) higher score before lower score.\n"
+            "- Be specific: name the finding, the fix, and the expected risk reduction.\n\n"
+            f"ENRICHED ISSUES:\n{issues_block}\n"
+            f"CAUSAL GRAPH (pressure points = highest-impact fixes):\n{graph_block}\n"
+            "Structure as: Immediate (fix within 24h), Short-term (1-2 weeks), "
+            "Long-term (architectural hardening). For each item, explain what it fixes "
+            "and how many attack paths it blocks."
         )
 
     # --- Fallbacks ---

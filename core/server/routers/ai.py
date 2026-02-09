@@ -51,14 +51,33 @@ async def generate_report(
     """
     state = get_state()
     session = await state.get_session(session_id)
-    
+    context_override: Dict[str, Any] | None = None
+
     if not session:
-        # Try to load from DB if not in memory
-        # This is a simplification; ideally we'd have a unified SessionLoader
-        raise SentinelError(ErrorCode.RESOURCE_NOT_FOUND, f"Session {session_id} not active or found")
+        db = Database.instance()
+        await db.init()
+        findings = await db.get_findings(session_id)
+        issues = await db.get_issues(session_id)
+        _, db_edges = await db.load_graph_snapshot(session_id)
+
+        if not findings and not issues:
+            raise SentinelError(ErrorCode.SESSION_NOT_FOUND, f"Session {session_id} not found")
+
+        context_override = {
+            "findings": findings,
+            "issues": issues,
+            "risk": {},
+            "killchain": db_edges,
+            "reasoning": {},
+            "decisions": [],
+        }
 
     composer = ReportComposer(session)
-    report_content = await composer.generate_async(report_type=report_type, format=format)
+    report_content = await composer.generate_async(
+        report_type=report_type,
+        format=format,
+        context_override=context_override,
+    )
     
     return {
         "session_id": session_id,
@@ -78,22 +97,60 @@ async def generate_section(
     """
     state = get_state()
     session = await state.get_session(session_id)
-    
-    # If session not found in memory, we still want to allow reporting 
-    # if the data exists in the database (persisted session).
-    # For now, if session is None, ReportComposer might fallback to skeletal data or error.
-    # Ideally, we should resuscitate the session context from DB here.
-    
+
+    # ReportComposer tolerates session=None — it falls back to global stores.
     composer = ReportComposer(session)
-    
-    # Check if section is valid
+
     if section not in composer.SECTIONS:
-         raise SentinelError(ErrorCode.INVALID_REQUEST, f"Invalid section name: {section}")
-         
-    content = await composer.generate_section(section, context_override=context)
-    
+        raise SentinelError(ErrorCode.SESSION_INVALID_STATE, f"Invalid section name: {section}")
+
+    try:
+        content = await composer.generate_section(section, context_override=context)
+    except Exception as exc:
+        logger.error("[AI] Report section '%s' generation failed: %s", section, exc, exc_info=True)
+        raise SentinelError(
+            ErrorCode.AI_INVALID_RESPONSE,
+            f"Failed to generate section '{section}': {exc}",
+        )
+
     return {
         "session_id": session_id,
         "section": section,
         "content": content
     }
+
+
+# ---------------------------------------------------------
+# Action Dispatcher: approval queue endpoints
+# ---------------------------------------------------------
+from core.base.action_dispatcher import ActionDispatcher
+
+
+@router.get("/actions/pending", dependencies=[Depends(verify_token)])
+async def get_pending_actions():
+    """List AI-suggested actions awaiting human approval."""
+    return ActionDispatcher.instance().get_pending()
+
+
+@router.post("/actions/{action_id}/approve", dependencies=[Depends(verify_token)])
+async def approve_action(action_id: str):
+    """Approve a pending AI-suggested action for execution."""
+    ok = ActionDispatcher.instance().approve_action(action_id)
+    if not ok:
+        raise SentinelError(
+            ErrorCode.SESSION_NOT_FOUND,
+            f"Action {action_id} not found or already processed",
+        )
+    return {"status": "approved", "action_id": action_id}
+
+
+@router.post("/actions/{action_id}/deny", dependencies=[Depends(verify_token)])
+async def deny_action(action_id: str):
+    """Deny a pending AI-suggested action."""
+    ok = ActionDispatcher.instance().deny_action(action_id)
+    if not ok:
+        raise SentinelError(
+            ErrorCode.SESSION_NOT_FOUND,
+            f"Action {action_id} not found or already processed",
+        )
+    return {"status": "denied", "action_id": action_id}

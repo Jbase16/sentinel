@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import threading
 from collections import deque
 from urllib.parse import urlparse
@@ -594,6 +595,11 @@ class ScanTransaction:
 class ScannerEngine:
     """Runs supported scanning tools on macOS (no unsupported tool errors)."""
 
+    # Some tools use non-zero exits for non-fatal outcomes. Keep this list narrow.
+    _NONFATAL_CLASSIFIABLE_EXIT_CODES: Dict[str, Tuple[int, ...]] = {
+        "nikto": (1,),
+    }
+
     def __init__(self, session=None):
         self.session = session
 
@@ -658,6 +664,34 @@ class ScannerEngine:
 
     def _global_scan_timeout_seconds(self) -> int:
         return self._get_env_seconds("SCANNER_GLOBAL_TIMEOUT", DEFAULT_GLOBAL_SCAN_TIMEOUT_SECONDS)
+
+    @classmethod
+    def _should_classify_tool_output(cls, tool: str, exit_code: Optional[int], output_text: str) -> bool:
+        """
+        Decide whether raw output should be sent through deterministic classification.
+
+        Default policy is strict: classify only on successful exits. We selectively
+        allow non-zero exit codes for tools with known non-fatal semantics.
+        """
+        if exit_code in (0, None):
+            return True
+
+        tool_name = (tool or "").lower()
+        allowed_codes = cls._NONFATAL_CLASSIFIABLE_EXIT_CODES.get(tool_name, ())
+        if exit_code not in allowed_codes:
+            return False
+
+        # Nikto classification expects shim-formatted lines.
+        if tool_name == "nikto":
+            text = output_text or ""
+            if "[nikto-shim]" in text:
+                return True
+            # Native Nikto findings are emitted as "+ ..." lines.
+            if re.search(r"^\+\s+", text, flags=re.MULTILINE):
+                return True
+            return False
+
+        return bool(output_text and output_text.strip())
 
     async def _global_timeout_runner(self, timeout_secs: int, cancel_flag: asyncio.Event, queue: asyncio.Queue[str]):
         try:
@@ -1330,6 +1364,7 @@ class ScannerEngine:
 
         # Accounting only (limit already enforced during read)
         self.resource_guard.account_disk(output_bytes)
+        should_classify_output = self._should_classify_tool_output(tool, exit_code, output_text)
 
         if timed_out_reason:
             self._last_tool_error = ToolError(
@@ -1337,9 +1372,13 @@ class ScannerEngine:
                 exit_code=124,
                 stderr=f"timeout:{timed_out_reason}",
             ).details
-        elif exit_code not in (0, None) and not (cancel_flag and cancel_flag.is_set()):
+        elif exit_code not in (0, None) and not (cancel_flag and cancel_flag.is_set()) and not should_classify_output:
             tail = "\n".join(output_lines[-10:])
             self._last_tool_error = ToolError(tool=tool, exit_code=exit_code, stderr=tail).details
+        elif exit_code not in (0, None) and should_classify_output:
+            logger.info(
+                f"[{exec_id}] Tool exited {exit_code}; non-fatal exit accepted for classification ({tool})"
+            )
 
         ev_meta = {
             "target": target,
@@ -1365,7 +1404,7 @@ class ScannerEngine:
         try:
             # Guard: don't classify output from failed tools — error messages
             # get misclassified as findings by the LLM (e.g. "connection refused" → "Open Redirect")
-            if exit_code != 0:
+            if not should_classify_output:
                 logger.info(f"[{exec_id}] Tool exited {exit_code}, skipping classification")
                 # Still record observation for audit trail, but no findings
                 try:
@@ -1373,7 +1412,12 @@ class ScannerEngine:
                     await router.handle_tool_output(
                         tool_name=tool, stdout=output_text, stderr="",
                         rc=exit_code,
-                        metadata={"target": target, "exec_id": exec_id, "skipped_classification": True},
+                        metadata={
+                            "target": target,
+                            "exec_id": exec_id,
+                            "skipped_classification": True,
+                            "classification_policy": "strict_exit_code",
+                        },
                     )
                 except Exception:
                     pass
@@ -1397,7 +1441,12 @@ class ScannerEngine:
                     stdout=output_text,
                     stderr="",
                     rc=exit_code,
-                    metadata={"target": target, "findings_count": len(findings), "exec_id": exec_id},
+                    metadata={
+                        "target": target,
+                        "findings_count": len(findings),
+                        "exec_id": exec_id,
+                        "classified_on_nonzero_exit": bool(exit_code not in (0, None)),
+                    },
                 )
             except Exception as router_err:
                 logger.warning(f"[{exec_id}] TaskRouter processing error: {router_err}")

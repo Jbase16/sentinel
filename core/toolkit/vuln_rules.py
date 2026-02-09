@@ -475,7 +475,7 @@ class VulnRule:
             # ranking (which target needs attention first). These serve different
             # consumers and are intentionally independent.
             # Do not remove one thinking the other covers it.
-            enriched.append({
+            issue = {
                 "id": issue_id,
                 "rule_id": self.id,
                 "title": self.title,
@@ -493,7 +493,20 @@ class VulnRule:
                 "supporting_findings": evidence,
                 "families": sorted(set(self.families + match.get("families", []))),
                 "evidence_summary": match.get("evidence_summary") or self._summarize_evidence(evidence),
-            })
+            }
+
+            # Attach three-axis priority scores when feature is enabled.
+            # This makes the composite score available to AI chat, reports,
+            # and the pressure graph without a second pass.
+            try:
+                from core.base.config import get_config
+                if get_config().capability_model.three_axis_enabled:
+                    from core.data.risk import risk_engine
+                    issue["three_axis"] = risk_engine.compute_three_axis_priority(issue)
+            except Exception:
+                pass  # Non-critical — scoring degrades gracefully
+
+            enriched.append(issue)
         return enriched
 
     @staticmethod

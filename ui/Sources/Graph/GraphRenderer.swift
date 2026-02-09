@@ -93,6 +93,7 @@ final class GraphRenderer: NSObject {
     // MARK: - Live Event Integration
 
     private var nodePositions: [String: Int] = [:]  // node_id -> index
+    private var nodeLabels: [String: String] = [:]  // node_id -> human-readable label
     private var nodeCount: Int = 0
 
     private var edgeKeys: Set<String> = []
@@ -387,6 +388,7 @@ final class GraphRenderer: NSObject {
         lock.lock()
         nodes.removeAll()
         nodePositions.removeAll()
+        nodeLabels.removeAll()
         nodeCount = 0
         edgeKeys.removeAll()
         edgeDefinitions.removeAll()
@@ -469,10 +471,12 @@ final class GraphRenderer: NSObject {
         // 1. Rebuild Nodes and Index Map together
         // This ensures nodePositions is always in sync with the nodes array.
         nodePositions.removeAll(keepingCapacity: true)
+        nodeLabels.removeAll(keepingCapacity: true)
 
         self.nodes = newNodes.enumerated().map { (index, node) in
             // Rebuild Map (Direct Assignment, 'id' is non-optional)
             nodePositions[node.id] = index
+            if let lbl = node.label { nodeLabels[node.id] = lbl }
 
             let x = node.x ?? Float.random(in: -40...40)
             let y = node.y ?? Float.random(in: -40...40)
@@ -967,7 +971,7 @@ final class GraphRenderer: NSObject {
             let screenX = CGFloat((ndc.x + 1.0) * 0.5) * viewportSize.width
             let screenY = CGFloat((1.0 - ndc.y) * 0.5) * viewportSize.height
 
-            let label = id.contains("_") ? (id.components(separatedBy: "_").last ?? id) : id
+            let label = nodeLabels[id] ?? (id.contains("_") ? (id.components(separatedBy: "_").last ?? id) : String(id.prefix(8)))
 
             results.append((id, CGPoint(x: screenX, y: screenY), label, pressure))
         }

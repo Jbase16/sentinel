@@ -47,6 +47,7 @@ class CortexStream: ObservableObject {
         var charge: Float?
         var temperature: Float?
         var structural: Bool?
+        var label: String?  // Human-readable name (e.g. "Exposed Git Repository")
         var description: String?  // Semantic Analysis
         var pressure: Float?  // 0.0-1.0
         var severity: String?  // "HIGH", "CRITICAL", etc.
@@ -465,6 +466,7 @@ class CortexStream: ObservableObject {
                 charge: Float(node.data.charge ?? 0.0),
                 temperature: Float(node.data.temperature ?? 0.0),
                 structural: node.data.structural,
+                label: node.label,
                 description: node.data.description,
                 pressure: {
                     // Normalize severity (0-10) to pressure (0.0-1.0)

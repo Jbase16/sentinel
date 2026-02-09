@@ -61,22 +61,36 @@ class RiskEngine(Observable):
         self.recalculate()
 
     def recalculate(self):
-        """Function recalculate."""
+        """Recalculate asset-level risk scores.
+
+        When three_axis_enabled is True, each issue's contribution is its
+        priority_composite (0-10) from compute_three_axis_priority().
+        Otherwise falls back to severity-weight * confirmation-multiplier.
+        """
+        from core.base.config import get_config
         raw = issues_store.get_all()
         scores = defaultdict(float)
-        # Loop over items.
+        three_axis = get_config().capability_model.three_axis_enabled
+
         for issue in raw:
             asset = issue.get("target") or issue.get("asset") or "unknown"
-            severity = str(issue.get("severity", "INFO")).upper()
-            weight = SEVERITY_WEIGHTS.get(severity, 0.5)
-            # Confirmation-weighted scoring
-            # COMPOUND MULTIPLIER NOTE:
-            # This multiplier applies to ASSET-LEVEL ranking (which target needs
-            # attention first). VulnRule.apply() applies a SEPARATE multiplier to
-            # ISSUE-LEVEL ranking. Both are needed — see note in VulnRule.apply().
-            confirmation = issue.get("confirmation_level")
-            multiplier = CONFIRMATION_MULTIPLIERS.get(confirmation, 1.0) if confirmation else 1.0
-            scores[asset] += weight * multiplier
+
+            if three_axis:
+                # Three-axis composite score drives asset-level ranking
+                try:
+                    axes = self.compute_three_axis_priority(issue)
+                    scores[asset] += axes["priority_composite"]
+                except Exception:
+                    # Graceful fallback to severity-only if computation fails
+                    severity = str(issue.get("severity", "INFO")).upper()
+                    scores[asset] += SEVERITY_WEIGHTS.get(severity, 0.5)
+            else:
+                severity = str(issue.get("severity", "INFO")).upper()
+                weight = SEVERITY_WEIGHTS.get(severity, 0.5)
+                confirmation = issue.get("confirmation_level")
+                multiplier = CONFIRMATION_MULTIPLIERS.get(confirmation, 1.0) if confirmation else 1.0
+                scores[asset] += weight * multiplier
+
         self._scores = dict(scores)
         self.scores_changed.emit()
 

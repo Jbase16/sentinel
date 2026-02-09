@@ -5,6 +5,7 @@ Covers:
 - ScanTransaction (Commit/Rollback)
 - Concurrency Logic
 """
+import asyncio
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from core.engine.scanner_engine import ScannerEngine, ResourceGuard, ResourceExhaustedError, ScanTransaction
@@ -117,3 +118,129 @@ async def test_dynamic_task_queue(engine):
     # 3. Injection attempt
     with pytest.raises(ValueError):
         engine.queue_task("nmap", ["; rm -rf /"])
+
+
+class _FakeStdout:
+    def __init__(self, lines):
+        self._lines = [f"{line}\n".encode("utf-8") for line in lines]
+
+    async def readline(self):
+        if self._lines:
+            return self._lines.pop(0)
+        return b""
+
+
+class _FakeProc:
+    def __init__(self, lines, exit_code):
+        self.stdout = _FakeStdout(lines)
+        self.stdin = None
+        self.returncode = None
+        self._exit_code = exit_code
+
+    async def wait(self):
+        self.returncode = self._exit_code
+        return self._exit_code
+
+    def terminate(self):
+        self.returncode = self._exit_code
+
+    def kill(self):
+        self.returncode = self._exit_code
+
+
+@pytest.mark.asyncio
+async def test_nikto_exit_code_one_still_classifies(monkeypatch, engine):
+    """Nikto exit code 1 with shim output should not drop findings."""
+    queue = asyncio.Queue()
+    cancel_flag = asyncio.Event()
+    fake_proc = _FakeProc(["[nikto-shim] HIGH: Exposed backup file"], exit_code=1)
+
+    async def _fake_create_subprocess_exec(*_args, **_kwargs):
+        return fake_proc
+
+    router = MagicMock()
+    router.handle_tool_output = AsyncMock(return_value=None)
+    classify_mock = MagicMock(return_value=[{"type": "Nikto Finding", "severity": "HIGH"}])
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr("core.engine.scanner_engine.ScannerBridge.classify", classify_mock)
+    monkeypatch.setattr("core.engine.scanner_engine.TaskRouter.instance", lambda: router)
+
+    findings = await engine._run_tool_task(
+        exec_id="nikto:test1234",
+        tool="nikto",
+        target="https://example.com",
+        queue=queue,
+        args=None,
+        cancel_flag=cancel_flag,
+    )
+
+    assert len(findings) == 1
+    assert classify_mock.called is True
+    assert engine.consume_last_tool_error() is None
+
+
+@pytest.mark.asyncio
+async def test_nikto_native_exit_code_one_still_classifies(monkeypatch, engine):
+    """Native Nikto '+ ...' output on exit code 1 should still classify."""
+    queue = asyncio.Queue()
+    cancel_flag = asyncio.Event()
+    fake_proc = _FakeProc(["+ /admin/: interesting directory found"], exit_code=1)
+
+    async def _fake_create_subprocess_exec(*_args, **_kwargs):
+        return fake_proc
+
+    router = MagicMock()
+    router.handle_tool_output = AsyncMock(return_value=None)
+    classify_mock = MagicMock(return_value=[{"type": "Nikto Finding", "severity": "MEDIUM"}])
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr("core.engine.scanner_engine.ScannerBridge.classify", classify_mock)
+    monkeypatch.setattr("core.engine.scanner_engine.TaskRouter.instance", lambda: router)
+
+    findings = await engine._run_tool_task(
+        exec_id="nikto:testnative",
+        tool="nikto",
+        target="https://example.com",
+        queue=queue,
+        args=None,
+        cancel_flag=cancel_flag,
+    )
+
+    assert len(findings) == 1
+    assert classify_mock.called is True
+    assert engine.consume_last_tool_error() is None
+
+
+@pytest.mark.asyncio
+async def test_nonzero_exit_still_skips_other_tools(monkeypatch, engine):
+    """Non-Nikto non-zero exits remain guarded and skip classification."""
+    queue = asyncio.Queue()
+    cancel_flag = asyncio.Event()
+    fake_proc = _FakeProc(["connection refused"], exit_code=1)
+
+    async def _fake_create_subprocess_exec(*_args, **_kwargs):
+        return fake_proc
+
+    router = MagicMock()
+    router.handle_tool_output = AsyncMock(return_value=None)
+    classify_mock = MagicMock(return_value=[{"type": "Open Port", "severity": "LOW"}])
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+    monkeypatch.setattr("core.engine.scanner_engine.ScannerBridge.classify", classify_mock)
+    monkeypatch.setattr("core.engine.scanner_engine.TaskRouter.instance", lambda: router)
+
+    findings = await engine._run_tool_task(
+        exec_id="nmap:test5678",
+        tool="nmap",
+        target="127.0.0.1",
+        queue=queue,
+        args=None,
+        cancel_flag=cancel_flag,
+    )
+
+    assert findings == []
+    assert classify_mock.called is False
+    tool_error = engine.consume_last_tool_error()
+    assert tool_error is not None
+    assert tool_error["exit_code"] == 1

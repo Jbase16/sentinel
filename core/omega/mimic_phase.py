@@ -21,10 +21,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from core.cortex.events import GraphEvent, GraphEventType, get_event_bus
-from core.sentient.mimic.downloader import AssetDownloader, AssetType, DownloadedAsset
-from core.sentient.mimic.route_miner import RouteMiner
+from core.sentient.mimic.downloader import AssetDownloader, AssetType
 from core.sentient.mimic.shadow_spec import ShadowSpec
-from core.sentient.mimic.ast_parser import ASTParser
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +120,7 @@ class MIMICPhaseOrchestrator:
         self.downloader = AssetDownloader(safe_mode=safe_mode)
         self.shadow_spec = ShadowSpec()
         self.asset_graph: Dict[str, AssetGraphNode] = {}
+        self._parsed_routes: List[Dict[str, Any]] = []
 
     async def execute(self) -> MIMICPhaseResult:
         """Execute MIMIC phase with manifest-first strategy."""
@@ -369,51 +368,181 @@ class MIMICPhaseOrchestrator:
 
     async def _parse_assets(self) -> int:
         """Parse downloaded assets for routes. Returns route count."""
-        routes_discovered = 0
+        seen_routes: Set[tuple[str, str]] = set()
+        self._parsed_routes = []
 
         for url, node in self.asset_graph.items():
             if not node.downloaded or node.asset_type != AssetType.JAVASCRIPT:
                 continue
 
-            # Get downloaded asset content
-            # For now, extract route patterns via regex (AST parsing is complex)
             try:
-                # Simple heuristic: look for common route patterns
-                # This is a simplified implementation - real version would use AST
-                pass  # Actual route mining happens in _analyze_assets
+                content = self._asset_text(url)
+                if not content:
+                    continue
+
+                route_patterns = [
+                    # router.get("/api/foo")
+                    (re.compile(r'router\.(get|post|put|patch|delete|options|head)\(\s*["\']([^"\']+)["\']', re.IGNORECASE), 1, 2, "router"),
+                    # axios.post("/api/foo")
+                    (re.compile(r'axios\.(get|post|put|patch|delete)\(\s*["\']([^"\']+)["\']', re.IGNORECASE), 1, 2, "axios"),
+                    # fetch("/api/foo")
+                    (re.compile(r'fetch\(\s*["\']([^"\']+)["\']', re.IGNORECASE), None, 1, "fetch"),
+                    # Generic API-like literals
+                    (re.compile(r'["\'](/(?:api|v\d+|admin|internal|debug|graphql)[^"\']*)["\']', re.IGNORECASE), None, 1, "literal"),
+                ]
+
+                for pattern, method_group, path_group, source_kind in route_patterns:
+                    for match in pattern.finditer(content):
+                        raw_path = match.group(path_group) if path_group else ""
+                        route = self._normalize_route(raw_path)
+                        if not route:
+                            continue
+                        method = (
+                            match.group(method_group).upper()
+                            if method_group and match.group(method_group)
+                            else "GET"
+                        )
+                        key = (method, route)
+                        if key in seen_routes:
+                            continue
+                        seen_routes.add(key)
+
+                        is_hidden = any(token in route.lower() for token in ("/admin", "/internal", "/debug", "/private"))
+                        self._parsed_routes.append(
+                            {
+                                "route": route,
+                                "method": method,
+                                "source_url": url,
+                                "source_kind": source_kind,
+                                "hidden": is_hidden,
+                            }
+                        )
+
+                        # Feed discovered structure into ShadowSpec.
+                        try:
+                            self.shadow_spec.observe(method=method, url=urljoin(self.target + "/", route))
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.debug(f"[MIMIC] Failed to parse {url}: {e}")
 
-        return routes_discovered
+        return len(self._parsed_routes)
 
     async def _analyze_assets(self) -> tuple[int, List[Dict[str, Any]]]:
         """Analyze assets for secrets and endpoints. Returns (secrets_count, endpoints)."""
         secrets_found = 0
-        hidden_endpoints = []
+        hidden_endpoints: List[Dict[str, Any]] = []
+        hidden_seen: Set[tuple[str, str]] = set()
+        secret_seen: Set[tuple[str, str, str]] = set()
 
         # Secret patterns
         SECRET_PATTERNS = [
-            (r'api[_-]?key["\']?\s*[:=]\s*["\']([^"\']+)["\']', "API Key"),
-            (r'secret["\']?\s*[:=]\s*["\']([^"\']+)["\']', "Secret"),
-            (r'password["\']?\s*[:=]\s*["\']([^"\']+)["\']', "Password"),
-            (r'token["\']?\s*[:=]\s*["\']([^"\']+)["\']', "Token"),
-            (r'aws[_-]?access[_-]?key["\']?\s*[:=]\s*["\']([^"\']+)["\']', "AWS Key"),
+            (re.compile(r'(?i)api[_-]?key["\']?\s*[:=]\s*["\']([^"\']+)["\']'), "api_key"),
+            (re.compile(r'(?i)secret["\']?\s*[:=]\s*["\']([^"\']+)["\']'), "secret"),
+            (re.compile(r'(?i)password["\']?\s*[:=]\s*["\']([^"\']+)["\']'), "password"),
+            (re.compile(r'(?i)token["\']?\s*[:=]\s*["\']([^"\']+)["\']'), "token"),
+            (re.compile(r'(?i)aws[_-]?access[_-]?key["\']?\s*[:=]\s*["\']([^"\']+)["\']'), "aws_key"),
         ]
 
-        # Endpoint patterns
-        ENDPOINT_PATTERNS = [
-            r'["\']/(api|v\d+)/[^"\']+["\']',
-            r'fetch\(["\']([^"\']+)["\']',
-            r'axios\.(get|post|put|delete)\(["\']([^"\']+)["\']',
+        HIDDEN_ENDPOINT_PATTERNS = [
+            re.compile(r'["\'](/(?:admin|internal|debug|private|_next|api/internal)[^"\']*)["\']', re.IGNORECASE),
         ]
 
         for url, node in self.asset_graph.items():
             if not node.downloaded or node.asset_type != AssetType.JAVASCRIPT:
                 continue
 
-            # Get asset content from downloader cache
-            # In real implementation, would retrieve from downloader's storage
-            # For now, we'll just count hypothetically
-            pass
+            content = self._asset_text(url)
+            if not content:
+                continue
+
+            for pattern, secret_type in SECRET_PATTERNS:
+                for match in pattern.finditer(content):
+                    secret_value = match.group(1).strip()
+                    if len(secret_value) < 8:
+                        continue
+                    lowered = secret_value.lower()
+                    if lowered in {"changeme", "example", "test", "placeholder", "your_api_key"}:
+                        continue
+
+                    key = (secret_type, secret_value[:16], url)
+                    if key in secret_seen:
+                        continue
+                    secret_seen.add(key)
+                    secrets_found += 1
+
+                    preview = f"{secret_value[:4]}***{secret_value[-4:]}" if len(secret_value) > 8 else "***"
+                    self.event_bus.emit(
+                        GraphEvent(
+                            type=GraphEventType.LOG,
+                            payload={
+                                "message": f"[MIMIC] Potential secret found in {url}",
+                                "secret_type": secret_type,
+                                "preview": preview,
+                            },
+                        )
+                    )
+
+            for pattern in HIDDEN_ENDPOINT_PATTERNS:
+                for match in pattern.finditer(content):
+                    route = self._normalize_route(match.group(1))
+                    if not route:
+                        continue
+                    key = ("GET", route)
+                    if key in hidden_seen:
+                        continue
+                    hidden_seen.add(key)
+                    hidden_endpoints.append(
+                        {
+                            "route": route,
+                            "method": "GET",
+                            "source_url": url,
+                            "reason": "hidden_pattern",
+                        }
+                    )
+
+        # Include hidden routes detected during route parsing.
+        for route_info in self._parsed_routes:
+            if not route_info.get("hidden"):
+                continue
+            method = route_info.get("method", "GET")
+            route = route_info.get("route", "")
+            key = (method, route)
+            if key in hidden_seen:
+                continue
+            hidden_seen.add(key)
+            hidden_endpoints.append(
+                {
+                    "route": route,
+                    "method": method,
+                    "source_url": route_info.get("source_url"),
+                    "reason": "route_parse_hidden",
+                }
+            )
 
         return secrets_found, hidden_endpoints
+
+    def _asset_text(self, url: str) -> str:
+        asset = self.downloader.get_cached_asset(url)
+        if asset is None:
+            return ""
+        if isinstance(asset.content, str):
+            return asset.content
+        try:
+            return asset.content.decode("utf-8")
+        except UnicodeDecodeError:
+            return asset.content.decode("latin-1", errors="replace")
+
+    @staticmethod
+    def _normalize_route(raw_route: str) -> str:
+        route = (raw_route or "").strip()
+        if not route:
+            return ""
+        if route.startswith("http://") or route.startswith("https://"):
+            parsed = urlparse(route)
+            route = parsed.path or "/"
+        if not route.startswith("/"):
+            route = "/" + route
+        if len(route) > 300:
+            return ""
+        return route

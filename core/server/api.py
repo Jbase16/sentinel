@@ -16,6 +16,7 @@ import logging
 import os
 import asyncio
 import json
+import inspect
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
@@ -233,13 +234,26 @@ async def lifespan(app: FastAPI):
         logger.error(f"[Shutdown] Failed to stop policy watcher: {e}")
 
     # Shutdown Managers
-    try:
-        nexus_manager.stop()
-        cronus_manager.stop()
-        mimic_manager.stop()
-        reasoning_engine.stop()
-    except Exception as e:
-        logger.error(f"[Shutdown] Manager cleanup failed: {e}")
+    async def _shutdown_component(name: str, component: Any) -> None:
+        for method_name in ("stop", "shutdown", "close"):
+            method = getattr(component, method_name, None)
+            if not callable(method):
+                continue
+            try:
+                result = method()
+                if inspect.isawaitable(result):
+                    await result
+                logger.info("[Shutdown] %s.%s complete", name, method_name)
+                return
+            except Exception as exc:
+                logger.error("[Shutdown] %s.%s failed: %s", name, method_name, exc)
+                return
+        logger.warning("[Shutdown] %s has no stop/shutdown hook", name)
+
+    await _shutdown_component("NexusManager", nexus_manager)
+    await _shutdown_component("CronusManager", cronus_manager)
+    await _shutdown_component("MimicManager", mimic_manager)
+    await _shutdown_component("ReasoningEngine", reasoning_engine)
 
     from core.data.blackbox import BlackBox
     await BlackBox.instance().shutdown()

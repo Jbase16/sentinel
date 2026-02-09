@@ -33,7 +33,10 @@ INTEGRATION POINTS:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -628,8 +631,10 @@ class ChainExecutor:
         """
         Validate approval token for chain execution.
 
-        For now, implements simple token validation.
-        In production, this would verify JWT signatures and expiry.
+        Accepted token formats:
+        1. Static token set in SENTINEL_NEXUS_APPROVAL_TOKEN
+        2. Timeboxed marker token: allow-chain-execution:<unix_expiry>
+        3. Signed token: v1:<unix_expiry>:<hmac_sha256(api_token, "nexus-exec:<expiry>")>
 
         Args:
             token: Approval token to validate
@@ -637,10 +642,48 @@ class ChainExecutor:
         Returns:
             True if token is valid
         """
-        # TODO: Implement JWT validation with signature verification
-        # For now, accept any non-empty token or no token at all
-        # This allows testing while maintaining the safety contract
-        return True  # Simplified for initial implementation
+        if not token:
+            return False
+
+        candidate = token.strip()
+        if candidate.lower().startswith("bearer "):
+            candidate = candidate[7:].strip()
+
+        static_token = os.getenv("SENTINEL_NEXUS_APPROVAL_TOKEN", "").strip()
+        if static_token and hmac.compare_digest(candidate, static_token):
+            return True
+
+        # allow-chain-execution:<expiry_epoch>
+        if candidate.startswith("allow-chain-execution:"):
+            parts = candidate.split(":", 1)
+            if len(parts) != 2:
+                return False
+            try:
+                expiry = int(parts[1])
+            except ValueError:
+                return False
+            return expiry >= int(time.time())
+
+        # v1:<expiry_epoch>:<hmac>
+        parts = candidate.split(":")
+        if len(parts) != 3 or parts[0] != "v1":
+            return False
+
+        expiry_raw, provided_sig = parts[1], parts[2]
+        try:
+            expiry = int(expiry_raw)
+        except ValueError:
+            return False
+        if expiry < int(time.time()):
+            return False
+
+        api_token = os.getenv("SENTINEL_API_TOKEN", "").strip()
+        if not api_token:
+            return False
+
+        signing_input = f"nexus-exec:{expiry_raw}".encode("utf-8")
+        expected_sig = hmac.new(api_token.encode("utf-8"), signing_input, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(provided_sig, expected_sig)
 
     def replay(self, recorded_execution: Dict[str, Any]) -> ChainResult:
         """

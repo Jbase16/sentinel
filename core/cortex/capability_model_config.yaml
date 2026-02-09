@@ -8,7 +8,7 @@
 
 # Feature flag: enable three-axis priority scoring in RiskEngine.
 # When false, RiskEngine behavior remains Phase 2 compatible.
-three_axis_enabled: false
+three_axis_enabled: true
 
 # Three-axis ranking weights (must sum to 1.0)
 time_to_impact_weight: 0.40

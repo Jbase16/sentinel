@@ -450,6 +450,42 @@ class AIEngine:
         question = (question or "").strip()
         findings = findings_store.get_all()
         issues = issues_store.get_all()
+        context_session_id: Optional[str] = None
+        context_killchain_edges: List[Dict[str, Any]] = []
+
+        # Prefer active scan session stores (authoritative for transactional pipeline),
+        # then fall back to persisted DB session data, then global stores.
+        try:
+            from core.server.state import get_state
+
+            state = get_state()
+            active_session_id = (state.scan_state or {}).get("session_id")
+            active_session = await state.get_session(active_session_id) if active_session_id else None
+
+            if active_session is not None:
+                session_findings = active_session.findings.get_all()
+                session_issues = active_session.issues.get_all()
+                if session_findings:
+                    findings = session_findings
+                if session_issues:
+                    issues = session_issues
+                context_killchain_edges = active_session.killchain.get_all()
+                context_session_id = active_session_id
+            elif not findings and not issues:
+                from core.data.db import Database
+
+                db = Database.instance()
+                await db.init()
+                session_rows = await db.fetch_all(
+                    "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1"
+                )
+                if session_rows:
+                    latest_session_id = str(session_rows[0][0])
+                    findings = await db.get_findings(latest_session_id)
+                    issues = await db.get_issues(latest_session_id)
+                    context_session_id = latest_session_id
+        except Exception as exc:
+            logger.debug("[AIEngine] Failed loading session-scoped chat context: %s", exc)
 
         # Self-Knowledge Manifesto
         manifesto = (
@@ -477,6 +513,8 @@ class AIEngine:
             if findings or issues:
                 # --- Raw findings context ---
                 context_block = "LIVE SCAN CONTEXT — RAW FINDINGS:\n"
+                if context_session_id:
+                    context_block += f"(session_id: {context_session_id})\n"
                 for f in findings[:30]:
                     context_block += (
                         f"- [{f.get('severity')}] {f.get('type')}: "
@@ -504,12 +542,21 @@ class AIEngine:
                         raw_score = issue.get("raw_score", "?")
                         mult = issue.get("confirmation_multiplier", "?")
                         n_evidence = len(issue.get("supporting_findings", []))
+                        three_axis = issue.get("three_axis")
+                        axis_str = ""
+                        if three_axis:
+                            axis_str = (
+                                f", priority_composite: {three_axis.get('priority_composite', '?')}"
+                                f", TTI: {three_axis.get('time_to_impact', '?')}"
+                                f", UR: {three_axis.get('uncertainty_reduction', '?')}"
+                                f", EE: {three_axis.get('effort_eliminated', '?')}"
+                            )
                         context_block += (
                             f"- [{conf.upper()}] {issue.get('title', 'Untitled')} "
                             f"(score: {score}, raw: {raw_score}, multiplier: {mult}, "
                             f"capabilities: [{caps}], "
                             f"target: {issue.get('target', 'unknown')}, "
-                            f"evidence_count: {n_evidence})\n"
+                            f"evidence_count: {n_evidence}{axis_str})\n"
                         )
 
                 # --- Causal graph summary ---
@@ -542,14 +589,83 @@ class AIEngine:
                 except Exception as exc:
                     logger.debug("[AIEngine] Could not build causal graph for chat: %s", exc)
 
+                if context_killchain_edges:
+                    context_block += (
+                        f"- Persisted killchain edges observed this session: {len(context_killchain_edges)}\n"
+                    )
+
+                # --- Tool execution summary (scan gap awareness) ---
+                try:
+                    # Evidence lives in session-specific stores, not the global singleton.
+                    # Collect from all active sessions via ApplicationState.
+                    from core.server.state import get_state
+                    _state = get_state()
+                    all_evidence = {}
+                    for _sid, _sess in _state.session_manager.items():
+                        _sess_ev = getattr(_sess, "evidence", None)
+                        if _sess_ev:
+                            all_evidence.update(_sess_ev.get_all())
+                    # Fallback to global singleton (e.g. task_router path)
+                    if not all_evidence:
+                        all_evidence = EvidenceStore.instance().get_all()
+                    if all_evidence:
+                        tool_runs = []
+                        for _eid, ev in all_evidence.items():
+                            meta = ev.get("metadata") or {}
+                            tool_runs.append({
+                                "tool": meta.get("tool") or ev.get("tool", "unknown"),
+                                "target": meta.get("target", "unknown"),
+                                "exit_code": meta.get("exit_code", "?"),
+                                "timed_out": meta.get("timed_out", False),
+                                "timeout_reason": meta.get("timeout_reason", ""),
+                                "lines": meta.get("lines", 0),
+                                "canceled": meta.get("canceled", False),
+                            })
+
+                        # Separate successes and failures
+                        failed = [r for r in tool_runs if r["exit_code"] != 0 or r["timed_out"] or r["canceled"]]
+                        succeeded = [r for r in tool_runs if r["exit_code"] == 0 and not r["timed_out"] and not r["canceled"]]
+
+                        context_block += "\nTOOL EXECUTION SUMMARY:\n"
+                        context_block += f"- Total tool runs: {len(tool_runs)}, Succeeded: {len(succeeded)}, Failed/Partial: {len(failed)}\n"
+
+                        if failed:
+                            context_block += "- FAILED/PARTIAL TOOL RUNS (these represent GAPS in scan coverage):\n"
+                            for r in failed:
+                                reason_parts = []
+                                if r["timed_out"]:
+                                    reason_parts.append(f"TIMED OUT ({r['timeout_reason']})" if r["timeout_reason"] else "TIMED OUT")
+                                if r["canceled"]:
+                                    reason_parts.append("CANCELED")
+                                if r["exit_code"] != 0 and not r["timed_out"]:
+                                    reason_parts.append(f"exit_code={r['exit_code']}")
+                                reason_str = ", ".join(reason_parts) if reason_parts else f"exit_code={r['exit_code']}"
+                                context_block += (
+                                    f"  * {r['tool']} on {r['target']}: {reason_str} "
+                                    f"(output lines: {r['lines']})\n"
+                                )
+                            context_block += (
+                                "  NOTE: Failed tools mean incomplete coverage. "
+                                "The scan results may be MISSING findings that these tools would have detected.\n"
+                            )
+
+                        if succeeded:
+                            context_block += "- Successful tool runs: "
+                            tool_targets = [f"{r['tool']} on {r['target']}" for r in succeeded]
+                            context_block += ", ".join(tool_targets) + "\n"
+                except Exception as exc:
+                    logger.debug("[AIEngine] Could not build tool execution summary for chat: %s", exc)
+
                 system_prompt = (
                     f"{manifesto}\n"
                     "INSTRUCTION:\n"
-                    "Use the provided Live Scan Context, Enriched Issues, and Causal Graph Summary "
-                    "to answer the user's question. "
+                    "Use the provided Live Scan Context, Enriched Issues, Causal Graph Summary, "
+                    "and Tool Execution Summary to answer the user's question. "
                     "Always cite specific findings by name and target. "
                     "Distinguish between confirmed, probable, and hypothesized findings. "
-                    "Reference attack chains and enablement relationships when discussing risk.\n\n"
+                    "Reference attack chains and enablement relationships when discussing risk. "
+                    "When discussing scan coverage or gaps, reference the Tool Execution Summary — "
+                    "failed or timed-out tools represent BLIND SPOTS where vulnerabilities may exist undetected.\n\n"
                     "COMMAND PROTOCOL:\n"
                     "To execute a tool or install software, you MUST use this format on a new line:\n"
                     ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n\n"
@@ -569,11 +685,95 @@ class AIEngine:
 
             user_prompt = f"{context_block}\n\nUser Question: {question}"
 
+            # Stream tokens while intercepting >>> EXEC commands.
+            # Tokens arrive as fragments, so we buffer lines and detect
+            # the EXEC protocol across chunk boundaries.
+            line_buffer = ""
             async for chunk in self.client.stream_generate(user_prompt, system_prompt):
-                yield chunk
+                line_buffer += chunk
+                # Only attempt detection when we have a complete line
+                while "\n" in line_buffer:
+                    line, line_buffer = line_buffer.split("\n", 1)
+                    exec_result = self._try_dispatch_exec(line)
+                    if exec_result is not None:
+                        # Replace raw EXEC line with human-readable status
+                        yield exec_result + "\n"
+                    else:
+                        yield line + "\n"
+                # Flush partial line (non-newline tokens) immediately for
+                # streaming UX — but don't try to parse them yet
+                if line_buffer and "\n" not in line_buffer:
+                    # Check if buffer could be start of EXEC line
+                    if not line_buffer.lstrip().startswith(">>>"):
+                        yield line_buffer
+                        line_buffer = ""
+            # Flush any remaining buffer
+            if line_buffer.strip():
+                exec_result = self._try_dispatch_exec(line_buffer)
+                if exec_result is not None:
+                    yield exec_result
+                else:
+                    yield line_buffer
             return
 
         yield "AI Chat unavailable (Ollama offline). Please check connection."
+
+    # ---------------------------------------------------------
+    # Action Dispatcher: parse >>> EXEC from AI stream
+    # ---------------------------------------------------------
+    _EXEC_PREFIX = ">>> EXEC:"
+
+    def _try_dispatch_exec(self, line: str) -> Optional[str]:
+        """Parse a single line for the EXEC protocol and dispatch if found.
+
+        Returns a human-readable status string if the line was an EXEC
+        command, or None if it was a normal text line.
+        """
+        stripped = line.strip()
+        if not stripped.startswith(self._EXEC_PREFIX):
+            return None
+
+        json_str = stripped[len(self._EXEC_PREFIX):].strip()
+        try:
+            payload = json.loads(json_str)
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.warning("[ActionDispatcher] Malformed EXEC JSON: %s — %s", json_str[:120], exc)
+            return f"⚠ Could not parse command: {json_str[:80]}"
+
+        tool = str(payload.get("tool", "")).strip().lower()
+        args = [str(a) for a in payload.get("args", [])]
+        reason = str(payload.get("reason", "AI-suggested"))
+
+        if not tool:
+            return "⚠ EXEC command missing tool name"
+
+        # Route through ActionDispatcher for safety gating
+        from core.base.action_dispatcher import ActionDispatcher
+        dispatcher = ActionDispatcher.instance()
+        # Derive target from args (last arg is typically the target) or from
+        # the current scan context.
+        target = args[-1] if args else "unknown"
+        result = dispatcher.request_action(
+            {"tool": tool, "args": args, "reason": reason},
+            target,
+        )
+
+        # Check if there's an active scan to actually run the tool
+        from core.server.state import get_state
+        scan_active = get_state().scan_state.get("status") == "running"
+
+        if result == "AUTO_APPROVED":
+            if scan_active:
+                return f"✓ Auto-executing: {tool} {' '.join(args)}"
+            else:
+                return f"⚠ {tool} approved but no active scan — start a scan first to execute tools"
+        elif result == "PENDING":
+            if scan_active:
+                return f"⏳ Queued for approval: {tool} {' '.join(args)} (reason: {reason})"
+            else:
+                return f"⚠ {tool} queued for approval but no active scan — start a scan first"
+        else:
+            return f"✗ Rejected: {tool} — {result}"
 
     async def process_tool_output(
         self,

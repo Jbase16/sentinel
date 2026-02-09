@@ -795,24 +795,81 @@ def _handle_nikto(target: str, output: str) -> List[RawFinding]:
     # Design rationale:
     #   Pattern is tightly coupled to wrapper format for deterministic parsing
     #   Alternative approach (parsing native nikto) would require complex OSVDB lookup and heuristic severity assignment
-    pattern = re.compile(r"\[nikto-shim\]\s+([A-Z]+):\s+(.*)")
+    shim_pattern = re.compile(r"\[nikto-shim\]\s+([A-Z]+):\s+(.*)")
+    native_pattern = re.compile(r"^\+\s+(.*)$")
+
+    native_skip_prefixes = (
+        "target ip:",
+        "target hostname:",
+        "target port:",
+        "start time:",
+        "end time:",
+        "retrieved x-powered-by",
+        "no web server found",
+        "0 host(s) tested",
+        "1 host(s) tested",
+    )
+
+    def _native_severity(message_text: str) -> str | None:
+        lowered = message_text.lower()
+        if lowered.startswith("error:"):
+            return None
+        if any(token in lowered for token in ("cve-", "vulnerability", "outdated", "remote code execution", "sql injection")):
+            return "HIGH"
+        if any(token in lowered for token in ("osvdb-", "interesting", "exposed", "backup", "admin", "directory indexing", "allowed methods")):
+            return "MEDIUM"
+        if any(token in lowered for token in ("header", "cookie", "server", "uncommon")):
+            return "LOW"
+        if len(message_text.strip()) < 8:
+            return None
+        return "INFO"
+
     # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
-        match = pattern.match(clean)
-        if not match:
+        if not clean:
             continue
-        severity = match.group(1).upper()
-        message = match.group(2).strip()
+
+        shim_match = shim_pattern.match(clean)
+        if shim_match:
+            severity = shim_match.group(1).upper()
+            message = shim_match.group(2).strip()
+            findings.append(
+                RawFinding(
+                    type="Nikto Finding",
+                    severity=severity if severity in {"LOW", "MEDIUM", "HIGH", "CRITICAL"} else "INFO",
+                    tool="nikto",
+                    target=target,
+                    message=message,
+                    proof=clean,
+                    tags=["web-scanner", "nikto"],
+                    families=["exposure", "misconfiguration"],
+                )
+            )
+            continue
+
+        native_match = native_pattern.match(clean)
+        if not native_match:
+            continue
+
+        message = native_match.group(1).strip()
+        lowered = message.lower()
+        if any(lowered.startswith(prefix) for prefix in native_skip_prefixes):
+            continue
+
+        severity = _native_severity(message)
+        if severity is None:
+            continue
+
         findings.append(
             RawFinding(
                 type="Nikto Finding",
-                severity=severity if severity in {"LOW", "MEDIUM", "HIGH", "CRITICAL"} else "INFO",
+                severity=severity,
                 tool="nikto",
                 target=target,
                 message=message,
                 proof=clean,
-                tags=["web-scanner", "nikto"],
+                tags=["web-scanner", "nikto", "nikto-native"],
                 families=["exposure", "misconfiguration"],
             )
         )

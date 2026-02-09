@@ -22,6 +22,7 @@
 #
 
 import logging
+import threading
 import uuid
 from typing import List, Dict, Optional
 from core.utils.observer import Observable, Signal
@@ -80,10 +81,12 @@ class ActionDispatcher(Observable):
         # Set of (tool, args) combinations we've already processed
         # Prevents running "nmap example.com" twice if AI suggests it multiple times
         self.history = set()
-        
+
         # Dictionary of actions awaiting approval: {action_id: action_details}
         # When human approves, we pop from here and emit action_approved signal
+        # Guarded by _lock for thread-safe access from AI thread + API handlers
         self._pending_actions: Dict[str, Dict] = {}
+        self._lock = threading.Lock()
 
     def request_action(self, action: Dict, target: str) -> Optional[str]:
         """
@@ -152,7 +155,8 @@ class ActionDispatcher(Observable):
         # Decision 2: Is this a restricted tool? (active scanning, needs approval)
         if tool in config.scan.restricted_tools:
             # Add to pending queue and ask human for approval
-            self._pending_actions[full_action["id"]] = full_action
+            with self._lock:
+                self._pending_actions[full_action["id"]] = full_action
             self.action_needed.emit(full_action["id"], full_action)
             return "PENDING"
             
@@ -173,41 +177,43 @@ class ActionDispatcher(Observable):
         Returns:
             True if action was found and approved, False if not found
         """
-        # Conditional branch.
-        if action_id in self._pending_actions:
-            # Remove from pending queue
-            action = self._pending_actions.pop(action_id)
-            # Emit approval signal (scan orchestrator will execute)
-            self.action_approved.emit(action)
-            return True
-        return False  # Action ID not found (maybe already processed?)
+        with self._lock:
+            if action_id in self._pending_actions:
+                # Remove from pending queue
+                action = self._pending_actions.pop(action_id)
+            else:
+                return False  # Action ID not found (maybe already processed?)
+        # Emit approval signal outside the lock (subscribers may be slow)
+        self.action_approved.emit(action)
+        return True
 
     def deny_action(self, action_id: str):
         """
         Human denied a pending action - discard it.
-        
+
         Simply removes from pending queue without executing.
-        
+
         Args:
             action_id: UUID of the action to deny
-            
+
         Returns:
             True if action was found and denied, False if not found
         """
-        # Conditional branch.
-        if action_id in self._pending_actions:
-            # Remove from pending queue without executing
-            self._pending_actions.pop(action_id)
-            return True
-        return False  # Action ID not found
+        with self._lock:
+            if action_id in self._pending_actions:
+                # Remove from pending queue without executing
+                self._pending_actions.pop(action_id)
+                return True
+            return False  # Action ID not found
 
     def get_pending(self) -> List[Dict]:
         """
         Get all actions awaiting human approval.
-        
+
         Used by UI to show the approval queue.
-        
+
         Returns:
             List of action dictionaries with {id, tool, args, target, reason, timestamp}
         """
-        return list(self._pending_actions.values())
+        with self._lock:
+            return list(self._pending_actions.values())

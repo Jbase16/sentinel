@@ -58,6 +58,9 @@ conflict.log
 ollama.log
 server.log
 
+# Scan Reports
+reports/
+
 # Private / Local Config
 live_fuzz_campaign.py
 TODO.md

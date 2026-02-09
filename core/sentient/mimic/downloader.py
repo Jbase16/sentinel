@@ -38,15 +38,18 @@ DEPENDENCIES (Future):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
+import httpx
 from core.base.config import get_config
 
 # Safety fuse: prevents unsafe operations
@@ -261,6 +264,8 @@ class AssetDownloader:
         self._cache_dir = cache_dir
         self._download_count = 0
         self._robots_disallow: Set[str] = set()
+        self._downloaded_assets: Dict[str, DownloadedAsset] = {}
+        self._robots_loaded_for: Set[str] = set()
 
     @property
     def safe_mode(self) -> bool:
@@ -290,10 +295,77 @@ class AssetDownloader:
         Raises:
             NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Asset type detection deferred. "
-            "Future implementation should check file extensions."
+        path = urlparse(url).path.lower()
+
+        if path.endswith(".map"):
+            return AssetType.SOURCE_MAP
+        if path.endswith((".js", ".mjs", ".cjs")) or ".js?" in path:
+            return AssetType.JAVASCRIPT
+        if path.endswith(".css"):
+            return AssetType.CSS
+        if path.endswith((".woff", ".woff2", ".ttf", ".otf", ".eot")):
+            return AssetType.FONT
+        if path.endswith((".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".ico", ".avif")):
+            return AssetType.IMAGE
+        if any(name in path for name in ("manifest", "webpack-stats", "asset-manifest")):
+            return AssetType.MANIFEST
+        return AssetType.OTHER
+
+    async def download(self, url: str, timeout: float = 10.0) -> DownloadedAsset:
+        """
+        Download a single asset and cache it in-memory.
+        """
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Invalid asset URL scheme: {parsed.scheme}")
+
+        if self._safe_mode:
+            base = f"{parsed.scheme}://{parsed.netloc}"
+            if base not in self._robots_loaded_for:
+                await self._load_robots_txt(base)
+            if not self._is_allowed_path(parsed.path):
+                raise PermissionError(f"robots.txt disallow for {parsed.path}")
+
+        if url in self._downloaded_assets:
+            return self._downloaded_assets[url]
+
+        # Lightweight rate limit: spread requests over configured RPS.
+        if self._rate_limit > 0:
+            await asyncio.sleep(1.0 / float(self._rate_limit))
+
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            response = await client.get(url, timeout=timeout)
+            response.raise_for_status()
+            content_bytes = response.content
+
+        max_size_mb = get_config().mimic.max_asset_size_mb
+        max_bytes = int(max_size_mb * 1024 * 1024)
+        if len(content_bytes) > max_bytes:
+            raise ValueError(
+                f"Asset too large ({len(content_bytes)} bytes) exceeds limit {max_bytes} bytes"
+            )
+
+        asset_type = self.detect_type_from_url(url)
+        content: bytes | str = content_bytes
+        if asset_type in (AssetType.JAVASCRIPT, AssetType.CSS, AssetType.MANIFEST, AssetType.SOURCE_MAP):
+            try:
+                content = content_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                content = content_bytes.decode("latin-1", errors="replace")
+
+        asset = DownloadedAsset.from_response(
+            url=url,
+            content=content,
+            headers={k: v for k, v in response.headers.items()},
+            asset_type=asset_type,
         )
+        self._downloaded_assets[url] = asset
+        self._download_count += 1
+        return asset
+
+    def get_cached_asset(self, url: str) -> Optional[DownloadedAsset]:
+        """Return an already-downloaded asset from in-memory cache."""
+        return self._downloaded_assets.get(url)
 
     async def discover(self, target: str) -> AssetManifest:
         """
@@ -332,15 +404,40 @@ class AssetDownloader:
         )
 
         # Create manifest skeleton
-        AssetManifest(
+        manifest = AssetManifest(
             target=parsed.netloc,
             base_url=target.rstrip("/"),
         )
+        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            try:
+                response = await client.get(target, timeout=8.0)
+                if response.status_code == 200:
+                    text = response.text
+                    # JavaScript sources from script tags.
+                    for src in re.findall(r'<script[^>]*src=["\'](.*?)["\']', text, flags=re.IGNORECASE):
+                        manifest.add_asset(urljoin(manifest.base_url + "/", src))
+                    # CSS sources from link tags.
+                    for href in re.findall(
+                        r'<link[^>]*href=["\'](.*?)["\']',
+                        text,
+                        flags=re.IGNORECASE,
+                    ):
+                        if href.lower().endswith(".css"):
+                            manifest.add_asset(urljoin(manifest.base_url + "/", href))
+            except Exception as exc:
+                logger.debug("[AssetDownloader] discover root fetch failed: %s", exc)
 
-        raise NotImplementedError(
-            "Wrapper-only: Asset discovery implementation deferred. "
-            "Future implementation should spider and parse HTML."
-        )
+            # Probe common manifests.
+            for probe in ("/manifest.json", "/asset-manifest.json", "/vite-manifest.json", "/webpack-stats.json"):
+                probe_url = urljoin(manifest.base_url + "/", probe)
+                try:
+                    resp = await client.get(probe_url, timeout=4.0)
+                    if resp.status_code == 200:
+                        manifest.add_asset(probe_url)
+                except Exception:
+                    continue
+
+        return manifest
 
     async def download_bundle(
         self,
@@ -372,10 +469,19 @@ class AssetDownloader:
             f"from {manifest.target}"
         )
 
-        raise NotImplementedError(
-            "Wrapper-only: Bundle download implementation deferred. "
-            "Future implementation should use asyncio.gather with semaphore."
-        )
+        semaphore = asyncio.Semaphore(max(1, self._max_concurrent))
+        downloaded: List[DownloadedAsset] = []
+
+        async def _fetch(url: str) -> None:
+            async with semaphore:
+                try:
+                    asset = await self.download(url)
+                    downloaded.append(asset)
+                except Exception as exc:
+                    logger.debug("[AssetDownloader] download failed url=%s err=%s", url, exc)
+
+        await asyncio.gather(*(_fetch(asset_url) for asset_url in manifest.assets), return_exceptions=True)
+        return downloaded
 
     async def save_to_cache(
         self,
@@ -399,10 +505,28 @@ class AssetDownloader:
         Raises:
             NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Asset caching implementation deferred. "
-            "Future implementation should write to cache_dir with hash-based naming."
-        )
+        cache_base = path or self._cache_dir
+        if cache_base is None:
+            cache_base = Path(get_config().storage.base_dir) / "mimic-cache"
+        cache_base.mkdir(parents=True, exist_ok=True)
+
+        suffix_map = {
+            AssetType.JAVASCRIPT: ".js",
+            AssetType.SOURCE_MAP: ".map",
+            AssetType.CSS: ".css",
+            AssetType.MANIFEST: ".json",
+            AssetType.FONT: ".font",
+            AssetType.IMAGE: ".img",
+        }
+        suffix = suffix_map.get(asset.asset_type, ".bin")
+        output_path = cache_base / f"{asset.content_hash}{suffix}"
+
+        if isinstance(asset.content, str):
+            payload = asset.content.encode("utf-8")
+        else:
+            payload = asset.content
+        output_path.write_bytes(payload)
+        return output_path
 
     async def fetch_source_map(
         self,
@@ -427,10 +551,28 @@ class AssetDownloader:
         Raises:
             NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Source Map fetching deferred. "
-            "Future implementation should parse sourceMappingURL comments."
-        )
+        js_asset = self._downloaded_assets.get(js_url)
+        candidate_urls: List[str] = []
+
+        if js_asset is not None:
+            content = js_asset.content if isinstance(js_asset.content, str) else js_asset.content.decode("utf-8", errors="ignore")
+            match = re.search(r"sourceMappingURL=(.+)", content)
+            if match:
+                source_map_ref = match.group(1).strip()
+                candidate_urls.append(urljoin(js_url, source_map_ref))
+
+        # Fallback: assume conventional ".map" sibling.
+        if not candidate_urls:
+            candidate_urls.append(f"{js_url}.map")
+
+        for candidate in candidate_urls:
+            try:
+                asset = await self.download(candidate)
+                if asset.asset_type == AssetType.SOURCE_MAP or candidate.endswith(".map"):
+                    return asset
+            except Exception:
+                continue
+        return None
 
     async def _load_robots_txt(self, target: str) -> None:
         """
@@ -446,10 +588,41 @@ class AssetDownloader:
         Raises:
             NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: robots.txt parsing deferred. "
-            "Future implementation should use robotexclusionrulesparser."
-        )
+        parsed = urlparse(target)
+        if parsed.scheme not in ("http", "https"):
+            return
+        base = f"{parsed.scheme}://{parsed.netloc}"
+
+        if base in self._robots_loaded_for:
+            return
+
+        self._robots_loaded_for.add(base)
+        robots_url = urljoin(base + "/", "robots.txt")
+        try:
+            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+                response = await client.get(robots_url, timeout=4.0)
+            if response.status_code != 200:
+                return
+
+            for line in response.text.splitlines():
+                clean = line.strip()
+                if not clean or clean.startswith("#"):
+                    continue
+                if clean.lower().startswith("disallow:"):
+                    path = clean.split(":", 1)[1].strip()
+                    if path and path != "/":
+                        self._robots_disallow.add(path)
+        except Exception as exc:
+            logger.debug("[AssetDownloader] robots.txt fetch failed for %s: %s", base, exc)
+
+    def _is_allowed_path(self, path: str) -> bool:
+        normalized = path or "/"
+        for disallowed in self._robots_disallow:
+            if disallowed == "/":
+                return False
+            if normalized.startswith(disallowed):
+                return False
+        return True
 
     def replay(self, recorded_assets: Dict[str, Any]) -> List[DownloadedAsset]:
         """
@@ -466,10 +639,39 @@ class AssetDownloader:
         Raises:
             NotImplementedError: This is a wrapper-only implementation
         """
-        raise NotImplementedError(
-            "Wrapper-only: Asset replay implementation deferred. "
-            "Future implementation should load from evidence store."
-        )
+        payload = recorded_assets.get("assets", recorded_assets)
+        if isinstance(payload, dict):
+            payload = [payload]
+        if not isinstance(payload, list):
+            return []
+
+        restored: List[DownloadedAsset] = []
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            try:
+                asset_type = AssetType(item.get("asset_type", AssetType.OTHER.value))
+            except Exception:
+                asset_type = AssetType.OTHER
+            content = item.get("content", b"")
+            if isinstance(content, list):
+                try:
+                    content = bytes(content)
+                except Exception:
+                    content = b""
+            if not isinstance(content, (bytes, str)):
+                content = str(content)
+            restored.append(
+                DownloadedAsset(
+                    url=str(item.get("url", "")),
+                    asset_type=asset_type,
+                    content=content,
+                    size_bytes=int(item.get("size_bytes", 0)),
+                    content_hash=str(item.get("content_hash", "")),
+                    headers=item.get("headers", {}) if isinstance(item.get("headers"), dict) else {},
+                )
+            )
+        return restored
 
     def get_statistics(self) -> Dict[str, Any]:
         """

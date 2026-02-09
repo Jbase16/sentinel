@@ -147,10 +147,113 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             "status": "running",
             "started_at": datetime.now(timezone.utc).isoformat(),
             "session_id": session.id,
+            # Will hold dispatch_tool closure once scan runner starts
+            "_dispatch_tool": None,
         }
 
         event_bus = get_event_bus()
         event_bus.emit_scan_started(req.target, allowed_tools, session.id)
+
+        # ─── ActionDispatcher → tool execution bridge ───────────────────
+        from core.base.action_dispatcher import ActionDispatcher
+        _action_dispatcher = ActionDispatcher.instance()
+
+        # Capture immutable identifiers (not mutable objects) so the closure
+        # can safely verify liveness without holding stale references.
+        _bound_session_id = session.id
+        _bound_target = req.target
+
+        def _on_action_approved(action: Dict) -> None:
+            """Fire-and-forget: schedule approved tool execution on the event loop.
+
+            Called from whatever thread emits the signal (may be AI thread).
+            We only touch thread-safe primitives here and defer real work
+            to the event loop via run_coroutine_threadsafe.
+            """
+            tool_name = action.get("tool", "")
+            if not tool_name:
+                return
+
+            # Guard: verify the scan that wired us is still the active one.
+            current_state = get_state()
+            active_sid = (current_state.scan_state or {}).get("session_id")
+            if active_sid != _bound_session_id:
+                logger.warning(
+                    "[ActionBridge] Stale callback: bound to session %s but active is %s — skipping",
+                    _bound_session_id, active_sid,
+                )
+                return
+
+            loop = current_state.api_loop
+            if loop is None or loop.is_closed():
+                logger.warning("[ActionBridge] No event loop for approved action %s", action.get("id"))
+                return
+            asyncio.run_coroutine_threadsafe(
+                _dispatch_approved_action(action), loop,
+            )
+
+        async def _dispatch_approved_action(action: Dict) -> None:
+            """Execute an AI-approved tool within the active scan session.
+
+            Re-resolves session and event_bus from global state each time
+            so we never operate on a stale/dead session object.
+            """
+            tool_name = action.get("tool", "")
+            args = action.get("args", [])
+            target_url = action.get("target") or _bound_target
+
+            # Re-resolve session from the live state manager
+            current_state = get_state()
+            live_session = None
+            for _sid, _sess in current_state.session_manager.items():
+                if _sid == _bound_session_id:
+                    live_session = _sess
+                    break
+            if live_session is None:
+                logger.warning("[ActionBridge] Session %s no longer active — dropping action %s",
+                               _bound_session_id, action.get("id"))
+                return
+
+            # Freshen event_bus from the module-level getter
+            _event_bus = get_event_bus()
+
+            live_session.log(f"[ActionDispatcher] Executing approved tool: {tool_name} {' '.join(args)}")
+
+            engine = ScannerEngine(session=live_session)
+            findings: List[Dict] = []
+            exit_code = 0
+            tool_error: Optional[Dict[str, Any]] = None
+            try:
+                _event_bus.emit_tool_invoked(tool=tool_name, target=target_url, args=args, scan_id=live_session.id)
+                if current_state.cancel_requested.is_set():
+                    return
+
+                async for log_line in engine.scan(
+                    target_url, selected_tools=[tool_name], cancel_flag=current_state.cancel_requested,
+                ):
+                    live_session.log(log_line)
+
+                findings = engine.get_last_results() or []
+                tool_error = engine.consume_last_tool_error()
+                exit_code = 130 if current_state.cancel_requested.is_set() else 0
+                if tool_error and "exit_code" in tool_error:
+                    exit_code = int(tool_error["exit_code"])
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                live_session.log(f"[ActionDispatcher] Tool failed ({tool_name}): {exc}")
+                logger.error("[ActionBridge] Approved action failed: %s", exc, exc_info=True)
+            finally:
+                _event_bus.emit_tool_completed(
+                    tool=tool_name,
+                    exit_code=exit_code,
+                    findings_count=len(findings),
+                    scan_id=live_session.id,
+                    error=tool_error,
+                )
+
+        _action_dispatcher.action_approved.connect(_on_action_approved)
+        logger.info("[ActionBridge] Wired action_approved → tool execution for session %s", session.id)
 
         async def _runner() -> None:
             start_time = time.time()
@@ -159,11 +262,11 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     findings = []
                     exit_code = 0
                     tool_error: Optional[Dict[str, Any]] = None
-                    
+
                     if tool not in allowed_tools:
                         session.log(f"⚠️ [Security] Tool '{tool}' blocked")
                         return []
-                        
+
                     engine = ScannerEngine(session=session)
                     try:
                         event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], scan_id=session.id)
@@ -196,6 +299,9 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             error=tool_error,
                         )
 
+                # Store dispatch_tool on state for external callers
+                state.scan_state["_dispatch_tool"] = dispatch_tool
+
                 mission = await reasoning_engine.start_scan(
                     target=req.target,
                     available_tools=allowed_tools,
@@ -206,7 +312,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 
                 state.scan_state["status"] = "completed"
                 state.scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
-                
+
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, scan_id=session.id)
 
@@ -256,6 +362,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 await db.init()
                 await db.blackbox.enqueue(db._save_session_impl, session.to_dict())
                 await db.blackbox.flush()
+
+            finally:
+                # Disconnect ActionDispatcher subscriber so stale closures
+                # don't fire on the next scan's session.
+                try:
+                    _action_dispatcher.action_approved.disconnect(_on_action_approved)
+                    logger.info("[ActionBridge] Disconnected action_approved for session %s", session.id)
+                except Exception:
+                    pass
+                # Clear the dispatch_tool reference
+                if state.scan_state.get("_dispatch_tool"):
+                    state.scan_state["_dispatch_tool"] = None
 
         state.active_scan_task = asyncio.create_task(_runner())
         return session.id
@@ -368,6 +486,24 @@ async def get_scan_results():
     # Build response matching Swift SentinelResults structure
     from core.cortex.causal_graph import get_graph_dto_for_session
     graph_dto = await get_graph_dto_for_session(session_id)
+    attack_paths: List[List[str]] = []
+    try:
+        from core.cortex.causal_graph import CausalGraphBuilder
+
+        builder = CausalGraphBuilder()
+        builder.build(findings)
+        builder.enrich_from_issues(issues)
+        raw_paths = builder.get_attack_chains(max_length=10)
+        id_to_title = {
+            str(f.get("id")): str(f.get("title") or f.get("type") or f.get("id"))
+            for f in findings
+        }
+        attack_paths = [
+            [id_to_title.get(str(node_id), str(node_id)) for node_id in chain]
+            for chain in raw_paths[:25]
+        ]
+    except Exception as exc:
+        logger.debug("[Results] Attack path export failed for %s: %s", session_id, exc)
 
     result = {
         "scan": {
@@ -394,7 +530,7 @@ async def get_scan_results():
         # Note: UI expects 'edges' and 'attackPaths' in Killchain struct
         "killchain": {
             "edges": graph_dto.get("edges", []),
-            "attack_paths": [], # TODO: Implement path finding export in CausalGraph
+            "attack_paths": attack_paths,
             "degraded_paths": [],
             "recommended_phases": []
         },
