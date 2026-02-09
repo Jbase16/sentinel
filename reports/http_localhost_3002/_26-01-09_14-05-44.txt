@@ -1,5 +1,0 @@
-# Dirsearch started Fri Jan  9 14:05:44 2026 as: /Users/jason/Developer/sentinelforge/.venv/bin/dirsearch -u http://localhost:3002 -w /Users/jason/Developer/sentinelforge/assets/wordlists/emergency.txt -q
-
-405   153B   http://localhost:3002/login
-200   244B   http://localhost:3002/.git/config
-403    27B   http://localhost:3002/admin
