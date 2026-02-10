@@ -71,6 +71,7 @@ public class HelixAppState: ObservableObject {
     // MARK: - Analysis State (Phase 11)
     @Published var graphAnalysis: TopologyResponse? = nil
     @Published var insightsByNode: [String: [InsightClaim]] = [:]
+    @Published var latestPressureGraph: PressureGraphDTO? = nil
 
     // MARK: - Replay State (Time Travel)
     @Published var allEvents: [GraphEvent] = []  // The Tape
@@ -385,6 +386,9 @@ public class HelixAppState: ObservableObject {
                     print(
                         "[AppState] Graph refreshed: \(graph.count.nodes) nodes, \(graph.count.edges) edges"
                     )
+                    await MainActor.run {
+                        self.latestPressureGraph = graph
+                    }
                     cortexStream.updateFromPressureGraph(graph)
                 } else {
                     // 204 No Content is normal during scan initialization
@@ -392,6 +396,9 @@ public class HelixAppState: ObservableObject {
                     print(
                         "[AppState] Graph refresh returned nil (204 No Content - session not ready yet)"
                     )
+                    await MainActor.run {
+                        self.latestPressureGraph = nil
+                    }
                 }
             } catch {
                 // Don't log errors as warnings during scan startup
@@ -743,15 +750,51 @@ public class HelixAppState: ObservableObject {
 
             let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
 
-            // Determine entry/critical nodes?
-            // Heuristic placeholder until Strategos exposes authoritative entry/asset classification.
-            // Backend GraphAnalyzer requires entry_nodes to find paths.
-            // Let's use nodes with type="entry" or hardcoded "INTERNET" if it exists.
+            // Prefer authoritative entry/critical sets from backend graph DTO when available.
+            let backendEntryNodes = (self.latestPressureGraph?.entryNodes ?? [])
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            let backendCriticalNodes = (self.latestPressureGraph?.criticalAssets ?? [])
+                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
-            let entryNodes = nodes.filter { $0.type == "entry" || $0.id == "INTERNET" }.map {
-                $0.id
+            // Fallback: infer entry nodes from topology if backend values are unavailable.
+            var inboundCounts: [String: Int] = [:]
+            for node in nodes {
+                inboundCounts[node.id] = 0
             }
-            let criticalNodes = nodes.filter { ($0.pressure ?? 0) > 0.8 }.map { $0.id }  // High pressure nodes
+            for edge in edges {
+                inboundCounts[edge.target, default: 0] += 1
+            }
+
+            var entryNodes = backendEntryNodes
+            if entryNodes.isEmpty {
+                entryNodes = nodes
+                    .filter { inboundCounts[$0.id, default: 0] == 0 }
+                    .map { $0.id }
+            }
+
+            if entryNodes.isEmpty {
+                let entryTypeHints = ["entry", "target", "exposure", "port", "service", "asset"]
+                entryNodes = nodes.filter { node in
+                    let lowered = node.type.lowercased()
+                    return entryTypeHints.contains { lowered.contains($0) }
+                }.map { $0.id }
+            }
+
+            if entryNodes.isEmpty, let highestPressure = nodes.max(by: { ($0.pressure ?? 0) < ($1.pressure ?? 0) }) {
+                entryNodes = [highestPressure.id]
+            }
+
+            // Critical assets fallback = high-pressure sinks; if none, use highest-pressure nodes.
+            var criticalNodes = backendCriticalNodes
+            if criticalNodes.isEmpty {
+                criticalNodes = nodes.filter { ($0.pressure ?? 0) >= 0.7 }.map { $0.id }
+            }
+            if criticalNodes.isEmpty {
+                criticalNodes = nodes
+                    .sorted { ($0.pressure ?? 0) > ($1.pressure ?? 0) }
+                    .prefix(5)
+                    .map { $0.id }
+            }
 
             do {
                 let analysis = try await cortexClient.fetchTopology(

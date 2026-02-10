@@ -61,6 +61,15 @@ EFFORT_ELIMINATED_BY_CAPABILITY: Dict[str, float] = {
     "partial_info": 2.0,
 }
 
+# Renderer-friendly severity scale (0-10).
+SEVERITY_SCORES: Dict[str, float] = {
+    "critical": 9.5,
+    "high": 8.0,
+    "medium": 5.5,
+    "low": 3.0,
+    "info": 1.0,
+}
+
 
 def _get_effort_eliminated_table() -> Dict[str, float]:
     """
@@ -961,36 +970,240 @@ class CausalGraphBuilder:
 
         return {"chains": chains, "nodes": node_summaries}
 
+    @staticmethod
+    def _severity_score(finding: Finding) -> float:
+        """
+        Convert finding severity to the renderer's expected 0-10 scale.
+        """
+        raw = finding.data.get("base_score")
+        if raw is None:
+            raw = finding.data.get("score")
+        if raw is None:
+            raw = finding.data.get("raw_score")
+        if raw is None:
+            raw = finding.severity
+
+        if isinstance(raw, (int, float)):
+            value = float(raw)
+            if 0.0 <= value <= 1.0:
+                value *= 10.0
+            return max(0.0, min(10.0, value))
+
+        text = str(raw).strip().lower()
+        if text in SEVERITY_SCORES:
+            return SEVERITY_SCORES[text]
+        try:
+            value = float(text)
+            if 0.0 <= value <= 1.0:
+                value *= 10.0
+            return max(0.0, min(10.0, value))
+        except (TypeError, ValueError):
+            return SEVERITY_SCORES.get(str(finding.severity).strip().lower(), 1.0)
+
+    @staticmethod
+    def _render_node_type(finding: Finding) -> str:
+        """
+        Collapse raw finding types into stable UI categories with richer color variance.
+        """
+        raw_type = str(finding.type or "").strip().lower()
+        if raw_type in {"decision", "strategy_decision"}:
+            return "decision"
+
+        if any(token in raw_type for token in ("port", "service", "connectivity")):
+            return "service" if "service" in raw_type else "port"
+
+        if any(token in raw_type for token in ("credential", "auth", "session", "exposure", "leak")):
+            return "exposure"
+
+        if any(token in raw_type for token in ("dns", "subdomain", "topology", "asset")):
+            return "asset"
+
+        capabilities = CausalGraphBuilder._finding_capability_types(finding)
+        if "access" in capabilities:
+            return "exposure"
+        if "execution" in capabilities:
+            return "vulnerability"
+        if "information" in capabilities:
+            return "asset"
+
+        return "vulnerability"
+
+    @staticmethod
+    def _derive_exposure(finding: Finding) -> float:
+        """
+        Estimate accessibility (0-1) from target context and finding type.
+        """
+        target = str(finding.target or "").lower()
+        finding_type = str(finding.type or "").lower()
+        text = CausalGraphBuilder._finding_text_blob(finding)
+
+        if any(token in finding_type for token in ("open_port", "port", "service", "connectivity")):
+            return 0.9
+        if any(token in text for token in ("internet", "public", "externally exposed")):
+            return 0.9
+        if any(token in target for token in ("localhost", "127.0.0.1", "internal", ".local", "10.", "192.168.")):
+            return 0.35
+        return 0.6
+
+    @staticmethod
+    def _derive_exploitability(finding: Finding, severity_score: float) -> float:
+        """
+        Estimate exploitability (0-1) from confirmation level + capability + severity.
+        """
+        confirmation = CausalGraphBuilder._finding_confirmation_level(finding)
+        confirmation_base = {
+            "confirmed": 0.82,
+            "probable": 0.62,
+            "hypothesized": 0.38,
+        }.get(confirmation, 0.5)
+
+        capabilities = CausalGraphBuilder._finding_capability_types(finding)
+        cap_bonus = 0.0
+        if "access" in capabilities:
+            cap_bonus += 0.10
+        if "execution" in capabilities:
+            cap_bonus += 0.08
+        if "information" in capabilities:
+            cap_bonus += 0.04
+
+        severity_bonus = min(0.12, max(0.0, severity_score / 10.0) * 0.12)
+        return max(0.0, min(1.0, confirmation_base + cap_bonus + severity_bonus))
+
+    @staticmethod
+    def _derive_privilege_gain(finding: Finding) -> float:
+        """
+        Estimate privilege gain (0-1) from capability metadata and finding semantics.
+        """
+        capabilities = CausalGraphBuilder._finding_capability_types(finding)
+        finding_type = str(finding.type or "").lower()
+        text = CausalGraphBuilder._finding_text_blob(finding)
+
+        if "access" in capabilities or any(token in finding_type for token in ("credential", "session", "auth")):
+            return 1.0
+        if "execution" in capabilities or any(token in finding_type for token in ("rce", "injection", "xss", "ssrf")):
+            return 0.8
+        if "information" in capabilities:
+            if any(token in text for token in ("admin", "password", "token", "secret")):
+                return 0.6
+            return 0.45
+        return 0.2
+
+    @staticmethod
+    def _canonical_edge_type(raw_relationship: str, edge_attrs: Optional[Dict[str, Any]] = None) -> str:
+        """
+        Map backend edge semantics to renderer edge classes.
+        """
+        attrs = edge_attrs or {}
+        relationship = str(raw_relationship or "").strip().lower()
+        enablement_class = str(attrs.get("enablement_class", "")).strip().lower()
+
+        if relationship in {"enablement", "enables"}:
+            if enablement_class == "port_disclosure":
+                return "HAS_PORT"
+            if enablement_class == "source_code":
+                return "USES_TECH"
+            return "EXPOSES"
+
+        if relationship in {"requires", "required_by", "depends_on", "dependency"}:
+            return "VULNERABLE_TO"
+
+        if relationship in {"triggered", "caused"}:
+            return "USES_TECH"
+
+        if "port" in relationship or enablement_class == "port_disclosure":
+            return "HAS_PORT"
+        if "tech" in relationship or "service" in relationship:
+            return "USES_TECH"
+
+        return "EXPOSES"
+
     def export_dto(self, session_id: str = "unknown") -> Dict[str, Any]:
         """
         Export graph nodes and edges for API consumption (PressureGraphDTO).
         """
+        pressure_points = self.identify_pressure_points(top_n=max(10, self.graph.number_of_nodes()))
+        pressure_by_id = {point.finding_id: point for point in pressure_points}
+
+        chain_analysis = self.get_attack_chains(max_length=10, include_metrics=True)
+        raw_chains: List[List[str]] = chain_analysis.get("chains", []) if isinstance(chain_analysis, dict) else []
+        node_metrics: Dict[str, Dict[str, Any]] = {
+            str(node.get("node_id")): node
+            for node in (chain_analysis.get("nodes", []) if isinstance(chain_analysis, dict) else [])
+        }
+
+        entry_nodes = [str(node_id) for node_id in self.graph.nodes() if self.graph.in_degree(node_id) == 0]
+        leaf_nodes = [str(node_id) for node_id in self.graph.nodes() if self.graph.out_degree(node_id) == 0]
+
+        chain_membership: Dict[str, int] = defaultdict(int)
+        for chain in raw_chains:
+            for node_id in chain:
+                chain_membership[str(node_id)] += 1
+
         nodes = []
         for node in self.graph.nodes():
             finding = self.findings_map.get(node)
             graph_attrs = self.graph.nodes[node]
-            
+            node_id = str(node)
+            is_entry_node = node_id in entry_nodes
+            is_leaf_node = node_id in leaf_nodes
+            out_degree = int(self.graph.out_degree(node))
+            in_degree = int(self.graph.in_degree(node))
+            point = pressure_by_id.get(node_id)
+
             if finding:
-                sev_map = {"critical": 1.0, "high": 0.8, "medium": 0.5, "low": 0.2, "info": 0.0}
+                severity_score = self._severity_score(finding)
+                exposure = self._derive_exposure(finding)
+                exploitability = self._derive_exploitability(finding, severity_score)
+                privilege_gain = self._derive_privilege_gain(finding)
+                centrality_score = float(node_metrics.get(node_id, {}).get("centrality_score", 0.0))
+                enablement_score = float(node_metrics.get(node_id, {}).get("enablement_score", 0.0))
+                attack_paths_blocked = int(point.attack_paths_blocked if point else 0)
+                downstream_count = int(len(point.downstream_findings) if point else 0)
+                chain_count = int(chain_membership.get(node_id, 0))
+                capabilities = self._finding_capability_types(finding)
+
+                # Physics tuning: high-severity choke points become larger/brighter.
+                mass = min(
+                    120.0,
+                    8.0 + (severity_score * 4.0) + (attack_paths_blocked * 1.5) + (centrality_score * 40.0),
+                )
+                charge = 15.0 + (10.0 if is_entry_node else 0.0) + (enablement_score * 3.0)
+
                 node_data = {
-                    "severity": sev_map.get(finding.severity.lower(), 0.1),
-                    "exposure": 0.5,
-                    "exploitability": 0.5,
-                    "privilege_gain": 0.0,
-                    "asset_value": 0.5,
-                    "pressure_source": "manual",
-                    "revision": 1,
+                    "severity": round(severity_score, 2),
+                    "raw_severity": str(finding.severity),
+                    "exposure": round(exposure, 3),
+                    "exploitability": round(exploitability, 3),
+                    "privilege_gain": round(privilege_gain, 3),
+                    "asset_value": round(min(10.0, 2.0 + attack_paths_blocked + enablement_score), 2),
+                    "pressure_source": "causal_graph",
+                    "revision": 2,
                     "description": str(finding.data.get("description", "")),
+                    "finding_type": str(finding.type),
+                    "target": str(finding.target),
+                    "confirmation_level": self._finding_confirmation_level(finding),
+                    "capability_types": capabilities,
+                    "base_score": round(self._finding_base_score(finding), 3),
+                    "centrality_score": round(centrality_score, 5),
+                    "enablement_score": round(enablement_score, 5),
+                    "out_degree": out_degree,
+                    "in_degree": in_degree,
+                    "downstream_count": downstream_count,
+                    "attack_paths_blocked": attack_paths_blocked,
+                    "attack_chain_membership": chain_count,
+                    "is_entry_node": is_entry_node,
+                    "is_leaf_node": is_leaf_node,
+                    "fix_impact_estimate": attack_paths_blocked,
                     # Physics Properties (Defaults for UI)
-                    "mass": 1.0,
-                    "charge": 30.0,
-                    "temperature": 0.0,
+                    "mass": round(mass, 3),
+                    "charge": round(charge, 3),
+                    "temperature": round(exploitability, 3),
                     "structural": False
                 }
                 nodes.append({
                     "id": finding.id,
                     "label": finding.title,
-                    "type": "decision" if finding.type == "decision" else finding.type,
+                    "type": self._render_node_type(finding),
                     "data": node_data
                 })
             else:
@@ -999,19 +1212,33 @@ class CausalGraphBuilder:
                 node_type = graph_attrs.get("type", "unknown")
                 node_label = graph_attrs.get("title", str(node))
                 node_data_raw = graph_attrs.get("data", {})
-                
+
                 # Check for physics attributes in data or root attrs
                 mass = node_data_raw.get("mass", 1.0)
                 charge = node_data_raw.get("charge", 30.0)
-                
+
                 # Construct data block
                 node_data = {
-                    "severity": 0.0, 
-                    "exposure": 0.5,
-                    "exploitability": 0.5, 
+                    "severity": 1.0,
+                    "raw_severity": "info",
+                    "exposure": 0.2,
+                    "exploitability": round(float(node_data_raw.get("confidence", 0.5)), 3),
+                    "privilege_gain": 0.0,
+                    "asset_value": 1.0,
+                    "pressure_source": "causal_graph",
+                    "revision": 2,
                     "description": node_data_raw.get("reason", ""),
-                    "mass": mass,
-                    "charge": charge,
+                    "out_degree": out_degree,
+                    "in_degree": in_degree,
+                    "downstream_count": 0,
+                    "attack_paths_blocked": 0,
+                    "attack_chain_membership": int(chain_membership.get(node_id, 0)),
+                    "is_entry_node": is_entry_node,
+                    "is_leaf_node": is_leaf_node,
+                    "fix_impact_estimate": 0,
+                    "mass": float(mass),
+                    "charge": float(charge),
+                    "temperature": float(node_data_raw.get("temperature", 0.0)),
                     "structural": False
                 }
                 # Merge rest of data
@@ -1023,27 +1250,90 @@ class CausalGraphBuilder:
                     "type": node_type,
                     "data": node_data
                 })
-        
         edges = []
         for u, v, data in self.graph.edges(data=True):
-             edge_data = {
-                "confidence": 1.0, 
+            relationship_raw = str(data.get("relationship", "enables"))
+            canonical_type = self._canonical_edge_type(relationship_raw, data)
+
+            weight_value = float(data.get("strength", data.get("weight", 1.0)))
+            confidence = data.get("confidence")
+            if confidence is None:
+                confidence = min(1.0, max(0.1, weight_value / 2.0))
+
+            edge_data = {
+                "confidence": float(confidence),
                 "created_at": data.get("enabled_at", time.time()),
-             }
-             if data.get("enablement_edge"):
-                 edge_data.update({
-                     "enablement_class": data.get("enablement_class", "partial_info"),
-                     "effort_replaced": float(data.get("effort_replaced", 0.0)),
-                 })
-             edges.append({
+                "relationship_raw": relationship_raw,
+                "render_type": canonical_type,
+            }
+            if data.get("enablement_edge"):
+                edge_data.update({
+                    "enablement_class": data.get("enablement_class", "partial_info"),
+                    "effort_replaced": float(data.get("effort_replaced", 0.0)),
+                })
+
+            edges.append({
                 "id": f"{u}-{v}",
                 "source": u,
                 "target": v,
-                "type": data.get("relationship", "enables"),
-                "weight": float(data.get("strength", 1.0)),
+                "type": canonical_type,
+                "weight": weight_value,
                 "data": edge_data
-             })
-            
+            })
+
+        id_to_title = {
+            str(node_id): str(self.findings_map[node_id].title)
+            for node_id in self.findings_map
+            if node_id in self.graph.nodes
+        }
+        for node_id, attrs in self.graph.nodes(data=True):
+            if str(node_id) not in id_to_title:
+                id_to_title[str(node_id)] = str(attrs.get("title", node_id))
+
+        attack_chains = []
+        for idx, chain in enumerate(raw_chains[:100]):
+            if not chain:
+                continue
+            chain_ids = [str(node_id) for node_id in chain]
+            chain_score = 0.0
+            for source, target in zip(chain_ids, chain_ids[1:]):
+                edge_attrs = self.graph.get_edge_data(source, target) or {}
+                chain_score += float(edge_attrs.get("strength", 1.0))
+            attack_chains.append({
+                "id": f"chain_{idx + 1}",
+                "node_ids": chain_ids,
+                "labels": [id_to_title.get(node_id, node_id) for node_id in chain_ids],
+                "entry_node": chain_ids[0],
+                "leaf_node": chain_ids[-1],
+                "length": len(chain_ids),
+                "score": round(chain_score, 3),
+            })
+
+        pressure_payload = [
+            {
+                "finding_id": point.finding_id,
+                "finding_title": point.finding_title,
+                "severity": point.severity,
+                "out_degree": int(point.out_degree),
+                "attack_paths_blocked": int(point.attack_paths_blocked),
+                "downstream_findings": list(point.downstream_findings),
+                "downstream_count": len(point.downstream_findings),
+                "centrality_score": round(float(point.centrality_score), 5),
+                "enablement_score": round(float(point.enablement_score), 5),
+                "recommendation": f"Fixing this finding blocks approximately {point.attack_paths_blocked} attack paths",
+            }
+            for point in pressure_points
+        ]
+
+        critical_assets = [
+            item["finding_id"]
+            for item in sorted(
+                pressure_payload,
+                key=lambda item: (item["attack_paths_blocked"], item["centrality_score"]),
+                reverse=True,
+            )[:10]
+        ]
+
         return {
             "session_id": session_id,
             "nodes": nodes,
@@ -1051,7 +1341,18 @@ class CausalGraphBuilder:
             "count": {
                 "nodes": len(nodes),
                 "edges": len(edges)
-            }
+            },
+            "entry_nodes": entry_nodes,
+            "leaf_nodes": leaf_nodes,
+            "critical_assets": critical_assets,
+            "attack_chains": attack_chains,
+            "pressure_points": pressure_payload,
+            "graph_metrics": {
+                "attack_chains_count": len(attack_chains),
+                "pressure_points_count": len(pressure_payload),
+                "entry_nodes_count": len(entry_nodes),
+                "leaf_nodes_count": len(leaf_nodes),
+            },
         }
 
     def export_summary(self) -> Dict[str, Any]:
@@ -1206,35 +1507,11 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
     if enablement_count:
         logger.info(f"[CausalGraph] Issue enrichment produced {enablement_count} enablement edges")
 
-    logger.info(f"[CausalGraph] Built causal graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges")
+    logger.info(
+        f"[CausalGraph] Built causal graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges"
+    )
 
-    # Get the base DTO from causal graph
-    dto = builder.export_dto(session_id=session_id)
-
-    # Load persisted edges from database (includes killchain, recon, and correlator edges)
-    db_nodes, db_edges = await db.load_graph_snapshot(session_id)
-
-    if db_edges:
-        logger.info(f"[CausalGraph] Adding {len(db_edges)} persisted edges from database")
-
-        # Merge database edges with causal graph edges
-        all_edges = list(dto.get("edges", []))
-        existing_edge_ids = {e.get('id') for e in all_edges}
-
-        for db_edge in db_edges:
-            edge_id = db_edge.get("id")
-            # Only add if not already present (avoid duplicates)
-            if edge_id not in existing_edge_ids:
-                all_edges.append(db_edge)
-                existing_edge_ids.add(edge_id)
-
-        dto["edges"] = all_edges
-        dto["count"]["edges"] = len(all_edges)
-        logger.info(f"[CausalGraph] Final graph: {dto['count']['nodes']} nodes, {dto['count']['edges']} edges")
-    else:
-        logger.info(f"[CausalGraph] No persisted edges found in database for session {session_id}")
-
-    # Fetch decisions and add to graph
+    # Fetch decisions and add to graph BEFORE export so they appear in pressure/chain views.
     try:
         # Use json_extract to filter by scan_id/session_id
         decision_rows = await db.fetch_all(
@@ -1253,15 +1530,129 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
                 "timestamp": row[6],
                 "context": json.loads(row[7]) if row[7] else {}
             })
-        
+
         if decisions:
             logger.info(f"[CausalGraph] Adding {len(decisions)} decisions to graph")
             builder.build_decisions(decisions)
-            
-            # Re-export DTO to include decision nodes/edges
-            dto = builder.export_dto(session_id=session_id)
-            
+
     except Exception as e:
         logger.warning(f"[CausalGraph] Failed to add decisions: {e}")
+
+    # Export DTO after all in-memory graph augmentations are complete.
+    dto = builder.export_dto(session_id=session_id)
+
+    # Load persisted graph snapshot from database (killchain/recon/correlator overlays).
+    db_nodes, db_edges = await db.load_graph_snapshot(session_id)
+
+    def _float_or(value: Any, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _int_or(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    if db_nodes:
+        existing_node_ids = {str(node.get("id")) for node in dto.get("nodes", [])}
+        merged_nodes = list(dto.get("nodes", []))
+        for db_node in db_nodes:
+            node_id = str(db_node.get("id", ""))
+            if not node_id or node_id in existing_node_ids:
+                continue
+
+            payload = db_node.get("data") if isinstance(db_node.get("data"), dict) else {}
+            severity_value = payload.get("severity", 1.0)
+            try:
+                severity_score = float(severity_value)
+                if 0.0 <= severity_score <= 1.0:
+                    severity_score *= 10.0
+            except (TypeError, ValueError):
+                severity_score = 1.0
+
+            merged_nodes.append({
+                "id": node_id,
+                "label": db_node.get("label") or node_id,
+                "type": str(db_node.get("type") or "asset"),
+                "data": {
+                    "severity": max(0.0, min(10.0, severity_score)),
+                    "raw_severity": str(payload.get("raw_severity", "info")),
+                    "exposure": _float_or(payload.get("exposure", 0.5), 0.5),
+                    "exploitability": _float_or(payload.get("exploitability", 0.5), 0.5),
+                    "privilege_gain": _float_or(payload.get("privilege_gain", 0.1), 0.1),
+                    "asset_value": _float_or(payload.get("asset_value", 5.0), 5.0),
+                    "pressure_source": str(payload.get("pressure_source", "snapshot")),
+                    "revision": _int_or(payload.get("revision", 2), 2),
+                    "description": str(payload.get("description", "")),
+                    "mass": _float_or(payload.get("mass", 8.0), 8.0),
+                    "charge": _float_or(payload.get("charge", 15.0), 15.0),
+                    "temperature": _float_or(payload.get("temperature", 0.0), 0.0),
+                    "structural": bool(payload.get("structural", False)),
+                    "is_entry_node": bool(payload.get("is_entry_node", False)),
+                    "is_leaf_node": bool(payload.get("is_leaf_node", False)),
+                },
+            })
+            existing_node_ids.add(node_id)
+
+        dto["nodes"] = merged_nodes
+        dto["count"]["nodes"] = len(merged_nodes)
+
+    if db_edges:
+        logger.info(f"[CausalGraph] Adding {len(db_edges)} persisted edges from database")
+        merged_edges = list(dto.get("edges", []))
+        existing_keys = {
+            (
+                str(edge.get("source", "")),
+                str(edge.get("target", "")),
+                str(edge.get("type", "")),
+                str((edge.get("data") or {}).get("relationship_raw", "")),
+            )
+            for edge in merged_edges
+        }
+
+        for db_edge in db_edges:
+            source_id = str(db_edge.get("source", ""))
+            target_id = str(db_edge.get("target", ""))
+            raw_type = str(db_edge.get("type", "enables"))
+            if not source_id or not target_id:
+                continue
+
+            db_data = db_edge.get("data") if isinstance(db_edge.get("data"), dict) else {}
+            canonical_type = builder._canonical_edge_type(raw_type, db_data)
+            edge_key = (source_id, target_id, canonical_type, raw_type)
+            if edge_key in existing_keys:
+                continue
+
+            confidence = db_data.get("confidence")
+            if confidence is None:
+                try:
+                    confidence = min(1.0, max(0.1, float(db_edge.get("weight", 1.0)) / 2.0))
+                except (TypeError, ValueError):
+                    confidence = 0.5
+
+            edge_data = dict(db_data)
+            edge_data.setdefault("relationship_raw", raw_type)
+            edge_data.setdefault("render_type", canonical_type)
+            edge_data.setdefault("confidence", _float_or(confidence, 0.5))
+            edge_data.setdefault("created_at", time.time())
+
+            merged_edges.append({
+                "id": str(db_edge.get("id") or f"{source_id}-{target_id}"),
+                "source": source_id,
+                "target": target_id,
+                "type": canonical_type,
+                "weight": _float_or(db_edge.get("weight", 1.0), 1.0),
+                "data": edge_data,
+            })
+            existing_keys.add(edge_key)
+
+        dto["edges"] = merged_edges
+        dto["count"]["edges"] = len(merged_edges)
+        logger.info(f"[CausalGraph] Final graph: {dto['count']['nodes']} nodes, {dto['count']['edges']} edges")
+    else:
+        logger.info(f"[CausalGraph] No persisted edges found in database for session {session_id}")
 
     return dto

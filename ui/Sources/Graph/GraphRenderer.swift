@@ -443,11 +443,18 @@ final class GraphRenderer: NSObject {
     }
 
     private func colorForEdgeType(_ edgeType: String) -> SIMD4<Float> {
-        switch edgeType {
-        case "EXPOSES", "VULNERABLE_TO": return SIMD4<Float>(1.0, 0.3, 0.3, 0.15)
-        case "HAS_PORT": return SIMD4<Float>(0.5, 1.0, 0.5, 0.15)
-        case "USES_TECH", "RUNS": return SIMD4<Float>(0.8, 0.5, 1.0, 0.15)
-        default: return SIMD4<Float>(0.7, 0.7, 0.8, 0.10)
+        let normalized = edgeType.uppercased()
+        switch normalized {
+        case "EXPOSES", "ENABLES", "ENABLEMENT", "CAUSES":
+            return SIMD4<Float>(1.0, 0.3, 0.3, 0.22)
+        case "VULNERABLE_TO", "REQUIRES", "DEPENDENCY", "DEPENDS_ON":
+            return SIMD4<Float>(1.0, 0.72, 0.2, 0.22)
+        case "HAS_PORT", "PORT_DISCLOSURE":
+            return SIMD4<Float>(0.5, 1.0, 0.5, 0.20)
+        case "USES_TECH", "RUNS", "TRIGGERED", "CAUSED":
+            return SIMD4<Float>(0.8, 0.5, 1.0, 0.20)
+        default:
+            return SIMD4<Float>(0.65, 0.72, 0.85, 0.16)
         }
     }
 

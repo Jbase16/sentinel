@@ -248,12 +248,16 @@ class GhostInterceptor:
 
     async def _run_master(self):
         """Run the mitmproxy master with error handling."""
-        # Error handling block.
         try:
             await self.master.run()
+        except SystemExit:
+            logger.info("[Ghost] Proxy stopped (SystemExit).")
         except Exception as e:
             logger.error(f"[Ghost] Proxy error: {e}")
             self.session.log(f"Ghost Proxy error: {e}")
+        except BaseException as e:
+             # Catch Any other hard crash (KeyboardInterrupt etc)
+             logger.warning(f"[Ghost] Proxy hard stop: {e}")
 
     def stop(self):
         """Shutdown the proxy gracefully."""

@@ -20,6 +20,7 @@
 //
 
 import Combine
+import Foundation
 import MetalKit
 import SwiftUI
 
@@ -354,7 +355,198 @@ struct InteractiveGraphContainer: View {
                 .position(x: pos.x, y: pos.y - 60)  // Offset above node
                 .allowsHitTesting(false)  // Pass touches through
             }
+
+            VStack {
+                HStack(alignment: .top) {
+                    Spacer()
+                    FixImpactPanel(
+                        graph: appState.latestPressureGraph,
+                        selectedNodeId: $selectedNodeId
+                    )
+                    .padding(.top, 72)
+                    .padding(.trailing, 16)
+                }
+                Spacer()
+            }
         }
+    }
+}
+
+private struct FixImpactPanel: View {
+    let graph: PressureGraphDTO?
+    @Binding var selectedNodeId: String?
+
+    private var rankedPoints: [PressurePointDTO] {
+        guard let points = graph?.pressurePoints else { return [] }
+        return points.sorted { lhs, rhs in
+            let lhsBlocked = lhs.attackPathsBlocked ?? 0
+            let rhsBlocked = rhs.attackPathsBlocked ?? 0
+            if lhsBlocked != rhsBlocked { return lhsBlocked > rhsBlocked }
+            let lhsCentrality = lhs.centralityScore ?? 0
+            let rhsCentrality = rhs.centralityScore ?? 0
+            if lhsCentrality != rhsCentrality { return lhsCentrality > rhsCentrality }
+            return (lhs.enablementScore ?? 0) > (rhs.enablementScore ?? 0)
+        }
+    }
+
+    private var selectedNodeData: PressureNodeDataDTO? {
+        guard let nodeId = selectedNodeId else { return nil }
+        return graph?.nodes.first(where: { $0.id == nodeId })?.data
+    }
+
+    private var selectedPressurePoint: PressurePointDTO? {
+        guard let nodeId = selectedNodeId else { return nil }
+        return rankedPoints.first(where: { $0.findingId == nodeId })
+    }
+
+    private var selectedUpstreamCount: Int {
+        guard let nodeId = selectedNodeId else { return 0 }
+        return graph?.edges.filter { $0.target == nodeId }.count ?? 0
+    }
+
+    private var selectedDownstreamCount: Int {
+        guard let nodeId = selectedNodeId else { return 0 }
+        return graph?.edges.filter { $0.source == nodeId }.count ?? 0
+    }
+
+    private var selectedChainCount: Int {
+        guard let nodeId = selectedNodeId else { return 0 }
+        if let explicitCount = selectedNodeData?.attackChainMembership {
+            return explicitCount
+        }
+        let chains = graph?.attackChains ?? []
+        return chains.filter { $0.nodeIds.contains(nodeId) }.count
+    }
+
+    private func severityColor(_ severity: String?) -> Color {
+        let value = (severity ?? "").uppercased()
+        switch value {
+        case "CRITICAL":
+            return Color(red: 1.0, green: 0.2, blue: 0.2)
+        case "HIGH":
+            return Color(red: 1.0, green: 0.55, blue: 0.2)
+        case "MEDIUM":
+            return Color(red: 1.0, green: 0.85, blue: 0.25)
+        case "LOW":
+            return Color(red: 0.3, green: 0.75, blue: 1.0)
+        default:
+            return Color.gray
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("FIX IMPACT")
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundColor(.white)
+
+            HStack(spacing: 10) {
+                Text("Pressure: \(rankedPoints.count)")
+                Text("Chains: \(graph?.attackChains?.count ?? 0)")
+                Text("Entries: \(graph?.entryNodes?.count ?? 0)")
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundColor(.white.opacity(0.75))
+
+            if let selected = selectedNodeId {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Selected: \(selected)")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.cyan)
+
+                    let blocked = selectedNodeData?.fixImpactEstimate
+                        ?? selectedPressurePoint?.attackPathsBlocked
+                        ?? 0
+                    let confidence = selectedNodeData?.confirmationLevel?.uppercased() ?? "UNKNOWN"
+                    Text(
+                        "Blocks ~\(blocked) paths | Upstream \(selectedUpstreamCount) | Downstream \(selectedDownstreamCount)"
+                    )
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.85))
+
+                    Text("Chains \(selectedChainCount) | Confirmation \(confidence)")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.75))
+
+                    if let caps = selectedNodeData?.capabilityTypes, !caps.isEmpty {
+                        Text("Capabilities: \(caps.joined(separator: ", "))")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.75))
+                            .lineLimit(2)
+                    }
+                }
+                .padding(8)
+                .background(Color.black.opacity(0.35))
+                .cornerRadius(6)
+            }
+
+            Divider().background(Color.white.opacity(0.25))
+
+            if rankedPoints.isEmpty {
+                Text("No pressure points available yet.")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.7))
+            } else {
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(Array(rankedPoints.prefix(10).enumerated()), id: \.element.id) {
+                            index, point in
+                            Button {
+                                selectedNodeId = point.findingId
+                            } label: {
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("#\(index + 1)")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.75))
+                                        .frame(width: 24, alignment: .leading)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(point.findingTitle ?? point.findingId)
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(.white)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+
+                                        Text(
+                                            "Blocks \(point.attackPathsBlocked ?? 0) | Out \(point.outDegree ?? 0) | C \(String(format: "%.2f", point.centralityScore ?? 0)) | E \(String(format: "%.2f", point.enablementScore ?? 0))"
+                                        )
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.75))
+                                    }
+
+                                    Spacer(minLength: 0)
+
+                                    Circle()
+                                        .fill(severityColor(point.severity))
+                                        .frame(width: 7, height: 7)
+                                        .padding(.top, 4)
+                                }
+                                .padding(6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(
+                                            selectedNodeId == point.findingId
+                                                ? Color.cyan.opacity(0.22)
+                                                : Color.white.opacity(0.04)
+                                        )
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .frame(maxHeight: 280)
+            }
+        }
+        .padding(12)
+        .frame(width: 360, alignment: .topLeading)
+        .background(Color.black.opacity(0.72))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 4)
     }
 }
 

@@ -426,30 +426,62 @@ class CortexStream: ObservableObject {
     }
 
     func updateFromPressureGraph(_ graph: PressureGraphDTO) {
+        func categoryForType(_ rawType: String) -> String {
+            let t = rawType.lowercased()
+            if t == "decision" { return "decision" }
+            if t.contains("port") { return "port" }
+            if t.contains("service") { return "service" }
+            if t.contains("exposure") || t.contains("credential") || t.contains("auth") {
+                return "exposure"
+            }
+            if t.contains("asset") || t.contains("dns") || t.contains("topology") {
+                return "asset"
+            }
+            if t.contains("vuln") || t.contains("rce") || t.contains("sqli") || t.contains("xss")
+            {
+                return "vulnerability"
+            }
+            return t
+        }
+
         // Map DTO -> NodeModel
         let mappedNodes = graph.nodes.map { node -> NodeModel in
             let id = node.id
 
             // Get cached position or generate stable one (Deterministic Layout)
             let base = positionCache[id] ?? stablePosition(for: id)
+            let severity = min(10.0, max(0.0, node.data.severity))
+            let category = categoryForType(node.type)
+            let pressure = Float(severity / 10.0)
 
             // Map Color based on Severity & Type
             var color: SIMD4<Float>
-            if node.data.severity >= 8.0 {
-                // Critical/High Severity -> Red pulsing (visualized as bright red here)
+            if severity >= 9.0 {
+                // CRITICAL
                 color = SIMD4<Float>(1.0, 0.0, 0.0, 1.0)
-            } else if node.data.exploitability > 0.8 {
-                // Highly Exploitable -> Orange/Red
-                color = SIMD4<Float>(1.0, 0.3, 0.0, 1.0)
+            } else if severity >= 7.0 {
+                // HIGH
+                color = SIMD4<Float>(1.0, 0.45, 0.0, 1.0)
+            } else if severity >= 4.0 {
+                // MEDIUM
+                color = SIMD4<Float>(1.0, 0.8, 0.1, 0.95)
+            } else if severity >= 1.0 {
+                // LOW
+                color = SIMD4<Float>(0.3, 0.75, 1.0, 0.85)
             } else {
-                // Standard Type Coloring
-                switch node.type {
-                case "service": color = SIMD4<Float>(0, 1, 0, 1)  // Green
-                case "vulnerability": color = SIMD4<Float>(1, 0, 0, 0.8)  // Red
-                case "exposure": color = SIMD4<Float>(1, 0.5, 0, 0.8)  // Orange
-                case "trust": color = SIMD4<Float>(0, 0.5, 1, 0.8)  // Blue
-                default: color = SIMD4<Float>(0.5, 0.5, 0.5, 0.8)  // Grey
+                // INFO and non-vulnerability nodes
+                switch category {
+                case "service", "port": color = SIMD4<Float>(0.4, 1.0, 0.45, 0.95)
+                case "asset": color = SIMD4<Float>(0.3, 0.8, 1.0, 0.9)
+                case "exposure": color = SIMD4<Float>(1.0, 0.6, 0.2, 0.9)
+                case "decision": color = SIMD4<Float>(0.7, 0.4, 1.0, 0.9)
+                default: color = SIMD4<Float>(0.55, 0.55, 0.6, 0.8)
                 }
+            }
+
+            // Exploitability bias: strong exploitability nudges toward warmer colors.
+            if node.data.exploitability >= 0.85 && severity < 7.0 {
+                color = SIMD4<Float>(max(color.x, 0.95), max(color.y, 0.35), color.z * 0.8, color.w)
             }
 
             // Update Cache
@@ -457,7 +489,7 @@ class CortexStream: ObservableObject {
 
             return NodeModel(
                 id: id,
-                type: node.type,
+                type: category,
                 x: base.x,
                 y: base.y,
                 z: base.z,
@@ -468,16 +500,12 @@ class CortexStream: ObservableObject {
                 structural: node.data.structural,
                 label: node.label,
                 description: node.data.description,
-                pressure: {
-                    // Normalize severity (0-10) to pressure (0.0-1.0)
-                    // If severity > 10, clamp to 1.0
-                    return Float(min(10.0, max(0.0, node.data.severity))) / 10.0
-                }(),
+                pressure: pressure,
                 severity: {
-                    if node.data.severity >= 9.0 { return "CRITICAL" }
-                    if node.data.severity >= 7.0 { return "HIGH" }
-                    if node.data.severity >= 4.0 { return "MEDIUM" }
-                    if node.data.severity >= 1.0 { return "LOW" }
+                    if severity >= 9.0 { return "CRITICAL" }
+                    if severity >= 7.0 { return "HIGH" }
+                    if severity >= 4.0 { return "MEDIUM" }
+                    if severity >= 1.0 { return "LOW" }
                     return "INFO"
                 }()
             )
@@ -489,7 +517,7 @@ class CortexStream: ObservableObject {
                 id: edge.id,
                 source: edge.source,
                 target: edge.target,
-                type: edge.type
+                type: edge.data?.renderType ?? edge.type
             )
         }
 

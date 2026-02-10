@@ -220,7 +220,18 @@ class PressureGraphManager(Observable):
             for e in self.edges.values()
         ]
         
-        await self.db.save_graph_snapshot(self.session_id, nodes_data, edges_data)
+        try:
+            await self.db.save_graph_snapshot(self.session_id, nodes_data, edges_data)
+        except ValueError as e:
+            if "no active connection" in str(e):
+                logger.debug("[GraphManager] Skipping snapshot save - DB connection closed.")
+                return
+            raise
+        except Exception as e:
+            logger.warning(f"[GraphManager] Snapshot save failed: {e}")
+            # Don't re-raise to avoid crashing background tasks
+            return
+
 
     def to_dict(self) -> dict:
         """Return graph state as DTO-compatible dict."""

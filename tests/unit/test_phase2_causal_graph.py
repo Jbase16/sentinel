@@ -313,3 +313,89 @@ def test_enrich_from_issues_empty_issues_is_noop():
     ])
     assert builder.enrich_from_issues([]) == 0
     assert builder.enrich_from_issues(None) == 0
+
+
+def test_export_dto_includes_attack_chains_and_pressure_points():
+    builder = CausalGraphBuilder()
+    findings = [
+        {
+            "id": "f-info",
+            "type": "git_exposure",
+            "title": "Exposed .git metadata",
+            "severity": "CRITICAL",
+            "target": "example.com",
+            "confirmation_level": "confirmed",
+            "capability_types": ["information", "access"],
+            "base_score": 9.5,
+            "tags": ["backup-leak"],
+        },
+        {
+            "id": "f-vuln",
+            "type": "sqli",
+            "title": "SQL injection on login endpoint",
+            "severity": "HIGH",
+            "target": "example.com",
+            "confirmation_level": "probable",
+            "capability_types": ["execution"],
+            "base_score": 7.0,
+            "tags": ["sqli"],
+        },
+    ]
+
+    builder.build(findings)
+    dto = builder.export_dto(session_id="test-session")
+
+    assert "attack_chains" in dto
+    assert "pressure_points" in dto
+    assert "entry_nodes" in dto
+    assert isinstance(dto["attack_chains"], list)
+    assert isinstance(dto["pressure_points"], list)
+
+    assert dto["edges"], "Expected at least one edge in exported DTO"
+    edge = dto["edges"][0]
+    assert edge["type"] in {"EXPOSES", "VULNERABLE_TO", "HAS_PORT", "USES_TECH"}
+    assert "relationship_raw" in edge.get("data", {})
+
+
+def test_export_dto_uses_dynamic_risk_fields_not_flat_defaults():
+    builder = CausalGraphBuilder()
+    findings = [
+        {
+            "id": "f-cred",
+            "type": "credential_dump",
+            "title": "Credential exposure",
+            "severity": "CRITICAL",
+            "target": "public.example.com",
+            "confirmation_level": "confirmed",
+            "capability_types": ["access"],
+            "base_score": 9.0,
+            "tags": ["secret-leak"],
+        },
+        {
+            "id": "f-hypo",
+            "type": "ssrf",
+            "title": "Potential SSRF",
+            "severity": "MEDIUM",
+            "target": "internal.localhost",
+            "confirmation_level": "hypothesized",
+            "capability_types": ["execution"],
+            "base_score": 5.0,
+            "tags": ["ssrf"],
+        },
+    ]
+
+    builder.build(findings)
+    dto = builder.export_dto(session_id="risk-session")
+    node_map = {node["id"]: node for node in dto["nodes"]}
+
+    cred_data = node_map["f-cred"]["data"]
+    hypo_data = node_map["f-hypo"]["data"]
+
+    # Severity should be on a 0-10 scale (not old 0-1 compressed values).
+    assert cred_data["severity"] > 8.0
+    assert hypo_data["severity"] >= 4.0
+
+    # Fields should be derived, not fixed constants.
+    assert cred_data["exploitability"] != hypo_data["exploitability"]
+    assert cred_data["exposure"] != hypo_data["exposure"]
+    assert cred_data["privilege_gain"] > hypo_data["privilege_gain"]

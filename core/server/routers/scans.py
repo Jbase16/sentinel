@@ -487,23 +487,35 @@ async def get_scan_results():
     from core.cortex.causal_graph import get_graph_dto_for_session
     graph_dto = await get_graph_dto_for_session(session_id)
     attack_paths: List[List[str]] = []
-    try:
-        from core.cortex.causal_graph import CausalGraphBuilder
+    chains_from_dto = graph_dto.get("attack_chains", [])
+    if isinstance(chains_from_dto, list) and chains_from_dto:
+        for chain in chains_from_dto[:25]:
+            if isinstance(chain, dict):
+                labels = chain.get("labels", [])
+                if isinstance(labels, list) and labels:
+                    attack_paths.append([str(label) for label in labels])
+                    continue
+                node_ids = chain.get("node_ids", [])
+                if isinstance(node_ids, list):
+                    attack_paths.append([str(node_id) for node_id in node_ids])
+    else:
+        try:
+            from core.cortex.causal_graph import CausalGraphBuilder
 
-        builder = CausalGraphBuilder()
-        builder.build(findings)
-        builder.enrich_from_issues(issues)
-        raw_paths = builder.get_attack_chains(max_length=10)
-        id_to_title = {
-            str(f.get("id")): str(f.get("title") or f.get("type") or f.get("id"))
-            for f in findings
-        }
-        attack_paths = [
-            [id_to_title.get(str(node_id), str(node_id)) for node_id in chain]
-            for chain in raw_paths[:25]
-        ]
-    except Exception as exc:
-        logger.debug("[Results] Attack path export failed for %s: %s", session_id, exc)
+            builder = CausalGraphBuilder()
+            builder.build(findings)
+            builder.enrich_from_issues(issues)
+            raw_paths = builder.get_attack_chains(max_length=10)
+            id_to_title = {
+                str(f.get("id")): str(f.get("title") or f.get("type") or f.get("id"))
+                for f in findings
+            }
+            attack_paths = [
+                [id_to_title.get(str(node_id), str(node_id)) for node_id in chain]
+                for chain in raw_paths[:25]
+            ]
+        except Exception as exc:
+            logger.debug("[Results] Attack path export failed for %s: %s", session_id, exc)
 
     result = {
         "scan": {
