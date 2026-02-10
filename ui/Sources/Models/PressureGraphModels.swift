@@ -17,6 +17,7 @@ public struct PressureGraphDTO: Decodable, Sendable {
     public let attackChains: [AttackChainDTO]?
     public let pressurePoints: [PressurePointDTO]?
     public let graphMetrics: GraphMetricsDTO?
+    public let decisionLayer: DecisionLayerDTO?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
@@ -26,7 +27,39 @@ public struct PressureGraphDTO: Decodable, Sendable {
         case attackChains = "attack_chains"
         case pressurePoints = "pressure_points"
         case graphMetrics = "graph_metrics"
+        case decisionLayer = "decision_layer"
     }
+}
+
+public struct DecisionLayerDTO: Decodable, Sendable {
+    public let count: Int
+    public let nodes: [DecisionNodeDTO]
+    public let edges: [DecisionEdgeDTO]
+    public let truncated: Bool?
+    public let limit: Int?
+}
+
+public struct DecisionNodeDTO: Decodable, Sendable, Identifiable {
+    public let id: String
+    public let type: String
+    public let chosen: String?
+    public let reason: String?
+    public let timestamp: Double?
+    public let parentID: String?
+    public let confidence: Double?
+    public let triggers: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, chosen, reason, timestamp, confidence, triggers
+        case parentID = "parent_id"
+    }
+}
+
+public struct DecisionEdgeDTO: Decodable, Sendable, Identifiable {
+    public let id: String
+    public let source: String
+    public let target: String
+    public let type: String
 }
 
 public struct GraphMetricsDTO: Decodable, Sendable {

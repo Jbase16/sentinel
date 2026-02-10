@@ -244,3 +244,62 @@ async def test_nonzero_exit_still_skips_other_tools(monkeypatch, engine):
     tool_error = engine.consume_last_tool_error()
     assert tool_error is not None
     assert tool_error["exit_code"] == 1
+
+
+def test_normalize_findings_deduplicates_overlapping_tool_path_findings(engine):
+    findings = [
+        {
+            "type": "directory_disclosure",
+            "severity": "MEDIUM",
+            "tool": "feroxbuster",
+            "target": "http://localhost:3003",
+            "message": "/admin (Status: 301)",
+            "tags": ["auth"],
+            "families": ["exposure"],
+            "metadata": {"path": "/admin"},
+        },
+        {
+            "type": "directory_disclosure",
+            "severity": "MEDIUM",
+            "tool": "gobuster",
+            "target": "http://localhost:3003",
+            "message": "/admin (Status: 301)",
+            "tags": ["auth"],
+            "families": ["exposure"],
+            "metadata": {"path": "/admin"},
+        },
+    ]
+
+    normalized = engine._normalize_findings(findings)
+    assert len(normalized) == 1
+    metadata = normalized[0].get("metadata", {})
+    assert sorted(metadata.get("seen_by_tools", [])) == ["feroxbuster", "gobuster"]
+    assert metadata.get("dedup_count") == 2
+
+
+def test_normalize_findings_keeps_distinct_paths(engine):
+    findings = [
+        {
+            "type": "directory_disclosure",
+            "severity": "MEDIUM",
+            "tool": "feroxbuster",
+            "target": "http://localhost:3003",
+            "message": "/admin (Status: 301)",
+            "tags": ["auth"],
+            "families": ["exposure"],
+            "metadata": {"path": "/admin"},
+        },
+        {
+            "type": "directory_disclosure",
+            "severity": "MEDIUM",
+            "tool": "gobuster",
+            "target": "http://localhost:3003",
+            "message": "/api (Status: 200)",
+            "tags": ["api"],
+            "families": ["exposure"],
+            "metadata": {"path": "/api"},
+        },
+    ]
+
+    normalized = engine._normalize_findings(findings)
+    assert len(normalized) == 2

@@ -32,6 +32,7 @@ Fix Impact of 1: 2 attack paths disabled (1→2 and 1→2→3)
 """
 
 import networkx as nx
+import asyncio
 import json
 from typing import List, Dict, Set, Tuple, Any, Optional
 from dataclasses import dataclass
@@ -39,6 +40,9 @@ from collections import defaultdict
 import logging
 import time
 from enum import Enum
+from urllib.parse import urlparse
+import hashlib
+import copy
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,11 @@ SEVERITY_SCORES: Dict[str, float] = {
     "low": 3.0,
     "info": 1.0,
 }
+
+# Short-lived DTO cache to avoid repeated full rebuilds during UI polling bursts.
+_GRAPH_DTO_CACHE_TTL_SECONDS = 1.0
+_graph_dto_cache: Dict[str, Dict[str, Any]] = {}
+_graph_dto_locks: Dict[str, asyncio.Lock] = {}
 
 
 def _get_effort_eliminated_table() -> Dict[str, float]:
@@ -299,12 +308,83 @@ class CausalGraphBuilder:
                     if key[0]:
                         evidence_key_to_issue[key] = issue
 
-        # --- Tier 3: target prefix lookup ---
-        issues_by_target: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        def _parse_target(raw_target: str) -> Tuple[str, str, Tuple[str, ...]]:
+            value = str(raw_target or "").strip().lower()
+            if not value:
+                return "", "", ()
+            parsed = urlparse(value)
+            # Support bare host/path values by treating them as path-only fallback.
+            if parsed.scheme and parsed.netloc:
+                path = (parsed.path or "").strip("/")
+                segments = tuple(seg for seg in path.split("/") if seg)
+                return parsed.scheme, parsed.netloc, segments
+            path = value.strip("/")
+            segments = tuple(seg for seg in path.split("/") if seg)
+            return "", "", segments
+
+        def _common_prefix_len(lhs: Tuple[str, ...], rhs: Tuple[str, ...]) -> int:
+            size = min(len(lhs), len(rhs))
+            n = 0
+            while n < size and lhs[n] == rhs[n]:
+                n += 1
+            return n
+
+        def _issue_semantic_sets(issue: Dict[str, Any]) -> Tuple[Set[str], Set[str], Set[str]]:
+            tools: Set[str] = set()
+            types: Set[str] = set()
+            tags: Set[str] = set()
+            for sf in issue.get("supporting_findings", []):
+                if not isinstance(sf, dict):
+                    continue
+                tool = str(sf.get("tool", "")).strip().lower()
+                finding_type = str(sf.get("type", "")).strip().lower()
+                if tool:
+                    tools.add(tool)
+                if finding_type:
+                    types.add(finding_type)
+                raw_tags = sf.get("tags", [])
+                if isinstance(raw_tags, str):
+                    raw_tags = [raw_tags]
+                if isinstance(raw_tags, list):
+                    for tag in raw_tags:
+                        tag_value = str(tag).strip().lower()
+                        if tag_value:
+                            tags.add(tag_value)
+            issue_tags = issue.get("tags", [])
+            if isinstance(issue_tags, str):
+                issue_tags = [issue_tags]
+            if isinstance(issue_tags, list):
+                for tag in issue_tags:
+                    tag_value = str(tag).strip().lower()
+                    if tag_value:
+                        tags.add(tag_value)
+            return tools, types, tags
+
+        def _passes_tier3_semantic_guard(finding: Finding, candidate_issue: Dict[str, Any]) -> bool:
+            issue_tools, issue_types, issue_tags = issue_semantics.get(id(candidate_issue), (set(), set(), set()))
+            f_tool = str(finding.data.get("tool", "")).strip().lower()
+            f_type = str(finding.type).strip().lower()
+            f_tags = self._finding_tags(finding)
+            if f_tool and issue_tools and f_tool in issue_tools:
+                return True
+            if f_type and issue_types and f_type in issue_types:
+                return True
+            if f_tags and issue_tags and bool(f_tags.intersection(issue_tags)):
+                return True
+            return False
+
+        # --- Tier 3: strict URL/path lookup (conservative to avoid over-enrichment) ---
+        issues_by_origin: Dict[Tuple[str, str], List[Tuple[Dict[str, Any], Tuple[str, ...]]]] = defaultdict(list)
+        issue_semantics: Dict[int, Tuple[Set[str], Set[str], Set[str]]] = {}
         for issue in issues:
-            t = str(issue.get("target", "")).strip().lower()
-            if t:
-                issues_by_target[t].append(issue)
+            scheme, netloc, path_segments = _parse_target(issue.get("target", ""))
+            issue_semantics[id(issue)] = _issue_semantic_sets(issue)
+            if not scheme or not netloc:
+                continue
+            # Never tier3-match root-only targets; this caused near-complete graph enrichment.
+            if not path_segments:
+                continue
+            issues_by_origin[(scheme, netloc)].append((issue, path_segments))
 
         enriched_count = 0
         tier_stats = {"hash": 0, "key": 0, "prefix": 0}
@@ -325,21 +405,39 @@ class CausalGraphBuilder:
                 if matched_issue:
                     tier_stats["key"] += 1
 
-            # Tier 3: target prefix match — pick highest-scored issue
+            # Tier 3: strict same-origin path match with semantic guard.
             if matched_issue is None:
-                f_target = str(finding.target).strip().lower()
-                best_issue = None
-                best_score = -1.0
-                for issue_target, issue_list in issues_by_target.items():
-                    if f_target.startswith(issue_target) or issue_target.startswith(f_target):
-                        for candidate in issue_list:
-                            s = float(candidate.get("score", 0))
-                            if s > best_score:
-                                best_score = s
-                                best_issue = candidate
-                if best_issue is not None:
-                    matched_issue = best_issue
-                    tier_stats["prefix"] += 1
+                f_scheme, f_netloc, f_segments = _parse_target(finding.target)
+                if f_scheme and f_netloc and f_segments:
+                    candidates = issues_by_origin.get((f_scheme, f_netloc), [])
+                    best_issue: Optional[Dict[str, Any]] = None
+                    best_rank: Optional[Tuple[int, int, float]] = None
+                    ambiguous = False
+
+                    for candidate_issue, issue_segments in candidates:
+                        # Prefix in either direction, but both sides must have non-root paths.
+                        if not (f_segments[: len(issue_segments)] == issue_segments or issue_segments[: len(f_segments)] == f_segments):
+                            continue
+                        if not _passes_tier3_semantic_guard(finding, candidate_issue):
+                            continue
+
+                        common = _common_prefix_len(f_segments, issue_segments)
+                        try:
+                            score = float(candidate_issue.get("score", 0))
+                        except (TypeError, ValueError):
+                            score = 0.0
+                        rank = (common, len(issue_segments), score)
+
+                        if best_rank is None or rank > best_rank:
+                            best_issue = candidate_issue
+                            best_rank = rank
+                            ambiguous = False
+                        elif rank == best_rank:
+                            ambiguous = True
+
+                    if best_issue is not None and not ambiguous:
+                        matched_issue = best_issue
+                        tier_stats["prefix"] += 1
 
             if matched_issue is None:
                 continue
@@ -687,6 +785,7 @@ class CausalGraphBuilder:
         """
         edges: List[Dict[str, Any]] = []
         seen_pairs: Set[Tuple[str, str]] = set()
+        max_edges_per_source = 5
 
         by_target: Dict[str, List[Finding]] = defaultdict(list)
         for finding in findings:
@@ -714,13 +813,26 @@ class CausalGraphBuilder:
                 strength = self._enablement_strength(capability_types, enablement_class)
                 effort_table = _get_effort_eliminated_table()
                 effort = effort_table.get(enablement_class, 2.0)
+                edges_created = 0
 
                 for candidate in target_findings:
+                    if edges_created >= max_edges_per_source:
+                        break
                     target_id = candidate.id
                     if not target_id or target_id == source_id:
                         continue
                     if candidate.target != target:
                         continue  # Explicit cross-target guard.
+                    if self._finding_confirmation_level(candidate) == "hypothesized":
+                        continue
+                    # Candidate must have explicit capability metadata from issue enrichment.
+                    # Avoid assuming executability for raw findings.
+                    candidate_raw_caps = candidate.data.get("capability_types")
+                    if not candidate_raw_caps:
+                        continue
+                    candidate_caps = self._finding_capability_types(candidate)
+                    if not any(cap in {"execution", "access"} for cap in candidate_caps):
+                        continue
 
                     if not self._would_benefit_from(candidate, enablement_class, capability_types):
                         continue
@@ -739,6 +851,7 @@ class CausalGraphBuilder:
                         "effort_replaced": float(effort),
                         "enabled_at": time.time(),
                     })
+                    edges_created += 1
 
         return edges
 
@@ -816,13 +929,22 @@ class CausalGraphBuilder:
             )
 
         if enablement_class == "source_code":
-            return any(token in target_type for token in ("injection", "sqli", "rce", "lfi", "ssrf")) or any(
-                tag in target_tags for tag in ("injection", "sqli", "rce", "lfi", "ssrf")
+            return any(token in target_type for token in ("injection", "sqli", "rce", "lfi", "ssrf", "auth", "login", "admin")) or any(
+                tag in target_tags for tag in ("injection", "sqli", "rce", "lfi", "ssrf", "auth", "login", "admin")
             )
 
-        # Access capability generally lowers effort for all findings on the same target.
-        if "access" in source_capability_types:
-            return True
+        if enablement_class == "confirmed_injection":
+            return any(token in target_type for token in ("database", "sql", "auth", "admin")) or any(
+                tag in target_tags for tag in ("database", "sql", "auth", "admin")
+            )
+
+        if enablement_class == "stack_disclosure":
+            return any(token in target_type for token in ("rce", "injection", "xss", "lfi", "ssrf"))
+
+        if enablement_class == "port_disclosure":
+            return any(token in target_type for token in ("service", "admin", "auth")) or any(
+                tag in target_tags for tag in ("service", "admin", "auth")
+            )
 
         return False
 
@@ -1484,7 +1606,11 @@ async def build_causal_graph_for_session(session_id: str) -> Dict[str, Any]:
     return builder.export_summary()
 
 
-async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
+async def get_graph_dto_for_session(
+    session_id: str,
+    findings: Optional[List[Dict[str, Any]]] = None,
+    issues: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """
     Build a causal graph from findings and return DTO (nodes/edges).
     Includes both causal graph edges AND persisted edges from the database.
@@ -1493,166 +1619,331 @@ async def get_graph_dto_for_session(session_id: str) -> Dict[str, Any]:
 
     db = Database.instance()
     await db.init()
-    findings = await db.get_findings(session_id)
-
-    issues = await db.get_issues(session_id)
+    if findings is None:
+        findings = await db.get_findings(session_id)
+    if issues is None:
+        issues = await db.get_issues(session_id)
     logger.info(f"[CausalGraph] Building graph from {len(findings)} findings")
 
-    builder = CausalGraphBuilder()
-    builder.build(findings)
+    def _stable_digest(items: List[Dict[str, Any]], keys: Tuple[str, ...]) -> str:
+        hasher = hashlib.sha256()
+        for item in sorted(items, key=lambda obj: str(obj.get("id", ""))):
+            parts: List[str] = []
+            for key in keys:
+                value = item.get(key)
+                if isinstance(value, (dict, list)):
+                    try:
+                        value_repr = json.dumps(value, sort_keys=True)
+                    except Exception:
+                        value_repr = str(value)
+                else:
+                    value_repr = str(value)
+                parts.append(f"{key}={value_repr}")
+            hasher.update("|".join(parts).encode())
+            hasher.update(b";")
+        return hasher.hexdigest()
 
-    # Overlay VulnRule-enriched metadata from issues so Rule 5 can
-    # see confirmation_level, capability_types, and score.
-    enablement_count = builder.enrich_from_issues(issues)
-    if enablement_count:
-        logger.info(f"[CausalGraph] Issue enrichment produced {enablement_count} enablement edges")
-
-    logger.info(
-        f"[CausalGraph] Built causal graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges"
+    findings_digest = _stable_digest(
+        findings,
+        ("id", "type", "severity", "target", "created_at", "fingerprint"),
+    )
+    issues_digest = _stable_digest(
+        issues,
+        ("id", "title", "severity", "target", "score", "confirmation_level", "capability_types"),
     )
 
-    # Fetch decisions and add to graph BEFORE export so they appear in pressure/chain views.
-    try:
-        # Use json_extract to filter by scan_id/session_id
-        decision_rows = await db.fetch_all(
-            "SELECT id, type, chosen, reason, evidence, parent_id, timestamp, context FROM decisions WHERE json_extract(context, '$.scan_id') = ? OR json_extract(context, '$.session_id') = ?",
-            (session_id, session_id)
+    decision_meta = await db.fetch_all(
+        """
+        SELECT COUNT(*), COALESCE(MAX(timestamp), '')
+        FROM decisions
+        WHERE json_extract(context, '$.scan_id') = ? OR json_extract(context, '$.session_id') = ?
+        """,
+        (session_id, session_id),
+    )
+    decision_count = int(decision_meta[0][0]) if decision_meta else 0
+    decision_latest = str(decision_meta[0][1]) if decision_meta else ""
+
+    snapshot_meta = await db.fetch_all(
+        """
+        SELECT
+            (SELECT COUNT(*) FROM graph_nodes WHERE session_id = ?),
+            (SELECT COUNT(*) FROM graph_edges WHERE session_id = ?)
+        """,
+        (session_id, session_id),
+    )
+    snapshot_nodes_count = int(snapshot_meta[0][0]) if snapshot_meta else 0
+    snapshot_edges_count = int(snapshot_meta[0][1]) if snapshot_meta else 0
+
+    cache_signature = "|".join(
+        [
+            findings_digest,
+            issues_digest,
+            str(decision_count),
+            decision_latest,
+            str(snapshot_nodes_count),
+            str(snapshot_edges_count),
+        ]
+    )
+
+    cache_entry = _graph_dto_cache.get(session_id)
+    now = time.time()
+    if cache_entry:
+        age = now - float(cache_entry.get("built_at", 0.0))
+        if age <= _GRAPH_DTO_CACHE_TTL_SECONDS and cache_entry.get("signature") == cache_signature:
+            logger.debug("[CausalGraph] DTO cache hit for session %s (age=%.3fs)", session_id, age)
+            return copy.deepcopy(cache_entry.get("dto", {}))
+
+    lock = _graph_dto_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        cache_entry = _graph_dto_cache.get(session_id)
+        if cache_entry:
+            age = now - float(cache_entry.get("built_at", 0.0))
+            if age <= _GRAPH_DTO_CACHE_TTL_SECONDS and cache_entry.get("signature") == cache_signature:
+                logger.debug("[CausalGraph] DTO cache hit (locked) for session %s (age=%.3fs)", session_id, age)
+                return copy.deepcopy(cache_entry.get("dto", {}))
+
+        builder = CausalGraphBuilder()
+        builder.build(findings)
+
+        # Overlay VulnRule-enriched metadata from issues so Rule 5 can
+        # see confirmation_level, capability_types, and score.
+        enablement_count = builder.enrich_from_issues(issues)
+        if enablement_count:
+            logger.info(f"[CausalGraph] Issue enrichment produced {enablement_count} enablement edges")
+
+        logger.info(
+            f"[CausalGraph] Built causal graph: {builder.graph.number_of_nodes()} nodes, {builder.graph.number_of_edges()} edges"
         )
-        decisions = []
-        for row in decision_rows:
-            decisions.append({
-                "id": row[0],
-                "type": row[1],
-                "chosen": row[2],
-                "reason": row[3],
-                "evidence": json.loads(row[4]) if row[4] else {},
-                "parent_id": row[5],
-                "timestamp": row[6],
-                "context": json.loads(row[7]) if row[7] else {}
-            })
 
-        if decisions:
-            logger.info(f"[CausalGraph] Adding {len(decisions)} decisions to graph")
-            builder.build_decisions(decisions)
-
-    except Exception as e:
-        logger.warning(f"[CausalGraph] Failed to add decisions: {e}")
-
-    # Export DTO after all in-memory graph augmentations are complete.
-    dto = builder.export_dto(session_id=session_id)
-
-    # Load persisted graph snapshot from database (killchain/recon/correlator overlays).
-    db_nodes, db_edges = await db.load_graph_snapshot(session_id)
-
-    def _float_or(value: Any, default: float) -> float:
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    def _int_or(value: Any, default: int) -> int:
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
-
-    if db_nodes:
-        existing_node_ids = {str(node.get("id")) for node in dto.get("nodes", [])}
-        merged_nodes = list(dto.get("nodes", []))
-        for db_node in db_nodes:
-            node_id = str(db_node.get("id", ""))
-            if not node_id or node_id in existing_node_ids:
-                continue
-
-            payload = db_node.get("data") if isinstance(db_node.get("data"), dict) else {}
-            severity_value = payload.get("severity", 1.0)
+        async def _load_decision_layer(limit: int = 200) -> Dict[str, Any]:
+            """
+            Load decisions as a separate, optional overlay (not merged into core finding graph).
+            """
             try:
-                severity_score = float(severity_value)
-                if 0.0 <= severity_score <= 1.0:
-                    severity_score *= 10.0
-            except (TypeError, ValueError):
-                severity_score = 1.0
+                rows = await db.fetch_all(
+                    """
+                    SELECT id, type, chosen, reason, evidence, parent_id, timestamp, context
+                    FROM decisions
+                    WHERE json_extract(context, '$.scan_id') = ? OR json_extract(context, '$.session_id') = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                    """,
+                    (session_id, session_id, limit + 1),
+                )
+            except Exception as exc:
+                logger.warning("[CausalGraph] Failed to load decision layer: %s", exc)
+                return {"count": 0, "nodes": [], "edges": [], "truncated": False}
 
-            merged_nodes.append({
-                "id": node_id,
-                "label": db_node.get("label") or node_id,
-                "type": str(db_node.get("type") or "asset"),
-                "data": {
-                    "severity": max(0.0, min(10.0, severity_score)),
-                    "raw_severity": str(payload.get("raw_severity", "info")),
-                    "exposure": _float_or(payload.get("exposure", 0.5), 0.5),
-                    "exploitability": _float_or(payload.get("exploitability", 0.5), 0.5),
-                    "privilege_gain": _float_or(payload.get("privilege_gain", 0.1), 0.1),
-                    "asset_value": _float_or(payload.get("asset_value", 5.0), 5.0),
-                    "pressure_source": str(payload.get("pressure_source", "snapshot")),
-                    "revision": _int_or(payload.get("revision", 2), 2),
-                    "description": str(payload.get("description", "")),
-                    "mass": _float_or(payload.get("mass", 8.0), 8.0),
-                    "charge": _float_or(payload.get("charge", 15.0), 15.0),
-                    "temperature": _float_or(payload.get("temperature", 0.0), 0.0),
-                    "structural": bool(payload.get("structural", False)),
-                    "is_entry_node": bool(payload.get("is_entry_node", False)),
-                    "is_leaf_node": bool(payload.get("is_leaf_node", False)),
-                },
-            })
-            existing_node_ids.add(node_id)
+            truncated = len(rows) > limit
+            if truncated:
+                rows = rows[:limit]
 
-        dto["nodes"] = merged_nodes
-        dto["count"]["nodes"] = len(merged_nodes)
+            nodes: List[Dict[str, Any]] = []
+            edges: List[Dict[str, Any]] = []
+            node_ids: Set[str] = set()
 
-    if db_edges:
-        logger.info(f"[CausalGraph] Adding {len(db_edges)} persisted edges from database")
-        merged_edges = list(dto.get("edges", []))
-        existing_keys = {
-            (
-                str(edge.get("source", "")),
-                str(edge.get("target", "")),
-                str(edge.get("type", "")),
-                str((edge.get("data") or {}).get("relationship_raw", "")),
-            )
-            for edge in merged_edges
-        }
+            for row in rows:
+                decision_id = str(row[0] or "")
+                if not decision_id or decision_id in node_ids:
+                    continue
+                node_ids.add(decision_id)
 
-        for db_edge in db_edges:
-            source_id = str(db_edge.get("source", ""))
-            target_id = str(db_edge.get("target", ""))
-            raw_type = str(db_edge.get("type", "enables"))
-            if not source_id or not target_id:
-                continue
-
-            db_data = db_edge.get("data") if isinstance(db_edge.get("data"), dict) else {}
-            canonical_type = builder._canonical_edge_type(raw_type, db_data)
-            edge_key = (source_id, target_id, canonical_type, raw_type)
-            if edge_key in existing_keys:
-                continue
-
-            confidence = db_data.get("confidence")
-            if confidence is None:
+                evidence = json.loads(row[4]) if row[4] else {}
+                context = json.loads(row[7]) if row[7] else {}
+                confidence = context.get("confidence", 1.0)
                 try:
-                    confidence = min(1.0, max(0.1, float(db_edge.get("weight", 1.0)) / 2.0))
+                    confidence = float(confidence)
                 except (TypeError, ValueError):
-                    confidence = 0.5
+                    confidence = 1.0
+                ts_raw = row[6]
+                try:
+                    ts_value = float(ts_raw or 0.0)
+                except (TypeError, ValueError):
+                    # Keep deterministic fallback for non-numeric timestamps.
+                    ts_value = 0.0
 
-            edge_data = dict(db_data)
-            edge_data.setdefault("relationship_raw", raw_type)
-            edge_data.setdefault("render_type", canonical_type)
-            edge_data.setdefault("confidence", _float_or(confidence, 0.5))
-            edge_data.setdefault("created_at", time.time())
+                nodes.append(
+                    {
+                        "id": decision_id,
+                        "type": str(row[1] or "decision"),
+                        "chosen": str(row[2] or ""),
+                        "reason": str(row[3] or ""),
+                        "timestamp": ts_value,
+                        "parent_id": str(row[5] or "") or None,
+                        "confidence": confidence,
+                        "triggers": list((evidence or {}).get("triggers", []) or []),
+                    }
+                )
 
-            merged_edges.append({
-                "id": str(db_edge.get("id") or f"{source_id}-{target_id}"),
-                "source": source_id,
-                "target": target_id,
-                "type": canonical_type,
-                "weight": _float_or(db_edge.get("weight", 1.0), 1.0),
-                "data": edge_data,
-            })
-            existing_keys.add(edge_key)
+                parent_id = str(row[5] or "")
+                if parent_id:
+                    edges.append(
+                        {
+                            "id": f"{parent_id}->{decision_id}:caused",
+                            "source": parent_id,
+                            "target": decision_id,
+                            "type": "CAUSED",
+                        }
+                    )
 
-        dto["edges"] = merged_edges
-        dto["count"]["edges"] = len(merged_edges)
-        logger.info(f"[CausalGraph] Final graph: {dto['count']['nodes']} nodes, {dto['count']['edges']} edges")
-    else:
-        logger.info(f"[CausalGraph] No persisted edges found in database for session {session_id}")
+                for trigger in list((evidence or {}).get("triggers", []) or []):
+                    trigger_id = str(trigger).strip()
+                    if not trigger_id:
+                        continue
+                    edges.append(
+                        {
+                            "id": f"{trigger_id}->{decision_id}:triggered",
+                            "source": trigger_id,
+                            "target": decision_id,
+                            "type": "TRIGGERED",
+                        }
+                    )
 
-    return dto
+            return {
+                "count": len(nodes),
+                "nodes": nodes,
+                "edges": edges,
+                "truncated": truncated,
+                "limit": limit,
+            }
+
+        decision_layer = await _load_decision_layer(limit=200)
+
+        # Export DTO after all in-memory graph augmentations are complete.
+        dto = builder.export_dto(session_id=session_id)
+
+        # Load persisted graph snapshot from database (killchain/recon/correlator overlays).
+        db_nodes, db_edges = await db.load_graph_snapshot(session_id)
+
+        def _float_or(value: Any, default: float) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        def _int_or(value: Any, default: int) -> int:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        if db_nodes:
+            existing_node_ids = {str(node.get("id")) for node in dto.get("nodes", [])}
+            merged_nodes = list(dto.get("nodes", []))
+            for db_node in db_nodes:
+                node_id = str(db_node.get("id", ""))
+                if not node_id or node_id in existing_node_ids:
+                    continue
+                node_type = str(db_node.get("type") or "").strip().lower()
+                if node_type == "decision":
+                    # Decisions are served through dto["decision_layer"], not merged into the finding graph.
+                    continue
+
+                payload = db_node.get("data") if isinstance(db_node.get("data"), dict) else {}
+                severity_value = payload.get("severity", 1.0)
+                try:
+                    severity_score = float(severity_value)
+                    if 0.0 <= severity_score <= 1.0:
+                        severity_score *= 10.0
+                except (TypeError, ValueError):
+                    severity_score = 1.0
+
+                merged_nodes.append({
+                    "id": node_id,
+                    "label": db_node.get("label") or node_id,
+                    "type": str(db_node.get("type") or "asset"),
+                    "data": {
+                        "severity": max(0.0, min(10.0, severity_score)),
+                        "raw_severity": str(payload.get("raw_severity", "info")),
+                        "exposure": _float_or(payload.get("exposure", 0.5), 0.5),
+                        "exploitability": _float_or(payload.get("exploitability", 0.5), 0.5),
+                        "privilege_gain": _float_or(payload.get("privilege_gain", 0.1), 0.1),
+                        "asset_value": _float_or(payload.get("asset_value", 5.0), 5.0),
+                        "pressure_source": str(payload.get("pressure_source", "snapshot")),
+                        "revision": _int_or(payload.get("revision", 2), 2),
+                        "description": str(payload.get("description", "")),
+                        "mass": _float_or(payload.get("mass", 8.0), 8.0),
+                        "charge": _float_or(payload.get("charge", 15.0), 15.0),
+                        "temperature": _float_or(payload.get("temperature", 0.0), 0.0),
+                        "structural": bool(payload.get("structural", False)),
+                        "is_entry_node": bool(payload.get("is_entry_node", False)),
+                        "is_leaf_node": bool(payload.get("is_leaf_node", False)),
+                    },
+                })
+                existing_node_ids.add(node_id)
+
+            dto["nodes"] = merged_nodes
+            dto["count"]["nodes"] = len(merged_nodes)
+
+        if db_edges:
+            logger.info(f"[CausalGraph] Adding {len(db_edges)} persisted edges from database")
+            merged_edges = list(dto.get("edges", []))
+            existing_keys = {
+                (
+                    str(edge.get("source", "")),
+                    str(edge.get("target", "")),
+                    str(edge.get("type", "")),
+                    str((edge.get("data") or {}).get("relationship_raw", "")),
+                )
+                for edge in merged_edges
+            }
+
+            for db_edge in db_edges:
+                source_id = str(db_edge.get("source", ""))
+                target_id = str(db_edge.get("target", ""))
+                raw_type = str(db_edge.get("type", "enables"))
+                if not source_id or not target_id:
+                    continue
+                # Do not backflow decision-layer edges into the finding graph.
+                if source_id not in existing_node_ids or target_id not in existing_node_ids:
+                    continue
+
+                db_data = db_edge.get("data") if isinstance(db_edge.get("data"), dict) else {}
+                canonical_type = builder._canonical_edge_type(raw_type, db_data)
+                edge_key = (source_id, target_id, canonical_type, raw_type)
+                if edge_key in existing_keys:
+                    continue
+
+                confidence = db_data.get("confidence")
+                if confidence is None:
+                    try:
+                        confidence = min(1.0, max(0.1, float(db_edge.get("weight", 1.0)) / 2.0))
+                    except (TypeError, ValueError):
+                        confidence = 0.5
+
+                edge_data = dict(db_data)
+                edge_data.setdefault("relationship_raw", raw_type)
+                edge_data.setdefault("render_type", canonical_type)
+                edge_data.setdefault("confidence", _float_or(confidence, 0.5))
+                edge_data.setdefault("created_at", time.time())
+
+                merged_edges.append({
+                    "id": str(db_edge.get("id") or f"{source_id}-{target_id}"),
+                    "source": source_id,
+                    "target": target_id,
+                    "type": canonical_type,
+                    "weight": _float_or(db_edge.get("weight", 1.0), 1.0),
+                    "data": edge_data,
+                })
+                existing_keys.add(edge_key)
+
+            dto["edges"] = merged_edges
+            dto["count"]["edges"] = len(merged_edges)
+            logger.info(f"[CausalGraph] Final graph: {dto['count']['nodes']} nodes, {dto['count']['edges']} edges")
+        else:
+            logger.info(f"[CausalGraph] No persisted edges found in database for session {session_id}")
+
+        dto["decision_layer"] = decision_layer
+        _graph_dto_cache[session_id] = {
+            "signature": cache_signature,
+            "dto": copy.deepcopy(dto),
+            "built_at": now,
+        }
+        if len(_graph_dto_cache) > 32:
+            oldest_key = min(
+                _graph_dto_cache.keys(),
+                key=lambda key: float(_graph_dto_cache.get(key, {}).get("built_at", 0.0)),
+            )
+            _graph_dto_cache.pop(oldest_key, None)
+
+        return dto

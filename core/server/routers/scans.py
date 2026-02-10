@@ -485,10 +485,14 @@ async def get_scan_results():
 
     # Build response matching Swift SentinelResults structure
     from core.cortex.causal_graph import get_graph_dto_for_session
-    graph_dto = await get_graph_dto_for_session(session_id)
+    graph_dto = await get_graph_dto_for_session(
+        session_id=session_id,
+        findings=findings,
+        issues=issues,
+    )
     attack_paths: List[List[str]] = []
     chains_from_dto = graph_dto.get("attack_chains", [])
-    if isinstance(chains_from_dto, list) and chains_from_dto:
+    if isinstance(chains_from_dto, list):
         for chain in chains_from_dto[:25]:
             if isinstance(chain, dict):
                 labels = chain.get("labels", [])

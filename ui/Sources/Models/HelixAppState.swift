@@ -72,6 +72,7 @@ public class HelixAppState: ObservableObject {
     @Published var graphAnalysis: TopologyResponse? = nil
     @Published var insightsByNode: [String: [InsightClaim]] = [:]
     @Published var latestPressureGraph: PressureGraphDTO? = nil
+    @Published var showDecisionLayerInGraph: Bool = false
 
     // MARK: - Replay State (Time Travel)
     @Published var allEvents: [GraphEvent] = []  // The Tape
@@ -389,7 +390,9 @@ public class HelixAppState: ObservableObject {
                     await MainActor.run {
                         self.latestPressureGraph = graph
                     }
-                    cortexStream.updateFromPressureGraph(graph)
+                    cortexStream.updateFromPressureGraph(
+                        graph, includeDecisionLayer: self.showDecisionLayerInGraph
+                    )
                 } else {
                     // 204 No Content is normal during scan initialization
                     // Session may not be fully created yet
@@ -406,6 +409,13 @@ public class HelixAppState: ObservableObject {
                 print("[AppState] Graph refresh failed (expected during scan startup): \(error)")
             }
         }
+    }
+
+    func applyGraphLayerVisibility() {
+        guard let graph = latestPressureGraph else { return }
+        cortexStream.updateFromPressureGraph(
+            graph, includeDecisionLayer: showDecisionLayerInGraph
+        )
     }
 
     /// Ask Python core to cancel any active scan.
@@ -724,8 +734,11 @@ public class HelixAppState: ObservableObject {
     func fetchAnalysis() {
         Task {
             // Snapshot current graph state
-            let nodes = cortexStream.nodes
-            let edges = cortexStream.edges
+            let nodes = cortexStream.nodes.filter { $0.type.lowercased() != "decision" }
+            let nodeIds = Set(nodes.map { $0.id })
+            let edges = cortexStream.edges.filter { edge in
+                nodeIds.contains(edge.source) && nodeIds.contains(edge.target)
+            }
 
             // Map to DTOs
             let nodeDTOs = nodes.map { node in
@@ -823,8 +836,11 @@ public class HelixAppState: ObservableObject {
 
         Task {
             // Snapshot current graph state (Similar to above, could refactor into helper)
-            let nodes = cortexStream.nodes
-            let edges = cortexStream.edges
+            let nodes = cortexStream.nodes.filter { $0.type.lowercased() != "decision" }
+            let nodeIds = Set(nodes.map { $0.id })
+            let edges = cortexStream.edges.filter { edge in
+                nodeIds.contains(edge.source) && nodeIds.contains(edge.target)
+            }
 
             let nodeDTOs = nodes.map { node in
                 NodeDTO(

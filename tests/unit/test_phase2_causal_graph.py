@@ -315,6 +315,58 @@ def test_enrich_from_issues_empty_issues_is_noop():
     assert builder.enrich_from_issues(None) == 0
 
 
+def test_enrich_from_issues_tier3_does_not_match_root_prefix_targets():
+    """
+    Tier 3 must not enrich by broad root URL prefix alone.
+    This prevents near-complete graphs when all findings share a base URL.
+    """
+    import hashlib
+    import json
+
+    builder = CausalGraphBuilder()
+
+    finding_raw = {
+        "type": "directory_disclosure",
+        "severity": "MEDIUM",
+        "target": "http://localhost:3003/admin",
+        "tool": "feroxbuster",
+        "message": "/admin (Status: 301)",
+        "tags": ["auth"],
+        "families": ["exposure"],
+        "metadata": {"path": "/admin"},
+    }
+    finding_id = hashlib.sha256(json.dumps(finding_raw, sort_keys=True).encode()).hexdigest()
+    builder.build([{**finding_raw, "id": finding_id, "created_at": 0.0}])
+
+    # Issue target is root-only and should not tier3-match this finding.
+    unrelated_supporting = {
+        "type": "open_port",
+        "severity": "LOW",
+        "target": "http://localhost:3003",
+        "tool": "nmap",
+        "message": "80/tcp open",
+        "tags": [],
+        "families": ["recon-phase2"],
+        "metadata": {"port": 80},
+    }
+    issues = [
+        {
+            "id": "issue-root",
+            "title": "Generic Root Issue",
+            "severity": "HIGH",
+            "target": "http://localhost:3003",
+            "score": 9.0,
+            "confirmation_level": "confirmed",
+            "capability_types": ["information", "access"],
+            "supporting_findings": [unrelated_supporting],
+        }
+    ]
+
+    new_edge_count = builder.enrich_from_issues(issues)
+    assert new_edge_count == 0
+    assert builder.findings_map[finding_id].data.get("confirmation_level") is None
+
+
 def test_export_dto_includes_attack_chains_and_pressure_points():
     builder = CausalGraphBuilder()
     findings = [
@@ -399,3 +451,69 @@ def test_export_dto_uses_dynamic_risk_fields_not_flat_defaults():
     assert cred_data["exploitability"] != hypo_data["exploitability"]
     assert cred_data["exposure"] != hypo_data["exposure"]
     assert cred_data["privilege_gain"] > hypo_data["privilege_gain"]
+
+
+def test_enablement_edges_require_explicit_candidate_capability_metadata():
+    builder = CausalGraphBuilder()
+    findings = [
+        {
+            "id": "f-cred",
+            "type": "credential_dump",
+            "title": "Credential exposure",
+            "severity": "CRITICAL",
+            "target": "example.com",
+            "confirmation_level": "confirmed",
+            "capability_types": ["access", "information"],
+            "base_score": 9.0,
+            "tags": ["secret-leak"],
+        },
+        {
+            # Looks auth-related but lacks capability_types enrichment metadata.
+            "id": "f-login",
+            "type": "admin_login",
+            "title": "Admin login page",
+            "severity": "MEDIUM",
+            "target": "example.com",
+            "confirmation_level": "confirmed",
+            "tags": ["auth"],
+        },
+    ]
+
+    graph = builder.build(findings)
+    assert not graph.has_edge("f-cred", "f-login")
+
+
+def test_enablement_edges_are_rate_limited_per_source():
+    builder = CausalGraphBuilder()
+    findings = [
+        {
+            "id": "f-cred",
+            "type": "credential_dump",
+            "title": "Credential exposure",
+            "severity": "CRITICAL",
+            "target": "example.com",
+            "confirmation_level": "confirmed",
+            "capability_types": ["access", "information"],
+            "base_score": 9.5,
+            "tags": ["secret-leak"],
+        }
+    ]
+
+    for idx in range(12):
+        findings.append(
+            {
+                "id": f"f-auth-{idx}",
+                "type": "admin_login",
+                "title": f"Auth target {idx}",
+                "severity": "HIGH",
+                "target": "example.com",
+                "confirmation_level": "probable",
+                "capability_types": ["execution"],
+                "base_score": 7.0,
+                "tags": ["auth"],
+            }
+        )
+
+    graph = builder.build(findings)
+    outgoing = list(graph.out_edges("f-cred"))
+    assert len(outgoing) <= 5

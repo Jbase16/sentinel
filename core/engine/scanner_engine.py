@@ -32,7 +32,7 @@ import re
 import threading
 from collections import deque
 from urllib.parse import urlparse
-from typing import Any, AsyncGenerator, Deque, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Deque, Dict, List, Optional, Set, Tuple
 
 from core.data.findings_store import findings_store
 from core.data.evidence_store import EvidenceStore
@@ -379,8 +379,38 @@ class ScanTransaction:
                     )
 
                     # Persist findings/evidence/issues
+                    # Cross-tool dedupe against already committed findings for this session.
+                    existing_fingerprints: set[str] = set()
+                    async with conn.execute(
+                        "SELECT data FROM findings WHERE session_id = ?",
+                        (self._session_id,),
+                    ) as cursor:
+                        async for row in cursor:
+                            try:
+                                parsed = json.loads(row[0]) if row and row[0] else {}
+                            except Exception:
+                                parsed = {}
+                            fp = str(parsed.get("fingerprint", "")).strip()
+                            if fp:
+                                existing_fingerprints.add(fp)
+
+                    committed_findings: List[Dict[str, Any]] = []
+                    deduped_count = 0
                     for finding in self._staged_findings:
+                        fingerprint = str(finding.get("fingerprint", "")).strip()
+                        if fingerprint and fingerprint in existing_fingerprints:
+                            deduped_count += 1
+                            continue
                         await db.save_finding_txn(finding, self._session_id, self._scan_sequence, conn)
+                        committed_findings.append(finding)
+                        if fingerprint:
+                            existing_fingerprints.add(fingerprint)
+                    self._staged_findings = committed_findings
+                    if deduped_count:
+                        logger.info(
+                            "[ScanTransaction] Deduped %d findings against session fingerprint history",
+                            deduped_count,
+                        )
 
                     for evidence in self._staged_evidence:
                         await db.save_evidence_txn(evidence, self._session_id, self._scan_sequence, conn)
@@ -1062,8 +1092,160 @@ class ScannerEngine:
     def _detect_installed(self) -> Dict[str, Dict[str, object]]:
         return get_installed_tools()
 
+    @staticmethod
+    def _semantic_bucket_for_entry(entry: Dict[str, Any]) -> str:
+        finding_type = str(entry.get("type", "generic")).strip().lower()
+        tags = entry.get("tags", [])
+        if isinstance(tags, str):
+            tags = [tags]
+        tag_set = {str(tag).strip().lower() for tag in tags if str(tag).strip()}
+        families = entry.get("families", [])
+        if isinstance(families, str):
+            families = [families]
+        family_set = {str(fam).strip().lower() for fam in families if str(fam).strip()}
+
+        if any(token in finding_type for token in ("port", "service", "connectivity")):
+            return "network_surface"
+        if "auth" in tag_set or "auth" in family_set or any(token in finding_type for token in ("auth", "login", "session", "admin")):
+            return "auth_surface"
+        if any(token in finding_type for token in ("git", "backup", "exposure", "disclosure", "directory")):
+            return "web_exposure"
+        if "vulnerability" in finding_type or "vuln" in finding_type:
+            return finding_type
+        return finding_type or "generic"
+
+    @staticmethod
+    def _extract_locator_from_entry(entry: Dict[str, Any]) -> str:
+        metadata = entry.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        # Prefer explicit metadata path-like values.
+        for key in ("path", "endpoint", "url", "uri", "location", "redirect", "match"):
+            value = metadata.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            if text.startswith(("http://", "https://")):
+                parsed = urlparse(text)
+                path = (parsed.path or "/").strip()
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
+                return path.lower()
+            if text.startswith("/"):
+                return text.lower()
+            # If metadata stores path-like fragments, normalize to slash-prefixed form.
+            if "/" in text and not text.startswith("http"):
+                return f"/{text.lstrip('/')}".lower()
+
+        # Port findings dedupe on host:port when available.
+        port = metadata.get("port")
+        if port is not None:
+            host = str(metadata.get("host") or entry.get("asset") or entry.get("target") or "").strip().lower()
+            try:
+                return f"{host}:{int(port)}"
+            except (TypeError, ValueError):
+                return f"{host}:{port}"
+
+        # Fallback: extract URL/path-like fragment from message/proof.
+        message = str(entry.get("message") or entry.get("proof") or "").strip()
+        if message:
+            url_match = re.search(r"https?://[^\s)]+", message, flags=re.IGNORECASE)
+            if url_match:
+                parsed = urlparse(url_match.group(0))
+                path = (parsed.path or "/").strip()
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
+                return path.lower()
+            path_match = re.search(r"(/[\w\-./%]+)", message)
+            if path_match:
+                return path_match.group(1).lower()
+
+        return ""
+
+    def _semantic_fingerprint(self, entry: Dict[str, Any], asset: str) -> str:
+        bucket = self._semantic_bucket_for_entry(entry)
+        locator = self._extract_locator_from_entry(entry)
+        if locator:
+            return f"{asset}|{bucket}|{locator}"
+
+        # Last-resort fallback: normalized message text without volatile IDs.
+        message = str(entry.get("message") or entry.get("proof") or "").strip().lower()
+        message = re.sub(r"\s+", " ", message)
+        message = re.sub(r"\b(status|code|size):\s*\d+\b", "", message)
+        message = message[:220]
+        return f"{asset}|{bucket}|{message}"
+
+    @staticmethod
+    def _merge_duplicate_finding(existing: Dict[str, Any], incoming: Dict[str, Any]) -> None:
+        """
+        Merge duplicate findings from overlapping tools into a single canonical finding.
+        """
+        existing_meta = existing.setdefault("metadata", {})
+        if not isinstance(existing_meta, dict):
+            existing_meta = {}
+            existing["metadata"] = existing_meta
+        incoming_meta = incoming.get("metadata", {})
+        if not isinstance(incoming_meta, dict):
+            incoming_meta = {}
+
+        severity_rank = {"CRITICAL": 5, "HIGH": 4, "MEDIUM": 3, "LOW": 2, "INFO": 1}
+        existing_sev = str(existing.get("severity", "INFO")).upper()
+        incoming_sev = str(incoming.get("severity", "INFO")).upper()
+        if severity_rank.get(incoming_sev, 0) > severity_rank.get(existing_sev, 0):
+            existing["severity"] = incoming_sev
+            if incoming.get("message"):
+                existing["message"] = incoming.get("message")
+            if incoming.get("proof"):
+                existing["proof"] = incoming.get("proof")
+
+        seen_tools = set()
+        for tool in (existing.get("tool"), incoming.get("tool")):
+            tool_name = str(tool or "").strip().lower()
+            if tool_name:
+                seen_tools.add(tool_name)
+        for tool in existing_meta.get("seen_by_tools", []) if isinstance(existing_meta.get("seen_by_tools"), list) else []:
+            tool_name = str(tool or "").strip().lower()
+            if tool_name:
+                seen_tools.add(tool_name)
+        if seen_tools:
+            existing_meta["seen_by_tools"] = sorted(seen_tools)
+
+        existing_meta["dedup_count"] = int(existing_meta.get("dedup_count", 1)) + 1
+
+        alt_messages = existing_meta.get("alternate_messages", [])
+        if not isinstance(alt_messages, list):
+            alt_messages = []
+        incoming_message = str(incoming.get("message", "")).strip()
+        if incoming_message and incoming_message != str(existing.get("message", "")).strip():
+            if incoming_message not in alt_messages:
+                alt_messages.append(incoming_message)
+        if len(alt_messages) > 5:
+            alt_messages = alt_messages[-5:]
+        if alt_messages:
+            existing_meta["alternate_messages"] = alt_messages
+
+        # Merge tags/families to preserve breadth from all tools.
+        def _merge_string_list(lhs: Any, rhs: Any) -> List[str]:
+            values: Set[str] = set()
+            for source in (lhs, rhs):
+                if isinstance(source, str):
+                    source = [source]
+                if isinstance(source, list):
+                    for item in source:
+                        value = str(item).strip()
+                        if value:
+                            values.add(value)
+            return sorted(values)
+
+        existing["tags"] = _merge_string_list(existing.get("tags", []), incoming.get("tags", []))
+        existing["families"] = _merge_string_list(existing.get("families", []), incoming.get("families", []))
+
     def _normalize_findings(self, items: List[dict] | None) -> List[dict]:
         normalized: List[dict] = []
+        semantic_index: Dict[str, int] = {}
         if not items:
             return normalized
 
@@ -1083,10 +1265,13 @@ class ScannerEngine:
             entry["asset"] = asset
             entry["target"] = asset
 
-            fingerprint = entry.setdefault(
-                "fingerprint",
-                f"{entry.get('tool', 'scanner')}:{asset}:{entry.get('type', 'generic')}:{severity}",
-            )
+            fingerprint = self._semantic_fingerprint(entry, asset)
+            entry["fingerprint"] = fingerprint
+
+            existing_idx = semantic_index.get(fingerprint)
+            if existing_idx is not None and 0 <= existing_idx < len(normalized):
+                self._merge_duplicate_finding(normalized[existing_idx], entry)
+                continue
 
             # Deterministic bounded dedupe: FIFO eviction
             if fingerprint in self._fingerprint_cache_set:
@@ -1100,6 +1285,7 @@ class ScannerEngine:
                 old = self._fingerprint_cache_order.popleft()
                 self._fingerprint_cache_set.discard(old)
 
+            semantic_index[fingerprint] = len(normalized)
             normalized.append(entry)
 
         return normalized

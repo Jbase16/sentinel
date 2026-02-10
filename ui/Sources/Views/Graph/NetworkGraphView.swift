@@ -63,6 +63,14 @@ struct NetworkGraphView: View {
                             .cornerRadius(4)
                     }
 
+                    Toggle("DECISIONS", isOn: $appState.showDecisionLayerInGraph)
+                        .toggleStyle(.switch)
+                        .font(.custom("Courier New", size: 11))
+                        .foregroundColor(.white)
+                        .padding(6)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(4)
+
                     Spacer()
 
                     // Identity Badge
@@ -114,6 +122,10 @@ struct NetworkGraphView: View {
                 .cornerRadius(8)
                 .padding(.bottom, 20)
             }
+        }
+        .onChange(of: appState.showDecisionLayerInGraph) {
+            appState.applyGraphLayerVisibility()
+            appState.fetchAnalysis()
         }
     }
 }

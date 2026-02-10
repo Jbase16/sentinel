@@ -425,7 +425,7 @@ class CortexStream: ObservableObject {
         return SIMD3<Float>(x, y, z)
     }
 
-    func updateFromPressureGraph(_ graph: PressureGraphDTO) {
+    func updateFromPressureGraph(_ graph: PressureGraphDTO, includeDecisionLayer: Bool = false) {
         func categoryForType(_ rawType: String) -> String {
             let t = rawType.lowercased()
             if t == "decision" { return "decision" }
@@ -512,7 +512,7 @@ class CortexStream: ObservableObject {
         }
 
         // Map DTO -> EdgeModel
-        let mappedEdges = graph.edges.map { edge in
+        var mappedEdges = graph.edges.map { edge in
             EdgeModel(
                 id: edge.id,
                 source: edge.source,
@@ -521,8 +521,45 @@ class CortexStream: ObservableObject {
             )
         }
 
+        var finalNodes = mappedNodes
+        if includeDecisionLayer, let decisionLayer = graph.decisionLayer {
+            let decisionNodes: [NodeModel] = decisionLayer.nodes.map { node in
+                let id = node.id
+                let base = positionCache[id] ?? stablePosition(for: id)
+                positionCache[id] = base
+                let confidence = Float(node.confidence ?? 0.6)
+                return NodeModel(
+                    id: id,
+                    type: "decision",
+                    x: base.x,
+                    y: base.y,
+                    z: base.z,
+                    color: SIMD4<Float>(0.7, 0.4, 1.0, 0.9),
+                    mass: 6.0,
+                    charge: 20.0,
+                    temperature: 0.0,
+                    structural: false,
+                    label: node.chosen ?? node.type,
+                    description: node.reason,
+                    pressure: max(0.1, min(1.0, confidence)),
+                    severity: "INFO"
+                )
+            }
+            finalNodes.append(contentsOf: decisionNodes)
+
+            let decisionEdges: [EdgeModel] = decisionLayer.edges.map { edge in
+                EdgeModel(
+                    id: edge.id,
+                    source: edge.source,
+                    target: edge.target,
+                    type: edge.type
+                )
+            }
+            mappedEdges.append(contentsOf: decisionEdges)
+        }
+
         DispatchQueue.main.async {
-            self.nodes = mappedNodes
+            self.nodes = finalNodes
             self.edges = mappedEdges
         }
     }
