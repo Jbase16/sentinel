@@ -26,6 +26,7 @@ INTEGRATION
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -381,6 +382,7 @@ class ScanTransaction:
                     # Persist findings/evidence/issues
                     # Cross-tool dedupe against already committed findings for this session.
                     existing_fingerprints: set[str] = set()
+                    existing_transaction_keys: set[str] = set()
                     async with conn.execute(
                         "SELECT data FROM findings WHERE session_id = ?",
                         (self._session_id,),
@@ -393,22 +395,54 @@ class ScanTransaction:
                             fp = str(parsed.get("fingerprint", "")).strip()
                             if fp:
                                 existing_fingerprints.add(fp)
+                            metadata = parsed.get("metadata", {})
+                            if not isinstance(metadata, dict):
+                                metadata = {}
+                            asset_value = self._engine._normalize_asset(
+                                parsed.get("asset") or parsed.get("target") or "unknown"
+                            )
+                            tx_key = str(metadata.get("transaction_dedupe_key", "")).strip()
+                            if not tx_key:
+                                tx_key = self._engine._transaction_dedupe_key(parsed, asset_value)
+                            if tx_key:
+                                existing_transaction_keys.add(tx_key)
 
                     committed_findings: List[Dict[str, Any]] = []
                     deduped_count = 0
                     for finding in self._staged_findings:
+                        asset_value = self._engine._normalize_asset(
+                            finding.get("asset") or finding.get("target") or "unknown"
+                        )
                         fingerprint = str(finding.get("fingerprint", "")).strip()
-                        if fingerprint and fingerprint in existing_fingerprints:
+                        if not fingerprint:
+                            fingerprint = self._engine._semantic_fingerprint(finding, asset_value)
+                            finding["fingerprint"] = fingerprint
+
+                        metadata = finding.setdefault("metadata", {})
+                        if not isinstance(metadata, dict):
+                            metadata = {}
+                            finding["metadata"] = metadata
+                        tx_key = str(metadata.get("transaction_dedupe_key", "")).strip()
+                        if not tx_key:
+                            tx_key = self._engine._transaction_dedupe_key(finding, asset_value)
+                            if tx_key:
+                                metadata["transaction_dedupe_key"] = tx_key
+
+                        if (fingerprint and fingerprint in existing_fingerprints) or (
+                            tx_key and tx_key in existing_transaction_keys
+                        ):
                             deduped_count += 1
                             continue
                         await db.save_finding_txn(finding, self._session_id, self._scan_sequence, conn)
                         committed_findings.append(finding)
                         if fingerprint:
                             existing_fingerprints.add(fingerprint)
+                        if tx_key:
+                            existing_transaction_keys.add(tx_key)
                     self._staged_findings = committed_findings
                     if deduped_count:
                         logger.info(
-                            "[ScanTransaction] Deduped %d findings against session fingerprint history",
+                            "[ScanTransaction] Deduped %d findings against session fingerprint/transaction-key history",
                             deduped_count,
                         )
 
@@ -1178,6 +1212,21 @@ class ScannerEngine:
         message = message[:220]
         return f"{asset}|{bucket}|{message}"
 
+    def _transaction_dedupe_key(self, entry: Dict[str, Any], asset: str) -> str:
+        """
+        Secondary dedupe key for cross-tool overlap within one session.
+        Limited to discovery/surface buckets to avoid collapsing distinct exploit findings.
+        """
+        bucket = self._semantic_bucket_for_entry(entry)
+        if bucket not in {"network_surface", "auth_surface", "web_exposure"}:
+            return ""
+
+        locator = self._extract_locator_from_entry(entry)
+        if not locator:
+            return ""
+
+        return f"{asset}|surface|{locator}"
+
     @staticmethod
     def _merge_duplicate_finding(existing: Dict[str, Any], incoming: Dict[str, Any]) -> None:
         """
@@ -1246,6 +1295,7 @@ class ScannerEngine:
     def _normalize_findings(self, items: List[dict] | None) -> List[dict]:
         normalized: List[dict] = []
         semantic_index: Dict[str, int] = {}
+        transaction_index: Dict[str, int] = {}
         if not items:
             return normalized
 
@@ -1268,10 +1318,23 @@ class ScannerEngine:
             fingerprint = self._semantic_fingerprint(entry, asset)
             entry["fingerprint"] = fingerprint
 
+            transaction_key = self._transaction_dedupe_key(entry, asset)
+            if transaction_key:
+                metadata = entry.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                    entry["metadata"] = metadata
+                metadata["transaction_dedupe_key"] = transaction_key
+
             existing_idx = semantic_index.get(fingerprint)
             if existing_idx is not None and 0 <= existing_idx < len(normalized):
                 self._merge_duplicate_finding(normalized[existing_idx], entry)
                 continue
+            if transaction_key:
+                transaction_idx = transaction_index.get(transaction_key)
+                if transaction_idx is not None and 0 <= transaction_idx < len(normalized):
+                    self._merge_duplicate_finding(normalized[transaction_idx], entry)
+                    continue
 
             # Deterministic bounded dedupe: FIFO eviction
             if fingerprint in self._fingerprint_cache_set:
@@ -1286,6 +1349,8 @@ class ScannerEngine:
                 self._fingerprint_cache_set.discard(old)
 
             semantic_index[fingerprint] = len(normalized)
+            if transaction_key:
+                transaction_index[transaction_key] = len(normalized)
             normalized.append(entry)
 
         return normalized

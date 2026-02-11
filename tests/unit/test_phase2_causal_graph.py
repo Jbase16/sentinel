@@ -516,4 +516,217 @@ def test_enablement_edges_are_rate_limited_per_source():
 
     graph = builder.build(findings)
     outgoing = list(graph.out_edges("f-cred"))
-    assert len(outgoing) <= 5
+    assert len(outgoing) <= 4
+
+
+def test_rule5_dedupes_overlapping_sources_and_candidate_families():
+    builder = CausalGraphBuilder()
+    findings = [
+        {
+            "id": "f-info-primary",
+            "type": "git_exposure",
+            "title": "Exposed .git metadata",
+            "severity": "CRITICAL",
+            "target": "example.com",
+            "confirmation_level": "confirmed",
+            "capability_types": ["information", "access"],
+            "base_score": 9.5,
+            "tags": ["backup-leak"],
+            "metadata": {"path": "/.git/config"},
+        },
+        {
+            # Same locator/class from another tool should not create a second
+            # fan-out source in Rule-5.
+            "id": "f-info-secondary",
+            "type": "git_disclosure",
+            "title": "Git config exposed via alternate probe",
+            "severity": "HIGH",
+            "target": "example.com",
+            "confirmation_level": "confirmed",
+            "capability_types": ["information", "access"],
+            "base_score": 9.0,
+            "tags": ["backup-leak"],
+            "metadata": {"path": "/.git/config"},
+        },
+        {
+            "id": "f-auth-1",
+            "type": "admin_login",
+            "title": "Admin login page",
+            "severity": "HIGH",
+            "target": "example.com",
+            "confirmation_level": "probable",
+            "capability_types": ["execution"],
+            "base_score": 7.0,
+            "tags": ["auth"],
+            "metadata": {"path": "/admin"},
+        },
+        {
+            "id": "f-auth-2",
+            "type": "session_login",
+            "title": "Session login endpoint",
+            "severity": "HIGH",
+            "target": "example.com",
+            "confirmation_level": "probable",
+            "capability_types": ["execution"],
+            "base_score": 6.8,
+            "tags": ["auth"],
+            "metadata": {"path": "/login"},
+        },
+        {
+            "id": "f-sqli",
+            "type": "sqli",
+            "title": "SQL injection candidate",
+            "severity": "HIGH",
+            "target": "example.com",
+            "confirmation_level": "probable",
+            "capability_types": ["execution"],
+            "base_score": 7.5,
+            "tags": ["sqli"],
+            "metadata": {"path": "/api/users"},
+        },
+    ]
+
+    graph = builder.build(findings)
+    enablement_edges = [
+        (u, v, d)
+        for u, v, d in graph.edges(data=True)
+        if d.get("enablement_edge") is True
+    ]
+
+    edge_sources = {u for u, _, _ in enablement_edges}
+    assert "f-info-primary" in edge_sources
+    assert "f-info-secondary" not in edge_sources
+
+    primary_targets = [v for u, v, _ in enablement_edges if u == "f-info-primary"]
+    auth_targets = [
+        v
+        for v in primary_targets
+        if "auth" in str(builder.findings_map[v].type).lower()
+        or "login" in str(builder.findings_map[v].type).lower()
+    ]
+    assert len(auth_targets) <= 1
+
+
+def test_enrich_from_issues_tier1_prefers_best_scored_issue_for_same_finding():
+    import hashlib
+    import json
+
+    builder = CausalGraphBuilder()
+
+    source_raw = {
+        "type": "version_disclosure",
+        "severity": "HIGH",
+        "target": "localhost",
+        "tool": "feroxbuster",
+        "message": "/.git/config exposed",
+        "tags": ["backup-leak"],
+        "families": [],
+        "metadata": {"original_target": "http://localhost:3003/.git/config"},
+    }
+    sink_raw = {
+        "type": "directory_disclosure",
+        "severity": "MEDIUM",
+        "target": "localhost",
+        "tool": "gobuster",
+        "message": "/admin discovered",
+        "tags": ["auth"],
+        "families": [],
+        "metadata": {"original_target": "http://localhost:3003/admin"},
+    }
+
+    source_id = hashlib.sha256(json.dumps(source_raw, sort_keys=True).encode()).hexdigest()
+    sink_id = hashlib.sha256(json.dumps(sink_raw, sort_keys=True).encode()).hexdigest()
+
+    builder.build(
+        [
+            {**source_raw, "id": source_id, "created_at": 0.0},
+            {**sink_raw, "id": sink_id, "created_at": 0.0},
+        ]
+    )
+
+    issues = [
+        {
+            "id": "issue-low",
+            "title": "Low-confidence chain",
+            "target": "localhost",
+            "score": 4.4,
+            "confirmation_level": "probable",
+            "capability_types": ["execution"],
+            "supporting_findings": [source_raw],
+        },
+        {
+            "id": "issue-high",
+            "title": "High-confidence artifact exposure",
+            "target": "localhost",
+            "score": 9.5,
+            "confirmation_level": "confirmed",
+            "capability_types": ["information", "access"],
+            "supporting_findings": [source_raw],
+        },
+        {
+            "id": "issue-sink",
+            "title": "Admin surface",
+            "target": "localhost",
+            "score": 6.0,
+            "confirmation_level": "confirmed",
+            "capability_types": ["execution"],
+            "supporting_findings": [sink_raw],
+        },
+    ]
+
+    builder.enrich_from_issues(issues)
+
+    source_finding = builder.findings_map[source_id]
+    assert source_finding.data.get("score") == 9.5
+    assert source_finding.data.get("confirmation_level") == "confirmed"
+    assert source_finding.data.get("capability_types") == ["information", "access"]
+
+
+def test_enrich_from_issues_tier3_uses_original_target_when_target_is_hostname_only():
+    builder = CausalGraphBuilder()
+    findings = [
+        {
+            "id": "f-host-only",
+            "type": "directory_disclosure",
+            "title": "Admin endpoint exposed",
+            "severity": "MEDIUM",
+            "target": "localhost",
+            "tool": "feroxbuster",
+            "tags": ["auth"],
+            "metadata": {"original_target": "http://localhost:3003/admin"},
+        }
+    ]
+    builder.build(findings)
+
+    issues = [
+        {
+            "id": "issue-tier3",
+            "title": "Auth surface issue",
+            "target": "localhost",
+            "score": 7.1,
+            "confirmation_level": "confirmed",
+            "capability_types": ["execution"],
+            "tags": ["auth"],
+            "supporting_findings": [
+                {
+                    "type": "other",
+                    "severity": "LOW",
+                    "target": "localhost",
+                    "tool": "othertool",
+                    "message": "auxiliary evidence",
+                    "tags": ["auth"],
+                    "metadata": {
+                        "original_target": "http://localhost:3003/admin/panel"
+                    },
+                }
+            ],
+        }
+    ]
+
+    new_edges = builder.enrich_from_issues(issues)
+    assert new_edges == 0  # no second finding to connect, but enrichment should still occur
+
+    enriched = builder.findings_map["f-host-only"]
+    assert enriched.data.get("confirmation_level") == "confirmed"
+    assert enriched.data.get("capability_types") == ["execution"]
+    assert enriched.data.get("score") == 7.1

@@ -4,7 +4,7 @@ Unit tests for URL validation in ScanRequest model.
 import pytest
 from pydantic import ValidationError
 
-from core.server.routers.scans import ScanRequest
+from core.server.routers.scans import ScanRequest, _extract_attack_paths_from_graph_dto
 
 
 class TestURLValidation:
@@ -135,3 +135,25 @@ class TestURLValidation:
         """Test valid URL with subdomain is accepted."""
         req = ScanRequest(target="https://api.example.com")
         assert req.target == "https://api.example.com"
+
+
+def test_extract_attack_paths_from_graph_dto_handles_empty_and_malformed_chains():
+    assert _extract_attack_paths_from_graph_dto({"attack_chains": []}) == []
+    assert _extract_attack_paths_from_graph_dto({"attack_chains": None}) == []
+    assert _extract_attack_paths_from_graph_dto({}) == []
+
+
+def test_extract_attack_paths_from_graph_dto_prefers_labels_and_falls_back_to_node_ids():
+    dto = {
+        "attack_chains": [
+            {"labels": ["Exposed Git", "Admin Login"], "node_ids": ["n1", "n2"]},
+            {"node_ids": ["n3", "n4"]},
+            {"labels": []},
+            "invalid",
+        ]
+    }
+    attack_paths = _extract_attack_paths_from_graph_dto(dto)
+    assert attack_paths == [
+        ["Exposed Git", "Admin Login"],
+        ["n3", "n4"],
+    ]

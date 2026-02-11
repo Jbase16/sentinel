@@ -1054,10 +1054,17 @@ def _match_waf_param_combo(findings: List[dict]) -> List[dict]:
     # Loop over items.
     for target, tags in targets.items():
         if "waf-bypass" in tags and any(tag.startswith("param-fuzz") for tag in tags):
-            evidence = [f for f in findings if f.get("target") == target and "waf-bypass" in f.get("tags", [])]
+            target_findings = [f for f in findings if f.get("target") == target]
+            evidence = [
+                f for f in target_findings
+                if "waf-bypass" in _finding_tag_set(f)
+                or any(tag.startswith("param-fuzz") for tag in _finding_tag_set(f))
+            ]
+            if not evidence:
+                continue
             results.append({
                 "target": target,
-                "evidence": evidence,
+                "evidence": _dedupe_evidence(evidence),
                 "severity": "CRITICAL",
                 "score": 9.4,
                 "tags": ["waf-bypass", "param-fuzz"],
@@ -1073,10 +1080,14 @@ def _match_timing_debug_combo(findings: List[dict]) -> List[dict]:
     # Loop over items.
     for target, tags in targets.items():
         if "timing-variance" in tags and "debug-toggle" in tags:
-            evidence = [f for f in findings if f.get("target") == target]
+            evidence = _findings_for_target_with_tags(
+                findings, target, {"timing-variance", "debug-toggle"}
+            )
+            if not evidence:
+                continue
             results.append({
                 "target": target,
-                "evidence": evidence,
+                "evidence": _dedupe_evidence(evidence),
                 "severity": "HIGH",
                 "score": 8.5,
                 "tags": ["timing-variance", "debug-toggle"],
@@ -1092,10 +1103,14 @@ def _match_tls_timing(findings: List[dict]) -> List[dict]:
     # Loop over items.
     for target, tags in targets.items():
         if "tls-probe" in tags and "timing-anomaly" in tags:
-            evidence = [f for f in findings if f.get("target") == target]
+            evidence = _findings_for_target_with_tags(
+                findings, target, {"tls-probe", "timing-anomaly"}
+            )
+            if not evidence:
+                continue
             results.append({
                 "target": target,
-                "evidence": evidence,
+                "evidence": _dedupe_evidence(evidence),
                 "severity": "HIGH",
                 "score": 8.0,
                 "tags": ["tls-probe", "timing-anomaly"],
@@ -1144,6 +1159,51 @@ def _gather_target_tag_map(findings: List[dict]) -> Dict[str, set]:
     return tag_map
 
 
+def _finding_tag_set(finding: dict) -> set[str]:
+    raw_tags = finding.get("tags", [])
+    if isinstance(raw_tags, str):
+        raw_tags = [raw_tags]
+    if not isinstance(raw_tags, list):
+        return set()
+    return {str(tag).strip().lower() for tag in raw_tags if str(tag).strip()}
+
+
+def _findings_for_target_with_tags(
+    findings: List[dict],
+    target: str,
+    allowed_tags: set[str],
+) -> List[dict]:
+    selected: List[dict] = []
+    normalized = {str(tag).strip().lower() for tag in allowed_tags if str(tag).strip()}
+    for finding in findings:
+        if finding.get("target", "unknown") != target:
+            continue
+        if not normalized or _finding_tag_set(finding).intersection(normalized):
+            selected.append(finding)
+    return selected
+
+
+def _dedupe_evidence(evidence: List[dict]) -> List[dict]:
+    unique: List[dict] = []
+    seen: set[tuple] = set()
+    for finding in evidence:
+        metadata = finding.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        key = (
+            str(finding.get("type", "")).strip().lower(),
+            str(finding.get("tool", "")).strip().lower(),
+            str(finding.get("message") or finding.get("proof") or "").strip().lower(),
+            str(metadata.get("path", "")).strip().lower(),
+            str(metadata.get("header", "")).strip().lower(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(finding)
+    return unique
+
+
 def _match_auth_chain(findings: List[dict]) -> List[dict]:
     """Function _match_auth_chain."""
     tag_map = _gather_target_tag_map(findings)
@@ -1157,10 +1217,16 @@ def _match_auth_chain(findings: List[dict]) -> List[dict]:
             "crypto" in tags,
         ]
         if sum(bool(s) for s in signals) >= 3:
-            evidence = [f for f in findings if f.get("target", "unknown") == target]
+            evidence = _findings_for_target_with_tags(
+                findings,
+                target,
+                {"pw-reset", "auth", "dev-surface", "header-missing", "crypto"},
+            )
+            if not evidence:
+                continue
             results.append({
                 "target": target,
-                "evidence": evidence,
+                "evidence": _dedupe_evidence(evidence),
                 "severity": "HIGH",
                 "score": 8.8,
                 "tags": ["auth-chain", "workflow"],
@@ -1176,10 +1242,14 @@ def _match_directory_upload_chain(findings: List[dict]) -> List[dict]:
     # Loop over items.
     for target, tags in tag_map.items():
         if "directory-listing" in tags and "upload" in tags:
-            evidence = [f for f in findings if f.get("target", "unknown") == target]
+            evidence = _findings_for_target_with_tags(
+                findings, target, {"directory-listing", "upload"}
+            )
+            if not evidence:
+                continue
             results.append({
                 "target": target,
-                "evidence": evidence,
+                "evidence": _dedupe_evidence(evidence),
                 "severity": "HIGH",
                 "score": 7.8,
                 "tags": ["directory-listing", "upload"],
@@ -1253,12 +1323,40 @@ def _match_header_chain(findings: List[dict]) -> List[dict]:
     results = []
     # Loop over items.
     for target, tags in tag_map.items():
-        missing_csp = any(f.get("metadata", {}).get("header") == "content-security-policy" for f in findings if f.get("target", "unknown") == target)
+        target_findings = [f for f in findings if f.get("target", "unknown") == target]
+        if not target_findings:
+            continue
+
+        missing_csp = any(
+            f.get("metadata", {}).get("header") == "content-security-policy"
+            for f in target_findings
+        )
         upload_surface = "upload" in tags
-        missing_hsts = any(f.get("metadata", {}).get("header") == "strict-transport-security" for f in findings if f.get("target", "unknown") == target)
+        missing_hsts = any(
+            f.get("metadata", {}).get("header") == "strict-transport-security"
+            for f in target_findings
+        )
         weak_tls = "crypto" in tags
-        evidence = [f for f in findings if f.get("target", "unknown") == target]
+
+        csp_findings = [
+            f for f in target_findings
+            if f.get("metadata", {}).get("header") == "content-security-policy"
+        ]
+        hsts_findings = [
+            f for f in target_findings
+            if f.get("metadata", {}).get("header") == "strict-transport-security"
+        ]
+        upload_findings = _findings_for_target_with_tags(
+            target_findings, target, {"upload"}
+        )
+        crypto_findings = _findings_for_target_with_tags(
+            target_findings, target, {"crypto"}
+        )
+
         if missing_csp and upload_surface:
+            evidence = _dedupe_evidence(csp_findings + upload_findings)
+            if not evidence:
+                continue
             results.append({
                 "target": target,
                 "evidence": evidence,
@@ -1268,6 +1366,9 @@ def _match_header_chain(findings: List[dict]) -> List[dict]:
                 "impact": "Missing CSP combined with upload functionality enables stored XSS weaponization.",
             })
         if missing_hsts and weak_tls:
+            evidence = _dedupe_evidence(hsts_findings + crypto_findings)
+            if not evidence:
+                continue
             results.append({
                 "target": target,
                 "evidence": evidence,

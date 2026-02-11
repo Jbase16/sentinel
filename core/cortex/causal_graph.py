@@ -284,19 +284,19 @@ class CausalGraphBuilder:
         # and does NOT write the id back into the dict.  The evidence dicts in
         # supporting_findings are the same dicts (JSON round-tripped), so
         # recomputing the hash should yield the same finding ID.
-        hash_to_issue: Dict[str, Dict[str, Any]] = {}
+        hash_to_issues: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for issue in issues:
             for sf in issue.get("supporting_findings", []):
                 if isinstance(sf, dict):
                     try:
                         blob = json.dumps(sf, sort_keys=True)
                         h = _hl.sha256(blob.encode()).hexdigest()
-                        hash_to_issue[h] = issue
+                        hash_to_issues[h].append(issue)
                     except (TypeError, ValueError):
                         continue
 
         # --- Tier 2: (target, tool, type) tuple lookup ---
-        evidence_key_to_issue: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+        evidence_key_to_issues: Dict[Tuple[str, str, str], List[Dict[str, Any]]] = defaultdict(list)
         for issue in issues:
             for sf in issue.get("supporting_findings", []):
                 if isinstance(sf, dict):
@@ -306,7 +306,7 @@ class CausalGraphBuilder:
                         str(sf.get("type", "")).strip().lower(),
                     )
                     if key[0]:
-                        evidence_key_to_issue[key] = issue
+                        evidence_key_to_issues[key].append(issue)
 
         def _parse_target(raw_target: str) -> Tuple[str, str, Tuple[str, ...]]:
             value = str(raw_target or "").strip().lower()
@@ -328,6 +328,54 @@ class CausalGraphBuilder:
             while n < size and lhs[n] == rhs[n]:
                 n += 1
             return n
+
+        def _issue_rank(issue: Dict[str, Any]) -> Tuple[float, int, int, int, str]:
+            try:
+                score = float(issue.get("score", 0.0))
+            except (TypeError, ValueError):
+                score = 0.0
+
+            raw_caps = issue.get("capability_types", [])
+            if isinstance(raw_caps, str):
+                raw_caps = [raw_caps]
+            if not isinstance(raw_caps, list):
+                raw_caps = []
+            capabilities = {
+                str(cap).strip().lower()
+                for cap in raw_caps
+                if str(cap).strip()
+            }
+            capability_specificity = sum(
+                1 for cap in capabilities if cap in {"information", "access", "execution"}
+            )
+
+            confirmation = str(issue.get("confirmation_level", "probable")).strip().lower()
+            confirmation_rank = {"hypothesized": 0, "probable": 1, "confirmed": 2}.get(
+                confirmation, 1
+            )
+
+            support = issue.get("supporting_findings", [])
+            support_count = len(support) if isinstance(support, list) else 0
+            return (
+                score,
+                capability_specificity,
+                confirmation_rank,
+                -support_count,  # fewer supporting findings = more specific issue
+                str(issue.get("id", "")),
+            )
+
+        def _select_best_issue(candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+            if not candidates:
+                return None
+            deduped: List[Dict[str, Any]] = []
+            seen_obj_ids: Set[int] = set()
+            for candidate in candidates:
+                key = id(candidate)
+                if key in seen_obj_ids:
+                    continue
+                seen_obj_ids.add(key)
+                deduped.append(candidate)
+            return max(deduped, key=_issue_rank) if deduped else None
 
         def _issue_semantic_sets(issue: Dict[str, Any]) -> Tuple[Set[str], Set[str], Set[str]]:
             tools: Set[str] = set()
@@ -373,50 +421,105 @@ class CausalGraphBuilder:
                 return True
             return False
 
+        def _issue_match_targets(issue: Dict[str, Any]) -> List[str]:
+            targets: List[str] = []
+            primary_target = str(issue.get("target", "")).strip()
+            if primary_target:
+                targets.append(primary_target)
+
+            for sf in issue.get("supporting_findings", []):
+                if not isinstance(sf, dict):
+                    continue
+                sf_target = str(sf.get("target", "")).strip()
+                if sf_target:
+                    targets.append(sf_target)
+                sf_meta = sf.get("metadata", {})
+                if isinstance(sf_meta, dict):
+                    original_target = str(sf_meta.get("original_target", "")).strip()
+                    if original_target:
+                        targets.append(original_target)
+
+            ordered: List[str] = []
+            seen: Set[str] = set()
+            for value in targets:
+                if value in seen:
+                    continue
+                seen.add(value)
+                ordered.append(value)
+            return ordered
+
+        def _finding_match_targets(finding: Finding) -> List[str]:
+            targets: List[str] = []
+            primary = str(finding.target or "").strip()
+            if primary:
+                targets.append(primary)
+            metadata = finding.data.get("metadata", {})
+            if isinstance(metadata, dict):
+                original_target = str(metadata.get("original_target", "")).strip()
+                if original_target:
+                    targets.append(original_target)
+
+            ordered: List[str] = []
+            seen: Set[str] = set()
+            for value in targets:
+                if value in seen:
+                    continue
+                seen.add(value)
+                ordered.append(value)
+            return ordered
+
         # --- Tier 3: strict URL/path lookup (conservative to avoid over-enrichment) ---
         issues_by_origin: Dict[Tuple[str, str], List[Tuple[Dict[str, Any], Tuple[str, ...]]]] = defaultdict(list)
         issue_semantics: Dict[int, Tuple[Set[str], Set[str], Set[str]]] = {}
         for issue in issues:
-            scheme, netloc, path_segments = _parse_target(issue.get("target", ""))
             issue_semantics[id(issue)] = _issue_semantic_sets(issue)
-            if not scheme or not netloc:
-                continue
-            # Never tier3-match root-only targets; this caused near-complete graph enrichment.
-            if not path_segments:
-                continue
-            issues_by_origin[(scheme, netloc)].append((issue, path_segments))
+            for raw_issue_target in _issue_match_targets(issue):
+                scheme, netloc, path_segments = _parse_target(raw_issue_target)
+                if not scheme or not netloc:
+                    continue
+                # Never tier3-match root-only targets; this caused near-complete graph enrichment.
+                if not path_segments:
+                    continue
+                issues_by_origin[(scheme, netloc)].append((issue, path_segments))
 
         enriched_count = 0
         tier_stats = {"hash": 0, "key": 0, "prefix": 0}
         for finding in self.findings_map.values():
             # Tier 1: hash match
-            matched_issue = hash_to_issue.get(finding.id)
+            matched_issue = _select_best_issue(hash_to_issues.get(finding.id, []))
             if matched_issue:
                 tier_stats["hash"] += 1
 
             # Tier 2: (target, tool, type) match
             if matched_issue is None:
-                f_key = (
-                    str(finding.target).strip().lower(),
-                    str(finding.data.get("tool", "")).strip().lower(),
-                    str(finding.type).strip().lower(),
-                )
-                matched_issue = evidence_key_to_issue.get(f_key)
+                tool = str(finding.data.get("tool", "")).strip().lower()
+                finding_type = str(finding.type).strip().lower()
+                tier2_candidates: List[Dict[str, Any]] = []
+                for raw_target in _finding_match_targets(finding):
+                    f_key = (str(raw_target).strip().lower(), tool, finding_type)
+                    tier2_candidates.extend(evidence_key_to_issues.get(f_key, []))
+                matched_issue = _select_best_issue(tier2_candidates)
                 if matched_issue:
                     tier_stats["key"] += 1
 
             # Tier 3: strict same-origin path match with semantic guard.
             if matched_issue is None:
-                f_scheme, f_netloc, f_segments = _parse_target(finding.target)
-                if f_scheme and f_netloc and f_segments:
-                    candidates = issues_by_origin.get((f_scheme, f_netloc), [])
-                    best_issue: Optional[Dict[str, Any]] = None
-                    best_rank: Optional[Tuple[int, int, float]] = None
-                    ambiguous = False
+                best_issue: Optional[Dict[str, Any]] = None
+                best_rank: Optional[Tuple[int, int, float, Tuple[float, int, int, int, str]]] = None
+                ambiguous = False
 
+                for raw_target in _finding_match_targets(finding):
+                    f_scheme, f_netloc, f_segments = _parse_target(raw_target)
+                    if not (f_scheme and f_netloc and f_segments):
+                        continue
+
+                    candidates = issues_by_origin.get((f_scheme, f_netloc), [])
                     for candidate_issue, issue_segments in candidates:
                         # Prefix in either direction, but both sides must have non-root paths.
-                        if not (f_segments[: len(issue_segments)] == issue_segments or issue_segments[: len(f_segments)] == f_segments):
+                        if not (
+                            f_segments[: len(issue_segments)] == issue_segments
+                            or issue_segments[: len(f_segments)] == f_segments
+                        ):
                             continue
                         if not _passes_tier3_semantic_guard(finding, candidate_issue):
                             continue
@@ -426,18 +529,18 @@ class CausalGraphBuilder:
                             score = float(candidate_issue.get("score", 0))
                         except (TypeError, ValueError):
                             score = 0.0
-                        rank = (common, len(issue_segments), score)
+                        rank = (common, len(issue_segments), score, _issue_rank(candidate_issue))
 
                         if best_rank is None or rank > best_rank:
                             best_issue = candidate_issue
                             best_rank = rank
                             ambiguous = False
-                        elif rank == best_rank:
+                        elif rank == best_rank and best_issue is not candidate_issue:
                             ambiguous = True
 
-                    if best_issue is not None and not ambiguous:
-                        matched_issue = best_issue
-                        tier_stats["prefix"] += 1
+                if best_issue is not None and not ambiguous:
+                    matched_issue = best_issue
+                    tier_stats["prefix"] += 1
 
             if matched_issue is None:
                 continue
@@ -773,6 +876,8 @@ class CausalGraphBuilder:
             finding.type,
             finding.title,
             finding.data.get("description"),
+            finding.data.get("message"),
+            finding.data.get("proof"),
             finding.data.get("value"),
             finding.data.get("evidence_summary"),
         ]
@@ -785,13 +890,15 @@ class CausalGraphBuilder:
         """
         edges: List[Dict[str, Any]] = []
         seen_pairs: Set[Tuple[str, str]] = set()
-        max_edges_per_source = 5
+        max_edges_per_source = 4
+        max_edges_per_target = 40
 
         by_target: Dict[str, List[Finding]] = defaultdict(list)
         for finding in findings:
             by_target[finding.target].append(finding)
 
         for target, target_findings in by_target.items():
+            target_edges_created = 0
             info_findings = [
                 finding
                 for finding in target_findings
@@ -803,19 +910,50 @@ class CausalGraphBuilder:
                 )
             ]
 
+            info_findings.sort(
+                key=lambda finding: (
+                    self._finding_base_score(finding),
+                    1 if "access" in self._finding_capability_types(finding) else 0,
+                    str(finding.id),
+                ),
+                reverse=True,
+            )
+
+            seen_source_signatures: Set[Tuple[str, str]] = set()
             for info_finding in info_findings:
+                if target_edges_created >= max_edges_per_target:
+                    break
                 source_id = info_finding.id
                 if not source_id:
                     continue
 
                 capability_types = self._finding_capability_types(info_finding)
                 enablement_class = self._classify_enablement(info_finding)
+
+                # Collapse near-identical source findings from overlapping tools.
+                source_locator = self._finding_locator_hint(info_finding) or source_id
+                source_signature = (enablement_class, source_locator)
+                if source_signature in seen_source_signatures:
+                    continue
+                seen_source_signatures.add(source_signature)
+
                 strength = self._enablement_strength(capability_types, enablement_class)
                 effort_table = _get_effort_eliminated_table()
                 effort = effort_table.get(enablement_class, 2.0)
                 edges_created = 0
+                seen_candidate_families: Set[str] = set()
 
-                for candidate in target_findings:
+                candidate_pool = sorted(
+                    target_findings,
+                    key=lambda candidate: (
+                        self._finding_base_score(candidate),
+                        str(candidate.id),
+                    ),
+                    reverse=True,
+                )
+                for candidate in candidate_pool:
+                    if target_edges_created >= max_edges_per_target:
+                        break
                     if edges_created >= max_edges_per_source:
                         break
                     target_id = candidate.id
@@ -834,6 +972,10 @@ class CausalGraphBuilder:
                     if not any(cap in {"execution", "access"} for cap in candidate_caps):
                         continue
 
+                    candidate_family = self._finding_attack_family(candidate)
+                    if candidate_family in seen_candidate_families:
+                        continue
+
                     if not self._would_benefit_from(candidate, enablement_class, capability_types):
                         continue
 
@@ -841,6 +983,7 @@ class CausalGraphBuilder:
                     if pair in seen_pairs:
                         continue
                     seen_pairs.add(pair)
+                    seen_candidate_families.add(candidate_family)
 
                     edges.append({
                         "source": source_id,
@@ -852,8 +995,69 @@ class CausalGraphBuilder:
                         "enabled_at": time.time(),
                     })
                     edges_created += 1
+                    target_edges_created += 1
 
         return edges
+
+    @staticmethod
+    def _finding_locator_hint(finding: Finding) -> str:
+        """
+        Best-effort, stable locator used only for Rule-5 dedupe budgeting.
+        """
+        metadata = finding.data.get("metadata", {})
+        if isinstance(metadata, dict):
+            for key in ("path", "endpoint", "uri", "url", "location"):
+                value = metadata.get(key)
+                if value is None:
+                    continue
+                text = str(value).strip().lower()
+                if not text:
+                    continue
+                if text.startswith(("http://", "https://")):
+                    parsed = urlparse(text)
+                    path = (parsed.path or "/").strip().lower()
+                    if parsed.query:
+                        path = f"{path}?{parsed.query}"
+                    return path
+                if text.startswith("/"):
+                    return text
+                if "/" in text:
+                    return f"/{text.lstrip('/')}"
+
+            port = metadata.get("port")
+            if port is not None:
+                host = str(metadata.get("host") or finding.target or "").strip().lower()
+                return f"{host}:{port}"
+
+        value = finding.data.get("value")
+        if value is not None:
+            text = str(value).strip().lower()
+            if text:
+                return text
+
+        return ""
+
+    def _finding_attack_family(self, finding: Finding) -> str:
+        """
+        Coarse candidate family used to avoid multiple near-identical Rule-5 edges.
+        """
+        finding_type = str(finding.type).strip().lower()
+        tags = self._finding_tags(finding)
+        text = f"{finding_type} {' '.join(sorted(tags))}"
+
+        if any(token in text for token in ("auth", "login", "admin", "session")):
+            return "auth_surface"
+        if any(token in text for token in ("sqli", "sql", "injection", "xss", "rce", "lfi", "ssrf")):
+            return "injection_surface"
+        if any(token in text for token in ("service", "port", "network")):
+            return "network_surface"
+        if any(token in text for token in ("directory", "disclosure", "exposure", "backup", "source", "git")):
+            return "exposure_surface"
+
+        locator = self._finding_locator_hint(finding)
+        if locator:
+            return f"locator:{locator}"
+        return finding_type or "generic"
 
     def _classify_enablement(self, finding: Finding) -> str:
         """
@@ -871,6 +1075,8 @@ class CausalGraphBuilder:
             return "credential_exposure"
         if "backup-leak" in tags and any(indicator in text for indicator in CREDENTIAL_INDICATORS):
             return "credential_exposure"
+        if "backup-leak" in tags:
+            return "source_code"
 
         if "git" in finding_type or "source" in finding_type or ".git" in text:
             return "source_code"

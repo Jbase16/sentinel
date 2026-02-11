@@ -6,6 +6,7 @@ Covers:
 - Concurrency Logic
 """
 import asyncio
+import json
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from core.engine.scanner_engine import ScannerEngine, ResourceGuard, ResourceExhaustedError, ScanTransaction
@@ -303,3 +304,128 @@ def test_normalize_findings_keeps_distinct_paths(engine):
 
     normalized = engine._normalize_findings(findings)
     assert len(normalized) == 2
+
+
+def test_normalize_findings_transaction_key_dedupes_cross_tool_surface_variants(engine):
+    findings = [
+        {
+            "type": "directory_disclosure",
+            "severity": "MEDIUM",
+            "tool": "feroxbuster",
+            "target": "http://localhost:3003",
+            "message": "/admin (Status: 301)",
+            "tags": ["auth"],
+            "families": ["exposure"],
+            "metadata": {"path": "/admin"},
+        },
+        {
+            # Different type/bucket, same target+locator -> should merge by transaction key.
+            "type": "admin_login",
+            "severity": "MEDIUM",
+            "tool": "gobuster",
+            "target": "http://localhost:3003",
+            "message": "Admin login page discovered",
+            "tags": ["auth"],
+            "families": ["discovery"],
+            "metadata": {"path": "/admin"},
+        },
+    ]
+
+    normalized = engine._normalize_findings(findings)
+    assert len(normalized) == 1
+    metadata = normalized[0].get("metadata", {})
+    assert metadata.get("transaction_dedupe_key", "").endswith("|surface|/admin")
+    assert sorted(metadata.get("seen_by_tools", [])) == ["feroxbuster", "gobuster"]
+
+
+@pytest.mark.asyncio
+async def test_transaction_commit_dedupes_using_transaction_key(engine):
+    class _FakeCursor:
+        def __init__(self, rows):
+            self._rows = list(rows)
+            self._idx = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self._idx >= len(self._rows):
+                raise StopAsyncIteration
+            row = self._rows[self._idx]
+            self._idx += 1
+            return row
+
+    class _FakeExecute:
+        def __init__(self, rows=None):
+            self._rows = list(rows or [])
+
+        def __await__(self):
+            async def _done():
+                return self
+
+            return _done().__await__()
+
+        async def __aenter__(self):
+            return _FakeCursor(self._rows)
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeConn:
+        def __init__(self, rows):
+            self._rows = rows
+            self.commit = AsyncMock()
+            self.rollback = AsyncMock()
+
+        def execute(self, query, params=()):
+            if "SELECT data FROM findings WHERE session_id" in str(query):
+                return _FakeExecute(self._rows)
+            return _FakeExecute()
+
+    existing_finding = {
+        "type": "directory_disclosure",
+        "severity": "MEDIUM",
+        "tool": "feroxbuster",
+        "target": "http://localhost:3003",
+        "asset": "localhost:3003",
+        "message": "/admin (Status: 301)",
+        "tags": ["auth"],
+        "families": ["exposure"],
+        "fingerprint": "existing-1",
+        "metadata": {"path": "/admin", "transaction_dedupe_key": "localhost:3003|surface|/admin"},
+    }
+    conn = _FakeConn(rows=[(json.dumps(existing_finding),)])
+
+    db_mock = MagicMock()
+    db_mock._initialized = True
+    db_mock._db_connection = conn
+    db_mock._db_lock = asyncio.Lock()
+    db_mock.next_scan_sequence_txn = AsyncMock(return_value=1)
+    db_mock.create_scan_record_txn = AsyncMock()
+    db_mock.save_finding_txn = AsyncMock()
+    db_mock.save_issue_txn = AsyncMock()
+    db_mock.save_evidence_txn = AsyncMock()
+    db_mock.update_scan_last_completed_tool_txn = AsyncMock()
+    db_mock.update_scan_status = AsyncMock()
+
+    with patch("core.data.db.Database.instance", return_value=db_mock):
+        txn = ScanTransaction(engine, "sess-1", "http://localhost:3003")
+        await txn.__aenter__()
+        txn._update_stores_after_commit = MagicMock()
+        txn.add_finding(
+            {
+                "type": "admin_login",
+                "severity": "MEDIUM",
+                "tool": "gobuster",
+                "target": "http://localhost:3003",
+                "asset": "localhost:3003",
+                "message": "Admin login page discovered",
+                "tags": ["auth"],
+                "families": ["discovery"],
+                "metadata": {"path": "/admin"},
+            }
+        )
+        await txn.commit()
+        await txn.__aexit__(None, None, None)
+
+    assert db_mock.save_finding_txn.await_count == 0
