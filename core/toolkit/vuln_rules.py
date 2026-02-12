@@ -966,27 +966,34 @@ def _match_business_logic(findings: List[dict]) -> List[dict]:
 
 
 def _match_session_header_chain(findings: List[dict]) -> List[dict]:
-    """Function _match_session_header_chain."""
+    """
+    Match session weakness + missing security headers chain.
+
+    Requires BOTH a session-tagged finding AND a header-missing finding
+    for the same target. Evidence is limited to findings carrying exactly
+    these two signal tags — no unrelated findings are included.
+    """
     results = []
     targets = _gather_target_tag_map(findings)
-    # Loop over items.
     for target, tags in targets.items():
-        if "session" not in tags:
+        if "session" not in tags or "header-missing" not in tags:
             continue
-        header_findings = [
-            f for f in findings
-            if f.get("target") == target and "header-missing" in f.get("tags", [])
-        ]
-        if not header_findings:
+        # Collect only the two signal categories
+        evidence = _findings_for_target_with_tags(
+            findings, target, {"session", "header-missing"},
+        )
+        if not evidence:
             continue
-        header_names = sorted({f.get("metadata", {}).get("header", "header") for f in header_findings})
-        session_items = [
-            f for f in findings
-            if f.get("target") == target and "session" in f.get("tags", [])
-        ]
+        evidence = _dedupe_evidence(evidence)
+        # Extract header names from the header-missing findings only
+        header_names = sorted({
+            f.get("metadata", {}).get("header", "header")
+            for f in evidence
+            if "header-missing" in _finding_tag_set(f)
+        })
         results.append({
             "target": target,
-            "evidence": session_items + header_findings,
+            "evidence": evidence,
             "severity": "HIGH",
             "score": 8.2,
             "tags": ["session", "header-missing"],
@@ -1023,19 +1030,31 @@ def _match_api_rate_limit_gap(findings: List[dict]) -> List[dict]:
 
 
 def _match_cloud_storage_chain(findings: List[dict]) -> List[dict]:
-    """Function _match_cloud_storage_chain."""
+    """
+    Match cloud storage + backup/secret leak chains.
+
+    Requires cloud-storage AND at least one of (backup-leak, secret-leak).
+    Evidence restricted to findings carrying only the triggered signal tags.
+    """
     results = []
     targets = _gather_target_tag_map(findings)
-    # Loop over items.
     for target, tags in targets.items():
         if "cloud-storage" not in tags:
             continue
-        if "backup-leak" not in tags and "secret-leak" not in tags:
+        has_backup = "backup-leak" in tags
+        has_secret = "secret-leak" in tags
+        if not has_backup and not has_secret:
             continue
-        evidence = [
-            f for f in findings
-            if f.get("target") == target and any(tag in f.get("tags", []) for tag in ("cloud-storage", "backup-leak", "secret-leak"))
-        ]
+        # Only include tags that actually fired
+        signal_tags: set = {"cloud-storage"}
+        if has_backup:
+            signal_tags.add("backup-leak")
+        if has_secret:
+            signal_tags.add("secret-leak")
+        evidence = _findings_for_target_with_tags(findings, target, signal_tags)
+        evidence = _dedupe_evidence(evidence)
+        if not evidence:
+            continue
         results.append({
             "target": target,
             "evidence": evidence,
@@ -1048,28 +1067,39 @@ def _match_cloud_storage_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_waf_param_combo(findings: List[dict]) -> List[dict]:
-    """Function _match_waf_param_combo."""
+    """
+    Match WAF bypass + parameter fuzzing combination.
+
+    Evidence is restricted to findings carrying either waf-bypass or
+    param-fuzz* tags — no unrelated findings for the target are included.
+    """
     results = []
     targets = _gather_target_tag_map(findings)
-    # Loop over items.
     for target, tags in targets.items():
-        if "waf-bypass" in tags and any(tag.startswith("param-fuzz") for tag in tags):
-            target_findings = [f for f in findings if f.get("target") == target]
-            evidence = [
-                f for f in target_findings
-                if "waf-bypass" in _finding_tag_set(f)
-                or any(tag.startswith("param-fuzz") for tag in _finding_tag_set(f))
-            ]
-            if not evidence:
-                continue
-            results.append({
-                "target": target,
-                "evidence": _dedupe_evidence(evidence),
-                "severity": "CRITICAL",
-                "score": 9.4,
-                "tags": ["waf-bypass", "param-fuzz"],
-                "impact": "WAF bypass triggered alongside parameter fuzzing indicates a critical bypass path.",
-            })
+        if "waf-bypass" not in tags:
+            continue
+        if not any(tag.startswith("param-fuzz") for tag in tags):
+            continue
+        # Only include findings that carry the signal tags
+        evidence = [
+            f for f in findings
+            if f.get("target") == target
+            and (
+                "waf-bypass" in _finding_tag_set(f)
+                or any(t.startswith("param-fuzz") for t in _finding_tag_set(f))
+            )
+        ]
+        evidence = _dedupe_evidence(evidence)
+        if not evidence:
+            continue
+        results.append({
+            "target": target,
+            "evidence": evidence,
+            "severity": "CRITICAL",
+            "score": 9.4,
+            "tags": ["waf-bypass", "param-fuzz"],
+            "impact": "WAF bypass triggered alongside parameter fuzzing indicates a critical bypass path.",
+        })
     return results
 
 
@@ -1205,33 +1235,55 @@ def _dedupe_evidence(evidence: List[dict]) -> List[dict]:
 
 
 def _match_auth_chain(findings: List[dict]) -> List[dict]:
-    """Function _match_auth_chain."""
+    """
+    Match authentication attack chains requiring 3+ signal categories.
+
+    Signal categories:
+      1. Auth surface (pw-reset OR auth tags)
+      2. Dev surface (dev-surface tag)
+      3. Missing headers (header-missing tag)
+      4. Weak crypto (crypto tag)
+
+    Evidence includes ONLY findings from the categories that actually fired,
+    preventing over-enrichment in the causal graph.
+    """
     tag_map = _gather_target_tag_map(findings)
     results = []
-    # Loop over items.
     for target, tags in tag_map.items():
-        signals = [
-            any(t in tags for t in ("pw-reset", "auth")),
-            "dev-surface" in tags,
-            "header-missing" in tags,
-            "crypto" in tags,
-        ]
-        if sum(bool(s) for s in signals) >= 3:
-            evidence = _findings_for_target_with_tags(
-                findings,
-                target,
-                {"pw-reset", "auth", "dev-surface", "header-missing", "crypto"},
-            )
-            if not evidence:
-                continue
-            results.append({
-                "target": target,
-                "evidence": _dedupe_evidence(evidence),
-                "severity": "HIGH",
-                "score": 8.8,
-                "tags": ["auth-chain", "workflow"],
-                "impact": "Credential interception and privilege escalation chain detected (weak TLS + missing hardening + exposed admin/login flows).",
-            })
+        # Check which signal categories are present
+        has_auth = any(t in tags for t in ("pw-reset", "auth"))
+        has_dev = "dev-surface" in tags
+        has_header = "header-missing" in tags
+        has_crypto = "crypto" in tags
+
+        fired = sum(bool(s) for s in [has_auth, has_dev, has_header, has_crypto])
+        if fired < 3:
+            continue
+
+        # Collect ONLY findings from the categories that actually triggered
+        triggered_tags: set = set()
+        if has_auth:
+            triggered_tags.update({"pw-reset", "auth"})
+        if has_dev:
+            triggered_tags.add("dev-surface")
+        if has_header:
+            triggered_tags.add("header-missing")
+        if has_crypto:
+            triggered_tags.add("crypto")
+
+        evidence = _findings_for_target_with_tags(
+            findings, target, triggered_tags,
+        )
+        if not evidence:
+            continue
+        results.append({
+            "target": target,
+            "evidence": _dedupe_evidence(evidence),
+            "severity": "HIGH",
+            "score": 8.8,
+            "tags": ["auth-chain", "workflow"],
+            "impact": "Credential interception and privilege escalation chain detected (weak TLS + missing hardening + exposed admin/login flows).",
+        })
     return results
 
 
@@ -1259,21 +1311,31 @@ def _match_directory_upload_chain(findings: List[dict]) -> List[dict]:
 
 
 def _match_ssrf_chain(findings: List[dict]) -> List[dict]:
-    """Function _match_ssrf_chain."""
+    """
+    Match SSRF attack chains: ssrf-source + cloud metadata indicators.
+
+    Evidence is restricted to findings that carry BOTH required signal tags,
+    not all SSRF-adjacent findings for the target.
+    """
     tag_map = _gather_target_tag_map(findings)
     results = []
-    # Loop over items.
     for target, tags in tag_map.items():
-        if "ssrf-source" in tags and "cloud" in tags:
-            evidence = [f for f in findings if f.get("target", "unknown") == target and any(tag in f.get("tags", []) for tag in ("ssrf-source", "cloud", "ssrf"))]
-            results.append({
-                "target": target,
-                "evidence": evidence,
-                "severity": "CRITICAL",
-                "score": 9.2,
-                "tags": ["ssrf-chain"],
-                "impact": "URL parameters referencing internal hosts plus metadata endpoints indicates a critical SSRF chain.",
-            })
+        if "ssrf-source" not in tags or "cloud" not in tags:
+            continue
+        # Only include findings that carry one of the two trigger tags
+        evidence = _findings_for_target_with_tags(
+            findings, target, {"ssrf-source", "cloud"},
+        )
+        if not evidence:
+            continue
+        results.append({
+            "target": target,
+            "evidence": _dedupe_evidence(evidence),
+            "severity": "CRITICAL",
+            "score": 9.2,
+            "tags": ["ssrf-chain"],
+            "impact": "URL parameters referencing internal hosts plus metadata endpoints indicates a critical SSRF chain.",
+        })
     return results
 
 
@@ -1318,65 +1380,60 @@ def _match_outdated_frameworks(findings: List[dict]) -> List[dict]:
 
 
 def _match_header_chain(findings: List[dict]) -> List[dict]:
-    """Function _match_header_chain."""
+    """
+    Match header hardening chains: CSP+upload or HSTS+weak-TLS.
+
+    Evidence is narrowly scoped to only the findings that form each chain:
+      - CSP chain: CSP-missing findings + upload-tagged findings
+      - HSTS chain: HSTS-missing findings + crypto-tagged findings
+    No unrelated findings are included.
+    """
     tag_map = _gather_target_tag_map(findings)
     results = []
-    # Loop over items.
     for target, tags in tag_map.items():
-        target_findings = [f for f in findings if f.get("target", "unknown") == target]
-        if not target_findings:
-            continue
-
-        missing_csp = any(
-            f.get("metadata", {}).get("header") == "content-security-policy"
-            for f in target_findings
-        )
-        upload_surface = "upload" in tags
-        missing_hsts = any(
-            f.get("metadata", {}).get("header") == "strict-transport-security"
-            for f in target_findings
-        )
-        weak_tls = "crypto" in tags
-
+        # Pre-filter: only findings for this target with relevant tags/metadata
         csp_findings = [
-            f for f in target_findings
-            if f.get("metadata", {}).get("header") == "content-security-policy"
+            f for f in findings
+            if f.get("target", "unknown") == target
+            and f.get("metadata", {}).get("header") == "content-security-policy"
         ]
         hsts_findings = [
-            f for f in target_findings
-            if f.get("metadata", {}).get("header") == "strict-transport-security"
+            f for f in findings
+            if f.get("target", "unknown") == target
+            and f.get("metadata", {}).get("header") == "strict-transport-security"
         ]
-        upload_findings = _findings_for_target_with_tags(
-            target_findings, target, {"upload"}
-        )
-        crypto_findings = _findings_for_target_with_tags(
-            target_findings, target, {"crypto"}
-        )
 
-        if missing_csp and upload_surface:
+        # CSP missing + upload surface → stored XSS chain
+        if csp_findings and "upload" in tags:
+            upload_findings = _findings_for_target_with_tags(
+                findings, target, {"upload"},
+            )
             evidence = _dedupe_evidence(csp_findings + upload_findings)
-            if not evidence:
-                continue
-            results.append({
-                "target": target,
-                "evidence": evidence,
-                "severity": "HIGH",
-                "score": 7.4,
-                "tags": ["stored-xss-chain"],
-                "impact": "Missing CSP combined with upload functionality enables stored XSS weaponization.",
-            })
-        if missing_hsts and weak_tls:
+            if evidence:
+                results.append({
+                    "target": target,
+                    "evidence": evidence,
+                    "severity": "HIGH",
+                    "score": 7.4,
+                    "tags": ["stored-xss-chain"],
+                    "impact": "Missing CSP combined with upload functionality enables stored XSS weaponization.",
+                })
+
+        # HSTS missing + weak TLS → downgrade chain
+        if hsts_findings and "crypto" in tags:
+            crypto_findings = _findings_for_target_with_tags(
+                findings, target, {"crypto"},
+            )
             evidence = _dedupe_evidence(hsts_findings + crypto_findings)
-            if not evidence:
-                continue
-            results.append({
-                "target": target,
-                "evidence": evidence,
-                "severity": "HIGH",
-                "score": 7.9,
-                "tags": ["tls-downgrade"],
-                "impact": "Missing HSTS plus weak TLS configuration permits protocol downgrade and credential theft.",
-            })
+            if evidence:
+                results.append({
+                    "target": target,
+                    "evidence": evidence,
+                    "severity": "HIGH",
+                    "score": 7.9,
+                    "tags": ["tls-downgrade"],
+                    "impact": "Missing HSTS plus weak TLS configuration permits protocol downgrade and credential theft.",
+                })
     return results
 
 

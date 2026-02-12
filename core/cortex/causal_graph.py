@@ -521,6 +521,13 @@ class CausalGraphBuilder:
                             or issue_segments[: len(f_segments)] == f_segments
                         ):
                             continue
+                            
+                        # [StrictMode] Prevent "Graph Explosion" from broad targets.
+                        # If the issue path is short (<= 1 segment, e.g. "/api" or "/login"),
+                        # only allow EXACT matches. Do not allow it to enrich all children.
+                        if len(issue_segments) < 2 and len(f_segments) != len(issue_segments):
+                            continue
+
                         if not _passes_tier3_semantic_guard(finding, candidate_issue):
                             continue
 
