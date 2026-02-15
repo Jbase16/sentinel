@@ -155,6 +155,13 @@ COMMON_WORDLIST = WordlistManager.get_path("common.txt")
 class ToolDefinition(BaseModel):
     """
     Defines the capabilities and execution requirements of a security tool.
+
+    Supports two tool types:
+      - "subprocess" (default): External binary executed via asyncio.create_subprocess_exec.
+      - "internal": Python-based tool that runs in-process via InternalTool.execute().
+
+    Internal tools set tool_type="internal" and provide a handler instance.
+    The cmd_template field is ignored for internal tools (set to ["internal"]).
     """
     name: str = Field(..., description="Unique identifier for the tool")
     label: str = Field(..., description="Human-readable description")
@@ -163,6 +170,10 @@ class ToolDefinition(BaseModel):
     target_type: str = Field("url", description="Type of target input: host, domain, ip, url")
     binary_name: Optional[str] = Field(default=None, description="Expected binary name if different from first cmd arg")
     stdin_input: bool = Field(default=False, description="If True, target is passed via stdin")
+    tool_type: str = Field("subprocess", description="subprocess or internal")
+    handler: Optional[Any] = Field(default=None, exclude=True, description="InternalTool instance for internal tools")
+
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class ToolRegistry:

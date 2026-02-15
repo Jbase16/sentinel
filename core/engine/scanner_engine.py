@@ -1478,6 +1478,76 @@ class ScannerEngine:
         logger.warning("[ScannerEngine] 🛡️ ACTIVATING STEALTH MODE due to detected WAF/Block.")
         self.resource_guard.set_stealth_mode(True)
 
+    async def _execute_internal_tool(
+        self,
+        exec_id: str,
+        tool: str,
+        target: str,
+        queue: asyncio.Queue[str],
+        tool_def: Any,
+    ) -> List[dict]:
+        """
+        Execute a Python-based internal tool (InternalTool subclass).
+
+        Internal tools run in-process and return findings in the standard
+        dict schema.  They receive an InternalToolContext with existing
+        findings and shared scan knowledge so they can make data-driven
+        decisions about what to verify/fuzz/test.
+        """
+        from core.toolkit.internal_tool import InternalToolContext
+
+        await queue.put(f"--- Running {tool} [internal] ({exec_id}) ---")
+
+        # Build context from current scan state
+        existing_findings = []
+        if self._active_transaction and hasattr(self._active_transaction, "_staged_findings"):
+            existing_findings = list(self._active_transaction._staged_findings)
+        elif self.session and hasattr(self.session, "findings"):
+            existing_findings = list(getattr(self.session.findings, "items", lambda: [])())
+
+        knowledge = {}
+        if self.session and hasattr(self.session, "knowledge"):
+            knowledge = getattr(self.session, "knowledge", {})
+
+        scan_id = getattr(self.session, "scan_id", exec_id) if self.session else exec_id
+        session_id = getattr(self.session, "session_id", exec_id) if self.session else exec_id
+
+        ctx = InternalToolContext(
+            target=target,
+            scan_id=str(scan_id),
+            session_id=str(session_id),
+            existing_findings=existing_findings,
+            knowledge=knowledge,
+            mode=knowledge.get("execution_mode", "research"),
+        )
+
+        tool_timeout = self._tool_timeout_seconds()
+        start_time = asyncio.get_running_loop().time()
+
+        try:
+            findings = await asyncio.wait_for(
+                tool_def.handler.execute(target, ctx, queue),
+                timeout=tool_timeout,
+            )
+        except asyncio.TimeoutError:
+            elapsed = asyncio.get_running_loop().time() - start_time
+            msg = f"[{tool}] internal tool timed out after {elapsed:.1f}s"
+            logger.warning(msg)
+            await queue.put(f"[{exec_id}] {msg}")
+            return []
+        except Exception as exc:
+            msg = f"[{tool}] internal tool error: {exc}"
+            logger.error(msg, exc_info=True)
+            self._last_tool_error = ToolError(tool=tool, exit_code=-1, stderr=str(exc)).details
+            await queue.put(f"[{exec_id}] {msg}")
+            return []
+
+        elapsed = asyncio.get_running_loop().time() - start_time
+        await queue.put(
+            f"[{exec_id}] {tool} completed: {len(findings)} findings in {elapsed:.1f}s"
+        )
+        return findings
+
     async def _execute_tool(
         self,
         exec_id: str,
@@ -1487,6 +1557,14 @@ class ScannerEngine:
         args: List[str] | None,
         cancel_flag: asyncio.Event,
     ) -> List[dict]:
+        # ── Internal tool dispatch ──────────────────────────────────────
+        # If the tool is registered as "internal", run its Python handler
+        # instead of shelling out to a subprocess.
+        tool_def = TOOLS.get(tool)
+        if tool_def and tool_def.tool_type == "internal" and tool_def.handler is not None:
+            return await self._execute_internal_tool(exec_id, tool, target, queue, tool_def)
+
+        # ── Subprocess tool dispatch (existing path) ────────────────────
         meta_override = self._installed_meta.get(tool)
 
         tool_timeout = self._tool_timeout_seconds()
