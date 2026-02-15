@@ -6,7 +6,7 @@ This module provides the STRICT runtime validation models for the EventContract.
 Every event type related to Omega/Governance MUST have a corresponding schema here.
 """
 
-from typing import Dict, List, Optional, Any, Literal
+from typing import Dict, List, Optional, Any, Literal, Type, Callable
 from enum import Enum
 import time
 from datetime import datetime

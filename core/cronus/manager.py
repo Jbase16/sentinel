@@ -134,11 +134,14 @@ class CronusManager:
 
         budget = payload.get("budget")
         if not isinstance(budget, Budget):
-            logger.warning(
-                "[CronusManager] SCAN_STARTED missing Budget; skipping CronusSession",
+            # Config drift fix: create a sane default Budget instead of skipping.
+            # Without this, Cronus is silently disabled for every scan that doesn't
+            # explicitly pass a Budget in the SCAN_STARTED event payload.
+            logger.info(
+                "[CronusManager] SCAN_STARTED missing Budget; using default (900s, 500 findings)",
                 extra={"scan_id": scan_id},
             )
-            return
+            budget = Budget(max_time_ms=900_000)  # 15 min default, 500 findings default
 
         if not scan_id:
             logger.warning("[CronusManager] SCAN_STARTED missing scan_id; skipping CronusSession")

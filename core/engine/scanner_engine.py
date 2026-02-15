@@ -230,6 +230,19 @@ MAX_CONCURRENT_TOOLS = calculate_concurrent_limit()
 
 DEFAULT_TOOL_TIMEOUT_SECONDS = get_config().scan.tool_timeout_seconds
 DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS = 60  # 1 minute without output => consider stuck
+
+# Per-tool idle timeout overrides (seconds).
+# Long-running tools like nmap emit output in bursts, not continuously.
+# Without per-tool overrides, the global 60s idle watchdog kills them prematurely.
+TOOL_IDLE_TIMEOUT_OVERRIDES: dict = {
+    "nmap": 300,       # nmap can go 5min between output bursts during host discovery
+    "masscan": 180,    # masscan is fast but bursty
+    "testssl": 180,    # testssl does cipher enumeration which takes time
+    "nuclei": 180,     # nuclei batches templates, long silent periods
+    "feroxbuster": 120,# recursive dir brute can stall between depth levels
+    "nikto": 120,      # nikto has slow sequential tests
+    "amass": 300,      # amass passive can be very slow
+}
 DEFAULT_GLOBAL_SCAN_TIMEOUT_SECONDS = 900  # 15 minutes overall cap
 
 
@@ -723,7 +736,10 @@ class ScannerEngine:
     def _tool_timeout_seconds(self) -> int:
         return get_config().scan.tool_timeout_seconds
 
-    def _tool_idle_timeout_seconds(self) -> int:
+    def _tool_idle_timeout_seconds(self, tool_name: str = "") -> int:
+        """Get idle timeout for a tool. Per-tool overrides take priority, then env var, then default."""
+        if tool_name and tool_name in TOOL_IDLE_TIMEOUT_OVERRIDES:
+            return TOOL_IDLE_TIMEOUT_OVERRIDES[tool_name]
         return self._get_env_seconds("SCANNER_TOOL_IDLE_TIMEOUT", DEFAULT_TOOL_IDLE_TIMEOUT_SECONDS)
 
     def _global_scan_timeout_seconds(self) -> int:
@@ -1472,7 +1488,7 @@ class ScannerEngine:
         meta_override = self._installed_meta.get(tool)
 
         tool_timeout = self._tool_timeout_seconds()
-        idle_timeout = self._tool_idle_timeout_seconds()
+        idle_timeout = self._tool_idle_timeout_seconds(tool_name=tool)
 
         if args:
             cmd = [tool] + args

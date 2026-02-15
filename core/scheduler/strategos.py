@@ -81,6 +81,24 @@ from core.scheduler.decisions import (
 from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.policy import ScopePolicy, RiskPolicy, Verdict
 
+# --- Integration: Capability Tiers + Feedback Loop + WAF Bypass ---
+from core.cortex.capability_tiers import (
+    CapabilityGate,
+    CapabilityTier,
+    ExecutionMode,
+    GateResult,
+    TOOL_TIER_CLASSIFICATION,
+    get_capability_gate,
+    set_capability_gate,
+)
+from core.scheduler.feedback_loop import (
+    ActionFeedback,
+    ActionOutcome,
+    FeedbackTracker,
+    StrategyAdvisor,
+    create_feedback_system,
+)
+
 if TYPE_CHECKING:
     from core.cortex.narrator import NarratorEngine
 
@@ -95,9 +113,11 @@ PROGRESS_LOG_THROTTLE_SECONDS = 0.5   # avoid spam under high event volume
 
 
 class ReconSkipReason(str, Enum):
-    LOCAL_OR_IP_TARGET = "LOCAL_OR_IP_TARGET"
-    FILE_TARGET = "FILE_TARGET"
-    NO_RECON_TOOLS_AVAILABLE = "NO_RECON_TOOLS_AVAILABLE"
+    # Honest names: we're skipping DNS/WHOIS passive recon, not all recon.
+    # Active probing (Phase 2+) still runs. Don't pretend otherwise.
+    DNS_RECON_IRRELEVANT_FOR_IP = "DNS_RECON_IRRELEVANT_FOR_IP"  # was LOCAL_OR_IP_TARGET
+    DNS_RECON_IRRELEVANT_FOR_FILE = "DNS_RECON_IRRELEVANT_FOR_FILE"  # was FILE_TARGET
+    NO_PASSIVE_RECON_TOOLS = "NO_PASSIVE_RECON_TOOLS"  # was NO_RECON_TOOLS_AVAILABLE
 
 
 def _clamp_int(value: int, lo: int, hi: int) -> int:
@@ -383,7 +403,14 @@ class Strategos:
         self._decision_ctx: Optional[DecisionContext] = None
         self._current_intent_decision: Optional[DecisionPoint] = None
 
-        # Layer 4: Policy arbitration
+        # Layer 4: Capability Gate + Feedback Loop
+        self._capability_gate: CapabilityGate = get_capability_gate()
+        self._feedback_tracker, self._action_queue, self._strategy_advisor = create_feedback_system(logger=logger)
+
+        # Dedup set for reactive signals (prevents "💥 Confirmed vulnerability" spam)
+        self._emitted_vuln_signals: Set[str] = set()
+
+        # Layer 5: Policy arbitration
         self.arbitrator = ArbitrationEngine()
         self.arbitrator.register_policy(ScopePolicy())
         self.arbitrator.register_policy(RiskPolicy())
@@ -502,9 +529,9 @@ class Strategos:
         from core.toolkit.normalizer import TargetClassification
 
         if target_classification in (TargetClassification.IP, TargetClassification.LOOPBACK):
-            return ReconSkipReason.LOCAL_OR_IP_TARGET
+            return ReconSkipReason.DNS_RECON_IRRELEVANT_FOR_IP
         if target_classification == TargetClassification.FILE:
-            return ReconSkipReason.FILE_TARGET
+            return ReconSkipReason.DNS_RECON_IRRELEVANT_FOR_FILE
         return None
 
     def _emit_recon_skipped(
@@ -597,6 +624,19 @@ class Strategos:
         self._terminated = False
         self._stop_requested = False
         self._stop_deadline = None
+
+        # --- Integration: register target in capability gate scope ---
+        self._capability_gate.add_scope_target(target)
+        # Map ScanMode → ExecutionMode (BOUNTY modes get BOUNTY gate, rest get RESEARCH)
+        if mode in (ScanMode.BUG_BOUNTY,):
+            self._capability_gate.set_mode(ExecutionMode.BOUNTY)
+        else:
+            self._capability_gate.set_mode(ExecutionMode.RESEARCH)
+        set_capability_gate(self._capability_gate)
+
+        # Reset per-scan feedback state
+        self._feedback_tracker, self._action_queue, self._strategy_advisor = create_feedback_system(logger=logger)
+        self._emitted_vuln_signals = set()
 
         self._dispatch_callback = dispatch_tool
         self._tool_tasks = {}
@@ -696,7 +736,7 @@ class Strategos:
                     if recon_skip_reason is None:
                         tools_to_run = self._select_tools(current_intent, available_tools, mode)
                         if not tools_to_run:
-                            recon_skip_reason = ReconSkipReason.NO_RECON_TOOLS_AVAILABLE
+                            recon_skip_reason = ReconSkipReason.NO_PASSIVE_RECON_TOOLS
                     if recon_skip_reason is not None:
                         recon_skipped = True
                         self._emit_recon_skipped(
@@ -755,12 +795,17 @@ class Strategos:
                             rationale = "No significant findings or surface expansion."
                             suppressed = ["ESCALATE_INTENSITY"]
 
-                        # Explicitly cite evidence
+                        # Explicitly cite evidence — enriched with feedback intelligence
+                        _intel = self._feedback_tracker.get_target_intelligence(self.context.target)
                         evidence_pkg = {
                             "findings_total": len(self.context.findings),
                             "findings_new": self.context.findings_this_intent,
                             "surface_new": self.context.surface_delta_this_intent,
-                            "mode": mode.value
+                            "mode": mode.value,
+                            "feedback_success_rate": round(_intel.success_rate, 3),
+                            "feedback_total_actions": _intel.total_actions,
+                            "waf_detected": _intel.waf_detected or False,
+                            "budget_remaining": self._capability_gate.get_budget(self.context.target).remaining_tokens,
                         }
 
                         self._decision_ctx.choose(
@@ -846,6 +891,30 @@ class Strategos:
         reason = "Mission Complete. All intents exhausted or Walk Away triggered."
         if self._stop_requested:
             reason = "Mission Cancelled by operator."
+
+        # --- Integration: emit feedback loop summary ---
+        try:
+            feedback_stats = self._feedback_tracker.get_statistics()
+            self._emit_log(
+                f"[Strategos] Feedback Summary: "
+                f"actions={feedback_stats['total_actions']}, "
+                f"successes={feedback_stats['total_successes']}, "
+                f"rate={feedback_stats['overall_success_rate']:.1%}, "
+                f"tools_deployed={feedback_stats['tools_deployed']}, "
+                f"waf_encounters={feedback_stats['waf_encounters']}"
+            )
+            budget = self._capability_gate.get_budget(self.context.target) if self.context else None
+            if budget:
+                self._emit_log(
+                    f"[Strategos] Budget: {budget.remaining_tokens}/{budget.max_tokens} tokens remaining, "
+                    f"{budget.actions_taken} actions taken"
+                )
+            # Emit lesson learned for the target
+            if self.context:
+                lesson = self._strategy_advisor.get_lesson_learned(self.context.target)
+                self._emit_log(f"[Strategos] {lesson}")
+        except Exception as e:
+            logger.debug(f"[Strategos] Failed to emit feedback summary: {e}")
 
         self._emit_log(f"[Strategos] {reason}")
         return MissionTerminatedEvent(reason=reason)
@@ -1012,6 +1081,40 @@ class Strategos:
                 if self._tool_semaphore is not None:
                     self._tool_semaphore.release()
 
+            # --- Integration: feed ActionFeedback into FeedbackTracker ---
+            try:
+                outcome = ActionOutcome.SUCCESS if success else ActionOutcome.FAILURE
+                if not success and duration > timeout_s * 0.95:
+                    outcome = ActionOutcome.TIMEOUT
+
+                # Derive vuln_class from tool tier classification
+                tool_tier = TOOL_TIER_CLASSIFICATION.get(tool, CapabilityTier.T1_PROBE)
+                vuln_class = "GENERAL"
+                # Infer vuln_class from findings if possible
+                for f in findings[:3]:
+                    ft = str(f.get("type", "")).lower()
+                    if ft in ("sqli", "xss", "rce", "ssrf", "lfi"):
+                        vuln_class = ft.upper()
+                        break
+
+                feedback = ActionFeedback(
+                    action_id=f"{self.context.scan_id}_{tool}_{int(start)}",
+                    target=self.context.target,
+                    tool_name=tool,
+                    vuln_class=vuln_class,
+                    tier=int(tool_tier),
+                    outcome=outcome,
+                    evidence_count=len(findings),
+                    max_evidence_confidence=0.7 if findings else 0.0,
+                    waf_detected=self.context.knowledge.get("waf_details", {}).get("waf_name") if self.context.knowledge.get("waf_detected") else None,
+                    elapsed_ms=duration * 1000,
+                    error_detail=None,
+                    timestamp=time.time(),
+                )
+                self._feedback_tracker.process_feedback(feedback)
+            except Exception as e:
+                logger.debug(f"[Strategos] Failed to record feedback for {tool}: {e}")
+
             # Emit existing TOOL_COMPLETED event (no new EventTypes invented)
             if self._event_bus:
                 try:
@@ -1162,19 +1265,31 @@ class Strategos:
         if not self.context:
             return
 
+        # --- Integration: deduplicate reactive signals ---
+        # Without this, every single finding triggers "💥 Confirmed vulnerability" spam.
+        # We dedup on (target, vuln_type, source_tool) to keep it meaningful.
+        vuln_type = insight.details.get("vuln_type") or insight.details.get("type", "unknown")
+        dedup_key = f"{insight.target}|{vuln_type}|{insight.source_tool}"
+        is_new = dedup_key not in self._emitted_vuln_signals
+        self._emitted_vuln_signals.add(dedup_key)
+
         async with self.context.lock:
             self.context.knowledge.setdefault("confirmed_vulns", [])
             self.context.knowledge["confirmed_vulns"].append(
                 {
                     "target": insight.target,
-                    "vuln_type": insight.details.get("vuln_type") or insight.details.get("type", ""),
+                    "vuln_type": vuln_type,
                     "insight_id": insight.insight_id,
                     "confidence": insight.confidence,
                 }
             )
 
-        await self._emit_reaction_decision(insight)
-        self._emit_log(f"[Strategos] 💥 Confirmed vulnerability: {insight.summary}")
+        # Only emit decision + log for truly NEW vuln types (not every finding)
+        if is_new:
+            await self._emit_reaction_decision(insight)
+            self._emit_log(f"[Strategos] 💥 Confirmed vulnerability: {insight.summary}")
+        else:
+            logger.debug(f"[Strategos] Duplicate vuln signal suppressed: {dedup_key}")
 
     async def _handle_waf_detected(self, insight: InsightPayload) -> None:
         if not self.context:
@@ -1183,6 +1298,17 @@ class Strategos:
         async with self.context.lock:
             self.context.knowledge["waf_detected"] = True
             self.context.knowledge["waf_details"] = insight.details
+
+            # --- Integration: initialize WAF bypass engine ---
+            if "waf_bypass_engine" not in self.context.knowledge:
+                try:
+                    from core.wraith.waf_bypass import WAFBypassEngine
+                    waf_engine = WAFBypassEngine()
+                    self.context.knowledge["waf_bypass_engine"] = waf_engine
+                    waf_name = insight.details.get("waf_name", "unknown")
+                    logger.info(f"[Strategos] WAFBypassEngine initialized for {waf_name}")
+                except Exception as e:
+                    logger.warning(f"[Strategos] Failed to initialize WAFBypassEngine: {e}")
 
         await self._emit_reaction_decision(insight)
         self._emit_log(f"[Strategos] 🛡 WAF detected: {insight.summary}")
@@ -1337,6 +1463,42 @@ class Strategos:
         summary = ""
         priority = self._normalize_insight_priority(finding.get("priority", 5))
 
+        # --- P0: Source code / credential exposure findings ---
+        # .git/config, .env, .git/HEAD, debug consoles, etc. are "stop everything" findings.
+        # They can lead to full source disclosure, credential theft, and RCE.
+        # These bypass the normal priority system and get priority 0 (highest).
+        _P0_SOURCE_EXPOSURE_INDICATORS = {
+            ".git/config", ".git/head", ".git/", ".gitignore",
+            ".env", ".svn/", ".hg/", ".DS_Store",
+            "debug", "console", "phpinfo", "server-status",
+            "wp-config", "config.php", "database.yml",
+            ".aws/credentials", ".ssh/", "id_rsa",
+        }
+        details = finding.get("details", {}) or {}
+        finding_path = str(details.get("path", "") or finding.get("target", "")).lower()
+        finding_description = str(finding.get("description", "")).lower()
+        is_p0_exposure = any(
+            indicator in finding_path or indicator in finding_description
+            for indicator in _P0_SOURCE_EXPOSURE_INDICATORS
+        )
+        if is_p0_exposure:
+            action_type = InsightActionType.HIGH_VALUE_TARGET
+            confidence = 1.0
+            summary = f"🚨 P0 Source/Config Exposure: {finding_path or finding_type_raw} at {target}"
+            priority = 0
+            return InsightPayload(
+                insight_id=uuid.uuid4().hex,
+                scan_id=self.context.scan_id,
+                action_type=action_type,
+                confidence=confidence,
+                target=target,
+                summary=summary,
+                details={"finding_type": finding_type, "path": finding_path, "severity": "critical", "p0": True},
+                source_tool=finding.get("source", "strategos_inference"),
+                source_finding_id=finding.get("id"),
+                priority=priority,
+            )
+
         # Security boundary findings still follow explicit deterministic mapping.
         if finding_type == "waf_detected":
             action_type = InsightActionType.WAF_DETECTED
@@ -1464,14 +1626,37 @@ class Strategos:
         candidates = [t for t in candidates if t in available_tools]
         candidates = [t for t in candidates if t not in self.context.completed_tools_per_intent.get(intent, set())]
 
-        # Filter tools incompatible with target type (e.g. amass on localhost)
-        from core.toolkit.normalizer import is_private_target
-        from core.toolkit.registry import TOOLS_REQUIRING_PUBLIC_DOMAIN, TOOLS_REQUIRING_ROOT
+        # Filter tools incompatible with target type
+        from core.toolkit.normalizer import is_private_target, is_localhost_target
+        from core.toolkit.registry import (
+            TOOLS_REQUIRING_PUBLIC_DOMAIN, TOOLS_REQUIRING_ROOT,
+            TOOLS_REQUIRING_TLS, TOOLS_HOST_WIDE_PORT_SCAN,
+        )
         if is_private_target(self.context.target):
             candidates = [t for t in candidates if t not in TOOLS_REQUIRING_PUBLIC_DOMAIN]
         import os
         if os.geteuid() != 0:
             candidates = [t for t in candidates if t not in TOOLS_REQUIRING_ROOT]
+
+        # --- Policy A: Block TLS tools on non-HTTPS targets ---
+        # If target scheme is http (not https) and no https listener discovered,
+        # TLS scanners are guaranteed noise (testssl, pshtt, sslyze).
+        target_scheme = urlparse(self.context.target).scheme or "http"
+        https_discovered = self.context.knowledge.get("https_discovered", False)
+        if target_scheme != "https" and not https_discovered:
+            tls_blocked = [t for t in candidates if t in TOOLS_REQUIRING_TLS]
+            if tls_blocked:
+                candidates = [t for t in candidates if t not in TOOLS_REQUIRING_TLS]
+                self._emit_log(f"[Strategos] Policy: Blocked TLS tools {tls_blocked} — target is {target_scheme}, no HTTPS listener found")
+
+        # --- Policy B: Block host-wide port scanners on loopback ---
+        # nmap/naabu on localhost find YOUR machine's ports, not the app's.
+        # This produces irrelevant noise (port 22, 445, 5432, etc.)
+        if is_localhost_target(self.context.target):
+            port_scan_blocked = [t for t in candidates if t in TOOLS_HOST_WIDE_PORT_SCAN]
+            if port_scan_blocked:
+                candidates = [t for t in candidates if t not in TOOLS_HOST_WIDE_PORT_SCAN]
+                self._emit_log(f"[Strategos] Policy: Blocked host-wide port scanners {port_scan_blocked} — target is loopback")
 
         scored: List[Tuple[str, int]] = []
         rejected_count = 0
@@ -1484,6 +1669,14 @@ class Strategos:
             if tool_def.get("disabled"):
                 rejected_count += 1
                 reasons.setdefault("Mode Overlay", []).append(t)
+                continue
+
+            # --- Integration: CapabilityGate tier check ---
+            gate_result = self._capability_gate.evaluate_tool(self.context.target, t)
+            if not gate_result.approved:
+                rejected_count += 1
+                reason = f"Capability Gate: {gate_result.reason}"
+                reasons.setdefault(reason, []).append(t)
                 continue
 
             sim_ctx = {
@@ -1556,13 +1749,62 @@ class Strategos:
         priority = overlay.priority_boost if overlay and overlay.priority_boost else 0
         cost = int(tool_def.get("cost", 1))
         intrusiveness = int(tool_def.get("intrusiveness", 1))
-        return (priority * 10) - (cost * 2) - intrusiveness
+
+        # --- Integration: boost score with feedback effectiveness ---
+        effectiveness_boost = 0
+        if tool_name:
+            effectiveness = self._feedback_tracker.get_tool_effectiveness(tool_name)
+            # effectiveness is 0.0-1.0; 0.5 is neutral/unknown → net-zero boost
+            effectiveness_boost = int((effectiveness - 0.5) * 10)
+
+        return (priority * 10) - (cost * 2) - intrusiveness + effectiveness_boost
 
     def _decide_next_step(self, current_intent: str) -> Optional[str]:
         if self.context is None or current_intent is None:
             return INTENT_PASSIVE_RECON
 
         mode = self.context.knowledge.get("mode", ScanMode.STANDARD)
+
+        # --- Integration: consult StrategyAdvisor for abandonment ---
+        target = self.context.target
+        intel = self._feedback_tracker.get_target_intelligence(target)
+        if intel.total_actions >= 3:
+            # Check if advisor recommends abandoning this target entirely
+            if self._strategy_advisor.should_abandon(target, "GENERAL"):
+                self._emit_log(
+                    f"[Strategos] StrategyAdvisor: ABANDON {target} "
+                    f"(success_rate={intel.success_rate:.1%}, actions={intel.total_actions})"
+                )
+                if self._decision_ctx:
+                    self._decision_ctx.choose(
+                        decision_type=DecisionType.EARLY_TERMINATION,
+                        chosen="ADVISOR_ABANDON",
+                        reason=f"StrategyAdvisor recommends abandonment: {self._strategy_advisor.get_lesson_learned(target)}",
+                        context={"from": current_intent, "mode": mode.value, "target": target},
+                        evidence={
+                            "success_rate": intel.success_rate,
+                            "total_actions": intel.total_actions,
+                            "failed_actions": intel.failed_actions,
+                        },
+                    )
+                return None
+
+        # --- Integration: check budget exhaustion ---
+        budget = self._capability_gate.get_budget(target)
+        if budget.is_exhausted:
+            self._emit_log(
+                f"[Strategos] Budget exhausted for {target} "
+                f"({budget.remaining_tokens} tokens, {budget.time_remaining:.0f}s remaining). Terminating."
+            )
+            if self._decision_ctx:
+                self._decision_ctx.choose(
+                    decision_type=DecisionType.EARLY_TERMINATION,
+                    chosen="BUDGET_EXHAUSTED",
+                    reason=f"Budget exhausted: {budget.summary()}",
+                    context={"from": current_intent, "mode": mode.value, "target": target},
+                    evidence=budget.summary(),
+                )
+            return None
 
         # If assessment concluded the phase (no new findings/surface), stop advancing.
         # Without this gate, the scan unconditionally progresses through all 5 phases

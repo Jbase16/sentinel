@@ -354,6 +354,10 @@ for tool in _tool_data:
 TOOLS_REQUIRING_PUBLIC_DOMAIN = {"amass", "subfinder", "dnsx", "assetfinder"}
 # Tools that require root/sudo privileges
 TOOLS_REQUIRING_ROOT = {"masscan"}
+# TLS/SSL tools — only meaningful when target scheme is https or port 443 discovered
+TOOLS_REQUIRING_TLS = {"testssl", "pshtt", "sslyze"}
+# Host-wide port scanners — on loopback these find the host's ports, not the app's
+TOOLS_HOST_WIDE_PORT_SCAN = {"naabu", "nmap", "masscan"}
 
 
 def get_tool_command(name: str, target: str, override: Optional[ToolDefinition] = None) -> tuple[List[str], str | None]:
