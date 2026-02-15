@@ -265,11 +265,28 @@ _tool_data = [
         target_type="url"
     ),
     ToolDefinition(
-        name="nuclei",
-        label="nuclei (vulnerability templates)",
-        cmd_template=["nuclei", "-target", "{target}", "-severity", "low,medium,high,critical"],
+        name="nuclei_safe",
+        label="nuclei (safe profile: low severity)",
+        cmd_template=["nuclei", "-target", "{target}", "-severity", "low"],
         aggressive=True,
-        target_type="url"
+        target_type="url",
+        binary_name="nuclei",
+    ),
+    ToolDefinition(
+        name="nuclei_mutating",
+        label="nuclei (mutating profile: medium/high/critical)",
+        cmd_template=["nuclei", "-target", "{target}", "-severity", "medium,high,critical"],
+        aggressive=True,
+        target_type="url",
+        binary_name="nuclei",
+    ),
+    ToolDefinition(
+        name="nuclei",
+        label="nuclei (legacy alias: safe profile)",
+        cmd_template=["nuclei", "-target", "{target}", "-severity", "low"],
+        aggressive=True,
+        target_type="url",
+        binary_name="nuclei",
     ),
     ToolDefinition(
         name="nikto",

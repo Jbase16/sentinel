@@ -350,12 +350,13 @@ class PressureGraphManager(Observable):
         Handle new issues from issues_store.
         Converts issues to pressure nodes.
         """
-        if not issues_store:
+        store = self._issues_store if self._issues_store else issues_store
+        if not store:
             return
         
         # Get all issues
         try:
-            issues = issues_store.get_all()
+            issues = store.get_all()
         except Exception:
             # Store might not be fully initialized
             return
@@ -381,12 +382,13 @@ class PressureGraphManager(Observable):
         Handle new killchain edges from killchain_store.
         Converts killchain edges to pressure edges.
         """
-        if not killchain_store:
+        store = self._killchain_store if self._killchain_store else killchain_store
+        if not store:
             return
         
         # Get all edges
         try:
-            edges = killchain_store.get_all()
+            edges = store.get_all()
         except Exception:
             # Store might not be fully initialized
             return
@@ -403,8 +405,6 @@ class PressureGraphManager(Observable):
         if self.crown_jewel_ids:
             self.recompute_pressure()
         
-        self.graph_updated.emit()
-    
         self.graph_updated.emit()
         
     def _on_findings_changed(self):

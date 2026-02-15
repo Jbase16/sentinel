@@ -183,7 +183,19 @@ class ScanConfig:
     # These are active/intrusive tools that could trigger alerts or cause damage
     # (nmap sends probe packets, sqlmap tests for SQL injection, etc.)
     # Also includes system tools (brew, pip) that could modify the environment
-    restricted_tools: tuple = ("nmap", "nikto", "nuclei", "gobuster", "feroxbuster", "sqlmap", "masscan", "brew", "pip")
+    restricted_tools: tuple = (
+        "nmap",
+        "nikto",
+        "nuclei",
+        "nuclei_safe",
+        "nuclei_mutating",
+        "gobuster",
+        "feroxbuster",
+        "sqlmap",
+        "masscan",
+        "brew",
+        "pip",
+    )
 
 
 # ============================================================================

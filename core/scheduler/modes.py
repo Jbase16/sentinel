@@ -60,7 +60,9 @@ class ModeRegistry:
         "subjack": ToolOverlay(priority_boost=5), # High impact, low noise
         
         # Restrict Noisy Tools
-        "nuclei": ToolOverlay(cost_modifier=1), # Nuanced: Nuclei is loud
+        "nuclei_safe": ToolOverlay(cost_modifier=1),      # low severity profile
+        "nuclei_mutating": ToolOverlay(cost_modifier=2),  # medium/high/critical profile
+        "nuclei": ToolOverlay(cost_modifier=1),           # legacy alias
         "gobuster": ToolOverlay(disabled=True), # Brute force is boring
         "feroxbuster": ToolOverlay(disabled=True),
         "wfuzz": ToolOverlay(disabled=True),
@@ -71,6 +73,8 @@ class ModeRegistry:
     STEALTH_OVERLAY: Dict[str, ToolOverlay] = {
         "nmap": ToolOverlay(disabled=True), # Too loud
         "masscan": ToolOverlay(disabled=True),
+        "nuclei_safe": ToolOverlay(disabled=True),
+        "nuclei_mutating": ToolOverlay(disabled=True),
         "nuclei": ToolOverlay(disabled=True),
         "dirsearch": ToolOverlay(disabled=True),
         "wfuzz": ToolOverlay(disabled=True),

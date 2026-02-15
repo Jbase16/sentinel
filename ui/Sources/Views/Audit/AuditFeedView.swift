@@ -1,43 +1,68 @@
 import SwiftUI
-import Combine
 
 struct AuditFeedView: View {
-    // Use the shared EventStreamClient (likely from Environment in a real app, but instantiating here for now to match pattern)
-    // Ideally this should be injected, but we will instantiate it here to replace the Zombie Ledger client.
-    // NOTE: In production, this should come from @EnvironmentObject var eventClient: EventStreamClient
-    @StateObject private var client = EventStreamClient()
-    @State private var events: [GraphEvent] = []
+    @EnvironmentObject var appState: HelixAppState
+    @State private var includeLogs = false
+
+    private var displayEvents: [GraphEvent] {
+        var seen = Set<String>()
+        var output: [GraphEvent] = []
+        for event in appState.allEvents.reversed() {
+            if !seen.insert(event.id).inserted {
+                continue
+            }
+            if !includeLogs && event.eventType == .log {
+                continue
+            }
+            if event.eventType == .nodeAdded
+                || event.eventType == .nodeUpdated
+                || event.eventType == .nodeRemoved
+                || event.eventType == .edgeAdded
+                || event.eventType == .edgeUpdated
+            {
+                continue
+            }
+            output.append(event)
+            if output.count >= 300 {
+                break
+            }
+        }
+        return output
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
             HStack {
-                Text("EPISTEMIC LEDGER API (SSE)")
+                Text("AUDIT FEED")
                     .font(.caption)
                     .fontWeight(.bold)
                     .foregroundColor(.gray)
                 Spacer()
+                Toggle("Logs", isOn: $includeLogs)
+                    .toggleStyle(.switch)
+                    .font(.caption2)
+                    .labelsHidden()
+                Text(includeLogs ? "logs:on" : "logs:off")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                Text("\(displayEvents.count)")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
                 Circle()
-                    .fill(client.isConnected ? Color.green : Color.red)
+                    .fill(appState.eventClient.isConnected ? Color.green : Color.red)
                     .frame(width: 8, height: 8)
             }
             .padding()
             .background(Color.black.opacity(0.2))
 
             // List
-            List(events) { event in
+            List(displayEvents) { event in
                 EventRow(event: event)
             }
             .listStyle(.plain)
         }
         .background(Color(red: 0.05, green: 0.05, blue: 0.08))
-        .onAppear {
-            client.connect()
-        }
-        .onReceive(client.eventPublisher) { event in
-            events.insert(event, at: 0)
-            if events.count > 200 { events.removeLast() }
-        }
     }
 }
 

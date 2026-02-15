@@ -34,14 +34,57 @@ def test_real_evaluation_consumes_budget() -> None:
     assert budget.actions_by_tier[CapabilityTier.T2a_SAFE_VERIFY] == 1
 
 
-def test_nuclei_blocked_in_research_mode() -> None:
+def test_nuclei_mutating_blocked_in_research_mode() -> None:
     gate = CapabilityGate(mode=ExecutionMode.RESEARCH)
     target = "https://example.test"
     gate.add_scope_target(target)
 
-    result = gate.evaluate_tool(target, "nuclei", dry_run=True)
+    result = gate.evaluate_tool(target, "nuclei_mutating", dry_run=True)
     assert result.approved is False
     assert "not allowed in research mode" in result.reason
+
+
+def test_nuclei_safe_allowed_in_research_mode() -> None:
+    gate = CapabilityGate(mode=ExecutionMode.RESEARCH)
+    target = "https://example.test"
+    gate.add_scope_target(target)
+
+    result = gate.evaluate_tool(target, "nuclei_safe", dry_run=True)
+    assert result.approved is True
+    assert result.budget_cost == 1
+
+
+def test_nuclei_mutating_allowed_in_bounty_without_operator_approval() -> None:
+    gate = CapabilityGate(mode=ExecutionMode.BOUNTY)
+    target = "https://example.test"
+    gate.add_scope_target(target)
+
+    result = gate.evaluate_tool(target, "nuclei_mutating", dry_run=True)
+    assert result.approved is True
+    assert result.budget_cost == 5
+    assert result.requires_operator_approval is False
+
+
+def test_t3_allowed_in_bounty_without_operator_approval() -> None:
+    gate = CapabilityGate(mode=ExecutionMode.BOUNTY)
+    target = "https://example.test"
+    gate.add_scope_target(target)
+
+    result = gate.evaluate_tool(target, "rce_proof", dry_run=True)
+    assert result.approved is True
+    assert result.budget_cost == 10
+    assert result.requires_operator_approval is False
+
+
+def test_t4_allowed_in_bounty_without_operator_approval() -> None:
+    gate = CapabilityGate(mode=ExecutionMode.BOUNTY)
+    target = "https://example.test"
+    gate.add_scope_target(target)
+
+    result = gate.evaluate_tool(target, "data_exfil", dry_run=True)
+    assert result.approved is True
+    assert result.budget_cost == 20
+    assert result.requires_operator_approval is False
 
 
 def test_reset_target_budget_reinitializes_budget_lifecycle() -> None:

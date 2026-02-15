@@ -164,6 +164,7 @@ public class HelixAppState: ObservableObject {
                     if self.seenEventIDs.count > 50_000 {
                         self.seenEventIDs.removeAll(keepingCapacity: true)
                     }
+                    self.allEvents.append(event)
 
                     // Update scan-running state from the authoritative scan lifecycle events.
                     switch event.eventType {
@@ -338,19 +339,6 @@ public class HelixAppState: ObservableObject {
                     guard !self.isReplaying else { return }
 
                     self.cortexStream.processEvent(event)
-                }
-                .store(in: &cancellables)
-
-            // Replay Buffer Subscription
-            // Capture ALL events for time travel
-            eventClient.eventPublisher
-                .receive(on: RunLoop.main)
-                .sink { [weak self] event in
-                    self?.allEvents.append(event)
-
-                    // If we are LIVE, processed events flow normally.
-                    // If we are REPLAYING, we capture them but do NOT process them into the view
-                    // until the user returns to live mode (or scrubs forward).
                 }
                 .store(in: &cancellables)
         }

@@ -238,7 +238,9 @@ TOOL_IDLE_TIMEOUT_OVERRIDES: dict = {
     "nmap": 300,       # nmap can go 5min between output bursts during host discovery
     "masscan": 180,    # masscan is fast but bursty
     "testssl": 180,    # testssl does cipher enumeration which takes time
-    "nuclei": 180,     # nuclei batches templates, long silent periods
+    "nuclei": 180,     # legacy alias (safe profile)
+    "nuclei_safe": 180,      # nuclei low-severity profile
+    "nuclei_mutating": 180,  # nuclei medium/high/critical profile
     "feroxbuster": 120,# recursive dir brute can stall between depth levels
     "nikto": 120,      # nikto has slow sequential tests
     "amass": 300,      # amass passive can be very slow

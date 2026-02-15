@@ -160,11 +160,18 @@ class ToolRegistry:
         },
         
         # --- Phase 4: Conditional Deep (Specifics) ---
-        "nuclei": {
+        "nuclei_safe": {
             "intent": INTENT_VULN_SCANNING,
             "phase": PHASE_4_DEEP,
             "cost": 2,
-            "intrusiveness": 3,
+            "intrusiveness": 2,
+            "gates": ["protocol:http", "protocol:https"]
+        },
+        "nuclei_mutating": {
+            "intent": INTENT_VULN_SCANNING,
+            "phase": PHASE_4_DEEP,
+            "cost": 4,
+            "intrusiveness": 4,
             "gates": ["protocol:http", "protocol:https"]
         },
         "nikto": {

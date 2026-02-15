@@ -11,7 +11,7 @@ Tier definitions:
                  T2a SAFE_VERIFY - Non-mutating (time-based blind, error-based, boolean blind)
                  T2b MUTATING_VERIFY - Potentially mutating (INSERT/UPDATE payloads, file writes)
   T3 EXPLOIT  - Full exploitation for proof (data extraction, RCE proof, auth bypass)
-  T4 DESTRUCTIVE - Destructive actions (never auto-approved)
+  T4 DESTRUCTIVE - Destructive actions (bounty-only in current policy)
 
 Gate formula evaluated by Strategos:
   (scope_ok) AND (tier_allowed_in_mode) AND (risk_budget_ok) AND (approval_if_required)
@@ -66,9 +66,12 @@ MODE_TIER_POLICIES: Dict[ExecutionMode, Dict[CapabilityTier, TierPolicy]] = {
         CapabilityTier.T0_OBSERVE:         TierPolicy(allowed=True, auto_approve=True, budget_cost=0),
         CapabilityTier.T1_PROBE:           TierPolicy(allowed=True, auto_approve=True, budget_cost=0),
         CapabilityTier.T2a_SAFE_VERIFY:    TierPolicy(allowed=True, auto_approve=True, budget_cost=1),
-        CapabilityTier.T2b_MUTATING_VERIFY:TierPolicy(allowed=True, auto_approve=False, budget_cost=5),
-        CapabilityTier.T3_EXPLOIT:         TierPolicy(allowed=True, auto_approve=False, budget_cost=10, requires_scope_attestation=True),
-        CapabilityTier.T4_DESTRUCTIVE:     TierPolicy(allowed=False),  # Never auto-approved
+        # Bounty mode: allow mutating verification without a separate approval hop.
+        CapabilityTier.T2b_MUTATING_VERIFY:TierPolicy(allowed=True, auto_approve=True, budget_cost=5),
+        # Bounty mode: allow exploit proof actions without a separate approval hop.
+        CapabilityTier.T3_EXPLOIT:         TierPolicy(allowed=True, auto_approve=True, budget_cost=10, requires_scope_attestation=True),
+        # Bounty mode: destructive actions are explicitly enabled by policy.
+        CapabilityTier.T4_DESTRUCTIVE:     TierPolicy(allowed=True, auto_approve=True, budget_cost=20, requires_scope_attestation=True),
     },
 }
 
@@ -102,6 +105,8 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "wappalyzer": CapabilityTier.T1_PROBE,
     # T2a: Safe verification (non-mutating)
     "nikto": CapabilityTier.T2a_SAFE_VERIFY,
+    "nuclei_safe": CapabilityTier.T2a_SAFE_VERIFY,
+    "nuclei": CapabilityTier.T2a_SAFE_VERIFY,  # legacy alias
     "nuclei_low": CapabilityTier.T2a_SAFE_VERIFY,
     "sqli_blind_time": CapabilityTier.T2a_SAFE_VERIFY,
     "sqli_blind_boolean": CapabilityTier.T2a_SAFE_VERIFY,
@@ -109,7 +114,7 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "xss_reflected_check": CapabilityTier.T2a_SAFE_VERIFY,
     "ssrf_dns_only": CapabilityTier.T2a_SAFE_VERIFY,
     # T2b: Mutating verification
-    "nuclei": CapabilityTier.T2b_MUTATING_VERIFY,
+    "nuclei_mutating": CapabilityTier.T2b_MUTATING_VERIFY,
     "nuclei_medium": CapabilityTier.T2b_MUTATING_VERIFY,
     "nuclei_high": CapabilityTier.T2b_MUTATING_VERIFY,
     "sqli_union": CapabilityTier.T2b_MUTATING_VERIFY,
@@ -120,7 +125,7 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "sqli_extract": CapabilityTier.T3_EXPLOIT,
     "auth_bypass": CapabilityTier.T3_EXPLOIT,
     "ssrf_exploit": CapabilityTier.T3_EXPLOIT,
-    # T4: Destructive (never auto-approved)
+    # T4: Destructive actions
     "data_exfil": CapabilityTier.T4_DESTRUCTIVE,
     "persistence": CapabilityTier.T4_DESTRUCTIVE,
 }

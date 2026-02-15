@@ -522,6 +522,47 @@ class CortexStream: ObservableObject {
         }
 
         var finalNodes = mappedNodes
+
+        // Defensive rendering cap: keep the graph interactive when backend snapshots
+        // contain a large amount of low-signal nodes.
+        let maxRenderableNodes = 260
+        if mappedNodes.count > maxRenderableNodes {
+            let pinnedIDs = Set((graph.entryNodes ?? []) + (graph.criticalAssets ?? []))
+
+            var degreeByNode: [String: Int] = [:]
+            for edge in mappedEdges {
+                degreeByNode[edge.source, default: 0] += 1
+                degreeByNode[edge.target, default: 0] += 1
+            }
+
+            let ranked = mappedNodes.sorted { lhs, rhs in
+                let lhsPinned = pinnedIDs.contains(lhs.id)
+                let rhsPinned = pinnedIDs.contains(rhs.id)
+                if lhsPinned != rhsPinned { return lhsPinned }
+
+                let lhsPressure = lhs.pressure ?? 0.0
+                let rhsPressure = rhs.pressure ?? 0.0
+                if lhsPressure != rhsPressure { return lhsPressure > rhsPressure }
+
+                let lhsStructural = lhs.structural ?? false
+                let rhsStructural = rhs.structural ?? false
+                if lhsStructural != rhsStructural { return lhsStructural }
+
+                let lhsDegree = degreeByNode[lhs.id, default: 0]
+                let rhsDegree = degreeByNode[rhs.id, default: 0]
+                if lhsDegree != rhsDegree { return lhsDegree > rhsDegree }
+
+                return lhs.id < rhs.id
+            }
+
+            var keepIDs = Set(ranked.prefix(maxRenderableNodes).map { $0.id })
+            keepIDs.formUnion(pinnedIDs)
+
+            finalNodes = mappedNodes.filter { keepIDs.contains($0.id) }
+            mappedEdges = mappedEdges.filter {
+                keepIDs.contains($0.source) && keepIDs.contains($0.target)
+            }
+        }
         if includeDecisionLayer, let decisionLayer = graph.decisionLayer {
             let decisionNodes: [NodeModel] = decisionLayer.nodes.map { node in
                 let id = node.id
