@@ -75,6 +75,7 @@ struct EventRow: View {
         case .scanFailed, .breachDetected: return .purple
         case .scanCompleted, .exploitValidated: return .green
         case .decisionMade, .narrativeEmitted: return .blue
+        case .nexusInsightFormed: return .purple
         case .log: return .gray
         case .toolStarted, .toolCompleted: return .orange
         default: return .secondary
@@ -87,6 +88,8 @@ struct EventRow: View {
             return (event.payload["tool"]?.stringValue ?? "Unknown Tool").uppercased()
         case .findingCreated:
             return (event.payload["title"]?.stringValue ?? "Finding").uppercased()
+        case .nexusInsightFormed:
+            return (event.payload["action_type"]?.stringValue ?? "INSIGHT").uppercased()
         default:
             return event.type.uppercased()
         }
@@ -101,7 +104,11 @@ struct EventRow: View {
         case .scanPhaseChanged:
             return event.payload["phase"]?.stringValue ?? ""
         case .decisionMade:
-            return event.payload["intent"]?.stringValue ?? ""
+            let dt = event.payload["decision_type"]?.stringValue ?? "decision"
+            let action = event.payload["selected_action"]?.stringValue ?? ""
+            return "\(dt) → \(action)"
+        case .nexusInsightFormed:
+            return event.payload["summary"]?.stringValue ?? ""
         case .log:
             return event.payload["line"]?.stringValue ?? event.payload["message"]?.stringValue ?? ""
         default:
@@ -138,10 +145,14 @@ struct EventRow: View {
 
                 // Payload Dump (simplified for specific types)
                 if event.eventType == .toolCompleted {
-                    Text((event.payload["output"]?.stringValue ?? "").prefix(200))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(.gray)
-                        .lineLimit(3)
+                    if let budget = event.payload["budget"]?.dictValue {
+                        let tokens = budget["tokens_remaining"] as? Int ?? 0
+                        let max = budget["tokens_max"] as? Int ?? 0
+                        Text("budget: \(tokens)/\(max)")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -181,6 +192,7 @@ extension GraphEvent {
         case .log: return "text.alignleft"
         case .narrativeEmitted: return "bubble.left.and.bubble.right.fill"
         case .decisionMade: return "brain.head.profile"
+        case .nexusInsightFormed: return "lightbulb.fill"
         case .actionNeeded: return "hand.raised.fill"
 
         // Security / Trinity

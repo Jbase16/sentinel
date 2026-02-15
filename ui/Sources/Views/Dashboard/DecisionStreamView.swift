@@ -60,9 +60,14 @@ struct DecisionRow: View {
         switch decision.type {
         case "assessment": return "stethoscope"
         case "tool_selection": return "hammer.fill"
+        case "tool_rejection": return "xmark.shield.fill"
         case "intent_transition": return "arrow.triangle.branch"
         case "phase_transition": return "flag.fill"
         case "resource_allocation": return "creditcard.fill"
+        case "early_termination": return "stop.circle.fill"
+        case "mode_adaptation": return "arrow.triangle.2.circlepath.circle.fill"
+        case "reactive_signal": return "bolt.fill"
+        case "scoring": return "chart.bar.fill"
         default: return "brain"
         }
     }
@@ -71,9 +76,14 @@ struct DecisionRow: View {
         switch decision.type {
         case "assessment": return .blue
         case "tool_selection": return .orange
+        case "tool_rejection": return .red
         case "intent_transition": return .purple
         case "phase_transition": return .green
         case "resource_allocation": return .yellow
+        case "early_termination": return .red
+        case "mode_adaptation": return .teal
+        case "reactive_signal": return .pink
+        case "scoring": return .mint
         default: return .gray
         }
     }
@@ -112,6 +122,18 @@ struct DecisionRow: View {
                     Text(decision.selectedAction)
                         .font(.system(.body, design: .monospaced))
                         .fontWeight(.medium)
+
+                    // For tool rejections, surface the blocked tool list without requiring expansion.
+                    if decision.type == "tool_rejection",
+                        let toolsAny = decision.evidence?["tools"]?.value as? [Any],
+                        !toolsAny.isEmpty
+                    {
+                        let tools = toolsAny.prefix(8).map { "\($0)" }.joined(separator: ", ")
+                        Text("Blocked: \(tools)" + (toolsAny.count > 8 ? "…" : ""))
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
                 }
 
                 Button(action: { withAnimation { isExpanded.toggle() } }) {

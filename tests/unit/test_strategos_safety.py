@@ -75,7 +75,8 @@ async def test_insight_queue_circuit_breaker_integration():
     cb = CircuitBreaker()
     cb._state = CircuitBreakerState(state="OPEN", last_failure_time=time.time())
     
-    queue = InsightQueue(maxsize=10, circuit_breaker=cb)
+    # InsightQueue now uses per-action-type breakers; inject a factory that returns our OPEN breaker.
+    queue = InsightQueue(maxsize=10, breaker_factory=lambda: cb)
     
     insight = InsightPayload(
         insight_id="1", scan_id="test", action_type=InsightActionType.GENERAL,
@@ -108,7 +109,7 @@ async def test_context_lock_prevents_race():
             await queue.enqueue(InsightPayload(
                 insight_id=str(i), scan_id="test", action_type=InsightActionType.GENERAL,
                 confidence=1.0, target="t", summary="valid_summary", details={}, source_tool="test",
-                priority=10-i
+                priority=9-i
             ))
             
     await asyncio.gather(produce(), produce())

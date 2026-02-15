@@ -988,10 +988,15 @@ class EventBus:
         findings_count: int,
         scan_id: Optional[str] = None,
         error: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         payload: Dict[str, Any] = {"tool": tool, "exit_code": exit_code, "findings_count": findings_count}
         if error:
             payload["error"] = error
+        if metadata:
+            # Allow callers to attach non-sensitive structured context for UI/debugging
+            # (e.g., capability tier, budgets). Keys must remain JSON-serializable.
+            payload.update(metadata)
         if scan_id:
             payload["scan_id"] = scan_id
         self.emit(GraphEvent(type=EventType.TOOL_COMPLETED, payload=payload, scan_id=scan_id, source="engine", priority=0))

@@ -119,7 +119,8 @@ class TestStrategosScoringMechanism:
 class TestStrategosFindingsIngestion:
     """Test that findings are correctly ingested and tracked."""
     
-    def test_findings_added_to_context(self):
+    @pytest.mark.asyncio
+    async def test_findings_added_to_context(self):
         """Findings should be added to context."""
         brain = Strategos()
         brain.context = ScanContext(target="example.com")
@@ -129,19 +130,20 @@ class TestStrategosFindingsIngestion:
             {"type": "port", "data": "80/tcp"}
         ]
         
-        brain.ingest_findings(findings)
+        await brain.ingest_findings(findings)
         
         assert len(brain.context.findings) == 2
     
-    def test_duplicate_findings_tracked(self):
+    @pytest.mark.asyncio
+    async def test_duplicate_findings_tracked(self):
         """Duplicate findings should not inflate count excessively."""
         brain = Strategos()
         brain.context = ScanContext(target="example.com")
         
         finding = {"type": "subdomain", "data": "sub.example.com", "source": "subfinder"}
         
-        brain.ingest_findings([finding])
-        brain.ingest_findings([finding])
+        await brain.ingest_findings([finding])
+        await brain.ingest_findings([finding])
         
         # Should have 2 entries (we don't dedupe, just track)
         assert len(brain.context.findings) == 2

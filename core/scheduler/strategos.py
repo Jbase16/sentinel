@@ -653,6 +653,27 @@ class Strategos:
             source="strategos",
         )
 
+        # Emit a capability/budget snapshot early so the UI can surface execution
+        # mode, tier ceiling, and budget gauges immediately.
+        try:
+            budget = self._capability_gate.get_budget(target)
+            allowed_tiers = self._capability_gate.get_allowed_tiers(target)
+            tier_ceiling = max(allowed_tiers) if allowed_tiers else None
+            self._decision_ctx.choose(
+                decision_type=DecisionType.RESOURCE_ALLOCATION,
+                chosen="CAPABILITY_GATE_INIT",
+                reason="Initialized capability gate for this mission",
+                context={"target": target, "mode": mode.value},
+                evidence={
+                    "execution_mode": self._capability_gate.mode.value,
+                    "tier_ceiling": tier_ceiling.name if tier_ceiling else None,
+                    "allowed_tiers": [t.name for t in allowed_tiers],
+                    "budget": budget.summary(),
+                },
+            )
+        except Exception as e:
+            logger.debug(f"[Strategos] Failed to emit capability gate init decision: {e}")
+
         current_intent = INTENT_PASSIVE_RECON
         self._emit_log(f"[Strategos] Mission Start: {target} (Mode: {mode.value}, scan_id={self.context.scan_id})")
 
@@ -788,6 +809,12 @@ class Strategos:
                             chosen_action = "MAINTAIN_PASSIVE_SCOPE"
                             rationale = "Passive mode restriction prevents escalation despite findings." if has_findings else "No triggers for escalation in passive mode."
                             suppressed = ["ESCALATE_TO_ACTIVE"] if has_findings else []
+                        elif not tools_to_run:
+                            # If this intent had no runnable tools, don't conclude the scan. Skipping
+                            # must advance to the next intent so later phases can still execute.
+                            chosen_action = "CONTINUE_ENGAGEMENT"
+                            rationale = "No runnable tools for this intent; advancing to the next intent."
+                            suppressed = ["CONCLUDE_PHASE"]
                         elif has_findings or has_new_surface:
                              chosen_action = "CONTINUE_ENGAGEMENT"
                              rationale = f"Novel surface or findings detected ({self.context.findings_this_intent} new)."
@@ -1046,6 +1073,7 @@ class Strategos:
         findings: List[Dict[str, Any]] = []
         success = True
         blocked_by_gate = False
+        gate_block_reason: Optional[str] = None
 
         start = asyncio.get_running_loop().time()
         timeout_s = self._tool_timeout_seconds(tool)
@@ -1059,6 +1087,7 @@ class Strategos:
             gate_result = self._capability_gate.evaluate_tool(self.context.target, tool)
             if not gate_result.approved:
                 blocked_by_gate = True
+                gate_block_reason = gate_result.reason
                 success = False
                 self._emit_log(
                     f"[Strategos] Capability Gate blocked {tool}: {gate_result.reason}",
@@ -1134,11 +1163,27 @@ class Strategos:
             # Emit existing TOOL_COMPLETED event (no new EventTypes invented)
             if self._event_bus:
                 try:
+                    # Attach low-risk metadata for UI transparency.
+                    tool_tier = TOOL_TIER_CLASSIFICATION.get(tool, CapabilityTier.T1_PROBE)
+                    budget = self._capability_gate.get_budget(self.context.target)
+                    metadata: Dict[str, Any] = {
+                        "tier": tool_tier.name,
+                        "tier_value": int(tool_tier),
+                        "execution_mode": self._capability_gate.mode.value,
+                        "budget": budget.summary(),
+                    }
+                    if blocked_by_gate:
+                        metadata["blocked"] = True
+                        metadata["block_reason"] = gate_block_reason
+                    if self.context.knowledge.get("waf_detected"):
+                        metadata["waf"] = self.context.knowledge.get("waf_details") or {}
+
                     self._event_bus.emit_tool_completed(
                         tool=tool,
                         exit_code=0 if success else 1,
                         findings_count=len(findings),
                         scan_id=self.context.scan_id,
+                        metadata=metadata,
                     )
                 except Exception as e:
                     logger.debug(f"[Strategos] Failed to emit tool_completed: {e}")
@@ -1642,6 +1687,13 @@ class Strategos:
         candidates = [t for t in candidates if t in available_tools]
         candidates = [t for t in candidates if t not in self.context.completed_tools_per_intent.get(intent, set())]
 
+        scored: List[Tuple[str, int]] = []
+        rejected_count = 0
+        # reasons maps rejection reason → list of tool names rejected for that reason.
+        # This is surfaced to the UI as TOOL_REJECTION decisions so operators can
+        # see why expected tools did not run.
+        reasons: Dict[str, List[str]] = {}
+
         # Filter tools incompatible with target type
         from core.toolkit.normalizer import is_private_target, is_localhost_target
         from core.toolkit.registry import (
@@ -1664,6 +1716,11 @@ class Strategos:
             if tls_blocked:
                 candidates = [t for t in candidates if t not in TOOLS_REQUIRING_TLS]
                 self._emit_log(f"[Strategos] Policy: Blocked TLS tools {tls_blocked} — target is {target_scheme}, no HTTPS listener found")
+                rejected_count += len(tls_blocked)
+                reasons.setdefault(
+                    f"Policy: TLS tools require HTTPS (target is {target_scheme}, no HTTPS listener discovered)",
+                    [],
+                ).extend(tls_blocked)
 
         # --- Policy B: Block host-wide port scanners on loopback ---
         # nmap/naabu on localhost find YOUR machine's ports, not the app's.
@@ -1673,10 +1730,11 @@ class Strategos:
             if port_scan_blocked:
                 candidates = [t for t in candidates if t not in TOOLS_HOST_WIDE_PORT_SCAN]
                 self._emit_log(f"[Strategos] Policy: Blocked host-wide port scanners {port_scan_blocked} — target is loopback")
-
-        scored: List[Tuple[str, int]] = []
-        rejected_count = 0
-        reasons: Dict[str, List[str]] = {}
+                rejected_count += len(port_scan_blocked)
+                reasons.setdefault(
+                    "Policy: Host-wide port scanning is irrelevant for loopback targets",
+                    [],
+                ).extend(port_scan_blocked)
 
         for t in candidates:
             tool_def = ToolRegistry.get(t, mode=mode)
@@ -1728,9 +1786,10 @@ class Strategos:
                 for reason_desc, tools in reasons.items():
                     self._decision_ctx.choose(
                         decision_type=DecisionType.TOOL_REJECTION,
-                        chosen="BLOCKED",
+                        chosen=f"BLOCKED ({len(tools)})",
                         reason=reason_desc,
                         context={"tools": tools, "count": len(tools), "intent": intent, "mode": mode.value},
+                        evidence={"tools": tools, "count": len(tools), "intent": intent, "mode": mode.value},
                     )
 
         scored.sort(key=lambda x: x[1], reverse=True)

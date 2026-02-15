@@ -67,13 +67,21 @@ struct ScanControlView: View {
             // Permission Requests
             ActionRequestView()
 
+            if let p0 = appState.activeP0Alert {
+                P0AlertBanner(alert: p0) { appState.activeP0Alert = nil }
+            }
+            if let waf = appState.wafStatus {
+                WAFStatusBanner(waf: waf) { appState.wafStatus = nil }
+            }
+
             // Scan Progress Header
             if isScanning {
                 ScanProgressHeader(
                     logCount: appState.apiLogItems.count,
                     nodeCount: appState.cortexStream.nodes.count,
                     edgeCount: appState.cortexStream.edges.count,
-                    startedAt: appState.scanStartTime
+                    startedAt: appState.scanStartTime,
+                    capabilityGate: appState.capabilityGateSnapshot
                 )
             }
 
@@ -235,6 +243,7 @@ struct ScanControlView: View {
 
 /// Struct ToolSelectionView.
 struct ToolSelectionView: View {
+    @EnvironmentObject var appState: HelixAppState
     let installed: [String]
     @Binding var selection: Set<String>
 
@@ -262,6 +271,9 @@ struct ToolSelectionView: View {
                     HStack {
                         Image(systemName: selection.contains(tool) ? "checkmark.square" : "square")
                         Text(tool)
+                        if let meta = appState.toolMetadata[tool] {
+                            TierBadgeView(tierShort: meta.tierShort, tierValue: meta.tierValue)
+                        }
                         Spacer()
                     }
                     .contentShape(Rectangle())
@@ -292,6 +304,7 @@ struct ScanProgressHeader: View {
     let nodeCount: Int
     let edgeCount: Int
     let startedAt: Date?
+    let capabilityGate: CapabilityGateSnapshot?
     @State private var currentTime = Date()
     @State private var timer: Timer?
 
@@ -310,6 +323,61 @@ struct ScanProgressHeader: View {
             }
 
             IndeterminateProgressBar(color: .blue)
+
+            if let gate = capabilityGate {
+                HStack(spacing: 12) {
+                    Text("Execution: \(gate.executionMode.uppercased())")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    if let ceiling = gate.tierCeiling {
+                        Text("Tier Ceiling: \(shortTierLabel(ceiling))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if let budget = gate.budget {
+                        Text("Tokens: \(budget.tokensRemaining)/\(budget.tokensMax)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("•")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("Time: \(formatSeconds(budget.timeRemainingS))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if let budget = capabilityGate?.budget {
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Budget (Tokens)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(budget.tokensUsed)/\(budget.tokensMax) used")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
+                    ProgressView(value: budget.tokensProgress)
+                        .progressViewStyle(.linear)
+
+                    HStack {
+                        Text("Budget (Time)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(formatSeconds(budget.timeUsedS))/\(formatSeconds(budget.timeMaxS)) used")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                    }
+                    ProgressView(value: budget.timeProgress)
+                        .progressViewStyle(.linear)
+                }
+            }
 
             HStack(spacing: 16) {
                 Text("\(logCount) logs")
@@ -352,6 +420,28 @@ struct ScanProgressHeader: View {
         let mins = elapsed / 60
         let secs = elapsed % 60
         return String(format: "%02d:%02d", mins, secs)
+    }
+
+    private func formatSeconds(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        let mins = s / 60
+        let secs = s % 60
+        if mins >= 60 {
+            let hrs = mins / 60
+            let rem = mins % 60
+            return String(format: "%dh%02dm", hrs, rem)
+        }
+        return String(format: "%dm%02ds", mins, secs)
+    }
+
+    private func shortTierLabel(_ tierCeiling: String) -> String {
+        if tierCeiling.contains("T0") { return "T0" }
+        if tierCeiling.contains("T1") { return "T1" }
+        if tierCeiling.contains("T2a") { return "T2a" }
+        if tierCeiling.contains("T2b") { return "T2b" }
+        if tierCeiling.contains("T3") { return "T3" }
+        if tierCeiling.contains("T4") { return "T4" }
+        return tierCeiling
     }
 }
 

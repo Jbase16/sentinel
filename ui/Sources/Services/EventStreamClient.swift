@@ -73,6 +73,7 @@ public enum GraphEventType: String, CaseIterable {
     // Logging & Reasoning
     case log = "log"
     case narrativeEmitted = "narrative_emitted"
+    case nexusInsightFormed = "nexus_insight_formed"
     case decisionMade = "decision_made"
     case actionNeeded = "action_needed"
 

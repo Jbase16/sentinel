@@ -26,6 +26,10 @@ from core.scheduler.strategos import ScanContext, Strategos
 async def test_tool_cancellation_does_not_deadlock_intent_completion():
     """AsyncFunction test_tool_cancellation_does_not_deadlock_intent_completion."""
     brain = Strategos(event_queue_maxsize=8)
+    # Unit tests must not depend on real network reachability.
+    async def _probe(_: str) -> bool:
+        return True
+    brain._probe_target = _probe  # type: ignore[assignment]
 
     async def dispatch_tool(_: str):
         """AsyncFunction dispatch_tool."""
@@ -114,6 +118,10 @@ async def test_bounded_event_queue_does_not_block_tool_cleanup():
 async def test_bug_bounty_walk_away_uses_surface_delta():
     """AsyncFunction test_bug_bounty_walk_away_uses_surface_delta."""
     brain = Strategos(event_queue_maxsize=8)
+    # Unit tests must not depend on real network reachability.
+    async def _probe(_: str) -> bool:
+        return True
+    brain._probe_target = _probe  # type: ignore[assignment]
 
     async def dispatch_tool(tool: str):
         """AsyncFunction dispatch_tool."""
@@ -157,4 +165,3 @@ async def test_bug_bounty_walk_away_uses_surface_delta():
 
     assert brain.context is not None
     assert brain.context.phase_index == PHASE_3_SURFACE
-

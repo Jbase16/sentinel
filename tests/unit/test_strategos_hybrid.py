@@ -85,10 +85,10 @@ async def test_full_insight_flow():
         # We need to check if emit was called with NEXUS_INSIGHT_FORMED
         # Note: In strategos.py we emit manually.
         mock_bus.emit.assert_called()
-        call_args = mock_bus.emit.call_args[1]
-        assert call_args["event_type"] == EventType.NEXUS_INSIGHT_FORMED
-        assert isinstance(call_args["payload"], dict)
-        assert call_args["payload"]["action_type"] == InsightActionType.HIGH_VALUE_TARGET.value
+        emitted = mock_bus.emit.call_args.args[0]
+        assert emitted.type == EventType.NEXUS_INSIGHT_FORMED
+        assert isinstance(emitted.payload, dict)
+        assert emitted.payload["action_type"] == InsightActionType.HIGH_VALUE_TARGET.value
         
     finally:
         # Cleanup
@@ -378,9 +378,9 @@ async def test_handler_exception_caught_and_logged():
 async def test_circuit_breaker_updates_on_handler_failure():
     """Verify that circuit breaker is updated appropriately on handler failures."""
     from core.scheduler.strategos import InsightQueue, CircuitBreaker
-    
+
     circuit_breaker = CircuitBreaker(failure_threshold=3)
-    queue = InsightQueue(maxsize=10, circuit_breaker=circuit_breaker)
+    queue = InsightQueue(maxsize=10, breaker_factory=lambda: circuit_breaker)
     
     async def failing_handler(insight):
         raise RuntimeError("Handler failed")
@@ -609,14 +609,15 @@ async def test_queue_overflow_scenario():
 async def test_circuit_breaker_stress():
     """Test circuit breaker behavior under stress."""
     from core.scheduler.strategos import InsightQueue, CircuitBreaker
-    
+
     circuit_breaker = CircuitBreaker(failure_threshold=5, timeout_seconds=0.1)
-    queue = InsightQueue(maxsize=100, circuit_breaker=circuit_breaker)
+    queue = InsightQueue(maxsize=100, breaker_factory=lambda: circuit_breaker)
     
     async def flaky_handler(insight):
-        # Fail 50% of the time
-        if hash(insight.insight_id) % 2 == 0:
-            raise RuntimeError("Random failure")
+        # Deterministic failure pattern: ensure >=5 consecutive failures so breaker opens.
+        idx = int(str(insight.insight_id).split("_")[-1])
+        if idx < 6:
+            raise RuntimeError("Deterministic failure")
     
     insights = [
         InsightPayload(
@@ -634,8 +635,11 @@ async def test_circuit_breaker_stress():
     ]
     
     # Enqueue all insights
+    enqueued = 0
     for insight in insights:
-        await queue.enqueue(insight)
+        if await queue.enqueue(insight):
+            enqueued += 1
+    assert enqueued == 20
     
     # Process all insights
     processed = 0
@@ -646,8 +650,7 @@ async def test_circuit_breaker_stress():
     
     # Stats should reflect processing
     stats = queue.get_stats()
-    assert stats.total_enqueued == 20
-    assert stats.total_processed + stats.total_failed == 20
-    
-    # Circuit breaker may be OPEN or CLOSED depending on failure pattern
-    assert stats.circuit_breaker_state in ["CLOSED", "OPEN", "HALF_OPEN"]
+    assert stats.total_enqueued >= 20  # includes re-queues when breaker is OPEN
+    assert stats.total_failed >= 5
+    assert stats.total_processed + stats.total_failed <= 20
+    assert stats.circuit_breaker_state in ["OPEN", "HALF_OPEN", "CLOSED"]

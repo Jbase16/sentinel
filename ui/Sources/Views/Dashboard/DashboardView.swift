@@ -24,6 +24,13 @@ struct DashboardView: View {
                 // Connection status
                 ConnectionStatusBanner()
 
+                if let p0 = appState.activeP0Alert {
+                    P0AlertBanner(alert: p0) { appState.activeP0Alert = nil }
+                }
+                if let waf = appState.wafStatus {
+                    WAFStatusBanner(waf: waf) { appState.wafStatus = nil }
+                }
+
                 // Status Cards Row
                 HStack(spacing: 16) {
                     // Backend Status
@@ -318,6 +325,7 @@ struct IssueRow: View {
     func severityColor(_ sev: String) -> Color {
         // Switch over value.
         switch sev {
+        case "P0", "CRITICAL_SOURCE_EXPOSURE": return .red
         case "CRITICAL": return .purple
         case "HIGH": return .red
         case "MEDIUM": return .orange

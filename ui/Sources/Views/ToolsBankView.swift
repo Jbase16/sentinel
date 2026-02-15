@@ -48,6 +48,9 @@ struct ToolsBankView: View {
                         HStack {
                             Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
                             Text(name)
+                            if let meta = appState.toolMetadata[name] {
+                                TierBadgeView(tierShort: meta.tierShort, tierValue: meta.tierValue)
+                            }
                             Spacer()
                             // Conditional branch.
                             if processingTool == name {
@@ -75,6 +78,9 @@ struct ToolsBankView: View {
                                     systemName: selectedMissing.contains(name)
                                         ? "checkmark.square" : "square")
                                 Text(name)
+                                if let meta = appState.toolMetadata[name] {
+                                    TierBadgeView(tierShort: meta.tierShort, tierValue: meta.tierValue)
+                                }
                             }
                             .contentShape(Rectangle())
                             .onTapGesture { toggle(name) }
@@ -111,6 +117,7 @@ struct ToolsBankView: View {
             // Only refresh status if backend is ready - prevents spamming during startup
             if BackendManager.shared.backendState == .ready {
                 appState.refreshStatus()
+                appState.refreshToolMetadata()
             }
         }
     }

@@ -57,6 +57,13 @@ public class HelixAppState: ObservableObject {
     /// Decisions
     @Published var decisions: [Decision] = []
 
+    // MARK: - Operational State (UI transparency)
+    @Published var toolMetadata: [String: ToolMetadata] = [:]
+    @Published var toolModeInfo: [String: ModeTierInfo] = [:]
+    @Published var capabilityGateSnapshot: CapabilityGateSnapshot? = nil
+    @Published var activeP0Alert: P0Alert? = nil
+    @Published var wafStatus: WAFStatus? = nil
+
     // Services
     let eventClient = EventStreamClient()
     let apiClient: SentinelAPIClient
@@ -145,6 +152,7 @@ public class HelixAppState: ObservableObject {
         }
 
         self.refreshStatus()
+        self.refreshToolMetadata()
         self.refreshGraph()  // Force initial graph load
 
         if !didSetupEventStreamSubscriptions {
@@ -172,6 +180,9 @@ public class HelixAppState: ObservableObject {
                         self.decisions.removeAll()  // Clear old decisions
                         self.isScanRunning = true
                         self.scanStartTime = Date(timeIntervalSince1970: event.timestamp)
+                        self.capabilityGateSnapshot = nil
+                        self.activeP0Alert = nil
+                        self.wafStatus = nil
                         let target = event.payload["target"]?.stringValue ?? "unknown"
                         // Backend sends "allowed_tools" not "modules"
                         let toolCount =
@@ -267,6 +278,11 @@ public class HelixAppState: ObservableObject {
                         let text = "🧠 [Decision] \(type) → \(action)"
                         self.apiLogs.append(text)
                         self.apiLogItems.append(LogItem(id: UUID(), text: text))
+
+                        // Update operational UI state from select evidence keys.
+                        self.applyOperationalStateFromDecision(type: type, evidence: evidence ?? [:])
+                    case .nexusInsightFormed:
+                        self.applyOperationalStateFromNexusInsight(payload: event.payload, timestamp: event.timestamp)
                     case .actionNeeded:
                         if let action = self.decodeAction(from: event.payload) {
                             if !self.pendingActions.contains(where: { $0.id == action.id }) {
@@ -291,6 +307,9 @@ public class HelixAppState: ObservableObject {
                         }
                         self.refreshResults()
                         self.refreshGraph()
+
+                        // Update capability budget/mode snapshot if metadata is attached.
+                        self.applyOperationalStateFromToolCompleted(payload: event.payload)
 
                     // Doppelganger
                     case .identityEstablished:
@@ -514,6 +533,21 @@ public class HelixAppState: ObservableObject {
         }
     }
 
+    /// Refresh tool metadata (tier badges, labels) for the UI.
+    func refreshToolMetadata() {
+        Task {
+            do {
+                let meta = try await apiClient.fetchToolMetadata()
+                await MainActor.run {
+                    self.toolMetadata = meta.tools
+                    self.toolModeInfo = meta.modes ?? [:]
+                }
+            } catch {
+                print("[AppState] Tool metadata refresh failed: \(error)")
+            }
+        }
+    }
+
     /// Refresh scan findings/results.
     func refreshResults() {
         Task {
@@ -551,6 +585,134 @@ public class HelixAppState: ObservableObject {
                 print("[AppState] Results refresh failed: \(error)")
             }
         }
+    }
+
+    // MARK: - Operational State Derivation
+
+    private func applyOperationalStateFromDecision(type: String, evidence: [String: AnyCodable]) {
+        // Budget + gate details are surfaced via Strategos RESOURCE_ALLOCATION decisions.
+        // We intentionally keep this conservative: only consume keys we expect.
+        if let executionMode = evidence["execution_mode"]?.stringValue {
+            let tierCeiling = evidence["tier_ceiling"]?.stringValue
+            let allowedTiers = (evidence["allowed_tiers"]?.value as? [Any])?.compactMap { "\($0)" } ?? []
+            let budget = parseBudgetSnapshot(from: evidence["budget"]?.value)
+            self.capabilityGateSnapshot = CapabilityGateSnapshot(
+                executionMode: executionMode,
+                tierCeiling: tierCeiling,
+                allowedTiers: allowedTiers,
+                budget: budget
+            )
+            return
+        }
+
+        // Fallback: some decisions only include a scalar budget_remaining.
+        if let remaining = evidence["budget_remaining"]?.intValue {
+            if let existing = capabilityGateSnapshot, let b = existing.budget {
+                let updated = CapabilityBudgetSnapshot(
+                    tokensRemaining: remaining,
+                    tokensMax: b.tokensMax,
+                    timeRemainingS: b.timeRemainingS,
+                    timeMaxS: b.timeMaxS,
+                    actionsTaken: b.actionsTaken,
+                    isExhausted: b.isExhausted
+                )
+                self.capabilityGateSnapshot = CapabilityGateSnapshot(
+                    executionMode: existing.executionMode,
+                    tierCeiling: existing.tierCeiling,
+                    allowedTiers: existing.allowedTiers,
+                    budget: updated
+                )
+            }
+        }
+    }
+
+    private func applyOperationalStateFromToolCompleted(payload: [String: AnyCodable]) {
+        if let budget = parseBudgetSnapshot(from: payload["budget"]?.value) {
+            let executionMode = payload["execution_mode"]?.stringValue
+            let tierCeiling = capabilityGateSnapshot?.tierCeiling
+            let allowedTiers = capabilityGateSnapshot?.allowedTiers ?? []
+            let existingMode = capabilityGateSnapshot?.executionMode
+
+            let mode = executionMode ?? existingMode ?? "unknown"
+            self.capabilityGateSnapshot = CapabilityGateSnapshot(
+                executionMode: mode,
+                tierCeiling: tierCeiling,
+                allowedTiers: allowedTiers,
+                budget: budget
+            )
+        }
+
+        // Opportunistic WAF update if tool emits waf metadata.
+        if let wafDict = payload["waf"]?.value as? [String: Any],
+            let wafName = wafDict["waf_name"] as? String ?? wafDict["waf"] as? String
+        {
+            self.wafStatus = WAFStatus(wafName: wafName, lastUpdated: Date())
+        }
+    }
+
+    private func applyOperationalStateFromNexusInsight(payload: [String: AnyCodable], timestamp: Double) {
+        let actionType = payload["action_type"]?.stringValue ?? "unknown"
+        let summary = payload["summary"]?.stringValue ?? ""
+        let target = payload["target"]?.stringValue ?? "unknown"
+        let details = payload["details"]?.dictValue ?? [:]
+
+        if (details["p0"] as? Bool) == true {
+            let path = details["path"] as? String
+            self.activeP0Alert = P0Alert(
+                summary: summary,
+                target: target,
+                path: path,
+                createdAt: Date(timeIntervalSince1970: timestamp)
+            )
+            let text = "🚨 [P0] \(summary)"
+            self.apiLogs.append(text)
+            self.apiLogItems.append(LogItem(id: UUID(), text: text))
+            return
+        }
+
+        if actionType == "waf_detected" {
+            let wafName =
+                (details["waf_name"] as? String)
+                ?? (details["waf"] as? String)
+                ?? "Unknown WAF"
+            self.wafStatus = WAFStatus(wafName: wafName, lastUpdated: Date(timeIntervalSince1970: timestamp))
+        }
+    }
+
+    private func parseBudgetSnapshot(from any: Any?) -> CapabilityBudgetSnapshot? {
+        guard let dict = any as? [String: Any] else { return nil }
+
+        func int(_ key: String) -> Int? {
+            if let v = dict[key] as? Int { return v }
+            if let v = dict[key] as? Double { return Int(v) }
+            if let v = dict[key] as? NSNumber { return v.intValue }
+            return nil
+        }
+
+        func dbl(_ key: String) -> Double? {
+            if let v = dict[key] as? Double { return v }
+            if let v = dict[key] as? Int { return Double(v) }
+            if let v = dict[key] as? NSNumber { return v.doubleValue }
+            return nil
+        }
+
+        let tokensRemaining = int("tokens_remaining") ?? 0
+        let tokensMax = int("tokens_max") ?? max(tokensRemaining, 1)
+        let timeRemainingS = dbl("time_remaining_s") ?? 0.0
+        let timeMaxS = dbl("time_max_s") ?? max(timeRemainingS, 1.0)
+        let actionsTaken = int("actions_taken")
+        let isExhausted =
+            (dict["is_exhausted"] as? Bool)
+            ?? (dict["is_exhausted"] as? NSNumber).map { $0.boolValue }
+
+        return CapabilityBudgetSnapshot(
+            tokensRemaining: tokensRemaining,
+            tokensMax: tokensMax,
+            timeRemainingS: timeRemainingS,
+            timeMaxS: timeMaxS,
+            actionsTaken: actionsTaken,
+            isExhausted: isExhausted
+        )
     }
 
     /// Function toggleGhost.

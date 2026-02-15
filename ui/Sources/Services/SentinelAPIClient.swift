@@ -249,6 +249,19 @@ public struct SentinelAPIClient: Sendable {
 
     // MARK: - Tool Management
 
+    /// Fetch tool metadata for UI rendering (tier badges, labels).
+    func fetchToolMetadata() async throws -> ToolMetadataResponse {
+        guard let url = URL(string: "/v1/tools/metadata", relativeTo: baseURL) else {
+            throw APIError.badStatus
+        }
+        let request = authenticatedRequest(url: url, method: "GET")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
+        return try JSONDecoder().decode(ToolMetadataResponse.self, from: data)
+    }
+
     /// Install selected tools
     func installTools(_ tools: [String]) async throws -> [InstallResult] {
         struct InstallResponse: Decodable { let results: [InstallResult] }
