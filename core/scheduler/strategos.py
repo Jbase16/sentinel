@@ -627,6 +627,8 @@ class Strategos:
 
         # --- Integration: register target in capability gate scope ---
         self._capability_gate.add_scope_target(target)
+        # Budget lifecycle is per mission; prevent cross-scan budget leakage.
+        self._capability_gate.reset_target_budget(target)
         # Map ScanMode → ExecutionMode (BOUNTY modes get BOUNTY gate, rest get RESEARCH)
         if mode in (ScanMode.BUG_BOUNTY,):
             self._capability_gate.set_mode(ExecutionMode.BOUNTY)
@@ -1043,6 +1045,7 @@ class Strategos:
 
         findings: List[Dict[str, Any]] = []
         success = True
+        blocked_by_gate = False
 
         start = asyncio.get_running_loop().time()
         timeout_s = self._tool_timeout_seconds(tool)
@@ -1050,6 +1053,17 @@ class Strategos:
         try:
             if self._stop_requested:
                 success = False
+                return
+
+            # Commit capability gate budget only when the tool is about to execute.
+            gate_result = self._capability_gate.evaluate_tool(self.context.target, tool)
+            if not gate_result.approved:
+                blocked_by_gate = True
+                success = False
+                self._emit_log(
+                    f"[Strategos] Capability Gate blocked {tool}: {gate_result.reason}",
+                    level="warning",
+                )
                 return
 
             # Timeout wrapper (fix: hung tools no longer deadlock mission)
@@ -1084,7 +1098,9 @@ class Strategos:
             # --- Integration: feed ActionFeedback into FeedbackTracker ---
             try:
                 outcome = ActionOutcome.SUCCESS if success else ActionOutcome.FAILURE
-                if not success and duration > timeout_s * 0.95:
+                if blocked_by_gate:
+                    outcome = ActionOutcome.BLOCKED
+                elif not success and duration > timeout_s * 0.95:
                     outcome = ActionOutcome.TIMEOUT
 
                 # Derive vuln_class from tool tier classification
@@ -1672,7 +1688,7 @@ class Strategos:
                 continue
 
             # --- Integration: CapabilityGate tier check ---
-            gate_result = self._capability_gate.evaluate_tool(self.context.target, t)
+            gate_result = self._capability_gate.evaluate_tool(self.context.target, t, dry_run=True)
             if not gate_result.approved:
                 rejected_count += 1
                 reason = f"Capability Gate: {gate_result.reason}"

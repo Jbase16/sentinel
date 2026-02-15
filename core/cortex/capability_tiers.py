@@ -81,16 +81,27 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "certificate_parse": CapabilityTier.T0_OBSERVE,
     "passive_recon": CapabilityTier.T0_OBSERVE,
     "subfinder": CapabilityTier.T0_OBSERVE,
+    "dnsx": CapabilityTier.T0_OBSERVE,
     # T1: Active probing
     "nmap": CapabilityTier.T1_PROBE,
+    "naabu": CapabilityTier.T1_PROBE,
+    "masscan": CapabilityTier.T1_PROBE,
     "httpx": CapabilityTier.T1_PROBE,
+    "httprobe": CapabilityTier.T1_PROBE,
     "feroxbuster": CapabilityTier.T1_PROBE,
     "gobuster": CapabilityTier.T1_PROBE,
     "dirsearch": CapabilityTier.T1_PROBE,
+    "whatweb": CapabilityTier.T1_PROBE,
+    "wafw00f": CapabilityTier.T1_PROBE,
+    "testssl": CapabilityTier.T1_PROBE,
+    "pshtt": CapabilityTier.T1_PROBE,
+    "sslyze": CapabilityTier.T1_PROBE,
+    "amass": CapabilityTier.T1_PROBE,
     "nuclei_info": CapabilityTier.T1_PROBE,
     "header_analysis": CapabilityTier.T1_PROBE,
     "wappalyzer": CapabilityTier.T1_PROBE,
     # T2a: Safe verification (non-mutating)
+    "nikto": CapabilityTier.T2a_SAFE_VERIFY,
     "nuclei_low": CapabilityTier.T2a_SAFE_VERIFY,
     "sqli_blind_time": CapabilityTier.T2a_SAFE_VERIFY,
     "sqli_blind_boolean": CapabilityTier.T2a_SAFE_VERIFY,
@@ -98,6 +109,7 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "xss_reflected_check": CapabilityTier.T2a_SAFE_VERIFY,
     "ssrf_dns_only": CapabilityTier.T2a_SAFE_VERIFY,
     # T2b: Mutating verification
+    "nuclei": CapabilityTier.T2b_MUTATING_VERIFY,
     "nuclei_medium": CapabilityTier.T2b_MUTATING_VERIFY,
     "nuclei_high": CapabilityTier.T2b_MUTATING_VERIFY,
     "sqli_union": CapabilityTier.T2b_MUTATING_VERIFY,
@@ -282,6 +294,23 @@ class CapabilityGate:
         if target not in self._budgets:
             self._budgets[target] = TargetBudget(target=target)
         return self._budgets[target]
+
+    def reset_target_budget(
+        self,
+        target: str,
+        *,
+        max_tokens: int = 100,
+        max_time_seconds: float = 3600.0,
+    ) -> TargetBudget:
+        """Reset budget lifecycle for a target (typically once per mission)."""
+        budget = TargetBudget(
+            target=target,
+            max_tokens=max_tokens,
+            remaining_tokens=max_tokens,
+            max_time_seconds=max_time_seconds,
+        )
+        self._budgets[target] = budget
+        return budget
     
     def set_mode(self, mode: ExecutionMode) -> None:
         """Switch execution mode. Clears operator approval cache.
@@ -325,6 +354,7 @@ class CapabilityGate:
         target: str,
         tier: CapabilityTier,
         tool_name: Optional[str] = None,
+        dry_run: bool = False,
     ) -> GateResult:
         """
         Evaluate the capability gate for a proposed action.
@@ -336,12 +366,14 @@ class CapabilityGate:
           4. Approval: Does tier require operator sign-off?
           5. Attestation: Does tier require explicit scope attestation?
         
-        If all checks pass, budget is consumed and action is approved.
+        If all checks pass, budget is consumed and action is approved
+        unless dry_run=True.
         
         Args:
             target: Target identifier being tested against.
             tier: Capability tier of the proposed action.
             tool_name: Optional tool name for logging/classification.
+            dry_run: If True, evaluate policy/budget feasibility without consuming budget.
             
         Returns:
             GateResult with approval status and reasoning.
@@ -409,7 +441,18 @@ class CapabilityGate:
                 budget_cost=policy.budget_cost,
             )
         
-        # All gates passed — consume budget and approve
+        # All gates passed. Dry-runs are for policy checks only and MUST NOT
+        # mutate budget state.
+        if dry_run:
+            return GateResult(
+                approved=True,
+                tier=tier,
+                mode=self.mode,
+                reason=f"Approved (dry-run): {tier.name} in {self.mode.value} mode (cost: {policy.budget_cost} tokens)",
+                budget_cost=policy.budget_cost,
+            )
+
+        # Commit budget only when action is actually executed.
         budget.consume(policy.budget_cost, tier)
         
         return GateResult(
@@ -420,24 +463,24 @@ class CapabilityGate:
             budget_cost=policy.budget_cost,
         )
     
-    def evaluate_tool(self, target: str, tool_name: str) -> GateResult:
+    def evaluate_tool(self, target: str, tool_name: str, dry_run: bool = False) -> GateResult:
         """Convenience: classify tool and evaluate in one call.
         
         Args:
             target: Target identifier.
             tool_name: Name of tool to classify and evaluate.
+            dry_run: If True, evaluate without consuming budget.
             
         Returns:
             GateResult from evaluate() with classified tier.
         """
         tier = self.classify_tool(tool_name)
-        return self.evaluate(target, tier, tool_name=tool_name)
+        return self.evaluate(target, tier, tool_name=tool_name, dry_run=dry_run)
     
     def get_allowed_tiers(self, target: str) -> List[CapabilityTier]:
         """Return list of tiers currently available for a target.
         
-        Evaluates each tier as a dry-run query and reverses budget consumption
-        since this is introspection, not an actual action.
+        Evaluates each tier as a dry-run query without consuming budget.
         
         Args:
             target: Target identifier to check.
@@ -447,13 +490,8 @@ class CapabilityGate:
         """
         allowed = []
         for tier in CapabilityTier:
-            result = self.evaluate(target, tier)
-            # Re-add consumed budget since this is a dry-run query
+            result = self.evaluate(target, tier, dry_run=True)
             if result.approved:
-                budget = self.get_budget(target)
-                budget.remaining_tokens += result.budget_cost
-                budget.actions_taken -= 1
-                budget.actions_by_tier[tier] -= 1
                 allowed.append(tier)
         return allowed
     
