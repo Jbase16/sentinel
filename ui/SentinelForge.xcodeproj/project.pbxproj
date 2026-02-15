@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -21,12 +21,15 @@
 		442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */ = {isa = PBXBuildFile; fileRef = D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */; };
 		4A1FF7DA7509E33F640B70A5 /* RetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946E142FF6202E3202EA5B2D /* RetryBackoff.swift */; };
 		4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1FB66EC2747EC1973D336E /* DashboardView.swift */; };
+		5BF1C14DFCA00863B476778E /* OperationalAlertBanners.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */; };
 		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
 		65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426219598E6076D786D8DAD8 /* ReportComposerView.swift */; };
+		6ACAA9191D686B0F50DE6548 /* OperationalStateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 882050DB17B4CE0CB0263245 /* OperationalStateModels.swift */; };
 		74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62409FA58DFFE1F4DBADB601 /* TerminalView.swift */; };
 		80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B8394185D36FC0D1095C1111 /* Shaders.metal */; };
 		84565490131B06C520A4801A /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */; };
 		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
+		8F1F1CC3866F00EBB302665E /* TierBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */; };
 		9369DFE67CE6BB7E573BBAB3 /* AuditFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A68494FDEACABC92B894B50 /* AuditFeedView.swift */; };
 		96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */; };
 		9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */; };
@@ -36,6 +39,7 @@
 		A96E61E2762FD4FD4E275E4B /* ActionRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB064037D50A118943B7AB93 /* ActionRequestView.swift */; };
 		AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */; };
 		AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230001B3E6349D392B2FE004 /* AppReducer.swift */; };
+		AF8160EFA180077F6DF5E81E /* ToolMetadataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */; };
 		B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C303CDE894C92523DAC01B0A /* ToolsBankView.swift */; };
 		B26A9F685FC70AC9C6D5D1A0 /* LedgerStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 008A72B75EBAE4A0EB5BB1FE /* LedgerStreamClient.swift */; };
 		B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE68CC8F07C4B289363C486 /* CortexStream.swift */; };
@@ -57,6 +61,7 @@
 		067CE6DABF3050B27FC85508 /* core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = core; path = ../core; sourceTree = SOURCE_ROOT; };
 		1269D7C35447A70FD8D1D9FB /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		13132A4BDB652874A328C71B /* SentinelForgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelForgeApp.swift; sourceTree = "<group>"; };
+		13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalAlertBanners.swift; sourceTree = "<group>"; };
 		1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanProjection.swift; sourceTree = "<group>"; };
 		230001B3E6349D392B2FE004 /* AppReducer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppReducer.swift; sourceTree = "<group>"; };
 		24341BFC06FC18EE38977FFC /* SentinelForge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SentinelForge.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -67,6 +72,7 @@
 		426219598E6076D786D8DAD8 /* ReportComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportComposerView.swift; sourceTree = "<group>"; };
 		493C6711EF03532E783C01F1 /* GraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphModels.swift; sourceTree = "<group>"; };
 		4A68494FDEACABC92B894B50 /* AuditFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditFeedView.swift; sourceTree = "<group>"; };
+		56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TierBadgeView.swift; sourceTree = "<group>"; };
 		58466552B0906B21951240F1 /* HelixAppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixAppState.swift; sourceTree = "<group>"; };
 		5F7C910B6EF70385F75EC7BA /* PTYClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTYClient.swift; sourceTree = "<group>"; };
 		62409FA58DFFE1F4DBADB601 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
@@ -79,6 +85,7 @@
 		7E340539956225F2B0A21565 /* ErrorClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorClassifier.swift; sourceTree = "<group>"; };
 		81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelAPIClient.swift; sourceTree = "<group>"; };
 		8318D0791A1940E626D7A7ED /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
+		882050DB17B4CE0CB0263245 /* OperationalStateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalStateModels.swift; sourceTree = "<group>"; };
 		8FD7FEF00ADB9A4983F8F7F4 /* DecisionStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionStreamView.swift; sourceTree = "<group>"; };
 		946E142FF6202E3202EA5B2D /* RetryBackoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryBackoff.swift; sourceTree = "<group>"; };
 		9BB1DE1E3EE6C98ABFF1F47D /* BackendSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendSettingsView.swift; sourceTree = "<group>"; };
@@ -93,6 +100,7 @@
 		BCE68CC8F07C4B289363C486 /* CortexStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexStream.swift; sourceTree = "<group>"; };
 		C303CDE894C92523DAC01B0A /* ToolsBankView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBankView.swift; sourceTree = "<group>"; };
 		CA1FB66EC2747EC1973D336E /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolMetadataModels.swift; sourceTree = "<group>"; };
 		D45E68340782F5F007892DD6 /* HelixError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixError.swift; sourceTree = "<group>"; };
 		D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = PressureShader.metal; sourceTree = "<group>"; };
 		E654B5888ACF358B53174849 /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
@@ -116,8 +124,10 @@
 				6EA4C5DC1C91D1C3867752C8 /* AnyCodable.swift */,
 				66E37493145D7E9C47F0B89B /* FindingModels.swift */,
 				58466552B0906B21951240F1 /* HelixAppState.swift */,
+				882050DB17B4CE0CB0263245 /* OperationalStateModels.swift */,
 				3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */,
 				7D47C9AABA588CA41003B700 /* SharedModels.swift */,
+				CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -135,7 +145,9 @@
 			isa = PBXGroup;
 			children = (
 				BA5A2EAB8B8B727F4AF90C39 /* IdentityStatusView.swift */,
+				13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */,
 				2569FD3CDF297078C1886472 /* StatusComponents.swift */,
+				56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -357,6 +369,7 @@
 			);
 			mainGroup = 2BE62123C101D1A0E78E9AC3;
 			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -408,6 +421,8 @@
 				5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */,
 				9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */,
 				23885C7C1426DA781B5E460F /* NeuralGraphView.swift in Sources */,
+				5BF1C14DFCA00863B476778E /* OperationalAlertBanners.swift in Sources */,
+				6ACAA9191D686B0F50DE6548 /* OperationalStateModels.swift in Sources */,
 				9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */,
 				96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */,
 				442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */,
@@ -422,6 +437,8 @@
 				2F3DA20D5D2C21A0200A21C9 /* SharedModels.swift in Sources */,
 				854DB144D784ECD29694882E /* StatusComponents.swift in Sources */,
 				74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */,
+				8F1F1CC3866F00EBB302665E /* TierBadgeView.swift in Sources */,
+				AF8160EFA180077F6DF5E81E /* ToolMetadataModels.swift in Sources */,
 				B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -433,11 +450,11 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = SentinelForge.Release.entitlements;
+				CODE_SIGN_ENTITLEMENTS = SentinelForge.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_PREVIEWS = YES;
-				INFOPLIST_FILE = Info-Release.plist;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

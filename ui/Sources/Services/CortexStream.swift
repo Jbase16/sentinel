@@ -525,14 +525,56 @@ class CortexStream: ObservableObject {
 
         // Defensive rendering cap: keep the graph interactive when backend snapshots
         // contain a large amount of low-signal nodes.
-        let maxRenderableNodes = 260
+        let maxRenderableNodes: Int = {
+            // As graphs grow, rendering hundreds of nodes degrades both legibility and
+            // interactivity. Use an adaptive cap: keep more detail for small graphs,
+            // but tighten as density increases.
+            let n = mappedNodes.count
+            if n <= 260 { return 260 }
+            if n <= 600 { return 220 }
+            if n <= 1_200 { return 180 }
+            return 150
+        }()
+
         if mappedNodes.count > maxRenderableNodes {
-            let pinnedIDs = Set((graph.entryNodes ?? []) + (graph.criticalAssets ?? []))
+            let nodeById = Dictionary(uniqueKeysWithValues: mappedNodes.map { ($0.id, $0) })
 
             var degreeByNode: [String: Int] = [:]
             for edge in mappedEdges {
                 degreeByNode[edge.source, default: 0] += 1
                 degreeByNode[edge.target, default: 0] += 1
+            }
+
+            // Pin only a SMALL set of meaningful anchors. Pinning an entire
+            // `entry_nodes` array (often huge in sparse graphs) defeats the cap.
+            let criticalIDs = graph.criticalAssets ?? []
+            let entryIDs = graph.entryNodes ?? []
+
+            let maxPinnedTotal = 30
+            let maxPinnedEntryNodes = 18
+
+            let rankedEntryIDs = entryIDs.sorted { lhs, rhs in
+                let lhsPressure = nodeById[lhs]?.pressure ?? 0.0
+                let rhsPressure = nodeById[rhs]?.pressure ?? 0.0
+                if lhsPressure != rhsPressure { return lhsPressure > rhsPressure }
+
+                let lhsDegree = degreeByNode[lhs, default: 0]
+                let rhsDegree = degreeByNode[rhs, default: 0]
+                if lhsDegree != rhsDegree { return lhsDegree > rhsDegree }
+
+                return lhs < rhs
+            }
+
+            var pinnedIDs = Set<String>()
+            for id in criticalIDs { pinnedIDs.insert(id) }
+
+            var addedEntry = 0
+            for id in rankedEntryIDs {
+                if addedEntry >= maxPinnedEntryNodes { break }
+                if pinnedIDs.count >= maxPinnedTotal { break }
+                if nodeById[id] == nil { continue }
+                pinnedIDs.insert(id)
+                addedEntry += 1
             }
 
             let ranked = mappedNodes.sorted { lhs, rhs in
@@ -559,12 +601,17 @@ class CortexStream: ObservableObject {
             keepIDs.formUnion(pinnedIDs)
 
             finalNodes = mappedNodes.filter { keepIDs.contains($0.id) }
-            mappedEdges = mappedEdges.filter {
-                keepIDs.contains($0.source) && keepIDs.contains($0.target)
-            }
+            mappedEdges = mappedEdges.filter { keepIDs.contains($0.source) && keepIDs.contains($0.target) }
         }
         if includeDecisionLayer, let decisionLayer = graph.decisionLayer {
-            let decisionNodes: [NodeModel] = decisionLayer.nodes.map { node in
+            // Decision layer can be large; cap to keep the renderer usable.
+            // Backend order is newest-first; we preserve that.
+            let maxTotalNodesWithDecisions = 320
+            let remainingSlots = max(0, maxTotalNodesWithDecisions - finalNodes.count)
+            let maxDecisionNodes = min(80, remainingSlots)
+            let selectedDecisionNodes = decisionLayer.nodes.prefix(maxDecisionNodes)
+
+            let decisionNodes: [NodeModel] = selectedDecisionNodes.map { node in
                 let id = node.id
                 let base = positionCache[id] ?? stablePosition(for: id)
                 positionCache[id] = base
@@ -588,15 +635,25 @@ class CortexStream: ObservableObject {
             }
             finalNodes.append(contentsOf: decisionNodes)
 
-            let decisionEdges: [EdgeModel] = decisionLayer.edges.map { edge in
-                EdgeModel(
-                    id: edge.id,
-                    source: edge.source,
-                    target: edge.target,
-                    type: edge.type
-                )
+            let allowedDecisionIDs = Set(decisionNodes.map { $0.id })
+            let allowedNodeIDs = Set(finalNodes.map { $0.id })
+            let decisionEdges: [EdgeModel] = decisionLayer.edges
+                .filter { allowedNodeIDs.contains($0.source) && allowedNodeIDs.contains($0.target) }
+                .map { edge in
+                    EdgeModel(
+                        id: edge.id,
+                        source: edge.source,
+                        target: edge.target,
+                        type: edge.type
+                    )
+                }
+
+            // Avoid adding a large decision-only subgraph that isn't connected to the
+            // visible node set (e.g. when the base graph is heavily capped).
+            let connectedDecisionEdges = decisionEdges.filter {
+                allowedDecisionIDs.contains($0.source) || allowedDecisionIDs.contains($0.target)
             }
-            mappedEdges.append(contentsOf: decisionEdges)
+            mappedEdges.append(contentsOf: connectedDecisionEdges)
         }
 
         DispatchQueue.main.async {

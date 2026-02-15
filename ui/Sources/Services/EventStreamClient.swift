@@ -392,7 +392,7 @@ public class EventStreamClient: ObservableObject {
             findingEventPublisher.send(event)
 
         case .scanStarted, .scanPhaseChanged, .scanCompleted, .scanFailed, .toolStarted,
-            .toolCompleted, .narrativeEmitted, .decisionMade, .actionNeeded:
+            .toolCompleted, .narrativeEmitted, .nexusInsightFormed, .decisionMade, .actionNeeded:
             scanEventPublisher.send(event)
 
         case .circuitBreakerStateChanged, .exploitValidated, .exploitRejected:

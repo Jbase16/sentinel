@@ -4,7 +4,7 @@ import json
 import time
 import logging
 from typing import List, Dict, Any, Tuple, Optional
-from concurrent.futures import ProcessPoolExecutor, TimeoutError
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError
 from core.cortex.models import TopologyRequest, TopologyResponse, PathResult, AnalysisCaps
 
 # Configure module logger
@@ -116,7 +116,19 @@ def _worker_analysis(graph_data: Dict[str, Any], entry_nodes: List[str], critica
 
 class GraphAnalyzer:
     def __init__(self, max_workers: int = 2):
-        self.executor = ProcessPoolExecutor(max_workers=max_workers)
+        # Prefer a ProcessPool for CPU-heavy networkx analysis, but fall back
+        # safely when the environment forbids process primitives (e.g. sandboxed
+        # runners where `os.sysconf`/semaphores are restricted).
+        try:
+            self.executor = ProcessPoolExecutor(max_workers=max_workers)
+            self._executor_kind = "process"
+        except (PermissionError, NotImplementedError, OSError) as exc:
+            logger.warning(
+                "[GraphAnalyzer] ProcessPool unavailable (%s). Falling back to ThreadPoolExecutor.",
+                exc,
+            )
+            self.executor = ThreadPoolExecutor(max_workers=max_workers)
+            self._executor_kind = "thread"
         # Simple in-memory cache: fingerprint -> TopologyResponse
         # In prod this should be Redis or similar if scaling out.
         self._cache: Dict[str, TopologyResponse] = {} 

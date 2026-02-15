@@ -69,6 +69,22 @@ struct AuditFeedView: View {
 struct EventRow: View {
     let event: GraphEvent
 
+    private var decisionType: String? {
+        event.payload["decision_type"]?.stringValue
+    }
+
+    private var decisionAction: String? {
+        event.payload["selected_action"]?.stringValue
+    }
+
+    private var decisionRationale: String? {
+        event.payload["rationale"]?.stringValue
+    }
+
+    private var decisionEvidence: [String: Any]? {
+        event.payload["evidence"]?.dictValue
+    }
+
     var color: Color {
         switch event.eventType {
         case .findingCreated, .findingConfirmed, .findingDiscovered: return .red
@@ -88,6 +104,8 @@ struct EventRow: View {
             return (event.payload["tool"]?.stringValue ?? "Unknown Tool").uppercased()
         case .findingCreated:
             return (event.payload["title"]?.stringValue ?? "Finding").uppercased()
+        case .decisionMade:
+            return (decisionType ?? "DECISION").uppercased()
         case .nexusInsightFormed:
             return (event.payload["action_type"]?.stringValue ?? "INSIGHT").uppercased()
         default:
@@ -104,9 +122,16 @@ struct EventRow: View {
         case .scanPhaseChanged:
             return event.payload["phase"]?.stringValue ?? ""
         case .decisionMade:
-            let dt = event.payload["decision_type"]?.stringValue ?? "decision"
-            let action = event.payload["selected_action"]?.stringValue ?? ""
-            return "\(dt) → \(action)"
+            let action = decisionAction ?? ""
+            if let dt = decisionType, dt == "tool_rejection",
+                let evidence = decisionEvidence,
+                let toolsAny = evidence["tools"] as? [Any],
+                !toolsAny.isEmpty
+            {
+                let tools = toolsAny.prefix(8).map { "\($0)" }.joined(separator: ", ")
+                return "\(action) • blocked: \(tools)" + (toolsAny.count > 8 ? "…" : "")
+            }
+            return action
         case .nexusInsightFormed:
             return event.payload["summary"]?.stringValue ?? ""
         case .log:
@@ -141,6 +166,13 @@ struct EventRow: View {
                     Text(Date(timeIntervalSince1970: event.timestamp), style: .time)
                         .font(.caption2)
                         .foregroundColor(.gray)
+                }
+
+                if event.eventType == .decisionMade, let rationale = decisionRationale, !rationale.isEmpty {
+                    Text(rationale)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.gray)
+                        .lineLimit(2)
                 }
 
                 // Payload Dump (simplified for specific types)

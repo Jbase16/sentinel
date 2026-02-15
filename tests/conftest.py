@@ -1,11 +1,24 @@
 """Pytest configuration for SentinelForge."""
+from __future__ import annotations
+
+import asyncio
+import inspect
 import os
 import sys
 import warnings
 import atexit
 
+# Ensure application modules resolve from repo root, not tests/* shadow packages.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-def pytest_configure():
+
+def pytest_configure(config):
+    # Register markers referenced across the suite even when optional plugins
+    # (like pytest-asyncio) aren't installed.
+    config.addinivalue_line("markers", "asyncio: run async test via built-in asyncio runner")
+
     # Enable development mode for tests so loopback port wildcards are allowed.
     os.environ.setdefault("SENTINEL_DEBUG", "true")
     # Keep test writes inside a writable sandbox path (avoid $HOME restrictions).
@@ -16,18 +29,38 @@ def pytest_configure():
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="uvicorn")
 
     # Many subsystems (EventBus, DecisionLedger) require the global sequence
-    # authority to be initialized. In production this happens during startup;
-    # tests should mirror that invariant.
+    # authority to be initialized. For unit tests we bypass DB startup to keep
+    # tests hermetic and avoid initialization order pitfalls (migrations, IO).
     try:
-        import asyncio
         from core.base.sequence import GlobalSequenceAuthority
 
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(GlobalSequenceAuthority.initialize_from_db())
-        loop.close()
+        GlobalSequenceAuthority.reset_for_testing()
+        GlobalSequenceAuthority.initialize_for_testing(start=1)
     except Exception:
         # Tests that don't emit events/decisions shouldn't fail hard here.
         pass
+
+
+def pytest_pyfunc_call(pyfuncitem):
+    """
+    Minimal asyncio runner for async tests.
+
+    The repo's test suite uses `async def` tests and `@pytest.mark.asyncio`,
+    but the environment running these tests may not have `pytest-asyncio`
+    installed. This hook runs coroutine tests via `asyncio.run()` so unit
+    tests remain executable without extra dependencies.
+    """
+    testfunction = pyfuncitem.obj
+    if not inspect.iscoroutinefunction(testfunction):
+        return None
+
+    # Only pass fixtures that are explicit arguments to the test function.
+    argnames = getattr(pyfuncitem, "_fixtureinfo", None)
+    argnames = getattr(argnames, "argnames", ()) if argnames is not None else ()
+    kwargs = {name: pyfuncitem.funcargs[name] for name in argnames}
+
+    asyncio.run(testfunction(**kwargs))
+    return True
 
 
 def pytest_unconfigure(config):

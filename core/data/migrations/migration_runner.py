@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from typing import List, Optional
 import re
 
-from core.cortex.events import GraphEvent, GraphEventType, get_event_bus
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,7 +64,6 @@ class MigrationRunner:
         """
         self.db_path = Path(db_path)
         self.enable_backups = enable_backups
-        self.event_bus = get_event_bus()
 
         if migrations_dir is None:
             # Default to migrations directory next to this file
@@ -81,6 +78,26 @@ class MigrationRunner:
         logger.info(f"[MigrationRunner] Migrations directory: {migrations_dir}")
         logger.info(f"[MigrationRunner] Backup directory: {self.backup_dir}")
         logger.info(f"[MigrationRunner] Backups enabled: {enable_backups}")
+
+    def _try_emit_log_event(self, payload: dict) -> None:
+        """
+        Best-effort event emission.
+
+        Important: MigrationRunner is invoked during database initialization, which happens
+        while the global sequence authority may not yet be initialized. Emitting GraphEvents
+        in that window can fail hard and break startup. We therefore only emit when the
+        sequence system is initialized, and we treat any emission failure as non-fatal.
+        """
+        try:
+            from core.base.sequence import is_sequence_initialized
+            if not is_sequence_initialized():
+                return
+
+            from core.cortex.events import GraphEvent, get_event_bus, GraphEventType
+            get_event_bus().emit(GraphEvent(type=GraphEventType.LOG, payload=payload, source="db"))
+        except Exception:
+            # Migration logging must never make migrations fail.
+            return
 
     async def get_current_version(self) -> int:
         """
@@ -274,14 +291,10 @@ class MigrationRunner:
         # Garbage collect old backups
         await self._garbage_collect_backups()
 
-        # Emit event
-        self.event_bus.emit(GraphEvent(
-            type=GraphEventType.LOG,
-            payload={
-                "message": f"[MigrationRunner] Database backup created",
-                "backup_path": str(backup_path),
-            },
-        ))
+        self._try_emit_log_event({
+            "message": "[MigrationRunner] Database backup created",
+            "backup_path": str(backup_path),
+        })
 
         return backup_path
 
@@ -312,15 +325,11 @@ class MigrationRunner:
 
             logger.info(f"[MigrationRunner] ✅ Database restored from {backup_path}")
 
-            # Emit event
-            self.event_bus.emit(GraphEvent(
-                type=GraphEventType.LOG,
-                payload={
-                    "message": f"[MigrationRunner] Database restored from backup",
-                    "backup_path": str(backup_path),
-                    "restored_at": datetime.utcnow().isoformat(),
-                },
-            ))
+            self._try_emit_log_event({
+                "message": "[MigrationRunner] Database restored from backup",
+                "backup_path": str(backup_path),
+                "restored_at": datetime.utcnow().isoformat(),
+            })
 
             # Remove safety backup if successful
             if safety_backup.exists():
@@ -405,15 +414,12 @@ class MigrationRunner:
         logger.info(f"[MigrationRunner] ✅ Rollback complete. Current version: {new_version}")
 
         # Emit rollback event
-        self.event_bus.emit(GraphEvent(
-            type=GraphEventType.LOG,
-            payload={
-                "message": f"[MigrationRunner] Database rolled back to version {new_version}",
-                "target_version": target_version,
-                "actual_version": new_version,
-                "backup_used": str(most_recent_backup),
-            },
-        ))
+        self._try_emit_log_event({
+            "message": f"[MigrationRunner] Database rolled back to version {new_version}",
+            "target_version": target_version,
+            "actual_version": new_version,
+            "backup_used": str(most_recent_backup),
+        })
 
     async def get_migration_history(self) -> List[dict]:
         """

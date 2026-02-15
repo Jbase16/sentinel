@@ -19,6 +19,7 @@ xcuserdata/
 .swiftpm/
 .venv/
 DerivedData/
+ui/.xcodeDerivedData/
 __pycache__/
 ui/.build/
 ui/build/

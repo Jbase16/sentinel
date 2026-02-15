@@ -850,7 +850,15 @@ class CausalGraphBuilder:
         else:
             values = []
         normalized = [str(v).strip().lower() for v in values if str(v).strip()]
-        return normalized or ["execution"]
+        # IMPORTANT:
+        # Raw findings frequently do not carry `capability_types` until they are
+        # enriched via VulnRules/Issues. Defaulting to "execution" makes the graph
+        # appear far more exploit-heavy than the evidence supports and bloats the
+        # visualization with false "vulnerability" semantics.
+        #
+        # "information" is the conservative default: it preserves context without
+        # implying exploitability.
+        return normalized or ["information"]
 
     @staticmethod
     def _finding_confirmation_level(finding: Finding) -> str:
@@ -1466,13 +1474,52 @@ class CausalGraphBuilder:
             for node in (chain_analysis.get("nodes", []) if isinstance(chain_analysis, dict) else [])
         }
 
-        entry_nodes = [str(node_id) for node_id in self.graph.nodes() if self.graph.in_degree(node_id) == 0]
-        leaf_nodes = [str(node_id) for node_id in self.graph.nodes() if self.graph.out_degree(node_id) == 0]
-
         chain_membership: Dict[str, int] = defaultdict(int)
         for chain in raw_chains:
             for node_id in chain:
                 chain_membership[str(node_id)] += 1
+
+        # Root nodes (in_degree == 0) are numerous in sparse graphs, and pinning
+        # all of them produces unusable "hairball" visualizations. We instead
+        # compute a bounded "entry_nodes" set that represents plausible starting
+        # points for attack paths or high-signal, user-actionable findings.
+        root_nodes = [str(node_id) for node_id in self.graph.nodes() if self.graph.in_degree(node_id) == 0]
+        leaf_nodes = [str(node_id) for node_id in self.graph.nodes() if self.graph.out_degree(node_id) == 0]
+
+        entry_candidates: List[Tuple[str, int, float, float, float]] = []
+        for node_id in root_nodes:
+            out_degree = int(self.graph.out_degree(node_id))
+            finding = self.findings_map.get(node_id)
+
+            severity_score = self._severity_score(finding) if finding else 1.0
+            confirmation = self._finding_confirmation_level(finding) if finding else "probable"
+            base_score = self._finding_base_score(finding) if finding else 0.0
+            capabilities = self._finding_capability_types(finding) if finding else []
+            chain_hits = int(chain_membership.get(node_id, 0))
+
+            # Skip low-signal isolated roots by default: they don't contribute to
+            # attack paths, and the findings list already preserves them.
+            if out_degree == 0 and chain_hits == 0:
+                is_high_signal = (
+                    severity_score >= 7.0
+                    or (confirmation == "confirmed" and base_score >= 5.0)
+                    or any(cap in {"access", "execution"} for cap in capabilities)
+                )
+                if not is_high_signal:
+                    continue
+
+            metrics = node_metrics.get(node_id, {})
+            enablement_score = float(metrics.get("enablement_score", 0.0))
+            centrality_score = float(metrics.get("centrality_score", 0.0))
+
+            entry_candidates.append((node_id, out_degree, severity_score, enablement_score, centrality_score))
+
+        # Rank: nodes that enable others first, then severity, then enablement/centrality.
+        entry_candidates.sort(
+            key=lambda item: (item[1], item[2], item[3], item[4], item[0]),
+            reverse=True,
+        )
+        entry_nodes = [node_id for node_id, *_ in entry_candidates[:50]]
 
         nodes = []
         for node in self.graph.nodes():
