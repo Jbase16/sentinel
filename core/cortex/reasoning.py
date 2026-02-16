@@ -195,7 +195,8 @@ class ReasoningEngine:
         available_tools: list[str], 
         mode: str, 
         dispatch_tool: callable, 
-        log_fn: callable = None
+        log_fn: callable = None,
+        knowledge: Optional[Dict[str, Any]] = None,
     ):
         """
         Entry point used by API.
@@ -211,7 +212,8 @@ class ReasoningEngine:
             available_tools=available_tools,
             mode=scan_mode,
             dispatch_tool=dispatch_tool,
-            log_fn=log_fn
+            log_fn=log_fn,
+            knowledge=knowledge,
         )
 
 
@@ -222,4 +224,3 @@ def get_reasoning_engine() -> ReasoningEngine:
 
 # Optional singleton (matches API import)
 reasoning_engine = ReasoningEngine()
-

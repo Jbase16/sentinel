@@ -3,6 +3,7 @@ import SwiftUI
 struct AuditFeedView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var includeLogs = false
+    @State private var includeGraphStructure = false
 
     private var displayEvents: [GraphEvent] {
         var seen = Set<String>()
@@ -14,13 +15,15 @@ struct AuditFeedView: View {
             if !includeLogs && event.eventType == .log {
                 continue
             }
-            if event.eventType == .nodeAdded
-                || event.eventType == .nodeUpdated
-                || event.eventType == .nodeRemoved
-                || event.eventType == .edgeAdded
-                || event.eventType == .edgeUpdated
-            {
-                continue
+            if !includeGraphStructure {
+                if event.eventType == .nodeAdded
+                    || event.eventType == .nodeUpdated
+                    || event.eventType == .nodeRemoved
+                    || event.eventType == .edgeAdded
+                    || event.eventType == .edgeUpdated
+                {
+                    continue
+                }
             }
             output.append(event)
             if output.count >= 300 {
@@ -44,6 +47,13 @@ struct AuditFeedView: View {
                     .font(.caption2)
                     .labelsHidden()
                 Text(includeLogs ? "logs:on" : "logs:off")
+                    .font(.caption2)
+                    .foregroundColor(.gray)
+                Toggle("Graph", isOn: $includeGraphStructure)
+                    .toggleStyle(.switch)
+                    .font(.caption2)
+                    .labelsHidden()
+                Text(includeGraphStructure ? "graph:on" : "graph:off")
                     .font(.caption2)
                     .foregroundColor(.gray)
                 Text("\(displayEvents.count)")
@@ -119,6 +129,16 @@ struct EventRow: View {
             return event.payload["target"]?.stringValue ?? ""
         case .findingCreated:
             return event.payload["severity"]?.stringValue ?? ""
+        case .nodeAdded, .nodeUpdated, .nodeRemoved:
+            let id = event.payload["node_id"]?.stringValue ?? event.payload["id"]?.stringValue ?? ""
+            let t = event.payload["node_type"]?.stringValue ?? event.payload["type"]?.stringValue ?? ""
+            if !t.isEmpty && !id.isEmpty { return "\(t) • \(id.prefix(10))" }
+            return t.isEmpty ? String(id.prefix(16)) : t
+        case .edgeAdded, .edgeUpdated:
+            let src = event.payload["source"]?.stringValue ?? ""
+            let dst = event.payload["target"]?.stringValue ?? ""
+            if !src.isEmpty && !dst.isEmpty { return "\(src.prefix(10)) → \(dst.prefix(10))" }
+            return ""
         case .scanPhaseChanged:
             return event.payload["phase"]?.stringValue ?? ""
         case .decisionMade:

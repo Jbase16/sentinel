@@ -23,6 +23,7 @@ from core.scheduler.intents import (
     INTENT_ACTIVE_LIVE_CHECK,
     INTENT_SURFACE_ENUMERATION,
     INTENT_VULN_SCANNING,
+    INTENT_VERIFICATION,
     INTENT_HEAVY_ARTILLERY
 )
 
@@ -201,6 +202,29 @@ class ToolRegistry:
              "cost": 1,
              "intrusiveness": 1,
              "gates": ["type:subdomain"] # Only run on subs
+        },
+
+        # --- Phase 4: Verification / Exploitation Layer (Wraith internal tools) ---
+        "wraith_verify": {
+            "intent": INTENT_VERIFICATION,
+            "phase": PHASE_4_DEEP,
+            "cost": 4,
+            "intrusiveness": 4,
+            "gates": ["protocol:http", "protocol:https"],
+        },
+        "wraith_persona_diff": {
+            "intent": INTENT_VERIFICATION,
+            "phase": PHASE_4_DEEP,
+            "cost": 3,
+            "intrusiveness": 2,
+            "gates": ["protocol:http", "protocol:https"],
+        },
+        "wraith_oob_probe": {
+            "intent": INTENT_VERIFICATION,
+            "phase": PHASE_4_DEEP,
+            "cost": 4,
+            "intrusiveness": 4,
+            "gates": ["protocol:http", "protocol:https"],
         },
         
         # --- Phase 5: Heavy Artillery (Opt-in) ---

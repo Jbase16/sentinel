@@ -249,10 +249,28 @@ class DecisionLedger:
             # DB failure should not crash scanner
             return
 
-    async def get_children(self, decision_id: str) -> List[DecisionPoint]:
+    def get_children(self, decision_id: str) -> List[DecisionPoint]:
+        """
+        Return immediate children of a decision from the in-memory window.
+
+        NOTE:
+        - This is intentionally synchronous: Strategos and tests use the
+          in-memory ledger for causality/hierarchy checks without requiring DB IO.
+        - If you need historical children outside the in-memory window, add a
+          dedicated DB/API call rather than blocking the scanner.
+        """
+        with self._lock:
+            return [d for d in self._decisions if d.parent_id == decision_id]
+
+    async def get_children_from_db(self, decision_id: str) -> List[DecisionPoint]:
+        """
+        Best-effort DB-backed child lookup.
+
+        This is optional and should not be used on the hot path.
+        """
         from core.data.db import Database
         if not Database.is_initialized():
-             return []
+            return []
 
         try:
             records = await Database.instance().get_decision_children(decision_id)

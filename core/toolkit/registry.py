@@ -378,6 +378,54 @@ _tool_data = [
 for tool in _tool_data:
     TOOLS.register(tool)
 
+# --------------------------------------------------------------------------
+# Internal (In-Process) Tools
+# --------------------------------------------------------------------------
+
+# Internal tools run inside the ScannerEngine process and are always "installed".
+# They provide the exploitation/verification layer without shelling out.
+try:
+    from core.toolkit.internal_tools.wraith_verify import WraithVerifyTool
+    from core.toolkit.internal_tools.persona_diff import WraithPersonaDiffTool
+    from core.toolkit.internal_tools.oob_probe import WraithOOBProbeTool
+
+    TOOLS.register(
+        ToolDefinition(
+            name="wraith_verify",
+            label="wraith_verify (MutationEngine targeted verification)",
+            cmd_template=["internal"],
+            aggressive=False,
+            target_type="url",
+            tool_type="internal",
+            handler=WraithVerifyTool(),
+        )
+    )
+    TOOLS.register(
+        ToolDefinition(
+            name="wraith_persona_diff",
+            label="wraith_persona_diff (differential auth replay across personas)",
+            cmd_template=["internal"],
+            aggressive=False,
+            target_type="url",
+            tool_type="internal",
+            handler=WraithPersonaDiffTool(),
+        )
+    )
+    TOOLS.register(
+        ToolDefinition(
+            name="wraith_oob_probe",
+            label="wraith_oob_probe (OOB canary injection + callback correlation)",
+            cmd_template=["internal"],
+            aggressive=False,
+            target_type="url",
+            tool_type="internal",
+            handler=WraithOOBProbeTool(),
+        )
+    )
+except Exception as e:
+    # Internal tools are optional; failure to import should not block the entire registry.
+    logger.warning(f"Failed to register internal tools: {e}")
+
 # Tools that require a public domain name (useless against localhost/RFC1918)
 TOOLS_REQUIRING_PUBLIC_DOMAIN = {"amass", "subfinder", "dnsx", "assetfinder"}
 # Tools that require root/sudo privileges

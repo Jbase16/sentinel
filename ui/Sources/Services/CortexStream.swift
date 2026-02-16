@@ -425,7 +425,11 @@ class CortexStream: ObservableObject {
         return SIMD3<Float>(x, y, z)
     }
 
-    func updateFromPressureGraph(_ graph: PressureGraphDTO, includeDecisionLayer: Bool = false) {
+    func updateFromPressureGraph(
+        _ graph: PressureGraphDTO,
+        includeDecisionLayer: Bool = false,
+        hideLowSignalNodes: Bool = false
+    ) {
         func categoryForType(_ rawType: String) -> String {
             let t = rawType.lowercased()
             if t == "decision" { return "decision" }
@@ -445,7 +449,7 @@ class CortexStream: ObservableObject {
         }
 
         // Map DTO -> NodeModel
-        let mappedNodes = graph.nodes.map { node -> NodeModel in
+        var mappedNodes = graph.nodes.map { node -> NodeModel in
             let id = node.id
 
             // Get cached position or generate stable one (Deterministic Layout)
@@ -519,6 +523,48 @@ class CortexStream: ObservableObject {
                 target: edge.target,
                 type: edge.data?.renderType ?? edge.type
             )
+        }
+
+        // Optional noise filter: hide low-signal nodes while preserving anchors.
+        if hideLowSignalNodes {
+            let minSeverityToRender = 3.0  // INFO=1.0, LOW=3.0; hide INFO by default
+            let pinnedIDs = Set((graph.criticalAssets ?? []) + (graph.entryNodes ?? []))
+
+            var keepIDs: Set<String> = pinnedIDs
+            for node in mappedNodes {
+                if pinnedIDs.contains(node.id) {
+                    keepIDs.insert(node.id)
+                    continue
+                }
+                if node.structural == true {
+                    keepIDs.insert(node.id)
+                    continue
+                }
+                let sev = Double((node.pressure ?? 0.0) * 10.0)
+                if sev >= minSeverityToRender {
+                    keepIDs.insert(node.id)
+                }
+            }
+
+            // Guard: never filter down to an unusable graph. If we're about to drop
+            // too much, keep the top nodes by pressure plus anchors.
+            let minKeep = min(30, mappedNodes.count)
+            if keepIDs.count < minKeep {
+                let ranked = mappedNodes.sorted { lhs, rhs in
+                    let lp = lhs.pressure ?? 0.0
+                    let rp = rhs.pressure ?? 0.0
+                    if lp != rp { return lp > rp }
+                    let ls = lhs.structural ?? false
+                    let rs = rhs.structural ?? false
+                    if ls != rs { return ls }
+                    return lhs.id < rhs.id
+                }
+                let top = ranked.prefix(min(40, ranked.count)).map { $0.id }
+                keepIDs.formUnion(top)
+            }
+
+            mappedNodes = mappedNodes.filter { keepIDs.contains($0.id) }
+            mappedEdges = mappedEdges.filter { keepIDs.contains($0.source) && keepIDs.contains($0.target) }
         }
 
         var finalNodes = mappedNodes

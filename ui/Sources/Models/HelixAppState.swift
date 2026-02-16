@@ -80,6 +80,7 @@ public class HelixAppState: ObservableObject {
     @Published var insightsByNode: [String: [InsightClaim]] = [:]
     @Published var latestPressureGraph: PressureGraphDTO? = nil
     @Published var showDecisionLayerInGraph: Bool = false
+    @Published var hideLowSignalGraphNodes: Bool = true
 
     // MARK: - Replay State (Time Travel)
     @Published var allEvents: [GraphEvent] = []  // The Tape
@@ -398,7 +399,9 @@ public class HelixAppState: ObservableObject {
                         self.latestPressureGraph = graph
                     }
                     cortexStream.updateFromPressureGraph(
-                        graph, includeDecisionLayer: self.showDecisionLayerInGraph
+                        graph,
+                        includeDecisionLayer: self.showDecisionLayerInGraph,
+                        hideLowSignalNodes: self.hideLowSignalGraphNodes
                     )
                 } else {
                     // 204 No Content is normal during scan initialization
@@ -421,7 +424,9 @@ public class HelixAppState: ObservableObject {
     func applyGraphLayerVisibility() {
         guard let graph = latestPressureGraph else { return }
         cortexStream.updateFromPressureGraph(
-            graph, includeDecisionLayer: showDecisionLayerInGraph
+            graph,
+            includeDecisionLayer: showDecisionLayerInGraph,
+            hideLowSignalNodes: hideLowSignalGraphNodes
         )
     }
 

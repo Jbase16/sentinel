@@ -1499,11 +1499,40 @@ class ScannerEngine:
         await queue.put(f"--- Running {tool} [internal] ({exec_id}) ---")
 
         # Build context from current scan state
-        existing_findings = []
+        existing_findings: List[Dict[str, Any]] = []
+
+        # Prefer the session store as the source of truth (committed findings).
+        if self.session and hasattr(self.session, "findings"):
+            try:
+                existing_findings = list(getattr(self.session.findings, "items", lambda: [])())
+            except Exception:
+                existing_findings = []
+
+        # Merge in staged (not-yet-committed) findings so internal tools can
+        # react to discoveries from earlier tools in the same scan run.
         if self._active_transaction and hasattr(self._active_transaction, "_staged_findings"):
-            existing_findings = list(self._active_transaction._staged_findings)
-        elif self.session and hasattr(self.session, "findings"):
-            existing_findings = list(getattr(self.session.findings, "items", lambda: [])())
+            try:
+                staged = list(self._active_transaction._staged_findings)
+            except Exception:
+                staged = []
+
+            if staged:
+                seen: set[str] = set()
+                for f in existing_findings:
+                    if isinstance(f, dict):
+                        key = str(f.get("fingerprint") or f.get("id") or "")
+                        if key:
+                            seen.add(key)
+
+                for f in staged:
+                    if not isinstance(f, dict):
+                        continue
+                    key = str(f.get("fingerprint") or f.get("id") or "")
+                    if key and key in seen:
+                        continue
+                    if key:
+                        seen.add(key)
+                    existing_findings.append(f)
 
         knowledge = {}
         if self.session and hasattr(self.session, "knowledge"):

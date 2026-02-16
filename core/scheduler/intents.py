@@ -33,6 +33,7 @@ INTENT_ACTIVE_LIVE_CHECK = "intent_active_live"     # Gentle touching (ping/http
 INTENT_SURFACE_ENUMERATION = "intent_surface_enum"  # Crawling, port scanning
 INTENT_PARAMETER_FUZZING = "intent_param_fuzzing"   # Fuzzing
 INTENT_VULN_SCANNING = "intent_vuln_scan"           # Explicit vuln checks
+INTENT_VERIFICATION = "intent_verification"         # Targeted verification/exploitation checks
 INTENT_HEAVY_ARTILLERY = "intent_heavy_artillery"   # Opt-in heavy tools
 
 # Helper to get human readable name

@@ -22,7 +22,7 @@ import time
 import re
 from pathlib import Path
 from threading import Lock
-from typing import Dict, Deque, Optional
+from typing import Any, Dict, Deque, Optional
 from collections import deque
 import logging
 
@@ -111,6 +111,13 @@ class ScanSession:
         
         # Store the target we're scanning
         self.target = target
+
+        # Shared per-scan knowledge for cross-layer coordination.
+        #
+        # This is intentionally NOT persisted to the database (see to_dict()),
+        # because it may contain runtime-only objects (e.g., bypass engines,
+        # auth sessions) that are not JSON serializable.
+        self.knowledge: Dict[str, Any] = {}
         
         # Record when this scan started (Unix timestamp: seconds since 1970)
         self.start_time = time.time()
@@ -176,6 +183,11 @@ class ScanSession:
     @property
     def session_id(self) -> str:
         """Alias for self.id for compatibility with scanner_engine."""
+        return self.id
+
+    @property
+    def scan_id(self) -> str:
+        """Alias for scan identifiers used by components that expect scan_id."""
         return self.id
 
     def _init_log_file(self) -> None:

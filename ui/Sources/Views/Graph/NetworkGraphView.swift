@@ -71,6 +71,14 @@ struct NetworkGraphView: View {
                         .background(.ultraThinMaterial)
                         .cornerRadius(4)
 
+                    Toggle("FILTER", isOn: $appState.hideLowSignalGraphNodes)
+                        .toggleStyle(.switch)
+                        .font(.custom("Courier New", size: 11))
+                        .foregroundColor(.white)
+                        .padding(6)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(4)
+
                     Spacer()
 
                     // Identity Badge
@@ -124,6 +132,10 @@ struct NetworkGraphView: View {
             }
         }
         .onChange(of: appState.showDecisionLayerInGraph) {
+            appState.applyGraphLayerVisibility()
+            appState.fetchAnalysis()
+        }
+        .onChange(of: appState.hideLowSignalGraphNodes) {
             appState.applyGraphLayerVisibility()
             appState.fetchAnalysis()
         }

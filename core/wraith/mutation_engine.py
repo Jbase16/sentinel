@@ -20,7 +20,7 @@ import time
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
-from urllib.parse import urlencode, urlparse, urljoin
+from urllib.parse import urlencode, urlparse, urljoin, parse_qsl
 
 import httpx
 
@@ -912,8 +912,37 @@ class MutationEngine:
                 evidence=[],
                 outcome=ActionOutcome.ERROR,
             )
+
+    def _canonicalize_url_and_params(
+        self,
+        url: str,
+        base_params: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, Dict[str, str]]:
+        """Normalize URL and params for stable baseline caching.
+
+        Callers may provide query parameters in `url`, in `base_params`, or both.
+        We merge them (base_params wins), strip query/fragment from the canonical
+        URL, and return a params dict with stringified values.
+        """
+        parsed = urlparse(url)
+        from_query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        merged: Dict[str, str] = {**from_query, **(base_params or {})}
+        merged = {str(k): str(v) for k, v in merged.items() if v is not None}
+        canonical_url = parsed._replace(query="", fragment="").geturl()
+        return canonical_url, merged
+
+    def _baseline_cache_key(self, canonical_url: str, params: Dict[str, str]) -> str:
+        """Deterministic baseline cache key (URL + sorted query params)."""
+        if not params:
+            return canonical_url
+        return canonical_url + "?" + urlencode(sorted(params.items()))
     
-    async def get_baseline(self, url: str, headers: Optional[Dict[str, str]] = None) -> MutationResponse:
+    async def get_baseline(
+        self,
+        url: str,
+        headers: Optional[Dict[str, str]] = None,
+        base_params: Optional[Dict[str, str]] = None,
+    ) -> MutationResponse:
         """Get or fetch baseline response for a URL.
         
         Caches baselines to avoid redundant requests. Used for comparison
@@ -926,12 +955,18 @@ class MutationEngine:
         Returns:
             Cached or freshly-fetched MutationResponse
         """
-        if url not in self._baselines:
-            request = MutationRequest(url=url, headers=headers or {})
-            self._baselines[url] = await self.send(request)
-        return self._baselines[url]
+        canonical_url, merged_params = self._canonicalize_url_and_params(url, base_params)
+        key = self._baseline_cache_key(canonical_url, merged_params)
+        if key not in self._baselines:
+            request = MutationRequest(
+                url=canonical_url,
+                headers=headers or {},
+                query_params=merged_params,
+            )
+            self._baselines[key] = await self.send(request)
+        return self._baselines[key]
     
-    def clear_baseline(self, url: str) -> None:
+    def clear_baseline(self, url: str, base_params: Optional[Dict[str, str]] = None) -> None:
         """Clear cached baseline for URL.
         
         Use when target state has changed (e.g., after privilege escalation).
@@ -939,7 +974,9 @@ class MutationEngine:
         Args:
             url: Target URL
         """
-        self._baselines.pop(url, None)
+        canonical_url, merged_params = self._canonicalize_url_and_params(url, base_params)
+        key = self._baseline_cache_key(canonical_url, merged_params)
+        self._baselines.pop(key, None)
     
     async def mutate_and_analyze(
         self,
@@ -967,18 +1004,20 @@ class MutationEngine:
         Returns:
             Tuple of (MutationResponse with evidence attached, ActionOutcome)
         """
+        canonical_url, merged_params = self._canonicalize_url_and_params(url, base_params)
+
         # Build the mutated request
         request = self._build_mutated_request(
-            url=url,
+            url=canonical_url,
             payload=payload,
             method=method,
             headers=headers or {},
             cookies=cookies or {},
-            base_params=base_params or {},
+            base_params=merged_params,
         )
         
         # Get baseline for comparison
-        baseline = await self.get_baseline(url, headers)
+        baseline = await self.get_baseline(canonical_url, headers, base_params=merged_params)
         
         # Send mutated request
         response = await self.send(request)
@@ -991,7 +1030,7 @@ class MutationEngine:
         all_evidence: List[Evidence] = []
         
         # WAF detection (cached per host)
-        host = urlparse(url).hostname or "unknown"
+        host = urlparse(canonical_url).hostname or "unknown"
         if host not in self._waf_cache:
             self._waf_cache[host] = detect_waf_block(response)
         
@@ -1194,7 +1233,13 @@ class MutationEngine:
             
             # Collect evidence from the step's payload oracles (if payload attached)
             if step.request.payload:
-                baseline = await self.get_baseline(step.request.url)
+                # Baseline must match the interpolated request (URL + query params + headers),
+                # otherwise time/status comparisons become meaningless.
+                baseline = await self.get_baseline(
+                    request.url,
+                    headers=request.headers,
+                    base_params=request.query_params,
+                )
                 
                 for oracle_fn in [detect_sql_errors, detect_reflection]:
                     evidence = oracle_fn(response, step.request.payload)

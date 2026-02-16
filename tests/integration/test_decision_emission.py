@@ -292,16 +292,18 @@ class TestDecisionHierarchy:
         # Find tool decisions that are children
         for intent_decision in intent_decisions:
             children = decision_ledger.get_children(intent_decision.id)
-            
+
             # Should have children (tool selections, rejections, or skip decisions)
             # Not guaranteed for every intent, but at least some should have children
             if children:
-                for child in children:
+                # Intent nodes may also nest non-tool children (e.g., ASSESSMENT).
+                # This test only asserts that *tool* children are properly nested.
+                tool_children = [
+                    c for c in children
+                    if c.type in (DecisionType.TOOL_SELECTION, DecisionType.TOOL_REJECTION)
+                ]
+                for child in tool_children:
                     assert child.parent_id == intent_decision.id
-                    assert child.type in [
-                        DecisionType.TOOL_SELECTION,
-                        DecisionType.TOOL_REJECTION
-                    ]
 
 
 class TestDecisionCompleteness:

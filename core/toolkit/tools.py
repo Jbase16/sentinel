@@ -54,6 +54,12 @@ def get_installed_tools() -> Dict[str, Dict[str, Any]]:
     """
     installed = {}
     for name, config in TOOLS.items():
+        # Internal tools are in-process handlers, not external binaries.
+        # Treat them as always available so they can be selected/executed.
+        if getattr(config, "tool_type", "subprocess") == "internal":
+            installed[name] = config
+            continue
+
         # Check if binary (or cmd[0]) exists in PATH or venv
         binary = config.binary_name or config.cmd_template[0]
         if find_binary(binary):

@@ -113,12 +113,16 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "sqli_error_based": CapabilityTier.T2a_SAFE_VERIFY,
     "xss_reflected_check": CapabilityTier.T2a_SAFE_VERIFY,
     "ssrf_dns_only": CapabilityTier.T2a_SAFE_VERIFY,
+    # Wraith internal exploitation/verification tools
+    "wraith_persona_diff": CapabilityTier.T2a_SAFE_VERIFY,
     # T2b: Mutating verification
     "nuclei_mutating": CapabilityTier.T2b_MUTATING_VERIFY,
     "nuclei_medium": CapabilityTier.T2b_MUTATING_VERIFY,
     "nuclei_high": CapabilityTier.T2b_MUTATING_VERIFY,
     "sqli_union": CapabilityTier.T2b_MUTATING_VERIFY,
     "file_upload_test": CapabilityTier.T2b_MUTATING_VERIFY,
+    "wraith_verify": CapabilityTier.T2b_MUTATING_VERIFY,
+    "wraith_oob_probe": CapabilityTier.T2b_MUTATING_VERIFY,
     # T3: Exploitation
     "nuclei_critical": CapabilityTier.T3_EXPLOIT,
     "rce_proof": CapabilityTier.T3_EXPLOIT,

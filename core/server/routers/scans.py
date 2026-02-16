@@ -331,7 +331,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     available_tools=allowed_tools,
                     mode=req.mode,
                     dispatch_tool=dispatch_tool,
-                    log_fn=session.log
+                    log_fn=session.log,
+                    knowledge=session.knowledge,
                 )
                 
                 state.scan_state["status"] = "completed"
