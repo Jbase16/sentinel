@@ -526,23 +526,51 @@ class CortexStream: ObservableObject {
         }
 
         // Optional noise filter: hide low-signal nodes while preserving anchors.
+        //
+        // Design goal: keep the graph legible by default without collapsing it into
+        // a meaningless "top-N" list. We do this by keeping:
+        // - Anchors: entry + critical assets
+        // - Structural nodes
+        // - High-signal nodes (confirmed/probable, high severity, execution/access capability)
+        // - One-hop neighborhood of the high-signal core (context)
         if hideLowSignalNodes {
-            let minSeverityToRender = 3.0  // INFO=1.0, LOW=3.0; hide INFO by default
             let pinnedIDs = Set((graph.criticalAssets ?? []) + (graph.entryNodes ?? []))
 
-            var keepIDs: Set<String> = pinnedIDs
-            for node in mappedNodes {
-                if pinnedIDs.contains(node.id) {
-                    keepIDs.insert(node.id)
-                    continue
+            let highConfirmIDs: Set<String> = Set(
+                graph.nodes.compactMap { node in
+                    let level = (node.data.confirmationLevel ?? "").lowercased()
+                    return (level == "confirmed" || level == "probable") ? node.id : nil
                 }
-                if node.structural == true {
-                    keepIDs.insert(node.id)
-                    continue
+            )
+
+            let highCapabilityIDs: Set<String> = Set(
+                graph.nodes.compactMap { node in
+                    guard let caps = node.data.capabilityTypes, !caps.isEmpty else { return nil }
+                    let lower = caps.map { $0.lowercased() }
+                    return (lower.contains("execution") || lower.contains("access")) ? node.id : nil
                 }
-                let sev = Double((node.pressure ?? 0.0) * 10.0)
-                if sev >= minSeverityToRender {
-                    keepIDs.insert(node.id)
+            )
+
+            let highSeverityIDs: Set<String> = Set(
+                graph.nodes.compactMap { node in
+                    return node.data.severity >= 7.0 ? node.id : nil  // HIGH+
+                }
+            )
+
+            var coreIDs: Set<String> = pinnedIDs
+            coreIDs.formUnion(highConfirmIDs)
+            coreIDs.formUnion(highCapabilityIDs)
+            coreIDs.formUnion(highSeverityIDs)
+            for node in mappedNodes where node.structural == true {
+                coreIDs.insert(node.id)
+            }
+
+            // Keep the core plus its immediate neighborhood so connections remain visible.
+            var keepIDs: Set<String> = coreIDs
+            for edge in mappedEdges {
+                if coreIDs.contains(edge.source) || coreIDs.contains(edge.target) {
+                    keepIDs.insert(edge.source)
+                    keepIDs.insert(edge.target)
                 }
             }
 

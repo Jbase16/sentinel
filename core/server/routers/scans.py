@@ -24,6 +24,11 @@ class ScanRequest(BaseModel):
     modules: Optional[List[str]] = None
     force: bool = False
     mode: str = "standard"
+    # Optional per-scan knowledge configuration used by internal verification tools.
+    # These are intentionally kept minimal and opt-in; missing config simply disables
+    # the corresponding internal tools (wraith_persona_diff / wraith_oob_probe).
+    personas: Optional[List[Dict[str, Any]]] = None
+    oob: Optional[Dict[str, Any]] = None
 
     @field_validator("target")
     @classmethod
@@ -68,6 +73,39 @@ class ScanRequest(BaseModel):
         invalid = [tool for tool in v if tool not in valid_tools]
         if invalid:
             raise ValueError(f"Invalid tool names: {', '.join(invalid)}")
+        return v
+
+    @field_validator("personas")
+    @classmethod
+    def validate_personas(cls, v: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("personas must be a list")
+        if len(v) > 8:
+            raise ValueError("personas list too large (max 8)")
+        # Shallow validation: ensure each persona is a dict with a name field.
+        for idx, item in enumerate(v):
+            if not isinstance(item, dict):
+                raise ValueError(f"personas[{idx}] must be an object")
+            name = item.get("name")
+            if name is not None and (not isinstance(name, str) or not name.strip()):
+                raise ValueError(f"personas[{idx}].name must be a non-empty string")
+        return v
+
+    @field_validator("oob")
+    @classmethod
+    def validate_oob(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if v is None:
+            return None
+        if not isinstance(v, dict):
+            raise ValueError("oob must be an object")
+        base_domain = v.get("base_domain")
+        if base_domain is not None and (not isinstance(base_domain, str) or not base_domain.strip()):
+            raise ValueError("oob.base_domain must be a non-empty string when provided")
+        provider = v.get("provider")
+        if provider is not None and not isinstance(provider, str):
+            raise ValueError("oob.provider must be a string when provided")
         return v
 
 def _log_sink_sync(msg: str) -> None:
@@ -149,6 +187,12 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         state.cancel_requested.clear()
 
         session = ScanSession(req.target)
+        # Seed per-scan knowledge used by internal tools. This is opt-in and
+        # intentionally shallow-validated at the API boundary.
+        if req.personas:
+            session.knowledge["personas"] = req.personas
+        if req.oob:
+            session.knowledge["oob"] = req.oob
         session.set_external_log_sink(_log_sink_sync)
         await state.register_session(session.id, session)
 

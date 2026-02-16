@@ -765,13 +765,24 @@ public class HelixAppState: ObservableObject {
     }
 
     /// Function startScan.
-    func startScan(target: String, modules: [String], mode: ScanMode) {
+    func startScan(
+        target: String,
+        modules: [String],
+        mode: ScanMode,
+        personas: [[String: Any]]? = nil,
+        oob: [String: Any]? = nil
+    ) {
         print("[AppState] startScan invoked target=\(target) mode=\(mode.rawValue)")
         Task {
             do {
                 print("[AppState] About to call apiClient.startScan...")
                 try await apiClient.startScan(
-                    target: target, modules: modules, mode: mode.rawValue)
+                    target: target,
+                    modules: modules,
+                    mode: mode.rawValue,
+                    personas: personas,
+                    oob: oob
+                )
                 print("[AppState] apiClient.startScan succeeded")
             } catch {
                 print("[AppState] Failed to start scan")

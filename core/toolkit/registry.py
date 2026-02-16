@@ -278,7 +278,18 @@ _tool_data = [
     ToolDefinition(
         name="nuclei_safe",
         label="nuclei (safe profile: low severity)",
-        cmd_template=["nuclei", "-target", "{target}", "-severity", "low"],
+        # Use JSONL output so raw_classifier can reliably parse findings.
+        # Omit raw request/response pairs to keep output bounded.
+        cmd_template=[
+            "nuclei",
+            "-target",
+            "{target}",
+            "-severity",
+            "low",
+            "-jsonl",
+            "-omit-raw",
+            "-nc",
+        ],
         aggressive=True,
         target_type="url",
         binary_name="nuclei",
@@ -286,7 +297,18 @@ _tool_data = [
     ToolDefinition(
         name="nuclei_mutating",
         label="nuclei (mutating profile: medium/high/critical)",
-        cmd_template=["nuclei", "-target", "{target}", "-severity", "medium,high,critical"],
+        # Use JSONL output so raw_classifier can reliably parse findings.
+        # Omit raw request/response pairs to keep output bounded.
+        cmd_template=[
+            "nuclei",
+            "-target",
+            "{target}",
+            "-severity",
+            "medium,high,critical",
+            "-jsonl",
+            "-omit-raw",
+            "-nc",
+        ],
         aggressive=True,
         target_type="url",
         binary_name="nuclei",
@@ -294,7 +316,17 @@ _tool_data = [
     ToolDefinition(
         name="nuclei",
         label="nuclei (legacy alias: safe profile)",
-        cmd_template=["nuclei", "-target", "{target}", "-severity", "low"],
+        # Legacy alias maintained for CLI compatibility. Keep output parseable.
+        cmd_template=[
+            "nuclei",
+            "-target",
+            "{target}",
+            "-severity",
+            "low",
+            "-jsonl",
+            "-omit-raw",
+            "-nc",
+        ],
         aggressive=True,
         target_type="url",
         binary_name="nuclei",

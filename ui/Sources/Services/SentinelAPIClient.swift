@@ -128,7 +128,13 @@ public struct SentinelAPIClient: Sendable {
     /// Backend may return 202 (Accepted) OR 200 (OK) with a JSON body:
     ///   {"session_id":"...","status":"started"}
     /// Both are success.
-    public func startScan(target: String, modules: [String] = [], mode: String = "standard")
+    public func startScan(
+        target: String,
+        modules: [String] = [],
+        mode: String = "standard",
+        personas: [[String: Any]]? = nil,
+        oob: [String: Any]? = nil
+    )
         async throws
     {
         guard let url = URL(string: "/v1/scans/start", relativeTo: baseURL) else { return }
@@ -138,6 +144,12 @@ public struct SentinelAPIClient: Sendable {
         var body: [String: Any] = ["target": target, "force": true, "mode": mode]
         if !modules.isEmpty {
             body["modules"] = modules
+        }
+        if let personas, !personas.isEmpty {
+            body["personas"] = personas
+        }
+        if let oob, !oob.isEmpty {
+            body["oob"] = oob
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

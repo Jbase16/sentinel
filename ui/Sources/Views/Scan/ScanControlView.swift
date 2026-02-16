@@ -43,6 +43,9 @@ struct ScanControlView: View {
     @State private var showToolConfig = false
     @State private var selectedMode: ScanMode = .standard
     @State private var toolSelectionMode: ToolSelectionMode = .scheduler
+    @State private var showAdvancedConfig = false
+    @State private var personasJSON: String = ""
+    @State private var oobJSON: String = ""
 
     private var isScanning: Bool {
         // Prioritize event-driven state (isScanRunning) over backend status
@@ -146,6 +149,17 @@ struct ScanControlView: View {
                     .disabled(isScanning)
                 }
 
+                Button(action: { showAdvancedConfig.toggle() }) {
+                    Image(systemName: "slider.horizontal.3")
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $showAdvancedConfig) {
+                    AdvancedScanConfigView(personasJSON: $personasJSON, oobJSON: $oobJSON)
+                        .frame(width: 520, height: 360)
+                }
+                .disabled(isScanning)
+
                 // Conditional branch.
                 if isScanning {
                     Button(action: { appState.cancelScan() }) {
@@ -229,13 +243,149 @@ struct ScanControlView: View {
             print(
                 "[ScanControlView] Calling appState.startScan(target=\(scanTarget), modules=\(modules), mode=\(selectedMode.rawValue))"
             )
+
+            let personasTrimmed = personasJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parsedPersonas = parseJSONArray(personasJSON)
+            if !personasTrimmed.isEmpty && parsedPersonas == nil {
+                print("[ScanControlView] Aborting startScan: invalid Personas JSON")
+                return
+            }
+
+            let oobTrimmed = oobJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+            let parsedOob = parseJSONDict(oobJSON)
+            if !oobTrimmed.isEmpty && parsedOob == nil {
+                print("[ScanControlView] Aborting startScan: invalid OOB JSON")
+                return
+            }
+
             appState.startScan(
-                target: scanTarget, modules: modules, mode: selectedMode)
+                target: scanTarget,
+                modules: modules,
+                mode: selectedMode,
+                personas: parsedPersonas,
+                oob: parsedOob
+            )
         } else {
             print(
                 "[ScanControlView] Guard failed - scanTarget.isEmpty: \(scanTarget.isEmpty), backend.isRunning: \(backend.isRunning)"
             )
         }
+    }
+
+    private func parseJSONArray(_ text: String) -> [[String: Any]]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let data = trimmed.data(using: .utf8) else { return nil }
+        do {
+            let obj = try JSONSerialization.jsonObject(with: data)
+            guard let arr = obj as? [[String: Any]] else {
+                print("[ScanControlView] personasJSON must be a JSON array of objects")
+                return nil
+            }
+            return arr
+        } catch {
+            print("[ScanControlView] personasJSON parse error: \(error)")
+            return nil
+        }
+    }
+
+    private func parseJSONDict(_ text: String) -> [String: Any]? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let data = trimmed.data(using: .utf8) else { return nil }
+        do {
+            let obj = try JSONSerialization.jsonObject(with: data)
+            guard let dict = obj as? [String: Any] else {
+                print("[ScanControlView] oobJSON must be a JSON object")
+                return nil
+            }
+            return dict
+        } catch {
+            print("[ScanControlView] oobJSON parse error: \(error)")
+            return nil
+        }
+    }
+}
+
+private struct AdvancedScanConfigView: View {
+    @Binding var personasJSON: String
+    @Binding var oobJSON: String
+
+    private let personasPlaceholder =
+        """
+        [
+          {
+            "name": "User",
+            "persona_type": "user",
+            "bearer_token": "REDACTED"
+          },
+          {
+            "name": "Admin",
+            "persona_type": "admin",
+            "cookie_jar": { "session": "REDACTED" }
+          }
+        ]
+        """
+
+    private let oobPlaceholder =
+        """
+        {
+          "provider": "interactsh",
+          "base_domain": "oob.example.com",
+          "api_url": "https://interactsh.com",
+          "poll_timeout_s": 25,
+          "poll_interval_s": 2
+        }
+        """
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Advanced Scan Config")
+                    .font(.headline)
+                Spacer()
+                Button("Clear") {
+                    personasJSON = ""
+                    oobJSON = ""
+                }
+                .buttonStyle(.link)
+            }
+
+            Text("Personas (optional) – enables wraith_persona_diff when provided.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $personasJSON)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(minHeight: 120)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25)))
+                if personasJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(personasPlaceholder)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.6))
+                        .padding(8)
+                }
+            }
+
+            Text("OOB (optional) – enables wraith_oob_probe when provided.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $oobJSON)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(minHeight: 100)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25)))
+                if oobJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(oobPlaceholder)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.gray.opacity(0.6))
+                        .padding(8)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
     }
 }
 

@@ -36,7 +36,7 @@ import json
 import re
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 from core.toolkit.fingerprinters import ContentHasher
 
 ManagementPortMap = {
@@ -492,6 +492,120 @@ def _handle_wafw00f(target: str, output: str) -> List[RawFinding]:
             metadata={"waf": waf_name},
         )
     ]
+
+
+def _handle_nuclei(target: str, output: str, *, tool_name: str) -> List[RawFinding]:
+    """Parse nuclei JSONL output into normalized RawFinding objects.
+
+    Assumptions:
+      - nuclei is invoked with `-jsonl` so each output line is a single JSON object.
+      - We ignore non-JSON lines (progress/logging) defensively.
+
+    Rationale:
+      - Structured nuclei output provides deterministic extraction of affected URL,
+        template id, severity and extracted results, enabling downstream verification
+        tools (MutationEngine/Wraith) to target the right endpoints.
+    """
+    findings: List[RawFinding] = []
+
+    for line in output.splitlines():
+        line = (line or "").strip()
+        if not line or not line.startswith("{"):
+            continue
+
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        info = data.get("info") if isinstance(data.get("info"), dict) else {}
+        template_id = str(data.get("templateID") or data.get("templateId") or "").strip()
+        name = str(info.get("name") or template_id or "Nuclei Finding").strip()
+
+        severity_raw = str(info.get("severity") or data.get("severity") or "info").strip().upper()
+        severity = severity_raw if severity_raw in {"INFO", "LOW", "MEDIUM", "HIGH", "CRITICAL"} else "INFO"
+
+        # nuclei uses `matched-at` in JSONL output; fall back to a few known aliases.
+        url: str | None = None
+        for key in ("matched-at", "matched_at", "matched", "url", "host"):
+            v = data.get(key)
+            if isinstance(v, str) and v.strip():
+                url = v.strip()
+                break
+        if not url:
+            url = target
+
+        matcher_name = data.get("matcher-name") or data.get("matcher_name") or data.get("matcher")
+        if matcher_name is not None and not isinstance(matcher_name, str):
+            matcher_name = None
+
+        extracted = data.get("extracted-results") or data.get("extracted_results")
+        if extracted is not None and not isinstance(extracted, list):
+            extracted = None
+
+        tags: List[str] = ["nuclei"]
+        info_tags = info.get("tags")
+        if isinstance(info_tags, str) and info_tags.strip():
+            tags.extend([t.strip() for t in info_tags.split(",") if t.strip()])
+        elif isinstance(info_tags, list):
+            tags.extend([str(t).strip() for t in info_tags if str(t).strip()])
+
+        if template_id:
+            tags.append(template_id)
+
+        message_parts: List[str] = []
+        if template_id:
+            message_parts.append(template_id)
+        if matcher_name:
+            message_parts.append(str(matcher_name))
+        if extracted:
+            message_parts.append(f"extracted={len(extracted)}")
+        message = " • ".join(message_parts) if message_parts else name
+
+        metadata: Dict[str, Any] = {
+            "url": url,
+            "template_id": template_id or None,
+            "template_path": data.get("templatePath") or data.get("template_path"),
+            "name": name,
+            "severity": severity,
+            "matcher_name": matcher_name,
+            "type": data.get("type"),
+            "host": data.get("host"),
+            "ip": data.get("ip"),
+            "timestamp": data.get("timestamp"),
+            "extracted_results": extracted,
+            "reference": info.get("reference"),
+        }
+
+        findings.append(
+            RawFinding(
+                type=name,
+                severity=severity,
+                tool=tool_name,
+                target=target,
+                message=message,
+                proof=url,
+                tags=tags,
+                families=["vulnerability"],
+                metadata={k: v for k, v in metadata.items() if v is not None},
+            )
+        )
+
+    return findings
+
+
+def _handle_nuclei_safe(target: str, output: str) -> List[RawFinding]:
+    return _handle_nuclei(target, output, tool_name="nuclei_safe")
+
+
+def _handle_nuclei_mutating(target: str, output: str) -> List[RawFinding]:
+    return _handle_nuclei(target, output, tool_name="nuclei_mutating")
+
+
+def _handle_nuclei_legacy(target: str, output: str) -> List[RawFinding]:
+    return _handle_nuclei(target, output, tool_name="nuclei")
 
 
 def _handle_httpx(target: str, output: str) -> List[RawFinding]:
@@ -1859,6 +1973,11 @@ _HANDLERS: Dict[str, Callable[[str, str], List[RawFinding]]] = {
     "whatweb": _handle_whatweb,
     "wafw00f": _handle_wafw00f,
     "httpx": _handle_httpx,
+    # nuclei profile aliases all share the same JSONL parser, but we preserve
+    # the tool name so tiers and UI attribution remain correct.
+    "nuclei_safe": _handle_nuclei_safe,
+    "nuclei_mutating": _handle_nuclei_mutating,
+    "nuclei": _handle_nuclei_legacy,
     "dirsearch": _handle_dirsearch,
     "gobuster": _handle_gobuster,
     "feroxbuster": _handle_feroxbuster,
