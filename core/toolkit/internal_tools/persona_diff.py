@@ -8,11 +8,10 @@ from core.toolkit.internal_tool import InternalTool, InternalToolContext
 from core.wraith.mutation_engine import HttpMethod, MutationRequest
 from core.wraith.personas import (
     DifferentialAnalyzer,
-    LoginFlow,
     Persona,
     PersonaManager,
-    PersonaType,
 )
+from core.wraith.session_manager import AuthSessionManager, parse_personas_config
 
 
 _SEVERITY_SCORE = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
@@ -67,12 +66,29 @@ class WraithPersonaDiffTool(InternalTool):
             return []
 
         base_url = self._origin(target)
-        personas = self._parse_personas(base_url, personas_cfg)
+        # Pre-auth/login once per scan (loads persisted sessions, replays login flows as needed).
+        session_bridge = await AuthSessionManager.from_knowledge(context.knowledge, base_url=target)
+        if session_bridge is not None and session_bridge.personas:
+            personas = list(session_bridge.personas)
+        else:
+            personas, _ = parse_personas_config(base_url, personas_cfg)
         if not personas:
             await self.log(queue, "Personas config present but invalid/empty after parsing. Skipping.")
             return []
 
-        baseline_persona = str(context.knowledge.get("persona_baseline") or "Admin")
+        requested_baseline = str(context.knowledge.get("persona_baseline") or "Admin")
+        baseline_persona = requested_baseline
+        available_names = {p.name for p in personas}
+        if baseline_persona not in available_names:
+            admin_name = next(
+                (p.name for p in personas if str(getattr(p.persona_type, "value", "")).lower() == "admin"),
+                None,
+            )
+            baseline_persona = admin_name or next(
+                (p.name for p in personas if str(getattr(p.persona_type, "value", "")).lower() != "anonymous"),
+                requested_baseline,
+            )
+            await self.log(queue, f"Baseline persona '{requested_baseline}' not found; using '{baseline_persona}'")
 
         mgr = PersonaManager(personas=personas)
         await self.log(queue, f"Initializing personas (count={len(personas)}, baseline={baseline_persona})")
@@ -156,61 +172,6 @@ class WraithPersonaDiffTool(InternalTool):
         netloc = parsed.netloc
         return f"{scheme}://{netloc}"
 
-    def _parse_personas(self, base_url: str, cfg: Sequence[Any]) -> List[Persona]:
-        personas: List[Persona] = []
-        for item in cfg:
-            if not isinstance(item, dict):
-                continue
-            name = str(item.get("name") or "").strip()
-            if not name:
-                continue
-            ptype_raw = str(item.get("persona_type") or item.get("type") or "custom").strip().lower()
-            try:
-                ptype = PersonaType(ptype_raw)
-            except Exception:
-                ptype = PersonaType.CUSTOM
-
-            login_flow_cfg = item.get("login_flow")
-            login_flow: Optional[LoginFlow] = None
-            if isinstance(login_flow_cfg, dict):
-                try:
-                    login_flow = LoginFlow(
-                        endpoint=str(login_flow_cfg.get("endpoint") or ""),
-                        method=str(login_flow_cfg.get("method") or "POST"),
-                        username_param=str(login_flow_cfg.get("username_param") or "username"),
-                        password_param=str(login_flow_cfg.get("password_param") or "password"),
-                        username_value=str(login_flow_cfg.get("username_value") or ""),
-                        password_value=str(login_flow_cfg.get("password_value") or ""),
-                        token_extract_path=login_flow_cfg.get("token_extract_path"),
-                        cookie_extract=login_flow_cfg.get("cookie_extract"),
-                        headers=login_flow_cfg.get("headers") if isinstance(login_flow_cfg.get("headers"), dict) else {},
-                        content_type=str(login_flow_cfg.get("content_type") or "application/json"),
-                    )
-                except Exception:
-                    login_flow = None
-
-            cookie_jar = item.get("cookie_jar") if isinstance(item.get("cookie_jar"), dict) else None
-            bearer_token = item.get("bearer_token") if isinstance(item.get("bearer_token"), str) else None
-            extra_headers = item.get("extra_headers") if isinstance(item.get("extra_headers"), dict) else {}
-
-            personas.append(
-                Persona(
-                    name=name,
-                    persona_type=ptype,
-                    cookie_jar=cookie_jar,
-                    bearer_token=bearer_token,
-                    login_flow=login_flow,
-                    extra_headers=extra_headers,
-                    base_url=str(item.get("base_url") or base_url),
-                )
-            )
-
-        # Ensure Anonymous exists to test auth bypass.
-        if not any(p.persona_type == PersonaType.ANONYMOUS for p in personas):
-            personas.append(Persona(name="Anonymous", persona_type=PersonaType.ANONYMOUS, base_url=base_url))
-
-        return personas
-
     def _collect_candidate_urls(self, base_target: str, findings: Sequence[Dict[str, Any]]) -> List[Tuple[str, str]]:
         base_url = self._origin(base_target)
         scored: List[Tuple[int, str, str]] = []
@@ -242,4 +203,3 @@ class WraithPersonaDiffTool(InternalTool):
             tool = next((tool for _, u, tool in scored if u == url), "unknown")
             out.append((url, tool))
         return out
-

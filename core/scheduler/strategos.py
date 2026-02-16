@@ -42,6 +42,7 @@ import logging
 from typing import List, Dict, Any, Callable, Awaitable, Optional, Set, Literal, TYPE_CHECKING, Tuple
 import time
 import itertools
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from urllib.parse import urlparse
@@ -1873,11 +1874,39 @@ class Strategos:
         Cheap preflight for wraith_verify.
 
         wraith_verify is intentionally bounded and currently focuses on query parameter mutation
-        against discovered URLs. If we haven't discovered any parameterized endpoints, running it
+        against discovered URLs, plus a narrow SQLi path-segment probe for id-like REST paths
+        when a SQLi hint is present. If we haven't discovered any injectable surfaces, running it
         is guaranteed to no-op but would still consume tier budget.
         """
         if not self.context:
             return False
+
+        def _has_sqli_hint(finding: Dict[str, Any]) -> bool:
+            tags = finding.get("tags") or []
+            if isinstance(tags, str):
+                tags = [t.strip() for t in tags.split(",") if t.strip()]
+            if isinstance(tags, list):
+                for t in tags:
+                    norm = str(t).strip().lower()
+                    if norm in ("sqli", "sql", "sql-injection", "sql_injection", "sqlinjection"):
+                        return True
+            ftype = str(finding.get("type") or "").lower()
+            return "sqli" in ftype or ("sql" in ftype and "inject" in ftype)
+
+        uuid_re = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+        def _is_id_like_segment(segment: str) -> bool:
+            seg = (segment or "").strip()
+            if not seg:
+                return False
+            if seg.isdigit() and 1 <= len(seg) <= 12:
+                return True
+            if uuid_re.match(seg):
+                return True
+            if len(seg) == 32 and all(c in "0123456789abcdefABCDEF" for c in seg):
+                return True
+            return False
+
         for finding in self.context.findings:
             meta = finding.get("metadata") if isinstance(finding.get("metadata"), dict) else {}
             details = finding.get("details") if isinstance(finding.get("details"), dict) else {}
@@ -1892,6 +1921,18 @@ class Strategos:
                     continue
                 text = value.strip()
                 if "?" in text:
+                    return True
+
+                # Path-segment probe candidates require an explicit SQLi hint.
+                if not _has_sqli_hint(finding):
+                    continue
+                try:
+                    parsed = urlparse(text)
+                    path = parsed.path if parsed.path else text
+                except Exception:
+                    path = text
+                segments = [p for p in (path or "").split("/") if p]
+                if any(_is_id_like_segment(seg) for seg in segments):
                     return True
 
         return False

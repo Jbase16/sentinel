@@ -986,6 +986,9 @@ class MutationEngine:
         headers: Optional[Dict[str, str]] = None,
         cookies: Optional[Dict[str, str]] = None,
         base_params: Optional[Dict[str, str]] = None,
+        *,
+        baseline_url: Optional[str] = None,
+        baseline_params: Optional[Dict[str, str]] = None,
     ) -> Tuple[MutationResponse, ActionOutcome]:
         """Send a mutated request and run all applicable oracles.
         
@@ -1000,11 +1003,23 @@ class MutationEngine:
             headers: Optional headers dict
             cookies: Optional cookies dict
             base_params: Optional base query params (payload added to these)
+            baseline_url: Optional URL used for baseline comparison. When omitted,
+                the baseline request is sent to `url` with `base_params`. This is
+                required for path-segment mutation that uses placeholders (e.g.,
+                `.../{PAYLOAD}`) so the baseline is fetched from the original
+                endpoint, not the placeholder path.
+            baseline_params: Optional query params for the baseline request. When
+                omitted, defaults to `base_params` merged with any query string
+                in `baseline_url`.
         
         Returns:
             Tuple of (MutationResponse with evidence attached, ActionOutcome)
         """
         canonical_url, merged_params = self._canonicalize_url_and_params(url, base_params)
+        baseline_canonical_url, baseline_merged_params = self._canonicalize_url_and_params(
+            baseline_url or canonical_url,
+            baseline_params if baseline_params is not None else merged_params,
+        )
 
         # Build the mutated request
         request = self._build_mutated_request(
@@ -1017,7 +1032,7 @@ class MutationEngine:
         )
         
         # Get baseline for comparison
-        baseline = await self.get_baseline(canonical_url, headers, base_params=merged_params)
+        baseline = await self.get_baseline(baseline_canonical_url, headers, base_params=baseline_merged_params)
         
         # Send mutated request
         response = await self.send(request)

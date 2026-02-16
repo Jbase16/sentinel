@@ -165,3 +165,19 @@ async def test_bug_bounty_walk_away_uses_surface_delta():
 
     assert brain.context is not None
     assert brain.context.phase_index == PHASE_3_SURFACE
+
+
+def test_has_wraith_verify_candidates_accepts_sqli_rest_id_paths():
+    brain = Strategos()
+    brain.context = ScanContext(target="https://example.com")
+    brain.context.findings = [
+        {
+            "tool": "nuclei_mutating",
+            "type": "SQL injection",
+            "severity": "HIGH",
+            "tags": ["nuclei", "sqli"],
+            "metadata": {"url": "https://example.com/api/users/123"},
+        }
+    ]
+
+    assert brain._has_wraith_verify_candidates() is True

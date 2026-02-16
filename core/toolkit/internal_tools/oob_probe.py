@@ -19,6 +19,7 @@ from core.wraith.oob_detector import (
     OOBManager,
     VulnerabilityClass,
 )
+from core.wraith.session_manager import AuthSessionManager
 
 
 def _is_http_url(value: str) -> bool:
@@ -105,6 +106,16 @@ class WraithOOBProbeTool(InternalTool):
             await self.log(queue, "No SSRF-like injection points found in findings metadata; skipping.")
             return []
 
+        headers: Dict[str, str] = {}
+        cookies: Dict[str, str] = {}
+        session_bridge = await AuthSessionManager.from_knowledge(context.knowledge, base_url=target)
+        if session_bridge is not None:
+            auth = await session_bridge.get_baseline_auth()
+            if auth is not None:
+                headers = dict(auth.headers)
+                cookies = dict(auth.cookies)
+                await self.log(queue, f"Using baseline auth: {auth.redacted_summary()}")
+
         engine = MutationEngine(rate_limit_ms=150)
         try:
             probes_sent = 0
@@ -126,6 +137,8 @@ class WraithOOBProbeTool(InternalTool):
                 req = MutationRequest(
                     url=canonical_url,
                     method=HttpMethod.GET,
+                    headers=headers,
+                    cookies=cookies,
                     query_params=params,
                     timeout=12.0,
                     payload=MutationPayload(
