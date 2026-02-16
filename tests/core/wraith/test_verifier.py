@@ -13,7 +13,7 @@ from core.wraith.mutation_engine import (
 
 
 class _FakeMutationEngine:
-    def __init__(self, rate_limit_ms: int = 0):
+    def __init__(self, rate_limit_ms: int = 0, policy_runtime=None):
         self.calls = []
 
     async def mutate_and_analyze(self, *, url, payload, method, headers=None, cookies=None, baseline_url=None, **kwargs):
@@ -113,4 +113,3 @@ async def test_wraith_verify_confirms_sqli_on_path_segment(monkeypatch):
     assert findings[0]["type"] == "sqli"
     assert findings[0]["metadata"]["url"] == "https://example.com/api/users/123"
     assert findings[0]["metadata"]["verification_url"].endswith("/api/users/{PAYLOAD}")
-

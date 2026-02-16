@@ -28,15 +28,17 @@ import enum
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
-from urllib.parse import urljoin, parse_qs, urlparse
+from typing import Any, Dict, List, Optional
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from core.cortex.capability_tiers import CapabilityTier
+from .execution_policy import ExecutionPolicyRuntime, PolicyViolation
 from .mutation_engine import (
+    ActionOutcome,
     MutationRequest,
     MutationResponse,
-    MutationEngine,
     ResponseDiff,
     diff_responses,
     Evidence,
@@ -149,6 +151,7 @@ class PersonaSession:
     """
     persona: Persona
     client: httpx.AsyncClient
+    policy_runtime: Optional[ExecutionPolicyRuntime] = None
     _authenticated: bool = False
     
     async def authenticate(self) -> bool:
@@ -204,14 +207,32 @@ class PersonaSession:
                 headers["Content-Type"] = flow.content_type
             
             # Execute login request
-            resp = await self.client.request(
-                flow.method,
-                login_url,
-                json=body if flow.content_type == "application/json" else None,
-                data=body if flow.content_type != "application/json" else None,
-                headers=headers,
-                timeout=10.0,
-            )
+            if self.policy_runtime is not None:
+                try:
+                    resp = await self.policy_runtime.execute_http(
+                        client=self.client,
+                        method=flow.method,
+                        url=login_url,
+                        request_kwargs={
+                            "json": body if flow.content_type == "application/json" else None,
+                            "data": body if flow.content_type != "application/json" else None,
+                            "headers": headers,
+                            "timeout": 10.0,
+                        },
+                        tier_hint=CapabilityTier.T2a_SAFE_VERIFY,
+                    )
+                except PolicyViolation as e:
+                    logger.error(f"Login flow blocked by policy for '{self.persona.name}': {e}")
+                    return False
+            else:
+                resp = await self.client.request(
+                    flow.method,
+                    login_url,
+                    json=body if flow.content_type == "application/json" else None,
+                    data=body if flow.content_type != "application/json" else None,
+                    headers=headers,
+                    timeout=10.0,
+                )
             
             if resp.status_code >= 400:
                 logger.error(
@@ -308,26 +329,49 @@ class PersonaSession:
         cookies = dict(mutation_request.cookies)
         if self.persona.cookie_jar:
             cookies.update(self.persona.cookie_jar)
-        
-        # Execute request via httpx
+
+        request_kwargs = {
+            "headers": headers,
+            "cookies": cookies,
+            "params": mutation_request.query_params or None,
+            "json": mutation_request.body if isinstance(mutation_request.body, dict) else None,
+            "content": mutation_request.body if isinstance(mutation_request.body, str) else None,
+            "timeout": mutation_request.timeout,
+            "follow_redirects": True,
+        }
+
+        # Execute request via centralized policy runtime when configured.
         try:
             start = asyncio.get_event_loop().time()
-            resp = await self.client.request(
-                mutation_request.method.value,
-                mutation_request.url,
-                headers=headers,
-                cookies=cookies,
-                params=mutation_request.query_params or None,
-                json=mutation_request.body if isinstance(mutation_request.body, dict) else None,
-                content=mutation_request.body if isinstance(mutation_request.body, str) else None,
-                timeout=mutation_request.timeout,
-                follow_redirects=True,
-            )
+            if self.policy_runtime is not None:
+                resp = await self.policy_runtime.execute_http(
+                    client=self.client,
+                    method=mutation_request.method.value,
+                    url=mutation_request.url,
+                    request_kwargs=request_kwargs,
+                    tier_hint=CapabilityTier.T2a_SAFE_VERIFY,
+                )
+            else:
+                resp = await self.client.request(
+                    mutation_request.method.value,
+                    mutation_request.url,
+                    **request_kwargs,
+                )
             elapsed_ms = (asyncio.get_event_loop().time() - start) * 1000
-            
             return MutationResponse.from_httpx(resp, elapsed_ms)
-        
-        except asyncio.TimeoutError:
+
+        except PolicyViolation as e:
+            logger.warning(f"Request blocked by policy for persona '{self.persona.name}': {e}")
+            return MutationResponse(
+                status_code=0,
+                headers={},
+                body=f"Policy blocked request: {e}",
+                body_length=len(str(e)),
+                elapsed_ms=0.0,
+                url=mutation_request.url,
+                outcome=ActionOutcome.BLOCKED,
+            )
+        except httpx.TimeoutException:
             logger.warning(f"Request timeout for persona '{self.persona.name}'")
             return MutationResponse(
                 status_code=0,
@@ -336,6 +380,7 @@ class PersonaSession:
                 body_length=0,
                 elapsed_ms=mutation_request.timeout * 1000,
                 url=mutation_request.url,
+                outcome=ActionOutcome.TIMEOUT,
             )
         except Exception as e:
             logger.error(f"Request failed for persona '{self.persona.name}': {e}")
@@ -346,6 +391,7 @@ class PersonaSession:
                 body_length=len(str(e)),
                 elapsed_ms=0.0,
                 url=mutation_request.url,
+                outcome=ActionOutcome.ERROR,
             )
     
     async def close(self):
@@ -364,7 +410,11 @@ class PersonaManager:
     across multiple personas.
     """
     
-    def __init__(self, personas: Optional[List[Persona]] = None):
+    def __init__(
+        self,
+        personas: Optional[List[Persona]] = None,
+        policy_runtime: Optional[ExecutionPolicyRuntime] = None,
+    ):
         """Initialize PersonaManager.
         
         Args:
@@ -377,6 +427,7 @@ class PersonaManager:
             )
         ]
         self.sessions: Dict[str, PersonaSession] = {}
+        self._policy_runtime = policy_runtime
     
     async def initialize(self) -> bool:
         """Create httpx clients and authenticate all personas.
@@ -391,7 +442,11 @@ class PersonaManager:
         for persona in self.personas:
             try:
                 client = httpx.AsyncClient(follow_redirects=True)
-                session = PersonaSession(persona=persona, client=client)
+                session = PersonaSession(
+                    persona=persona,
+                    client=client,
+                    policy_runtime=self._policy_runtime,
+                )
                 
                 if not await session.authenticate():
                     logger.error(f"Failed to authenticate persona '{persona.name}'")

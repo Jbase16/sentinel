@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
 from core.toolkit.internal_tool import InternalTool, InternalToolContext
+from core.wraith.execution_policy import build_policy_runtime
 from core.wraith.mutation_engine import (
     ActionOutcome,
     EvidenceType,
@@ -156,8 +157,16 @@ class WraithVerifyTool(InternalTool):
                 cookies = dict(auth.cookies)
                 await self.log(queue, f"Using baseline auth: {auth.redacted_summary()}")
 
+        policy_runtime = build_policy_runtime(
+            context=context,
+            tool_name=self.name,
+            target=target,
+            default_rate_limit_ms=120,
+            default_request_budget=max(40, self.MAX_TOTAL_MUTATIONS * 2),
+            default_retry_ceiling=2,
+        )
         # Keep tool bounded: do not allow unbounded request fan-out.
-        engine = MutationEngine(rate_limit_ms=120)
+        engine = MutationEngine(rate_limit_ms=120, policy_runtime=policy_runtime)
         try:
             waf_engine: Optional[WAFBypassEngine] = self._get_waf_engine(context.knowledge)
 
@@ -281,6 +290,7 @@ class WraithVerifyTool(InternalTool):
                         )
 
             await self.log(queue, f"Completed verification (mutations_sent={total_mutations}, findings={len(findings_out)})")
+            await self.log(queue, f"Policy metrics: {policy_runtime.metrics()}")
             return findings_out
         finally:
             await engine.close()

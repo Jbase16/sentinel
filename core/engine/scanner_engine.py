@@ -1541,6 +1541,14 @@ class ScannerEngine:
         scan_id = getattr(self.session, "scan_id", exec_id) if self.session else exec_id
         session_id = getattr(self.session, "session_id", exec_id) if self.session else exec_id
 
+        capability_gate = None
+        try:
+            from core.cortex.capability_tiers import get_capability_gate
+
+            capability_gate = get_capability_gate()
+        except Exception:
+            capability_gate = None
+
         ctx = InternalToolContext(
             target=target,
             scan_id=str(scan_id),
@@ -1548,6 +1556,7 @@ class ScannerEngine:
             existing_findings=existing_findings,
             knowledge=knowledge,
             mode=knowledge.get("execution_mode", "research"),
+            capability_gate=capability_gate,
         )
 
         tool_timeout = self._tool_timeout_seconds()

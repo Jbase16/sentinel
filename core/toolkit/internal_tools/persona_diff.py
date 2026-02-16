@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urlparse
 
 from core.toolkit.internal_tool import InternalTool, InternalToolContext
+from core.wraith.execution_policy import build_policy_runtime
 from core.wraith.mutation_engine import HttpMethod, MutationRequest
 from core.wraith.personas import (
     DifferentialAnalyzer,
@@ -90,7 +91,16 @@ class WraithPersonaDiffTool(InternalTool):
             )
             await self.log(queue, f"Baseline persona '{requested_baseline}' not found; using '{baseline_persona}'")
 
-        mgr = PersonaManager(personas=personas)
+        policy_runtime = build_policy_runtime(
+            context=context,
+            tool_name=self.name,
+            target=target,
+            default_rate_limit_ms=120,
+            default_request_budget=max(30, self.MAX_TARGET_URLS * max(2, len(personas))),
+            default_retry_ceiling=2,
+        )
+
+        mgr = PersonaManager(personas=personas, policy_runtime=policy_runtime)
         await self.log(queue, f"Initializing personas (count={len(personas)}, baseline={baseline_persona})")
 
         ok = await mgr.initialize()
@@ -162,6 +172,7 @@ class WraithPersonaDiffTool(InternalTool):
                     out.append(finding)
 
             await self.log(queue, f"Persona diff complete (findings={len(out)})")
+            await self.log(queue, f"Policy metrics: {policy_runtime.metrics()}")
             return out
         finally:
             await mgr.close()

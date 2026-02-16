@@ -37,6 +37,7 @@ class InternalToolContext:
     existing_findings: List[Dict[str, Any]]
     knowledge: Dict[str, Any]  # shared scan knowledge (waf_bypass_engine, session_bridge, etc.)
     mode: str = "research"     # "research" or "bounty"
+    capability_gate: Optional[Any] = None  # Optional CapabilityGate snapshot for request-level policy checks
 
     def get_findings_by_tool(self, tool_name: str) -> List[Dict[str, Any]]:
         """Filter existing findings to those produced by a specific tool."""

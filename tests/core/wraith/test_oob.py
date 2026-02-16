@@ -10,7 +10,7 @@ from core.wraith.oob_detector import InteractionType, OOBEvidence
 
 
 class _FakeMutationEngine:
-    def __init__(self, rate_limit_ms: int = 0):
+    def __init__(self, rate_limit_ms: int = 0, policy_runtime=None):
         self.sent = []
 
     async def send(self, request):
@@ -86,4 +86,3 @@ async def test_wraith_oob_probe_emits_finding_on_callback(monkeypatch):
     assert len(findings) == 1
     assert findings[0]["type"] == "ssrf"
     assert findings[0]["confirmation_level"] == "confirmed"
-

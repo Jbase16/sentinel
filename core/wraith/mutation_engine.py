@@ -19,10 +19,14 @@ import hashlib
 import time
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 from urllib.parse import urlencode, urlparse, urljoin, parse_qsl
 
 import httpx
+from core.wraith.execution_policy import PolicyViolation
+
+if TYPE_CHECKING:
+    from core.wraith.execution_policy import ExecutionPolicyRuntime
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +815,7 @@ class MutationEngine:
         client: Optional[httpx.AsyncClient] = None,
         rate_limit_ms: int = 100,      # Minimum ms between requests to same host
         max_retries: int = 2,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
     ):
         """Initialize MutationEngine.
         
@@ -818,11 +823,13 @@ class MutationEngine:
             client: Optional httpx.AsyncClient. If None, creates one internally.
             rate_limit_ms: Minimum ms between requests to same host (default 100)
             max_retries: Max retries on transport failure (default 2)
+            policy_runtime: Optional centralized execution policy runtime.
         """
         self._client = client
         self._owns_client = client is None
         self._rate_limit_ms = rate_limit_ms
         self._max_retries = max_retries
+        self._policy_runtime = policy_runtime
         self._last_request_time: Dict[str, float] = {}  # host → timestamp
         self._baselines: Dict[str, MutationResponse] = {}  # url → baseline response
         self._waf_cache: Dict[str, Optional[str]] = {}  # host → detected WAF name
@@ -878,11 +885,65 @@ class MutationEngine:
             MutationResponse with status, headers, body, and timing
         """
         client = await self._get_client()
+        kwargs = request.to_httpx_kwargs()
+
+        # Centralized enforcement path: capability, scope, rate, budget, retries.
+        if self._policy_runtime is not None:
+            request_kwargs = dict(kwargs)
+            request_kwargs.pop("method", None)
+            request_kwargs.pop("url", None)
+
+            start = time.monotonic()
+            try:
+                resp = await self._policy_runtime.execute_http(
+                    client=client,
+                    method=request.method.value,
+                    url=request.url,
+                    request_kwargs=request_kwargs,
+                    payload_tier_required=request.payload.tier_required if request.payload else None,
+                )
+                elapsed_ms = (time.monotonic() - start) * 1000
+                return MutationResponse.from_httpx(resp, elapsed_ms)
+            except PolicyViolation as exc:
+                elapsed_ms = (time.monotonic() - start) * 1000
+                return MutationResponse(
+                    status_code=0,
+                    headers={},
+                    body=f"Policy blocked request: {exc}",
+                    body_length=len(str(exc)),
+                    elapsed_ms=elapsed_ms,
+                    url=request.url,
+                    evidence=[],
+                    outcome=ActionOutcome.BLOCKED,
+                )
+            except httpx.TimeoutException:
+                elapsed_ms = (time.monotonic() - start) * 1000
+                return MutationResponse(
+                    status_code=0,
+                    headers={},
+                    body="",
+                    body_length=0,
+                    elapsed_ms=elapsed_ms,
+                    url=request.url,
+                    evidence=[],
+                    outcome=ActionOutcome.TIMEOUT,
+                )
+            except httpx.HTTPError as exc:
+                elapsed_ms = (time.monotonic() - start) * 1000
+                return MutationResponse(
+                    status_code=0,
+                    headers={},
+                    body=str(exc),
+                    body_length=0,
+                    elapsed_ms=elapsed_ms,
+                    url=request.url,
+                    evidence=[],
+                    outcome=ActionOutcome.ERROR,
+                )
+
         host = urlparse(request.url).hostname or "unknown"
         await self._rate_limit(host)
-        
-        kwargs = request.to_httpx_kwargs()
-        
+
         start = time.monotonic()
         try:
             resp = await client.request(**kwargs)

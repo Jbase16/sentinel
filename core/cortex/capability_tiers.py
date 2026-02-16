@@ -134,6 +134,17 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "persistence": CapabilityTier.T4_DESTRUCTIVE,
 }
 
+# Tools whose token charging is delegated to request-time execution policy.
+# Strategos should gate them with dry-run at tool dispatch, while the
+# centralized request executor consumes target budget per outbound request.
+REQUEST_LEVEL_BUDGET_TOOLS: FrozenSet[str] = frozenset(
+    {
+        "wraith_verify",
+        "wraith_oob_probe",
+        "wraith_persona_diff",
+    }
+)
+
 
 # Budget management per target
 @dataclass

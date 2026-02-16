@@ -88,6 +88,7 @@ from core.cortex.capability_tiers import (
     CapabilityTier,
     ExecutionMode,
     GateResult,
+    REQUEST_LEVEL_BUDGET_TOOLS,
     TOOL_TIER_CLASSIFICATION,
     get_capability_gate,
     set_capability_gate,
@@ -1113,8 +1114,14 @@ class Strategos:
                 success = False
                 return
 
-            # Commit capability gate budget only when the tool is about to execute.
-            gate_result = self._capability_gate.evaluate_tool(self.context.target, tool)
+            # Request-accounted tools consume budget inside the centralized request
+            # executor; avoid an upfront tool-level debit here to prevent double charge.
+            request_accounted = tool in REQUEST_LEVEL_BUDGET_TOOLS
+            gate_result = self._capability_gate.evaluate_tool(
+                self.context.target,
+                tool,
+                dry_run=request_accounted,
+            )
             if not gate_result.approved:
                 blocked_by_gate = True
                 gate_block_reason = gate_result.reason
@@ -1124,6 +1131,12 @@ class Strategos:
                     level="warning",
                 )
                 return
+
+            if request_accounted:
+                self._emit_log(
+                    f"[Strategos] Budget charging delegated to request-runtime for {tool}",
+                    level="debug",
+                )
 
             # Timeout wrapper (fix: hung tools no longer deadlock mission)
             try:

@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import parse_qsl, urlparse, urlunparse
 
 from core.toolkit.internal_tool import InternalTool, InternalToolContext
+from core.wraith.execution_policy import build_policy_runtime, PolicyViolation
 from core.wraith.mutation_engine import (
     EvidenceType,
     HttpMethod,
@@ -97,6 +98,21 @@ class WraithOOBProbeTool(InternalTool):
         poll_timeout_s = float(cfg.get("poll_timeout_s") or 25.0)
         poll_interval_s = float(cfg.get("poll_interval_s") or 2.0)
 
+        policy_runtime = build_policy_runtime(
+            context=context,
+            tool_name=self.name,
+            target=target,
+            default_rate_limit_ms=150,
+            default_request_budget=max(20, self.MAX_PROBES * 4),
+            default_retry_ceiling=2,
+            default_external_budget=2,
+        )
+        try:
+            policy_runtime.authorize_external_url(api_url)
+        except PolicyViolation as exc:
+            await self.log(queue, f"OOB provider blocked by policy: {exc}")
+            return []
+
         provider = InteractshProvider(base_domain=base_domain, api_url=api_url)
         manager = OOBManager(provider=provider)
 
@@ -116,7 +132,7 @@ class WraithOOBProbeTool(InternalTool):
                 cookies = dict(auth.cookies)
                 await self.log(queue, f"Using baseline auth: {auth.redacted_summary()}")
 
-        engine = MutationEngine(rate_limit_ms=150)
+        engine = MutationEngine(rate_limit_ms=150, policy_runtime=policy_runtime)
         try:
             probes_sent = 0
             for url, param, source_tool in candidates[: self.MAX_PROBES]:
@@ -199,6 +215,7 @@ class WraithOOBProbeTool(InternalTool):
                 out.append(finding)
 
             await self.log(queue, f"OOB probe complete (interactions={len(out)})")
+            await self.log(queue, f"Policy metrics: {policy_runtime.metrics()}")
             return out
         finally:
             await engine.close()
