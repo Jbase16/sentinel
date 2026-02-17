@@ -34,6 +34,7 @@ logger = logging.getLogger("PySentinel")
 
 API_BASE = "http://127.0.0.1:8765"
 TOKEN_PATH = Path.home() / ".sentinelforge" / "api_token"
+SSE_ENDPOINTS = ("/v1/events/stream", "/v1/events")
 
 
 class SentinelCLI:
@@ -65,19 +66,19 @@ class SentinelCLI:
             print(f"❌ Connection failed: {e}")
             return False
 
-    async def start_scan(self, target: str, modules: List[str] = None):
+    async def start_scan(self, target: str, modules: List[str] = None, mode: str = "standard"):
         """Start a new scan session"""
         payload = {
             "target": target,
             "force": True,
-            "mode": "standard"
+            "mode": mode
         }
         if modules:
             payload["modules"] = modules
         
-        print(f"🚀 Starting scan for target: {target}")
+        print(f"🚀 Starting scan for target: {target} (Mode: {mode})")
         try:
-            resp = await self.client.post("/v1/scan", json=payload)
+            resp = await self.client.post("/v1/scans/start", json=payload)
             resp.raise_for_status()
             print("✅ Scan initiated successfully. Waiting for events...")
         except httpx.HTTPStatusError as e:
@@ -91,10 +92,34 @@ class SentinelCLI:
         err_count = 0
         while self.running:
             try:
-                # Connect to SSE endpoint with no buffering
-                async with self.client.stream("GET", "/v1/events", timeout=None) as response:
-                    print(f"✅ Connected to event stream (status: {response.status_code})")
+                stream_cm = None
+                response = None
+                used_endpoint = None
 
+                # Try canonical SSE route first; keep legacy fallback for older backends.
+                for endpoint in SSE_ENDPOINTS:
+                    candidate_stream = self.client.stream(
+                        "GET",
+                        endpoint,
+                        timeout=None,
+                        headers={"Accept": "text/event-stream"},
+                    )
+                    candidate_response = await candidate_stream.__aenter__()
+                    if candidate_response.status_code == 404:
+                        await candidate_stream.__aexit__(None, None, None)
+                        continue
+                    candidate_response.raise_for_status()
+                    stream_cm = candidate_stream
+                    response = candidate_response
+                    used_endpoint = endpoint
+                    break
+
+                if response is None or stream_cm is None:
+                    raise RuntimeError("No SSE endpoint found (tried /v1/events/stream and /v1/events)")
+
+                print(f"✅ Connected to event stream {used_endpoint} (status: {response.status_code})")
+
+                try:
                     buffer = ""
                     async for chunk in response.aiter_text():
                         if not self.running:
@@ -115,6 +140,9 @@ class SentinelCLI:
 
                         # Reset error count on successful read
                         err_count = 0
+                finally:
+                    # Ensure streaming connection is released even on parser/runtime errors.
+                    await stream_cm.__aexit__(None, None, None)
 
             except Exception as e:
                 err_count += 1
@@ -190,7 +218,7 @@ class SentinelCLI:
             status_icon = "✅" if exit_code == 0 else "❌"
             print(f"{status_icon} [TOOL] {tool} finished ({findings} findings, exit: {exit_code})")
 
-    async def run(self, target: str, modules: List[str] = None):
+    async def run(self, target: str, modules: List[str] = None, mode: str = "standard"):
         if not await self.check_connection():
             return
 
@@ -201,7 +229,7 @@ class SentinelCLI:
         await asyncio.sleep(0.5)
 
         # Kick off the scan
-        await self.start_scan(target, modules)
+        await self.start_scan(target, modules, mode)
 
         # Wait for scan to complete (signaled by self.running = False in stream_events)
         while self.running:
@@ -221,6 +249,7 @@ async def main():
     parser = argparse.ArgumentParser(description="SentinelForge Headless Scanner")
     parser.add_argument("--target", help="Target URL/IP to scan")
     parser.add_argument("--modules", help="Comma-separated list of tools to run (optional)")
+    parser.add_argument("--mode", default="standard", help="Scan mode (standard, bug_bounty, stealth, passive)")
     
     args = parser.parse_args()
     
@@ -252,7 +281,7 @@ async def main():
         # Windows/some environments don't support add_signal_handler in this context
         pass
 
-    await cli.run(target, modules)
+    await cli.run(target, modules, args.mode)
 
 if __name__ == "__main__":
     try:

@@ -754,7 +754,8 @@ public class HelixAppState: ObservableObject {
         let assistantMsg = ChatMessage(role: .assistant, text: "")
         thread.append(assistantMsg)
 
-        llm.generate(prompt: text) { [weak self] token in
+        let sessionID = currentChatSessionID()
+        llm.generate(prompt: text, sessionID: sessionID) { [weak self] token in
             guard let self else { return }
             // Update the last message directly
             if var last = self.thread.messages.last, last.role == .assistant {
@@ -762,6 +763,19 @@ public class HelixAppState: ObservableObject {
                 self.thread.messages[self.thread.messages.count - 1] = last
             }
         }
+    }
+
+    private func currentChatSessionID() -> String? {
+        if let sessionID = apiResults?.scan?.sessionId, !sessionID.isEmpty {
+            return sessionID
+        }
+        if let sessionID = engineStatus?.scanState?.sessionId, !sessionID.isEmpty {
+            return sessionID
+        }
+        if let sessionID = latestPressureGraph?.sessionId, !sessionID.isEmpty {
+            return sessionID
+        }
+        return nil
     }
 
     /// Function startScan.
@@ -985,7 +999,7 @@ public class HelixAppState: ObservableObject {
                 await MainActor.run {
                     self.graphAnalysis = analysis
                     print(
-                        "[Analysis] Received topology: \(analysis.critical_paths?.count ?? 0) paths"
+                        "[Analysis] Received topology: \(analysis.critical_paths?.count ?? 0) critical-path candidates"
                     )
                 }
             } catch {

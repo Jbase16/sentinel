@@ -180,13 +180,20 @@ class ReasoningEngine:
             
         # Get synthesized context from Nexus
         nexus_context = NexusContext.instance().analyze_context()
+        hypothesized_attack_paths = nexus_context.get(
+            "hypothesized_attack_paths",
+            nexus_context.get("attack_paths", []),
+        )
             
         return {
             "status": "ok",
             "scope": "global",
             "decision_ledger": ledger_stats,
             "cal": self.cal_stats(),
-            "attack_paths": nexus_context.get("attack_paths", []),
+            # Canonical label: hypothesis-layer path synthesis from Nexus.
+            "hypothesized_attack_paths": hypothesized_attack_paths,
+            # Backward-compat alias (deprecated): use hypothesized_attack_paths.
+            "attack_paths": hypothesized_attack_paths,
             "recommended_phases": nexus_context.get("recommended_phases", [])
         }
         

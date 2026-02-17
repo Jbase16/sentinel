@@ -4,7 +4,11 @@ Unit tests for URL validation in ScanRequest model.
 import pytest
 from pydantic import ValidationError
 
-from core.server.routers.scans import ScanRequest, _extract_attack_paths_from_graph_dto
+from core.server.routers.scans import (
+    ScanRequest,
+    _extract_attack_paths_from_graph_dto,
+    _extract_graph_attack_paths_from_graph_dto,
+)
 
 
 class TestURLValidation:
@@ -157,3 +161,6 @@ def test_extract_attack_paths_from_graph_dto_prefers_labels_and_falls_back_to_no
         ["Exposed Git", "Admin Login"],
         ["n3", "n4"],
     ]
+
+    graph_attack_paths = _extract_graph_attack_paths_from_graph_dto(dto)
+    assert graph_attack_paths == attack_paths

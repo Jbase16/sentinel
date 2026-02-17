@@ -82,14 +82,29 @@ public struct ResultCounts: Decodable {
 public struct Killchain: Decodable {
     public let edges: [JSONDict]?
     public let attackPaths: [[String]]?
+    public let graphAttackPaths: [[String]]?
     public let degradedPaths: [[String]]?
     public let recommendedPhases: [String]?
 
     enum CodingKeys: String, CodingKey {
         case edges
         case attackPaths = "attack_paths"
+        case graphAttackPaths = "graph_attack_paths"
         case degradedPaths = "degraded_paths"
         case recommendedPhases = "recommended_phases"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        edges = try container.decodeIfPresent([JSONDict].self, forKey: .edges)
+
+        let canonical = try container.decodeIfPresent([[String]].self, forKey: .graphAttackPaths)
+        let legacy = try container.decodeIfPresent([[String]].self, forKey: .attackPaths)
+        graphAttackPaths = canonical ?? legacy
+        attackPaths = legacy ?? canonical
+
+        degradedPaths = try container.decodeIfPresent([[String]].self, forKey: .degradedPaths)
+        recommendedPhases = try container.decodeIfPresent([String].self, forKey: .recommendedPhases)
     }
 }
 

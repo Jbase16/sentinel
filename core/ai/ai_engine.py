@@ -441,41 +441,55 @@ class AIEngine:
             logger.warning("Failed to fetch available models: %s", exc)
             return []
 
-    async def stream_chat(self, question: str) -> AsyncGenerator[str, None]:
+    async def _resolve_chat_context(
+        self,
+        *,
+        requested_session_id: Optional[str],
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], Optional[str], List[Dict[str, Any]]]:
         """
-        Stream answer to a natural-language question based on stored
-        evidence, findings, enriched issues, and causal graph data.
+        Resolve findings/issues context with explicit session pinning when provided.
         """
-        self.ensure_client()
-        question = (question or "").strip()
         findings = findings_store.get_all()
         issues = issues_store.get_all()
         context_session_id: Optional[str] = None
         context_killchain_edges: List[Dict[str, Any]] = []
 
-        # Prefer active scan session stores (authoritative for transactional pipeline),
-        # then fall back to persisted DB session data, then global stores.
         try:
             from core.server.state import get_state
 
             state = get_state()
             active_session_id = (state.scan_state or {}).get("session_id")
-            active_session = await state.get_session(active_session_id) if active_session_id else None
+            preferred_session_id = str(requested_session_id or active_session_id or "").strip()
 
-            if active_session is not None:
-                session_findings = active_session.findings.get_all()
-                session_issues = active_session.issues.get_all()
-                if session_findings:
-                    findings = session_findings
-                if session_issues:
-                    issues = session_issues
-                context_killchain_edges = active_session.killchain.get_all()
-                context_session_id = active_session_id
-            elif not findings and not issues:
-                from core.data.db import Database
+            # 1) In-memory session (authoritative during active scan).
+            if preferred_session_id:
+                pinned_session = await state.get_session(preferred_session_id)
+                if pinned_session is not None:
+                    session_findings = pinned_session.findings.get_all()
+                    session_issues = pinned_session.issues.get_all()
+                    if session_findings:
+                        findings = session_findings
+                    if session_issues:
+                        issues = session_issues
+                    context_killchain_edges = pinned_session.killchain.get_all()
+                    context_session_id = preferred_session_id
+                    return findings, issues, context_session_id, context_killchain_edges
 
-                db = Database.instance()
-                await db.init()
+            # 2) Persisted DB snapshot for explicit session pinning.
+            from core.data.db import Database
+
+            db = Database.instance()
+            await db.init()
+            if preferred_session_id:
+                findings = await db.get_findings(preferred_session_id)
+                issues = await db.get_issues(preferred_session_id)
+                _, persisted_edges = await db.load_graph_snapshot(preferred_session_id)
+                context_killchain_edges = persisted_edges or []
+                context_session_id = preferred_session_id
+                return findings, issues, context_session_id, context_killchain_edges
+
+            # 3) Legacy fallback when no active/requested session and global stores are empty.
+            if not findings and not issues:
                 session_rows = await db.fetch_all(
                     "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1"
                 )
@@ -483,9 +497,104 @@ class AIEngine:
                     latest_session_id = str(session_rows[0][0])
                     findings = await db.get_findings(latest_session_id)
                     issues = await db.get_issues(latest_session_id)
+                    _, persisted_edges = await db.load_graph_snapshot(latest_session_id)
+                    context_killchain_edges = persisted_edges or []
                     context_session_id = latest_session_id
         except Exception as exc:
             logger.debug("[AIEngine] Failed loading session-scoped chat context: %s", exc)
+
+        return findings, issues, context_session_id, context_killchain_edges
+
+    async def _build_attack_path_contract(
+        self,
+        *,
+        session_id: Optional[str],
+        findings: List[Dict[str, Any]],
+        issues: List[Dict[str, Any]],
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Build canonical graph-derived attack-path contract for narration guardrails.
+        """
+        from core.cortex.attack_path_contract import build_attack_path_contract
+
+        canonical_session_id = str(session_id or "unknown")
+        graph_dto: Dict[str, Any] = {}
+        if session_id:
+            try:
+                from core.cortex.causal_graph import get_graph_dto_for_session
+
+                graph_dto = await get_graph_dto_for_session(
+                    session_id=session_id,
+                    findings=findings,
+                    issues=issues,
+                )
+            except Exception as exc:
+                logger.debug("[AIEngine] Could not build graph DTO for chat: %s", exc)
+
+        contract = build_attack_path_contract(
+            session_id=canonical_session_id,
+            graph_dto=graph_dto,
+        )
+        return contract, graph_dto
+
+    def _apply_attack_path_claim_guard(
+        self,
+        *,
+        response_text: str,
+        contract: Dict[str, Any],
+        context_label: str,
+    ) -> str:
+        """
+        Enforce graph-truth for any generated text that mentions attack paths.
+        """
+        from core.cortex.attack_path_contract import sanitize_attack_path_claims
+
+        result = sanitize_attack_path_claims(
+            response_text,
+            contract,
+            require_chain_ids=True,
+        )
+        if bool(result.get("modified")):
+            logger.warning(
+                "[AIEngine] Attack-path guard applied (%s): reason=%s removed=%s chain_count=%s",
+                context_label,
+                result.get("reason", "unknown"),
+                result.get("removed_claims", 0),
+                result.get("chain_count", 0),
+            )
+        return str(result.get("text") or "").strip()
+
+    async def stream_chat(
+        self,
+        question: str,
+        session_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        Stream answer to a natural-language question based on stored
+        evidence, findings, enriched issues, and causal graph data.
+        """
+        self.ensure_client()
+        question = (question or "").strip()
+        findings, issues, context_session_id, context_killchain_edges = await self._resolve_chat_context(
+            requested_session_id=session_id
+        )
+        graph_contract, graph_dto = await self._build_attack_path_contract(
+            session_id=context_session_id,
+            findings=findings,
+            issues=issues,
+        )
+
+        try:
+            from core.cortex.attack_path_contract import (
+                is_attack_path_question,
+                render_attack_path_response,
+            )
+
+            if is_attack_path_question(question):
+                yield render_attack_path_response(graph_contract)
+                return
+        except Exception as exc:
+            logger.debug("[AIEngine] Attack-path deterministic guard failed: %s", exc)
 
         # Self-Knowledge Manifesto
         manifesto = (
@@ -559,35 +668,60 @@ class AIEngine:
                             f"evidence_count: {n_evidence}{axis_str})\n"
                         )
 
-                # --- Causal graph summary ---
+                # --- Causal graph summary (canonical contract) ---
                 try:
-                    from core.cortex.causal_graph import CausalGraphBuilder
-                    builder = CausalGraphBuilder()
-                    builder.build(findings)
-                    n_enablement = builder.enrich_from_issues(issues)
-                    summary = builder.export_summary()
-                    context_block += (
-                        f"\nCAUSAL GRAPH SUMMARY:\n"
-                        f"- Nodes: {summary.get('nodes_count', 0)}, "
-                        f"Edges: {summary.get('edges_count', 0)} "
-                        f"(including {n_enablement} enablement edges)\n"
-                        f"- Attack chains: {summary.get('attack_chains_count', 0)}, "
-                        f"Longest chain: {summary.get('longest_chain_length', 0)} steps\n"
+                    graph_counts = graph_dto.get("count", {}) if isinstance(graph_dto, dict) else {}
+                    nodes_count = int(graph_counts.get("nodes", 0) or 0)
+                    edges_count = int(graph_counts.get("edges", 0) or 0)
+
+                    chains = graph_contract.get("chains", []) if isinstance(graph_contract, dict) else []
+                    if not isinstance(chains, list):
+                        chains = []
+                    chain_count = int(graph_contract.get("chain_count", len(chains)) or 0)
+                    longest_chain = max(
+                        (int(chain.get("length", 0) or 0) for chain in chains if isinstance(chain, dict)),
+                        default=0,
                     )
-                    for pp in summary.get("top_pressure_points", [])[:3]:
-                        context_block += (
-                            f"- Pressure Point: {pp['finding_title']} "
-                            f"(severity: {pp['severity']}, "
-                            f"blocks {pp['attack_paths_blocked']} attack paths, "
-                            f"centrality: {pp['centrality_score']})\n"
-                        )
-                    chains = summary.get("sample_attack_chains", [])
+
+                    context_block += (
+                        "\nCAUSAL GRAPH SUMMARY:\n"
+                        f"- Graph hash: {graph_contract.get('graph_hash', 'unknown')}\n"
+                        f"- Nodes: {nodes_count}, Edges: {edges_count}\n"
+                        f"- Attack chains (graph-validated): {chain_count}, "
+                        f"Longest chain: {longest_chain} steps\n"
+                    )
+
+                    pressure_points = graph_dto.get("pressure_points", []) if isinstance(graph_dto, dict) else []
+                    if isinstance(pressure_points, list):
+                        for pp in pressure_points[:3]:
+                            if not isinstance(pp, dict):
+                                continue
+                            context_block += (
+                                f"- Pressure Point: {pp.get('finding_title', 'unknown')} "
+                                f"(severity: {pp.get('severity', 'unknown')}, "
+                                f"blocks {pp.get('attack_paths_blocked', 0)} attack paths, "
+                                f"centrality: {pp.get('centrality_score', 0)})\n"
+                            )
+
                     if chains:
-                        context_block += "- Sample attack chains:\n"
+                        context_block += "- Graph attack chains:\n"
                         for chain in chains[:3]:
-                            context_block += f"  * {' → '.join(chain)}\n"
+                            if not isinstance(chain, dict):
+                                continue
+                            labels = chain.get("labels", [])
+                            label_text = " → ".join(
+                                str(item) for item in labels if str(item)
+                            ) if isinstance(labels, list) else ""
+                            if not label_text:
+                                node_ids = chain.get("node_ids", [])
+                                if isinstance(node_ids, list):
+                                    label_text = " → ".join(str(item) for item in node_ids if str(item))
+                            context_block += (
+                                f"  * {chain.get('id', 'chain')}: "
+                                f"{label_text or '(chain labels unavailable)'}\n"
+                            )
                 except Exception as exc:
-                    logger.debug("[AIEngine] Could not build causal graph for chat: %s", exc)
+                    logger.debug("[AIEngine] Could not build canonical graph summary for chat: %s", exc)
 
                 if context_killchain_edges:
                     context_block += (
@@ -664,6 +798,8 @@ class AIEngine:
                     "Always cite specific findings by name and target. "
                     "Distinguish between confirmed, probable, and hypothesized findings. "
                     "Reference attack chains and enablement relationships when discussing risk. "
+                    "Never invent attack paths that are not listed in the graph attack chains. "
+                    "If graph attack chain count is 0, explicitly state no graph-validated attack path exists. "
                     "When discussing scan coverage or gaps, reference the Tool Execution Summary — "
                     "failed or timed-out tools represent BLIND SPOTS where vulnerabilities may exist undetected.\n\n"
                     "COMMAND PROTOCOL:\n"
@@ -689,6 +825,7 @@ class AIEngine:
             # Tokens arrive as fragments, so we buffer lines and detect
             # the EXEC protocol across chunk boundaries.
             line_buffer = ""
+            rendered_chunks: List[str] = []
             async for chunk in self.client.stream_generate(user_prompt, system_prompt):
                 line_buffer += chunk
                 # Only attempt detection when we have a complete line
@@ -697,23 +834,34 @@ class AIEngine:
                     exec_result = self._try_dispatch_exec(line)
                     if exec_result is not None:
                         # Replace raw EXEC line with human-readable status
-                        yield exec_result + "\n"
+                        rendered_chunks.append(exec_result + "\n")
                     else:
-                        yield line + "\n"
+                        rendered_chunks.append(line + "\n")
                 # Flush partial line (non-newline tokens) immediately for
-                # streaming UX — but don't try to parse them yet
+                # post-processing buffer; don't parse partial lines yet.
                 if line_buffer and "\n" not in line_buffer:
                     # Check if buffer could be start of EXEC line
                     if not line_buffer.lstrip().startswith(">>>"):
-                        yield line_buffer
+                        rendered_chunks.append(line_buffer)
                         line_buffer = ""
             # Flush any remaining buffer
             if line_buffer.strip():
                 exec_result = self._try_dispatch_exec(line_buffer)
                 if exec_result is not None:
-                    yield exec_result
+                    rendered_chunks.append(exec_result)
                 else:
-                    yield line_buffer
+                    rendered_chunks.append(line_buffer)
+
+            model_output = "".join(rendered_chunks).strip()
+            guarded_output = self._apply_attack_path_claim_guard(
+                response_text=model_output,
+                contract=graph_contract,
+                context_label="chat_stream",
+            )
+            if guarded_output:
+                yield guarded_output
+            else:
+                yield "AI Generation failed (empty response)."
             return
 
         yield "AI Chat unavailable (Ollama offline). Please check connection."

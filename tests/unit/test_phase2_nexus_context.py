@@ -114,3 +114,14 @@ def test_rule3_skips_hypothesized_information_findings(monkeypatch):
     context.synthesize_attack_paths()
 
     assert emitted == []
+
+
+def test_analyze_context_exposes_hypothesized_attack_paths_alias(monkeypatch):
+    context = _build_context(monkeypatch)
+    monkeypatch.setattr(context, "synthesize_attack_paths", lambda: [["A", "B", "C"]])
+    monkeypatch.setattr(context, "generate_recommendations", lambda: [{"phase": "Immediate Action"}])
+
+    result = context.analyze_context()
+
+    assert result["hypothesized_attack_paths"] == [["A", "B", "C"]]
+    assert result["attack_paths"] == [["A", "B", "C"]]

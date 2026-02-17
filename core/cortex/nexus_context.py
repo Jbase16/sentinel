@@ -229,10 +229,13 @@ class NexusContext:
         """
         Return the full synthesized context for consumers (Reporting, UI).
         """
-        attack_paths = self.synthesize_attack_paths()
+        hypothesized_attack_paths = self.synthesize_attack_paths()
         recs = self.generate_recommendations()
         return {
-            "attack_paths": attack_paths,
+            # Canonical: these are heuristic Nexus hypotheses, not graph-validated chains.
+            "hypothesized_attack_paths": hypothesized_attack_paths,
+            # Backward-compat alias (deprecated): use hypothesized_attack_paths.
+            "attack_paths": hypothesized_attack_paths,
             "recommended_phases": recs,
             "insight_count": len(self._emitted_hypotheses),
         }

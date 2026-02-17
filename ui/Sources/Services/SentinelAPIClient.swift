@@ -420,7 +420,7 @@ public struct SentinelAPIClient: Sendable {
     }
 
     /// Stream context-aware chat from Python backend (plain text chunks, not SSE)
-    public func streamChat(prompt: String) -> AsyncThrowingStream<String, Error> {
+    public func streamChat(prompt: String, sessionID: String? = nil) -> AsyncThrowingStream<String, Error> {
         print("[Swift] Attempting to stream chat...")
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -430,7 +430,12 @@ public struct SentinelAPIClient: Sendable {
                 }
                 var request = authenticatedRequest(url: url, method: "POST")
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                let body = ["prompt": prompt]
+                var body: [String: Any] = ["prompt": prompt]
+                if let sessionID = sessionID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !sessionID.isEmpty
+                {
+                    body["session_id"] = sessionID
+                }
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
                     let (bytes, response) = try await session.bytes(for: request)

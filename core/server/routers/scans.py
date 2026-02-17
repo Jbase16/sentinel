@@ -126,28 +126,36 @@ def _log_sink_sync(msg: str) -> None:
             pass
 
 
-def _extract_attack_paths_from_graph_dto(graph_dto: Dict[str, Any]) -> List[List[str]]:
+def _extract_graph_attack_paths_from_graph_dto(graph_dto: Dict[str, Any]) -> List[List[str]]:
     """
-    Convert attack_chains payload in graph DTO to legacy attack_paths format.
+    Convert graph attack_chains payload to list-of-steps format.
     Never rebuild the graph here; empty or malformed chains degrade to [].
     """
-    attack_paths: List[List[str]] = []
+    graph_attack_paths: List[List[str]] = []
     chains_from_dto = graph_dto.get("attack_chains", [])
     if not isinstance(chains_from_dto, list):
-        logger.debug("[Results] attack_chains payload is not a list; returning empty attack_paths")
-        return attack_paths
+        logger.debug("[Results] attack_chains payload is not a list; returning empty graph_attack_paths")
+        return graph_attack_paths
 
     for chain in chains_from_dto[:25]:
         if not isinstance(chain, dict):
             continue
         labels = chain.get("labels", [])
         if isinstance(labels, list) and labels:
-            attack_paths.append([str(label) for label in labels])
+            graph_attack_paths.append([str(label) for label in labels])
             continue
         node_ids = chain.get("node_ids", [])
         if isinstance(node_ids, list) and node_ids:
-            attack_paths.append([str(node_id) for node_id in node_ids])
-    return attack_paths
+            graph_attack_paths.append([str(node_id) for node_id in node_ids])
+    return graph_attack_paths
+
+
+def _extract_attack_paths_from_graph_dto(graph_dto: Dict[str, Any]) -> List[List[str]]:
+    """
+    Backward-compat helper alias.
+    Deprecated: use _extract_graph_attack_paths_from_graph_dto.
+    """
+    return _extract_graph_attack_paths_from_graph_dto(graph_dto)
 
 async def begin_scan_logic(req: ScanRequest) -> str:
     state = get_state()
@@ -559,7 +567,13 @@ async def get_scan_results():
         findings=findings,
         issues=issues,
     )
-    attack_paths = _extract_attack_paths_from_graph_dto(graph_dto)
+    graph_attack_paths = _extract_graph_attack_paths_from_graph_dto(graph_dto)
+    from core.cortex.attack_path_contract import build_attack_path_contract
+
+    attack_path_contract = build_attack_path_contract(
+        session_id=str(session_id),
+        graph_dto=graph_dto,
+    )
 
     result = {
         "scan": {
@@ -586,9 +600,13 @@ async def get_scan_results():
         # Note: UI expects 'edges' and 'attackPaths' in Killchain struct
         "killchain": {
             "edges": graph_dto.get("edges", []),
-            "attack_paths": attack_paths,
+            # Canonical: graph-validated chains rendered as list-of-steps.
+            "graph_attack_paths": graph_attack_paths,
+            # Backward-compat alias (deprecated): use graph_attack_paths.
+            "attack_paths": graph_attack_paths,
             "degraded_paths": [],
-            "recommended_phases": []
+            "recommended_phases": [],
+            "attack_path_contract": attack_path_contract,
         },
         "phase_results": {},
         "logs": logs

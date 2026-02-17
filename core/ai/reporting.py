@@ -31,7 +31,7 @@ import os
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, Tuple
 
 from core.data.findings_store import findings_store
 from core.data.issues_store import issues_store
@@ -69,6 +69,135 @@ class ReportComposer:
         self.ai = AIEngine.instance()
         self.session = session
 
+    async def _build_attack_path_contract(
+        self,
+        context: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Build canonical attack-path contract for report generation.
+        """
+        from core.cortex.attack_path_contract import build_attack_path_contract
+
+        session_id = str(
+            context.get("session_id")
+            or getattr(self.session, "id", "")
+            or ""
+        ).strip()
+        if not session_id:
+            return build_attack_path_contract(session_id="unknown", graph_dto={}), {}
+
+        findings = context.get("findings", [])
+        issues = context.get("issues", [])
+        if not isinstance(findings, list):
+            findings = []
+        if not isinstance(issues, list):
+            issues = []
+
+        graph_dto: Dict[str, Any] = {}
+        try:
+            from core.cortex.causal_graph import get_graph_dto_for_session
+
+            graph_dto = await get_graph_dto_for_session(
+                session_id=session_id,
+                findings=findings,
+                issues=issues,
+            )
+        except Exception as exc:
+            logger.debug("[ReportComposer] Failed to build graph DTO for attack narrative: %s", exc)
+
+        contract = build_attack_path_contract(
+            session_id=session_id,
+            graph_dto=graph_dto,
+        )
+        return contract, graph_dto
+
+    def _render_attack_narrative_from_contract(
+        self,
+        contract: Dict[str, Any],
+        graph_dto: Dict[str, Any],
+    ) -> str:
+        """
+        Deterministic attack narrative: only graph-validated chains are emitted.
+        """
+        session_id = str(contract.get("session_id") or "unknown")
+        graph_hash = str(contract.get("graph_hash") or "unknown")
+        chain_count = int(contract.get("chain_count", 0) or 0)
+        chains = contract.get("chains", [])
+        if not isinstance(chains, list):
+            chains = []
+
+        lines = ["## Attack Narrative", ""]
+        lines.append(f"Session: `{session_id}`")
+        lines.append(f"Graph Hash: `{graph_hash}`")
+        lines.append(f"Graph-Validated Attack Chains: **{chain_count}**")
+        lines.append("")
+
+        if chain_count <= 0:
+            lines.append(
+                "No confirmed attack chain currently exists in the deterministic causal graph."
+            )
+            lines.append(
+                "Potential exploitation stories are intentionally omitted until graph-validated."
+            )
+            return "\n".join(lines).strip()
+
+        lines.append("Validated Chains:")
+        for chain in chains[:10]:
+            if not isinstance(chain, dict):
+                continue
+            chain_id = str(chain.get("id") or "chain")
+            labels = chain.get("labels", [])
+            if isinstance(labels, list) and labels:
+                chain_text = " -> ".join(str(item) for item in labels if str(item))
+            else:
+                node_ids = chain.get("node_ids", [])
+                chain_text = " -> ".join(str(item) for item in node_ids if str(item)) if isinstance(node_ids, list) else ""
+            length = int(chain.get("length", 0) or 0)
+            score = float(chain.get("score", 0.0) or 0.0)
+            lines.append(f"- `{chain_id}` ({length} steps, score={score:.3f}): {chain_text}")
+
+        pressure_points = graph_dto.get("pressure_points", []) if isinstance(graph_dto, dict) else []
+        if isinstance(pressure_points, list) and pressure_points:
+            lines.append("")
+            lines.append("Top Pressure Points:")
+            for pp in pressure_points[:5]:
+                if not isinstance(pp, dict):
+                    continue
+                lines.append(
+                    f"- {pp.get('finding_title', 'unknown')} "
+                    f"(severity={pp.get('severity', 'unknown')}, "
+                    f"blocks={pp.get('attack_paths_blocked', 0)} paths)"
+                )
+
+        return "\n".join(lines).strip()
+
+    def _apply_attack_path_claim_guard(
+        self,
+        *,
+        text: str,
+        contract: Dict[str, Any],
+        context_label: str,
+    ) -> str:
+        """
+        Enforce graph-truth for report section text.
+        """
+        from core.cortex.attack_path_contract import sanitize_attack_path_claims
+
+        result = sanitize_attack_path_claims(
+            text,
+            contract,
+            require_chain_ids=True,
+        )
+        if bool(result.get("modified")):
+            logger.warning(
+                "[ReportComposer] Attack-path guard applied (%s): reason=%s removed=%s chain_count=%s",
+                context_label,
+                result.get("reason", "unknown"),
+                result.get("removed_claims", 0),
+                result.get("chain_count", 0),
+            )
+        return str(result.get("text") or "").strip()
+
     async def generate_section(self, section_name: str, context_override: Optional[Dict] = None) -> str:
         """
         Generates a specific section of the report using the LLM.
@@ -78,6 +207,15 @@ class ReportComposer:
             return f"Error: Unknown section '{section_name}'"
 
         context = context_override or self._gather_context()
+        attack_path_contract, graph_dto = await self._build_attack_path_contract(context)
+        if isinstance(context, dict):
+            context = dict(context)
+            context["attack_path_contract"] = attack_path_contract
+            context["graph_dto"] = graph_dto
+
+        # Contract guardrail: attack narrative must be deterministic and graph-bound.
+        if section_name == "attack_narrative":
+            return self._render_attack_narrative_from_contract(attack_path_contract, graph_dto)
 
         prompts = {
             "executive_summary": self._prompt_exec_summary,
@@ -114,7 +252,13 @@ class ReportComposer:
 
         try:
             result = await self.ai.client.generate_text(user_prompt, system_prompt)
-            return result or "AI Generation failed (Empty response)."
+            if not result:
+                return "AI Generation failed (Empty response)."
+            return self._apply_attack_path_claim_guard(
+                text=result,
+                contract=attack_path_contract,
+                context_label=f"report_section:{section_name}",
+            )
         except Exception as e:
             logger.error(f"[ReportComposer] AI generation failed for {section_name}: {e}")
             return self._fallback_content(section_name, context)
@@ -173,6 +317,7 @@ class ReportComposer:
         take down the whole report.
         """
         ctx: Dict = {
+            "session_id": getattr(self.session, "id", None) if self.session else None,
             "findings": [],
             "issues": [],
             "risk": {},
@@ -255,8 +400,54 @@ class ReportComposer:
             )
         return "\n".join(lines) + "\n"
 
-    def _build_graph_summary(self, findings: list, issues: list) -> str:
+    def _build_graph_summary(self, findings: list, issues: list, ctx: Optional[Dict[str, Any]] = None) -> str:
         """Build a causal graph summary string for report prompts."""
+        contract = ctx.get("attack_path_contract") if isinstance(ctx, dict) else None
+        graph_dto = ctx.get("graph_dto") if isinstance(ctx, dict) else None
+        if isinstance(contract, dict):
+            try:
+                graph_counts = graph_dto.get("count", {}) if isinstance(graph_dto, dict) else {}
+                nodes_count = int(graph_counts.get("nodes", 0) or 0)
+                edges_count = int(graph_counts.get("edges", 0) or 0)
+
+                chains = contract.get("chains", [])
+                if not isinstance(chains, list):
+                    chains = []
+                chain_count = int(contract.get("chain_count", len(chains)) or 0)
+                longest_chain = max(
+                    (int(chain.get("length", 0) or 0) for chain in chains if isinstance(chain, dict)),
+                    default=0,
+                )
+
+                parts = [
+                    f"Nodes: {nodes_count}, Edges: {edges_count}",
+                    f"Graph-validated attack chains: {chain_count}, Longest chain: {longest_chain} steps",
+                ]
+                pressure_points = graph_dto.get("pressure_points", []) if isinstance(graph_dto, dict) else []
+                for pp in pressure_points[:5] if isinstance(pressure_points, list) else []:
+                    if not isinstance(pp, dict):
+                        continue
+                    parts.append(
+                        f"Pressure Point: {pp.get('finding_title', 'unknown')} "
+                        f"(severity: {pp.get('severity', 'unknown')}, "
+                        f"blocks {pp.get('attack_paths_blocked', 0)} attack paths, "
+                        f"centrality: {pp.get('centrality_score', 0)})"
+                    )
+                for chain in chains[:3]:
+                    if not isinstance(chain, dict):
+                        continue
+                    labels = chain.get("labels", [])
+                    if isinstance(labels, list) and labels:
+                        chain_text = " → ".join(str(item) for item in labels if str(item))
+                    else:
+                        node_ids = chain.get("node_ids", [])
+                        chain_text = " → ".join(str(item) for item in node_ids if str(item)) if isinstance(node_ids, list) else ""
+                    if chain_text:
+                        parts.append(f"Chain {chain.get('id', 'chain')}: {chain_text}")
+                return "\n".join(f"- {part}" for part in parts) + "\n"
+            except Exception as exc:
+                logger.debug("[ReportComposer] Canonical graph summary failed: %s", exc)
+
         try:
             from core.cortex.causal_graph import CausalGraphBuilder
             builder = CausalGraphBuilder()
@@ -291,7 +482,7 @@ class ReportComposer:
         issues = ctx.get("issues", [])
         findings = ctx.get("findings", [])
         issues_block = self._format_issues_block(issues, limit=10)
-        graph_block = self._build_graph_summary(findings, issues)
+        graph_block = self._build_graph_summary(findings, issues, ctx=ctx)
 
         return (
             "Write an Executive Summary for a penetration test report.\n\n"
@@ -311,7 +502,7 @@ class ReportComposer:
         issues = ctx.get("issues", [])
         findings = ctx.get("findings", [])
         issues_block = self._format_issues_block(issues)
-        graph_block = self._build_graph_summary(findings, issues)
+        graph_block = self._build_graph_summary(findings, issues, ctx=ctx)
 
         return (
             "Write an Attack Narrative for a penetration test report.\n\n"
@@ -351,7 +542,7 @@ class ReportComposer:
         issues = ctx.get("issues", [])
         findings = ctx.get("findings", [])
         issues_block = self._format_issues_block(issues)
-        graph_block = self._build_graph_summary(findings, issues)
+        graph_block = self._build_graph_summary(findings, issues, ctx=ctx)
 
         return (
             "Provide a Risk Assessment for a penetration test report.\n\n"
@@ -371,7 +562,7 @@ class ReportComposer:
         issues = ctx.get("issues", [])
         findings = ctx.get("findings", [])
         issues_block = self._format_issues_block(issues)
-        graph_block = self._build_graph_summary(findings, issues)
+        graph_block = self._build_graph_summary(findings, issues, ctx=ctx)
 
         return (
             "Draft a Remediation Roadmap for a penetration test report.\n\n"

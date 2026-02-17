@@ -68,7 +68,7 @@ final class LLMService: ObservableObject {
     // Kick off a streaming generation call and deliver tokens to the caller.
     // onToken is invoked on the main actor so UI mutations are safe.
     /// Function generate.
-    func generate(prompt: String, onToken: @escaping (String) -> Void) {
+    func generate(prompt: String, sessionID: String? = nil, onToken: @escaping (String) -> Void) {
         cancel()
 
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -88,7 +88,7 @@ final class LLMService: ObservableObject {
             // Do-catch block.
             do {
                 // Use the Python API streamChat which streams plain text chunks
-                for try await token in client.streamChat(prompt: trimmed) {
+                for try await token in client.streamChat(prompt: trimmed, sessionID: sessionID) {
                     // Conditional branch.
                     if Task.isCancelled { break }
                     await MainActor.run {

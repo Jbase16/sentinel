@@ -19,6 +19,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 class ChatRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=32000)
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 @router.get("/status", dependencies=[Depends(verify_token)])
 async def get_ai_status():
@@ -36,7 +37,7 @@ async def chat_with_ai(req: ChatRequest):
     
     # Use streaming response for real-time feel
     return StreamingResponse(
-        ai.stream_chat(req.prompt),
+        ai.stream_chat(req.prompt, session_id=req.session_id),
         media_type="text/plain"
     )
 
@@ -64,6 +65,7 @@ async def generate_report(
             raise SentinelError(ErrorCode.SESSION_NOT_FOUND, f"Session {session_id} not found")
 
         context_override = {
+            "session_id": session_id,
             "findings": findings,
             "issues": issues,
             "risk": {},
