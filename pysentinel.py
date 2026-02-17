@@ -46,6 +46,7 @@ class SentinelCLI:
             timeout=10.0
         )
         self.running = True
+        self.active_session_id: Optional[str] = None
 
     def _load_token(self) -> str:
         """Load API token from ~/.sentinelforge/api_token"""
@@ -66,7 +67,7 @@ class SentinelCLI:
             print(f"❌ Connection failed: {e}")
             return False
 
-    async def start_scan(self, target: str, modules: List[str] = None, mode: str = "standard"):
+    async def start_scan(self, target: str, modules: List[str] = None, mode: str = "standard") -> str:
         """Start a new scan session"""
         payload = {
             "target": target,
@@ -80,10 +81,27 @@ class SentinelCLI:
         try:
             resp = await self.client.post("/v1/scans/start", json=payload)
             resp.raise_for_status()
-            print("✅ Scan initiated successfully. Waiting for events...")
+            body = resp.json() if resp.content else {}
+            session_id = str(body.get("session_id") or "").strip()
+            if not session_id:
+                raise RuntimeError(f"Backend returned no session_id: {body}")
+            self.active_session_id = session_id
+            print(f"✅ Scan initiated successfully. session={session_id[:12]}")
+            print("   Waiting for events...")
+            return session_id
         except httpx.HTTPStatusError as e:
             print(f"❌ Failed to start scan: {e.response.text}")
             sys.exit(1)
+        except Exception as e:
+            print(f"❌ Failed to start scan: {e}")
+            sys.exit(1)
+
+    def _event_scan_id(self, payload: dict) -> Optional[str]:
+        scan_id = payload.get("scan_id") or payload.get("session_id")
+        if scan_id is None:
+            return None
+        text = str(scan_id).strip()
+        return text or None
 
     async def stream_events(self):
         """Stream SSE events from the backend"""
@@ -155,9 +173,33 @@ class SentinelCLI:
         """Process and print a single event"""
         event_type = event.get("type", "unknown")
         payload = event.get("payload", {})
+        event_scan_id = self._event_scan_id(payload)
+
+        # Ignore all events until we know which session we're responsible for.
+        if not self.active_session_id:
+            return
+
+        # Strictly scope state-bearing events to the active session.
+        scoped_types = {
+            "scan_started",
+            "scan_phase_changed",
+            "scan_completed",
+            "scan_failed",
+            "finding_created",
+            "decision_made",
+            "narrative_emitted",
+            "tool_started",
+            "tool_completed",
+        }
+        if event_type in scoped_types and event_scan_id != self.active_session_id:
+            return
 
         # -- LOGS --
         if event_type == "log":
+            # If scan_id is available, enforce session scope. If absent, allow
+            # passthrough because some producers emit unscoped logs.
+            if event_scan_id and event_scan_id != self.active_session_id:
+                return
             msg = payload.get("line") or payload.get("message")
             if msg:
                 print(f"  {msg}")
@@ -165,7 +207,7 @@ class SentinelCLI:
         # -- SCAN LIFECYCLE --
         elif event_type == "scan_started":
             target = payload.get("target")
-            session_id = payload.get("session_id", "")[:8]
+            session_id = (event_scan_id or "")[:8]
             print(f"\n🟢 SCAN STARTED: {target} (session: {session_id})")
 
         elif event_type == "scan_completed":

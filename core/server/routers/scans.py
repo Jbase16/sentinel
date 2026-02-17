@@ -75,6 +75,24 @@ class ScanRequest(BaseModel):
             raise ValueError(f"Invalid tool names: {', '.join(invalid)}")
         return v
 
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        raw = str(v or "").strip().lower()
+        aliases = {
+            "standard": "standard",
+            "bug_bounty": "bug_bounty",
+            "bug-bounty": "bug_bounty",
+            "bugbounty": "bug_bounty",
+            "stealth": "stealth",
+            "passive": "passive",
+        }
+        normalized = aliases.get(raw)
+        if not normalized:
+            allowed = ", ".join(sorted({"standard", "bug_bounty", "stealth", "passive"}))
+            raise ValueError(f"Invalid scan mode '{v}'. Allowed modes: {allowed}")
+        return normalized
+
     @field_validator("personas")
     @classmethod
     def validate_personas(cls, v: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:

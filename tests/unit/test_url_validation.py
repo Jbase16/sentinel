@@ -140,6 +140,22 @@ class TestURLValidation:
         req = ScanRequest(target="https://api.example.com")
         assert req.target == "https://api.example.com"
 
+    def test_scan_mode_bug_bounty_is_accepted(self):
+        req = ScanRequest(target="https://example.com", mode="bug_bounty")
+        assert req.mode == "bug_bounty"
+
+    def test_scan_mode_bug_bounty_aliases_are_normalized(self):
+        req1 = ScanRequest(target="https://example.com", mode="bug-bounty")
+        req2 = ScanRequest(target="https://example.com", mode="bugbounty")
+        assert req1.mode == "bug_bounty"
+        assert req2.mode == "bug_bounty"
+
+    def test_scan_mode_invalid_is_rejected(self):
+        with pytest.raises(ValidationError) as exc_info:
+            ScanRequest(target="https://example.com", mode="bounty")
+        assert "mode" in str(exc_info.value).lower()
+        assert "allowed modes" in str(exc_info.value).lower()
+
 
 def test_extract_attack_paths_from_graph_dto_handles_empty_and_malformed_chains():
     assert _extract_attack_paths_from_graph_dto({"attack_chains": []}) == []
