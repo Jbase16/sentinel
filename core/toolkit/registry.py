@@ -420,6 +420,7 @@ try:
     from core.toolkit.internal_tools.wraith_verify import WraithVerifyTool
     from core.toolkit.internal_tools.persona_diff import WraithPersonaDiffTool
     from core.toolkit.internal_tools.oob_probe import WraithOOBProbeTool
+    from core.toolkit.internal_tools.api_discoverer import APIDiscovererTool
 
     TOOLS.register(
         ToolDefinition(
@@ -452,6 +453,17 @@ try:
             target_type="url",
             tool_type="internal",
             handler=WraithOOBProbeTool(),
+        )
+    )
+    TOOLS.register(
+        ToolDefinition(
+            name="api_discoverer",
+            label="api_discoverer (API endpoint discovery via probing + spec parsing)",
+            cmd_template=["internal"],
+            aggressive=False,
+            target_type="url",
+            tool_type="internal",
+            handler=APIDiscovererTool(),
         )
     )
 except Exception as e:

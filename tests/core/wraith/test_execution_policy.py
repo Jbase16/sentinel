@@ -124,6 +124,48 @@ def test_external_allowlist_enforced():
 
 
 @pytest.mark.anyio
+async def test_execute_http_enforces_external_budget_per_request():
+    runtime = ExecutionPolicyRuntime(
+        tool_name="wraith_oob_probe",
+        scope_target="https://example.com",
+        execution_mode=ExecutionMode.BOUNTY,
+        safe_mode=False,
+        same_origin_only=True,
+        rate_limit_ms=0,
+        max_requests=5,
+        max_retries_per_request=0,
+        max_retries_total=0,
+        allowed_external_hosts={"interactsh.com"},
+        max_external_calls=1,
+    )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_ok_response))
+    try:
+        first = await runtime.execute_http(
+            client=client,
+            method="GET",
+            url="https://interactsh.com/log",
+            request_kwargs={},
+            allow_external=True,
+        )
+        assert first.status_code == 200
+        with pytest.raises(PolicyViolation):
+            await runtime.execute_http(
+                client=client,
+                method="GET",
+                url="https://interactsh.com/log",
+                request_kwargs={},
+                allow_external=True,
+            )
+    finally:
+        await client.aclose()
+
+    metrics = runtime.metrics()
+    assert metrics["external_calls"] == 1
+    assert metrics["attempts_total"] == 1
+
+
+@pytest.mark.anyio
 async def test_capability_gate_charged_per_request():
     target = "https://example.com"
     gate = CapabilityGate(mode=ExecutionMode.BOUNTY)

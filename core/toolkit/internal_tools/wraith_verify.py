@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import replace
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import parse_qsl, urljoin, urlparse, urlunparse
 
@@ -19,6 +18,7 @@ from core.wraith.mutation_engine import (
 )
 from core.wraith.session_manager import AuthSessionManager
 from core.wraith.waf_bypass import VulnerabilityClass, WAFBypassEngine
+from core.wraith.waf_retry import get_or_create_waf_engine, waf_aware_send
 
 
 _SEVERITY_SCORE = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
@@ -168,7 +168,7 @@ class WraithVerifyTool(InternalTool):
         # Keep tool bounded: do not allow unbounded request fan-out.
         engine = MutationEngine(rate_limit_ms=120, policy_runtime=policy_runtime)
         try:
-            waf_engine: Optional[WAFBypassEngine] = self._get_waf_engine(context.knowledge)
+            waf_engine: Optional[WAFBypassEngine] = get_or_create_waf_engine(context.knowledge)
 
             findings_out: List[Dict[str, Any]] = []
             dedup: Set[str] = set()
@@ -194,30 +194,16 @@ class WraithVerifyTool(InternalTool):
 
                         await self.log(queue, f"Mutate {url} param={param} class={payload.vuln_class}")
 
-                        response, outcome = await engine.mutate_and_analyze(
-                            url=url,
-                            payload=payload,
+                        response, outcome, was_bypassed = await waf_aware_send(
+                            engine, url, payload,
                             method=HttpMethod.GET,
                             headers=headers,
                             cookies=cookies,
+                            waf_engine=waf_engine,
+                            queue=queue,
+                            tool_label=self.name,
                         )
                         total_mutations += 1
-
-                        if outcome == ActionOutcome.BLOCKED:
-                            waf_engine = waf_engine or self._ensure_waf_engine(context.knowledge)
-                            if waf_engine is not None:
-                                response, outcome, total_mutations = await self._attempt_waf_bypass(
-                                    engine=engine,
-                                    waf_engine=waf_engine,
-                                    url=url,
-                                    baseline_url=None,
-                                    payload=payload,
-                                    headers=headers,
-                                    cookies=cookies,
-                                    blocked_response=response,
-                                    total_mutations=total_mutations,
-                                    queue=queue,
-                                )
 
                         self._maybe_emit_verified_finding(
                             findings_out=findings_out,
@@ -250,31 +236,17 @@ class WraithVerifyTool(InternalTool):
                         param_label = f"path:{original_segment}"
                         await self.log(queue, f"Mutate {url} {param_label} class={payload.vuln_class}")
 
-                        response, outcome = await engine.mutate_and_analyze(
-                            url=template_url,
-                            payload=payload,
+                        response, outcome, was_bypassed = await waf_aware_send(
+                            engine, template_url, payload,
                             method=HttpMethod.GET,
                             headers=headers,
                             cookies=cookies,
                             baseline_url=url,
+                            waf_engine=waf_engine,
+                            queue=queue,
+                            tool_label=self.name,
                         )
                         total_mutations += 1
-
-                        if outcome == ActionOutcome.BLOCKED:
-                            waf_engine = waf_engine or self._ensure_waf_engine(context.knowledge)
-                            if waf_engine is not None:
-                                response, outcome, total_mutations = await self._attempt_waf_bypass(
-                                    engine=engine,
-                                    waf_engine=waf_engine,
-                                    url=template_url,
-                                    baseline_url=url,
-                                    payload=payload,
-                                    headers=headers,
-                                    cookies=cookies,
-                                    blocked_response=response,
-                                    total_mutations=total_mutations,
-                                    queue=queue,
-                                )
 
                         self._maybe_emit_verified_finding(
                             findings_out=findings_out,
@@ -496,17 +468,6 @@ class WraithVerifyTool(InternalTool):
             ),
         ]
 
-    def _ensure_waf_engine(self, knowledge: Dict[str, Any]) -> Optional[WAFBypassEngine]:
-        existing = self._get_waf_engine(knowledge)
-        if existing is not None:
-            return existing
-        try:
-            engine = WAFBypassEngine()
-            knowledge["waf_bypass_engine"] = engine
-            return engine
-        except Exception:
-            return None
-
     def _maybe_emit_verified_finding(
         self,
         *,
@@ -636,72 +597,3 @@ class WraithVerifyTool(InternalTool):
             f"evidence:\n{ev_block}"
         ).strip()
 
-    def _get_waf_engine(self, knowledge: Dict[str, Any]) -> Optional[WAFBypassEngine]:
-        engine = knowledge.get("waf_bypass_engine")
-        if isinstance(engine, WAFBypassEngine):
-            return engine
-        return None
-
-    async def _attempt_waf_bypass(
-        self,
-        *,
-        engine: MutationEngine,
-        waf_engine: WAFBypassEngine,
-        url: str,
-        baseline_url: Optional[str],
-        payload: MutationPayload,
-        headers: Dict[str, str],
-        cookies: Dict[str, str],
-        blocked_response: Any,
-        total_mutations: int,
-        queue: asyncio.Queue[str],
-    ) -> Tuple[Any, ActionOutcome, int]:
-        # Parse waf name from blocking evidence (MutationEngine attaches it in metadata).
-        waf_name = None
-        for ev in getattr(blocked_response, "evidence", []) or []:
-            meta = getattr(ev, "metadata", {}) or {}
-            if isinstance(meta, dict) and meta.get("waf"):
-                waf_name = str(meta.get("waf"))
-                break
-        if not waf_name:
-            return blocked_response, ActionOutcome.BLOCKED, total_mutations
-
-        vuln_class = self._to_vuln_class(payload.vuln_class)
-        if vuln_class is None:
-            return blocked_response, ActionOutcome.BLOCKED, total_mutations
-
-        technique = waf_engine.select_bypass_technique(waf_name, vuln_class)
-        if technique is None:
-            return blocked_response, ActionOutcome.BLOCKED, total_mutations
-
-        transformed = waf_engine.apply_bypass_to_payload(payload.value, technique)
-        bypass_payload = replace(payload, value=transformed, description=f"{payload.description} (bypass:{technique.id})")
-
-        await self.log(queue, f"WAF({waf_name}) blocked; retrying with bypass={technique.id}")
-        response2, outcome2 = await engine.mutate_and_analyze(
-            url=url,
-            payload=bypass_payload,
-            method=HttpMethod.GET,
-            headers=headers,
-            cookies=cookies,
-            baseline_url=baseline_url,
-        )
-        total_mutations += 1
-
-        # Treat "not blocked" as success signal for the bandit; evidence presence is a bonus.
-        bypass_success = outcome2 != ActionOutcome.BLOCKED
-        waf_engine.record_bypass_result(waf_name, technique.id, bypass_success)
-
-        return response2, outcome2, total_mutations
-
-    def _to_vuln_class(self, vuln_class: str) -> Optional[VulnerabilityClass]:
-        v = (vuln_class or "").strip().lower()
-        if v == "sqli":
-            return VulnerabilityClass.SQLI
-        if v == "xss":
-            return VulnerabilityClass.XSS
-        if v == "ssrf":
-            return VulnerabilityClass.SSRF
-        if v == "rce":
-            return VulnerabilityClass.RCE
-        return None

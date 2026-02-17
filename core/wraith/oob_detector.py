@@ -10,7 +10,7 @@ License: Apache 2.0
 """
 
 import abc
-import hashlib
+import asyncio
 import logging
 import random
 import string
@@ -19,9 +19,14 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+import httpx
 import requests
+
+if TYPE_CHECKING:
+    from core.cortex.capability_tiers import CapabilityTier
+    from core.wraith.execution_policy import ExecutionPolicyRuntime
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +119,31 @@ class OOBProvider(abc.ABC):
         """
         pass
 
+    async def get_interactions_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Async interaction fetch path.
+
+        Providers that do not override this method fall back to the legacy
+        synchronous implementation in a worker thread.
+        """
+        return await asyncio.to_thread(self.get_interactions)
+
+    async def verify_connectivity_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> bool:
+        """Async connectivity check path (fallback to sync)."""
+        return await asyncio.to_thread(self.verify_connectivity)
+
     def generate_interaction_id(self) -> str:
         """
         Generate a unique interaction identifier.
@@ -160,6 +190,34 @@ class InteractshProvider(OOBProvider):
             logger.warning(f"Interact.sh connectivity check failed: {e}")
             return False
 
+    async def verify_connectivity_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> bool:
+        request_kwargs: Dict[str, Any] = {"timeout": self.timeout_s}
+        try:
+            if policy_runtime is not None:
+                response = await policy_runtime.execute_http(
+                    client=client,
+                    method="GET",
+                    url=f"{self.api_url}/register",
+                    request_kwargs=request_kwargs,
+                    tier_hint=tier_hint,
+                    allow_external=True,
+                )
+            else:
+                response = await client.get(
+                    f"{self.api_url}/register",
+                    **request_kwargs,
+                )
+            return response.status_code in (200, 400)
+        except httpx.RequestError as e:
+            logger.warning(f"Interact.sh connectivity check failed: {e}")
+            return False
+
     def get_interactions(self) -> List[Dict[str, Any]]:
         """
         Fetch interactions from interact.sh service.
@@ -177,26 +235,64 @@ class InteractshProvider(OOBProvider):
                 timeout=self.timeout_s,
             )
             response.raise_for_status()
-            data = response.json()
-
-            interactions = []
-            for entry in data.get("interactions", []):
-                interaction = {
-                    "interaction_id": entry.get("url_part", ""),
-                    "type": self._parse_interaction_type(entry.get("type", "")),
-                    "source_ip": entry.get("source_ip", "unknown"),
-                    "timestamp": self._parse_timestamp(entry.get("timestamp", "")),
-                    "raw_data": entry,
-                }
-                interactions.append(interaction)
-
-            return interactions
+            return self._parse_interactions_payload(response.json())
         except requests.RequestException as e:
             logger.error(f"Failed to fetch interactions from interact.sh: {e}")
             raise ConnectionError(f"interact.sh API error: {e}")
         except (KeyError, ValueError) as e:
             logger.error(f"Invalid interact.sh response format: {e}")
             raise ValueError(f"Invalid interact.sh response: {e}")
+
+    async def get_interactions_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> List[Dict[str, Any]]:
+        if not self.base_domain:
+            raise ValueError("base_domain is required for interact.sh provider")
+
+        request_kwargs: Dict[str, Any] = {
+            "params": {"url": self.base_domain},
+            "timeout": self.timeout_s,
+        }
+        try:
+            if policy_runtime is not None:
+                response = await policy_runtime.execute_http(
+                    client=client,
+                    method="GET",
+                    url=f"{self.api_url}/log",
+                    request_kwargs=request_kwargs,
+                    tier_hint=tier_hint,
+                    allow_external=True,
+                )
+            else:
+                response = await client.get(
+                    f"{self.api_url}/log",
+                    **request_kwargs,
+                )
+            response.raise_for_status()
+            return self._parse_interactions_payload(response.json())
+        except httpx.RequestError as e:
+            logger.error(f"Failed to fetch interactions from interact.sh: {e}")
+            raise ConnectionError(f"interact.sh API error: {e}")
+        except (KeyError, ValueError) as e:
+            logger.error(f"Invalid interact.sh response format: {e}")
+            raise ValueError(f"Invalid interact.sh response: {e}")
+
+    def _parse_interactions_payload(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        interactions = []
+        for entry in data.get("interactions", []):
+            interaction = {
+                "interaction_id": entry.get("url_part", ""),
+                "type": self._parse_interaction_type(entry.get("type", "")),
+                "source_ip": entry.get("source_ip", "unknown"),
+                "timestamp": self._parse_timestamp(entry.get("timestamp", "")),
+                "raw_data": entry,
+            }
+            interactions.append(interaction)
+        return interactions
 
     @staticmethod
     def _parse_interaction_type(interaction_str: str) -> InteractionType:
@@ -259,6 +355,37 @@ class BurpCollaboratorProvider(OOBProvider):
             logger.warning(f"Burp Collaborator connectivity check failed: {e}")
             return False
 
+    async def verify_connectivity_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> bool:
+        request_kwargs: Dict[str, Any] = {
+            "params": {"apikey": self.api_key},
+            "timeout": self.timeout_s,
+        }
+        try:
+            if policy_runtime is not None:
+                response = await policy_runtime.execute_http(
+                    client=client,
+                    method="GET",
+                    url=f"{self.api_url}/interact",
+                    request_kwargs=request_kwargs,
+                    tier_hint=tier_hint,
+                    allow_external=True,
+                )
+            else:
+                response = await client.get(
+                    f"{self.api_url}/interact",
+                    **request_kwargs,
+                )
+            return response.status_code in (200, 400)
+        except httpx.RequestError as e:
+            logger.warning(f"Burp Collaborator connectivity check failed: {e}")
+            return False
+
     def get_interactions(self) -> List[Dict[str, Any]]:
         """
         Fetch interactions from Burp Collaborator service.
@@ -279,26 +406,64 @@ class BurpCollaboratorProvider(OOBProvider):
                 timeout=self.timeout_s,
             )
             response.raise_for_status()
-            data = response.json()
-
-            interactions = []
-            for entry in data.get("interactions", []):
-                interaction = {
-                    "interaction_id": entry.get("interaction_id", ""),
-                    "type": self._parse_interaction_type(entry.get("type", "")),
-                    "source_ip": entry.get("client_ip", "unknown"),
-                    "timestamp": datetime.fromtimestamp(entry.get("time_stamp", 0) / 1000),
-                    "raw_data": entry,
-                }
-                interactions.append(interaction)
-
-            return interactions
+            return self._parse_interactions_payload(response.json())
         except requests.RequestException as e:
             logger.error(f"Failed to fetch interactions from Burp Collaborator: {e}")
             raise ConnectionError(f"Burp Collaborator API error: {e}")
         except (KeyError, ValueError) as e:
             logger.error(f"Invalid Burp Collaborator response format: {e}")
             raise ValueError(f"Invalid response format: {e}")
+
+    async def get_interactions_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> List[Dict[str, Any]]:
+        if not self.base_domain:
+            raise ValueError("base_domain is required for Burp Collaborator")
+
+        request_kwargs: Dict[str, Any] = {
+            "params": {"apikey": self.api_key, "domain": self.base_domain},
+            "timeout": self.timeout_s,
+        }
+        try:
+            if policy_runtime is not None:
+                response = await policy_runtime.execute_http(
+                    client=client,
+                    method="GET",
+                    url=f"{self.api_url}/interact",
+                    request_kwargs=request_kwargs,
+                    tier_hint=tier_hint,
+                    allow_external=True,
+                )
+            else:
+                response = await client.get(
+                    f"{self.api_url}/interact",
+                    **request_kwargs,
+                )
+            response.raise_for_status()
+            return self._parse_interactions_payload(response.json())
+        except httpx.RequestError as e:
+            logger.error(f"Failed to fetch interactions from Burp Collaborator: {e}")
+            raise ConnectionError(f"Burp Collaborator API error: {e}")
+        except (KeyError, ValueError) as e:
+            logger.error(f"Invalid Burp Collaborator response format: {e}")
+            raise ValueError(f"Invalid response format: {e}")
+
+    def _parse_interactions_payload(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        interactions = []
+        for entry in data.get("interactions", []):
+            interaction = {
+                "interaction_id": entry.get("interaction_id", ""),
+                "type": self._parse_interaction_type(entry.get("type", "")),
+                "source_ip": entry.get("client_ip", "unknown"),
+                "timestamp": datetime.fromtimestamp(entry.get("time_stamp", 0) / 1000),
+                "raw_data": entry,
+            }
+            interactions.append(interaction)
+        return interactions
 
     @staticmethod
     def _parse_interaction_type(interaction_str: str) -> InteractionType:
@@ -347,6 +512,39 @@ class CustomWebhookProvider(OOBProvider):
             logger.warning(f"Webhook connectivity check failed: {e}")
             return False
 
+    async def verify_connectivity_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> bool:
+        request_kwargs: Dict[str, Any] = {
+            "timeout": self.timeout_s,
+            "headers": {"User-Agent": "SentinelForge/1.0"},
+        }
+        if self.auth_header:
+            request_kwargs["headers"]["Authorization"] = self.auth_header
+        try:
+            if policy_runtime is not None:
+                response = await policy_runtime.execute_http(
+                    client=client,
+                    method="GET",
+                    url=self.webhook_url,
+                    request_kwargs=request_kwargs,
+                    tier_hint=tier_hint,
+                    allow_external=True,
+                )
+            else:
+                response = await client.get(
+                    self.webhook_url,
+                    **request_kwargs,
+                )
+            return response.status_code < 500
+        except httpx.RequestError as e:
+            logger.warning(f"Webhook connectivity check failed: {e}")
+            return False
+
     def get_interactions(self) -> List[Dict[str, Any]]:
         """
         Fetch interactions from custom webhook endpoint.
@@ -370,26 +568,64 @@ class CustomWebhookProvider(OOBProvider):
         try:
             response = self.session.get(self.webhook_url, timeout=self.timeout_s)
             response.raise_for_status()
-            data = response.json()
-
-            interactions = []
-            for entry in data.get("interactions", []):
-                interaction = {
-                    "interaction_id": entry.get("interaction_id", ""),
-                    "type": self._parse_interaction_type(entry.get("type", "")),
-                    "source_ip": entry.get("source_ip", "unknown"),
-                    "timestamp": self._parse_timestamp(entry.get("timestamp", "")),
-                    "raw_data": entry,
-                }
-                interactions.append(interaction)
-
-            return interactions
+            return self._parse_interactions_payload(response.json())
         except requests.RequestException as e:
             logger.error(f"Failed to fetch interactions from webhook: {e}")
             raise ConnectionError(f"Webhook error: {e}")
         except (KeyError, ValueError) as e:
             logger.error(f"Invalid webhook response format: {e}")
             raise ValueError(f"Invalid webhook response: {e}")
+
+    async def get_interactions_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+    ) -> List[Dict[str, Any]]:
+        request_kwargs: Dict[str, Any] = {
+            "timeout": self.timeout_s,
+            "headers": {"User-Agent": "SentinelForge/1.0"},
+        }
+        if self.auth_header:
+            request_kwargs["headers"]["Authorization"] = self.auth_header
+
+        try:
+            if policy_runtime is not None:
+                response = await policy_runtime.execute_http(
+                    client=client,
+                    method="GET",
+                    url=self.webhook_url,
+                    request_kwargs=request_kwargs,
+                    tier_hint=tier_hint,
+                    allow_external=True,
+                )
+            else:
+                response = await client.get(
+                    self.webhook_url,
+                    **request_kwargs,
+                )
+            response.raise_for_status()
+            return self._parse_interactions_payload(response.json())
+        except httpx.RequestError as e:
+            logger.error(f"Failed to fetch interactions from webhook: {e}")
+            raise ConnectionError(f"Webhook error: {e}")
+        except (KeyError, ValueError) as e:
+            logger.error(f"Invalid webhook response format: {e}")
+            raise ValueError(f"Invalid webhook response: {e}")
+
+    def _parse_interactions_payload(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        interactions = []
+        for entry in data.get("interactions", []):
+            interaction = {
+                "interaction_id": entry.get("interaction_id", ""),
+                "type": self._parse_interaction_type(entry.get("type", "")),
+                "source_ip": entry.get("source_ip", "unknown"),
+                "timestamp": self._parse_timestamp(entry.get("timestamp", "")),
+                "raw_data": entry,
+            }
+            interactions.append(interaction)
+        return interactions
 
     @staticmethod
     def _parse_interaction_type(interaction_str: str) -> InteractionType:
@@ -489,41 +725,17 @@ class OOBManager:
         """
         start_time = time.time()
         all_evidence = []
+        seen_interactions: set[Tuple[str, str]] = set()
 
         while time.time() - start_time < timeout_s:
             try:
                 interactions = self.provider.get_interactions()
                 logger.debug(f"Retrieved {len(interactions)} interactions from provider")
-
-                for interaction in interactions:
-                    interaction_id = interaction.get("interaction_id", "")
-                    payload_id = self.interaction_mapping.get(interaction_id, "unknown")
-
-                    # Skip interactions not from our registered payloads
-                    if payload_id == "unknown" and interaction_id:
-                        continue
-
-                    evidence = OOBEvidence(
-                        interaction_type=interaction.get("type", InteractionType.UNKNOWN),
-                        source_ip=interaction.get("source_ip", "unknown"),
-                        timestamp=interaction.get("timestamp", datetime.utcnow()),
-                        raw_data=interaction.get("raw_data", {}),
-                        payload_id=payload_id,
-                        correlation_id=str(uuid.uuid4()),
-                        interaction_id=interaction_id,
-                        domain=self.provider.base_domain,
-                    )
-
-                    # Cache evidence and avoid duplicates
-                    if evidence.correlation_id not in [e.correlation_id for e in all_evidence]:
-                        all_evidence.append(evidence)
-                        if payload_id not in self.evidence_cache:
-                            self.evidence_cache[payload_id] = []
-                        self.evidence_cache[payload_id].append(evidence)
-                        logger.info(
-                            f"Captured OOB evidence: {evidence.interaction_type.value} "
-                            f"from {evidence.source_ip} for payload {payload_id}"
-                        )
+                self._ingest_interactions(
+                    interactions=interactions,
+                    all_evidence=all_evidence,
+                    seen_interactions=seen_interactions,
+                )
 
             except (ConnectionError, ValueError) as e:
                 logger.warning(f"Error during interaction polling: {e}")
@@ -534,6 +746,89 @@ class OOBManager:
             time.sleep(interval_s)
 
         return all_evidence
+
+    async def poll_interactions_async(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        tier_hint: Optional["CapabilityTier"] = None,
+        timeout_s: float = 30.0,
+        interval_s: float = 2.0,
+    ) -> List[OOBEvidence]:
+        """
+        Async polling path that supports centralized request-policy enforcement.
+        """
+        start_time = time.time()
+        all_evidence: List[OOBEvidence] = []
+        seen_interactions: set[Tuple[str, str]] = set()
+
+        while time.time() - start_time < timeout_s:
+            try:
+                interactions = await self.provider.get_interactions_async(
+                    client=client,
+                    policy_runtime=policy_runtime,
+                    tier_hint=tier_hint,
+                )
+                logger.debug(f"Retrieved {len(interactions)} interactions from provider")
+                self._ingest_interactions(
+                    interactions=interactions,
+                    all_evidence=all_evidence,
+                    seen_interactions=seen_interactions,
+                )
+            except (ConnectionError, ValueError) as e:
+                logger.warning(f"Error during interaction polling: {e}")
+
+            if all_evidence:
+                break
+
+            await asyncio.sleep(interval_s)
+
+        return all_evidence
+
+    def _ingest_interactions(
+        self,
+        *,
+        interactions: List[Dict[str, Any]],
+        all_evidence: List[OOBEvidence],
+        seen_interactions: set[Tuple[str, str]],
+    ) -> None:
+        for interaction in interactions:
+            interaction_id = str(interaction.get("interaction_id", "") or "")
+            payload_id = self.interaction_mapping.get(interaction_id, "unknown")
+
+            # Skip interactions not from our registered payloads
+            if payload_id == "unknown" and interaction_id:
+                continue
+
+            interaction_kind = interaction.get("type", InteractionType.UNKNOWN)
+            if not isinstance(interaction_kind, InteractionType):
+                interaction_kind = InteractionType.UNKNOWN
+
+            dedup_key = (interaction_id, interaction_kind.value)
+            if dedup_key in seen_interactions:
+                continue
+            seen_interactions.add(dedup_key)
+
+            evidence = OOBEvidence(
+                interaction_type=interaction_kind,
+                source_ip=interaction.get("source_ip", "unknown"),
+                timestamp=interaction.get("timestamp", datetime.utcnow()),
+                raw_data=interaction.get("raw_data", {}),
+                payload_id=payload_id,
+                correlation_id=str(uuid.uuid4()),
+                interaction_id=interaction_id,
+                domain=self.provider.base_domain,
+            )
+
+            all_evidence.append(evidence)
+            if payload_id not in self.evidence_cache:
+                self.evidence_cache[payload_id] = []
+            self.evidence_cache[payload_id].append(evidence)
+            logger.info(
+                f"Captured OOB evidence: {evidence.interaction_type.value} "
+                f"from {evidence.source_ip} for payload {payload_id}"
+            )
 
     def get_evidence_for_payload(self, payload_id: str) -> List[OOBEvidence]:
         """

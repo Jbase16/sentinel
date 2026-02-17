@@ -1806,6 +1806,9 @@ class Strategos:
                     reasons.setdefault("Precondition: no verification candidates (no query-parameter URLs discovered)", []).append(t)
                     continue
 
+            # api_discoverer is T1 and cheap — always allowed. No preconditions needed.
+            # It runs in SURFACE phase to feed endpoints to downstream T2 tools.
+
             if tool_def.get("disabled"):
                 rejected_count += 1
                 reasons.setdefault("Mode Overlay", []).append(t)

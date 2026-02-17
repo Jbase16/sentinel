@@ -274,6 +274,10 @@ class ExecutionPolicyRuntime:
         retries_for_request = 0
 
         while True:
+            if allow_external:
+                # External endpoints are never in scan scope; enforce host allowlist
+                # and external-call budget per outbound attempt.
+                self.authorize_external_url(url)
             self._consume_attempt()
             self._consume_capability_budget(tier)
             await self._rate_limit(host)

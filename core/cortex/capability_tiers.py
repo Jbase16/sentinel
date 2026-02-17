@@ -114,6 +114,7 @@ TOOL_TIER_CLASSIFICATION: Dict[str, CapabilityTier] = {
     "xss_reflected_check": CapabilityTier.T2a_SAFE_VERIFY,
     "ssrf_dns_only": CapabilityTier.T2a_SAFE_VERIFY,
     # Wraith internal exploitation/verification tools
+    "api_discoverer": CapabilityTier.T1_PROBE,
     "wraith_persona_diff": CapabilityTier.T2a_SAFE_VERIFY,
     # T2b: Mutating verification
     "nuclei_mutating": CapabilityTier.T2b_MUTATING_VERIFY,
@@ -142,6 +143,7 @@ REQUEST_LEVEL_BUDGET_TOOLS: FrozenSet[str] = frozenset(
         "wraith_verify",
         "wraith_oob_probe",
         "wraith_persona_diff",
+        "api_discoverer",
     }
 )
 
