@@ -29,6 +29,16 @@ class ScanRequest(BaseModel):
     # the corresponding internal tools (wraith_persona_diff / wraith_oob_probe).
     personas: Optional[List[Dict[str, Any]]] = None
     oob: Optional[Dict[str, Any]] = None
+    # Bug bounty scope rules. List of scope strings:
+    #   "*.example.com"          — wildcard domain (matches all subdomains)
+    #   "example.com/api"        — domain + path prefix
+    #   "!staging.example.com"   — explicit exclusion (prefix with !)
+    #   "10.0.0.0/24"            — CIDR block
+    #   "/regex/"                — regex pattern (surrounded by slashes)
+    # If omitted, all targets are allowed (permissive mode).
+    # Set strict=true to reject targets that don't match any inclusion rule.
+    scope: Optional[List[str]] = None
+    scope_strict: bool = False
 
     @field_validator("target")
     @classmethod
@@ -126,6 +136,25 @@ class ScanRequest(BaseModel):
             raise ValueError("oob.provider must be a string when provided")
         return v
 
+    @field_validator("scope")
+    @classmethod
+    def validate_scope(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("scope must be a list of strings")
+        if len(v) > 256:
+            raise ValueError("scope list too large (max 256 entries)")
+        cleaned: List[str] = []
+        for idx, entry in enumerate(v):
+            if not isinstance(entry, str):
+                raise ValueError(f"scope[{idx}] must be a string")
+            entry = entry.strip()
+            if not entry or entry.startswith("#"):
+                continue  # silently drop blank lines / comments
+            cleaned.append(entry)
+        return cleaned or None
+
 def _log_sink_sync(msg: str) -> None:
     state = get_state()
     loop = None
@@ -219,6 +248,28 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             session.knowledge["personas"] = req.personas
         if req.oob:
             session.knowledge["oob"] = req.oob
+
+        # ─── Scope enforcement ────────────────────────────────────────────
+        from core.scope import ScopeEnforcer, OutOfScopeError
+        scope_enforcer = (
+            ScopeEnforcer.from_lines(req.scope, strict=req.scope_strict)
+            if req.scope
+            else ScopeEnforcer.permissive()
+        )
+        # Fail-fast: the primary target itself must be in scope.
+        try:
+            scope_enforcer.assert_in_scope(req.target)
+        except OutOfScopeError as exc:
+            raise SentinelError(
+                ErrorCode.INVALID_REQUEST,
+                f"Target is outside the declared scope: {exc.violation.reason}",
+                details={"target": req.target, "scope": req.scope},
+            )
+        # Store enforcer in session knowledge so internal tools can call it.
+        session.knowledge["scope_enforcer"] = scope_enforcer
+        logger.info("[Scope] %s", scope_enforcer.describe())
+        # ─────────────────────────────────────────────────────────────────
+
         session.set_external_log_sink(_log_sink_sync)
         await state.register_session(session.id, session)
 
@@ -523,6 +574,146 @@ async def get_session_issues(session_id: str):
     db = Database.instance()
     issues = await db.get_issues(session_id)
     return {"session_id": session_id, "issues": issues, "count": len(issues)}
+
+@router.get("/sessions/{session_id}/bounty-report", dependencies=[Depends(verify_token)])
+async def get_session_bounty_report(
+    session_id: str,
+    min_severity: str = "LOW",
+    format: str = "markdown",
+    platform: str = "hackerone",
+):
+    """
+    Generate a HackerOne-ready bug bounty report for a specific session.
+
+    Query params:
+      min_severity: Minimum severity to include (CRITICAL/HIGH/MEDIUM/LOW/INFO). Default: LOW
+      format:       "markdown" (default) or "json"
+      platform:     "hackerone" (default), "bugcrowd", "intigriti"
+
+    Returns a complete Markdown document (or JSON array) with per-finding reports,
+    CVSS 3.1 vectors, steps to reproduce, and impact statements.
+    """
+    from core.reporting.bounty_report import build_reports, render_summary_report
+    from core.data.db import Database
+
+    db = Database.instance()
+    findings = await db.get_findings(session_id)
+    issues = await db.get_issues(session_id)
+    evidence = await db.get_evidence(session_id)
+
+    # Merge issues and findings; prefer issues (higher confidence)
+    all_findings = list(issues) + [
+        f for f in findings
+        if not any(
+            (iss.get("type") == f.get("type") and iss.get("asset") == f.get("asset"))
+            for iss in issues
+        )
+    ]
+
+    if not all_findings:
+        return {"session_id": session_id, "reports": [], "markdown": "No findings to report.", "count": 0}
+
+    session_data = await db.get_session(session_id)
+    target = (session_data or {}).get("target", session_id)
+
+    reports = build_reports(
+        all_findings,
+        scan_id=session_id,
+        evidence_items=evidence,
+        min_severity=min_severity.upper(),
+        platform=platform,
+    )
+
+    # Cross-scan duplicate annotations
+    from core.data.dedup_store import DedupStore
+    dedup_store = DedupStore.instance()
+    try:
+        await dedup_store.init()
+        dedup_map: Dict[str, Any] = {}
+        for finding in all_findings:
+            fp = dedup_store.fingerprint(finding)
+            result = await dedup_store.check_finding(finding)
+            dedup_map[fp] = result
+    except Exception as _dedup_err:
+        logger.warning("[BountyReport] Dedup check failed (non-fatal): %s", _dedup_err)
+        dedup_map = {}
+
+    # Annotate each report dict with duplicate info
+    report_dicts = []
+    for rep in reports:
+        d = rep.to_dict()
+        # Find the corresponding finding to get its fingerprint
+        for finding in all_findings:
+            ftype = finding.get("type") or finding.get("title") or ""
+            fasset = finding.get("asset") or finding.get("target") or ""
+            if ftype.lower() in rep.title.lower() or fasset in rep.asset:
+                fp = dedup_store.fingerprint(finding)
+                dr = dedup_map.get(fp)
+                if dr:
+                    d["duplicate_info"] = {
+                        "is_duplicate": dr.is_duplicate,
+                        "first_seen_at": dr.first_seen_at,
+                        "first_session": dr.first_session,
+                        "seen_count": dr.seen_count,
+                        "annotation": dr.annotation(),
+                    }
+                break
+        report_dicts.append(d)
+
+    if format.lower() == "json":
+        return {
+            "session_id": session_id,
+            "target": target,
+            "count": len(reports),
+            "reports": report_dicts,
+        }
+
+    # Default: Markdown summary document
+    md = render_summary_report(reports, target=target, scan_id=session_id)
+    return {
+        "session_id": session_id,
+        "target": target,
+        "count": len(reports),
+        "markdown": md,
+        "reports": report_dicts,
+    }
+
+
+@router.get("/bounty-report", dependencies=[Depends(verify_token)])
+async def get_bounty_report(
+    min_severity: str = "LOW",
+    format: str = "markdown",
+    platform: str = "hackerone",
+):
+    """
+    Generate a HackerOne-ready bug bounty report for the active or most recent scan.
+
+    Identical to /sessions/{session_id}/bounty-report but resolves the session
+    automatically (same behaviour as /results).
+    """
+    state = get_state()
+    scan_state = state.scan_state
+    db = Database.instance()
+
+    session_id = scan_state.get("session_id") if scan_state else None
+
+    if not session_id:
+        recent = await db.fetch_all(
+            "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1", ()
+        )
+        if not recent:
+            from fastapi.responses import Response
+            return Response(status_code=204)
+        session_id = recent[0][0]
+
+    # Delegate to the per-session endpoint handler
+    return await get_session_bounty_report(
+        session_id=session_id,
+        min_severity=min_severity,
+        format=format,
+        platform=platform,
+    )
+
 
 @router.get("/results", dependencies=[Depends(verify_token)])
 async def get_scan_results():

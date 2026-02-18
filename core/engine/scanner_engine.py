@@ -489,6 +489,30 @@ class ScanTransaction:
             # After DB commit, publish to in-memory stores (UI-safe)
             self._update_stores_after_commit()
 
+            # Cross-scan dedup registration (best-effort, non-blocking)
+            # Mark every committed finding as "seen" in the persistent dedup
+            # table so future scans of the same target flag them as duplicates.
+            try:
+                import asyncio as _asyncio
+                from core.data.dedup_store import DedupStore as _DedupStore
+                _dedup = _DedupStore.instance()
+
+                async def _register_dedup():
+                    try:
+                        await _dedup.init()
+                        for _f in self._staged_findings:
+                            _fp = _dedup.fingerprint(_f)
+                            await _dedup.mark_seen(_fp, _f, self._session_id)
+                        for _i in self._staged_issues:
+                            _fp = _dedup.fingerprint(_i)
+                            await _dedup.mark_seen(_fp, _i, self._session_id)
+                    except Exception as _e:
+                        logger.debug("[DedupStore] Registration error (non-fatal): %s", _e)
+
+                _asyncio.ensure_future(_register_dedup())
+            except Exception as _dedup_err:
+                logger.debug("[DedupStore] Could not schedule dedup registration: %s", _dedup_err)
+
             # Update scan record outside the transaction lock (best effort)
             try:
                 await db.update_scan_status(
@@ -1595,6 +1619,23 @@ class ScannerEngine:
         args: List[str] | None,
         cancel_flag: asyncio.Event,
     ) -> List[dict]:
+        # ── Scope enforcement gate ──────────────────────────────────────
+        # Every URL that leaves the system must be checked before execution.
+        # The enforcer is stored in session.knowledge by the scan router when
+        # scope rules were provided; if absent we operate in permissive mode.
+        _scope_enforcer = (
+            (self.session.knowledge.get("scope_enforcer") if self.session else None)
+        )
+        if _scope_enforcer is not None:
+            from core.scope import OutOfScopeError
+            try:
+                _scope_enforcer.assert_in_scope(target)
+            except OutOfScopeError as _oos:
+                msg = f"[{exec_id}] SCOPE BLOCK — {tool} on {target!r}: {_oos.violation.reason}"
+                logger.warning("[ScopeEnforcer] %s", msg)
+                await queue.put(msg)
+                return []
+
         # ── Internal tool dispatch ──────────────────────────────────────
         # If the tool is registered as "internal", run its Python handler
         # instead of shelling out to a subprocess.

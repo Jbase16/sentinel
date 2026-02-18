@@ -77,6 +77,41 @@ class InternalToolContext:
             and (f.get("severity") or "").upper() in ("MEDIUM", "HIGH", "CRITICAL")
         ]
 
+    # ------------------------------------------------------------------
+    # Scope helpers
+    # ------------------------------------------------------------------
+
+    @property
+    def scope_enforcer(self) -> Optional[Any]:
+        """Return the ScopeEnforcer for this scan, or None if not configured."""
+        return self.knowledge.get("scope_enforcer")
+
+    def is_in_scope(self, url: str) -> bool:
+        """
+        Return True if *url* is within the scan's declared scope.
+
+        Always returns True when no scope policy has been loaded (permissive mode).
+        Internal tools should call this before probing any derived URL that was
+        not the original scan target (e.g. discovered subdomains, redirects,
+        API endpoints found in JS).
+        """
+        enforcer = self.scope_enforcer
+        if enforcer is None:
+            return True
+        return enforcer.is_in_scope(url)
+
+    def filter_in_scope(self, urls: List[str]) -> List[str]:
+        """
+        Filter a list of URLs down to those within scope.
+
+        Returns the full list unchanged if no scope policy is configured.
+        """
+        enforcer = self.scope_enforcer
+        if enforcer is None:
+            return urls
+        ok, _ = enforcer.filter_urls(urls)
+        return ok
+
 
 class InternalTool(ABC):
     """
