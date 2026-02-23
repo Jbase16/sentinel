@@ -4,36 +4,40 @@ struct ReportView: View {
     @EnvironmentObject var appState: HelixAppState
 
     @State private var selectedTab: Int = 0
-    @State private var target: String = ""
-    @State private var scope: String = ""
-
     var body: some View {
         VStack(spacing: 0) {
             // Header / Controls
             HStack(spacing: 12) {
                 Picker("Mode", selection: $selectedTab) {
                     Text("Report").tag(0)
-                    Text("Proof Lab").tag(1)
+                    Text("Bounty").tag(1)
+                    Text("Proof Lab").tag(2)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 200)
+                .frame(width: 260)
 
                 Divider().frame(height: 20)
 
-                TextField("Target (e.g. example.com)", text: $target)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 200)
-
-                Button("Generate Report") {
-                    Task {
-                        let s = scope.trimmingCharacters(in: .whitespacesAndNewlines)
-                        await appState.generateReport(
-                            target: target, scope: s.isEmpty ? nil : s, format: "markdown")
-                        selectedTab = 0
+                // Report tab: generate button — target auto-detected from last scan
+                if selectedTab == 0 {
+                    if let scanTarget = appState.apiResults?.scan?.target
+                        ?? appState.engineStatus?.latestTarget {
+                        Text(scanTarget)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Button("Generate Report") {
+                            Task {
+                                await appState.generateReport(
+                                    target: scanTarget, scope: nil, format: "markdown")
+                            }
+                        }
+                        .keyboardShortcut(.return, modifiers: [.command])
+                    } else {
+                        Text("Run a scan first")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
-                .disabled(target.isEmpty)
-                .keyboardShortcut(.return, modifiers: [.command])
 
                 Spacer()
 
@@ -52,7 +56,8 @@ struct ReportView: View {
                 alignment: .bottom)
 
             // Content
-            if selectedTab == 0 {
+            switch selectedTab {
+            case 0:
                 // MARK: - Markdown Report View
                 ScrollView {
                     Text(
@@ -65,7 +70,12 @@ struct ReportView: View {
                     .textSelection(.enabled)
                     .padding()
                 }
-            } else {
+
+            case 1:
+                // MARK: - Bounty Report
+                BountyReportView()
+
+            default:
                 // MARK: - Proof Lab (PoC)
                 HSplitView {
                     // Left: Findings List
@@ -130,6 +140,13 @@ struct ReportView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+            }
+        }
+        .onAppear {
+            // Auto-fetch bounty report when tab is first opened after a scan completes
+            if appState.bountyReport == nil && !appState.bountyReportIsLoading
+                && appState.apiResults != nil {
+                appState.refreshBountyReport()
             }
         }
     }

@@ -176,13 +176,24 @@ def generate_report(
 
 
 @router.get("/reporting/poc/{finding_id}", response_model=PoCResponse)
-def get_poc(
+async def get_poc(
     finding_id: str,
     target: Optional[str] = None,
     poc: PoCGenerator = Depends(get_poc_generator),
     finding_store=Depends(get_finding_store),
 ) -> PoCResponse:
+    # 1. Try in-memory store (populated during active scans)
     finding = finding_store.get(finding_id)
+
+    # 2. Fall back to DB — handles restarts and cross-session PoC generation
+    if not finding:
+        from core.data.db import Database
+        db = Database.instance()
+        all_findings = await db.get_findings()
+        for f in all_findings:
+            if str(f.get("id")) == str(finding_id):
+                finding = f
+                break
 
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")

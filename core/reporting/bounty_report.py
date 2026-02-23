@@ -113,7 +113,10 @@ class BountyReport:
             "finding_id": self.finding_id,
             "title": self.title,
             "severity": self.severity,
-            "cvss": self.cvss.to_dict(),
+            # Flattened CVSS fields — matches Swift BountyFindingReport CodingKeys
+            "cvss_score":  self.cvss.base_score,
+            "cvss_vector": self.cvss.vector_string,
+            "cvss_label":  self.cvss.severity_label,
             "summary": self.summary,
             "steps_to_reproduce": self.steps_to_reproduce,
             "impact": self.impact,

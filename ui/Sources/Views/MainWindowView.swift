@@ -107,7 +107,7 @@ struct MainWindowView: View {
                         case .scan: ScanControlView()
                         case .graph: NetworkGraphView()  // Metal 3D
                         case .terminal: TerminalView()
-                        case .report: ReportComposerView()
+                        case .report: ReportView()
                         case .tools: ToolsBankView()
                         case .audit: AuditFeedView()
                         case .chat: ChatView()

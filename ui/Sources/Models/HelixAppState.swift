@@ -118,6 +118,18 @@ public class HelixAppState: ObservableObject {
     @Published var activeReportMeta: ReportGenerateResponse? = nil
     @Published var activePoCByFindingId: [String: PoCResponse] = [:]
 
+    // MARK: - Bounty Report State (P3)
+    @Published var bountyReport: BountyReportResponse? = nil
+    @Published var bountyReportIsLoading: Bool = false
+    @Published var bountyReportError: String? = nil
+    @Published var bountyMinSeverity: String = "LOW"
+    @Published var bountyPlatform: String = "hackerone"
+
+    // MARK: - Scope State (P3)
+    /// Lines of scope rules entered in the UI (e.g. "*.example.com", "!staging.example.com")
+    @Published var scopeRules: [String] = []
+    @Published var scopeStrict: Bool = false
+
     private let llm: LLMService
 
     init(llm: LLMService) {
@@ -784,7 +796,9 @@ public class HelixAppState: ObservableObject {
         modules: [String],
         mode: ScanMode,
         personas: [[String: Any]]? = nil,
-        oob: [String: Any]? = nil
+        oob: [String: Any]? = nil,
+        scope: [String]? = nil,
+        scopeStrict: Bool = false
     ) {
         print("[AppState] startScan invoked target=\(target) mode=\(mode.rawValue)")
         Task {
@@ -795,7 +809,9 @@ public class HelixAppState: ObservableObject {
                     modules: modules,
                     mode: mode.rawValue,
                     personas: personas,
-                    oob: oob
+                    oob: oob,
+                    scope: scope,
+                    scopeStrict: scopeStrict
                 )
                 print("[AppState] apiClient.startScan succeeded")
             } catch {
@@ -1136,6 +1152,40 @@ extension HelixAppState {
                     notes: ["Failed to fetch PoC: \(error.localizedDescription)"],
                     created_at: ""
                 )
+            }
+        }
+    }
+
+    // MARK: - Bounty Report (P3)
+
+    /// Fetch the bounty report for the active/most-recent scan.
+    func refreshBountyReport() {
+        bountyReportIsLoading = true
+        bountyReportError = nil
+
+        let sessionId = apiResults?.scan?.sessionId ?? engineStatus?.scanState?.sessionId
+        let minSev    = bountyMinSeverity
+        let platform  = bountyPlatform
+
+        Task {
+            do {
+                let result = try await apiClient.fetchBountyReport(
+                    sessionId: sessionId,
+                    minSeverity: minSev,
+                    format: "markdown",
+                    platform: platform
+                )
+                await MainActor.run {
+                    self.bountyReport = result
+                    self.bountyReportIsLoading = false
+                    print("[BountyReport] Fetched \(result.count) reports")
+                }
+            } catch {
+                await MainActor.run {
+                    self.bountyReportError = error.localizedDescription
+                    self.bountyReportIsLoading = false
+                    print("[BountyReport] Fetch failed: \(error)")
+                }
             }
         }
     }

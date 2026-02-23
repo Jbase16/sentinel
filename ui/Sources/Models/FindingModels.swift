@@ -11,6 +11,85 @@ public struct FindingDTO: Identifiable, Codable, Equatable {
     public let severity: String
     public let description: String?
     public let created_at: Double
+    // Populated by bounty-report endpoint; nil during live scan stream
+    public let target: String?
+    public let asset: String?
+    public let duplicateInfo: DuplicateInfo?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, message, tool, type, severity, description, created_at, target, asset
+        case duplicateInfo = "duplicate_info"
+    }
+}
+
+// MARK: - Dedup / Bounty Report Models
+
+/// Duplicate-detection annotation attached to a finding by the bounty-report endpoint.
+public struct DuplicateInfo: Codable, Equatable {
+    public let isDuplicate: Bool
+    public let firstSeenAt: String?
+    public let firstSession: String?
+    public let seenCount: Int
+    public let annotation: String?   // e.g. "NEW" or "DUPLICATE (first seen …, 3x)"
+
+    enum CodingKeys: String, CodingKey {
+        case isDuplicate  = "is_duplicate"
+        case firstSeenAt  = "first_seen_at"
+        case firstSession = "first_session"
+        case seenCount    = "seen_count"
+        case annotation
+    }
+}
+
+/// One entry in the `reports` array returned by GET /v1/scans/bounty-report.
+public struct BountyFindingReport: Decodable, Identifiable {
+    public var id: String { findingId }
+    public let findingId: String
+    public let title: String
+    public let severity: String
+    public let cvssScore: Double?
+    public let cvssVector: String?
+    public let cvssLabel: String?
+    public let asset: String?
+    public let summary: String?
+    public let stepsToReproduce: [String]?
+    public let impact: String?
+    public let remediation: String?
+    public let markdown: String
+    public let duplicateInfo: DuplicateInfo?
+
+    enum CodingKeys: String, CodingKey {
+        case title, severity, asset, summary, impact, remediation, markdown
+        case findingId      = "finding_id"
+        case cvssScore      = "cvss_score"
+        case cvssVector     = "cvss_vector"
+        case cvssLabel      = "cvss_label"
+        case stepsToReproduce = "steps_to_reproduce"
+        case duplicateInfo  = "duplicate_info"
+    }
+}
+
+/// Top-level response from GET /v1/scans/bounty-report.
+public struct BountyReportResponse: Decodable {
+    public let sessionId: String?
+    public let target: String?
+    public let count: Int
+    public let markdown: String       // Full combined Markdown document
+    public let reports: [BountyFindingReport]
+
+    enum CodingKeys: String, CodingKey {
+        case count, markdown, reports, target
+        case sessionId = "session_id"
+    }
+
+    // Explicit init so we can construct empty responses (e.g. HTTP 204)
+    public init(sessionId: String?, target: String?, count: Int, markdown: String, reports: [BountyFindingReport]) {
+        self.sessionId = sessionId
+        self.target = target
+        self.count = count
+        self.markdown = markdown
+        self.reports = reports
+    }
 }
 
 // MARK: - Sentinel Results

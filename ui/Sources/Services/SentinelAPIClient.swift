@@ -133,7 +133,9 @@ public struct SentinelAPIClient: Sendable {
         modules: [String] = [],
         mode: String = "standard",
         personas: [[String: Any]]? = nil,
-        oob: [String: Any]? = nil
+        oob: [String: Any]? = nil,
+        scope: [String]? = nil,
+        scopeStrict: Bool = false
     )
         async throws
     {
@@ -150,6 +152,13 @@ public struct SentinelAPIClient: Sendable {
         }
         if let oob, !oob.isEmpty {
             body["oob"] = oob
+        }
+        // Scope enforcement — only include when rules are non-empty
+        if let scope, !scope.isEmpty {
+            body["scope"] = scope
+            if scopeStrict {
+                body["scope_strict"] = true
+            }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -659,6 +668,56 @@ public struct SentinelAPIClient: Sendable {
             }
             continuation.onTermination = { @Sendable _ in task.cancel() }
         }
+    }
+
+    // MARK: - Bounty Report
+
+    /// Fetch the bug-bounty report for the most recent (or specified) scan session.
+    /// - Parameters:
+    ///   - sessionId: Optional specific session; defaults to the active/most-recent session.
+    ///   - minSeverity: Minimum severity to include. Defaults to "LOW".
+    ///   - format: Report format. "markdown" (default) or "json".
+    ///   - platform: Bug-bounty platform hint for formatting. "hackerone" or "bugcrowd".
+    func fetchBountyReport(
+        sessionId: String? = nil,
+        minSeverity: String = "LOW",
+        format: String = "markdown",
+        platform: String = "hackerone"
+    ) async throws -> BountyReportResponse {
+        // Choose endpoint: session-specific or latest
+        let path: String
+        if let sid = sessionId, !sid.isEmpty {
+            path = "/v1/scans/sessions/\(sid)/bounty-report"
+        } else {
+            path = "/v1/scans/bounty-report"
+        }
+
+        guard let base = URL(string: path, relativeTo: baseURL),
+              var components = URLComponents(url: base, resolvingAgainstBaseURL: true)
+        else { throw APIError.badStatus }
+        components.queryItems = [
+            URLQueryItem(name: "min_severity", value: minSeverity),
+            URLQueryItem(name: "format",       value: format),
+            URLQueryItem(name: "platform",     value: platform),
+        ]
+        guard let url = components.url else { throw APIError.badStatus }
+
+        let request = authenticatedRequest(url: url, method: "GET")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.badStatus }
+
+        // 204 = backend has no sessions yet — return empty response instead of throwing
+        if http.statusCode == 204 {
+            return BountyReportResponse(
+                sessionId: nil, target: nil, count: 0,
+                markdown: "", reports: []
+            )
+        }
+
+        guard (200..<300).contains(http.statusCode) else {
+            throw Self.parseAPIError(data: data, response: response)
+        }
+        return try JSONDecoder().decode(BountyReportResponse.self, from: data)
     }
 
     /// Generate a specific report section using the AI
