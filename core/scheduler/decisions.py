@@ -46,6 +46,7 @@ class DecisionType(str, Enum):
     SCORING = "scoring"
     REACTIVE_SIGNAL = "reactive_signal"
     ASSESSMENT = "assessment"
+    SCOPE_ENFORCEMENT = "scope_enforcement"
 
 
 # ============================================================================

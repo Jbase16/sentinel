@@ -1620,18 +1620,17 @@ class ScannerEngine:
         cancel_flag: asyncio.Event,
     ) -> List[dict]:
         # ── Scope enforcement gate ──────────────────────────────────────
-        # Every URL that leaves the system must be checked before execution.
-        # The enforcer is stored in session.knowledge by the scan router when
-        # scope rules were provided; if absent we operate in permissive mode.
-        _scope_enforcer = (
-            (self.session.knowledge.get("scope_enforcer") if self.session else None)
-        )
-        if _scope_enforcer is not None:
-            from core.scope import OutOfScopeError
-            try:
-                _scope_enforcer.assert_in_scope(target)
-            except OutOfScopeError as _oos:
-                msg = f"[{exec_id}] SCOPE BLOCK — {tool} on {target!r}: {_oos.violation.reason}"
+        # Every network boundary that leaves the system must be checked
+        # strictly against the ScopeContext before execution.
+        _scope_context = getattr(self.session, "scope_context", None) if self.session else None
+        if _scope_context is not None:
+            from core.base.scope import ScopeDecision
+            decision = _scope_context.registry.resolve(target)
+            is_bounty = _scope_context.mode.upper() == "BOUNTY"
+            
+            # In BOUNTY mode, unresolvable or poorly formed targets are strictly denied (Conservative Fallback).
+            if decision.verdict == ScopeDecision.DENY or (decision.verdict == ScopeDecision.UNKNOWN and is_bounty):
+                msg = f"[{exec_id}] SCOPE BLOCK — {tool} on {target!r}: Verdict={decision.verdict.value} Reason={decision.reason_code}"
                 logger.warning("[ScopeEnforcer] %s", msg)
                 await queue.put(msg)
                 return []

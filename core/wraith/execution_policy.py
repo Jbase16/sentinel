@@ -128,9 +128,11 @@ class ExecutionPolicyRuntime:
         capability_gate: Optional[CapabilityGate] = None,
         allowed_external_hosts: Optional[Set[str]] = None,
         max_external_calls: int = 4,
+        scope_context: Any = None,
     ):
         self.tool_name = str(tool_name or "")
         self.scope_target = str(scope_target or "")
+        self.scope_context = scope_context
         self.scope_origin = _origin(self.scope_target)
         self.execution_mode = execution_mode
         self.safe_mode = bool(safe_mode)
@@ -181,6 +183,8 @@ class ExecutionPolicyRuntime:
             return
         if not self.same_origin_only:
             return
+        # If ScopeContext is active, it enforces ScopeRegistry boundaries at the adapter layer,
+        # so same-origin checks here are supplementary.
         req_origin = _origin(url)
         if not self.scope_origin or not req_origin or req_origin != self.scope_origin:
             self._block(f"Out-of-scope request blocked: {url} (scope_origin={self.scope_origin})")
@@ -282,7 +286,15 @@ class ExecutionPolicyRuntime:
             self._consume_capability_budget(tier)
             await self._rate_limit(host)
             try:
-                response = await client.request(method, url, **request_kwargs)
+                if getattr(self, "scope_context", None) and not allow_external:
+                    from core.net.adapter import SentinelHTTPClient
+                    # In external calls, scope_context might unnecessarily block it unless we selectively skip it.
+                    # Since authorize_external_url already passed, we can bypass strict scope guard for external hosts,
+                    # or wrap it. For safety on external calls, we bypass the internal ScopeRegistry but keep the policy.
+                    safe_client = SentinelHTTPClient(context=self.scope_context, underlying_client=client)
+                    response = await safe_client.request(method, url, **request_kwargs)
+                else:
+                    response = await client.request(method, url, **request_kwargs)
             except httpx.RequestError:
                 if not self._can_retry(retries_for_request):
                     raise
@@ -428,4 +440,5 @@ def build_policy_runtime(
         capability_gate=capability_gate if isinstance(capability_gate, CapabilityGate) else None,
         allowed_external_hosts=external_hosts,
         max_external_calls=max_external_calls,
+        scope_context=getattr(context, "scope_context", getattr(getattr(context, "session", None), "scope_context", None)),
     )

@@ -70,6 +70,20 @@ class GhostAddon:
             method = flow.request.method
             host = flow.request.host
             
+            # ═══════════════════════════════════════════════════════════════
+            # SCOPE ENFORCEMENT GUARD
+            # ═══════════════════════════════════════════════════════════════
+            scope_context = getattr(self.session, "scope_context", None)
+            if scope_context:
+                from core.base.scope import ScopeDecision
+                decision = scope_context.registry.resolve(url)
+                is_bounty = scope_context.mode.upper() == "BOUNTY"
+                if decision.verdict == ScopeDecision.DENY or (decision.verdict == ScopeDecision.UNKNOWN and is_bounty):
+                    logger.warning(f"[Ghost] SCOPE BLOCK - {method} {url} (Reason: {decision.reason_code})")
+                    from mitmproxy.http import Response
+                    flow.response = Response.make(403, b"Blocked by SentinelForge ScopeGuard")
+                    return
+            
             # 1. Log the 'Sight'
             msg = f"[Ghost] Intercepted: {method} {url}"
             self.session.log(msg)
