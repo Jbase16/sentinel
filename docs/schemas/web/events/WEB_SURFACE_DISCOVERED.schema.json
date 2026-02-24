@@ -25,6 +25,7 @@
         "minLength": 1,
         "type": "string"
       },
+      "maxItems": 20000,
       "title": "Discovered Assets",
       "type": "array"
     },
@@ -35,6 +36,7 @@
         "minLength": 1,
         "type": "string"
       },
+      "maxItems": 20000,
       "title": "Discovered Forms",
       "type": "array"
     },
@@ -45,6 +47,7 @@
         "minLength": 1,
         "type": "string"
       },
+      "maxItems": 20000,
       "title": "Discovered Urls",
       "type": "array"
     },

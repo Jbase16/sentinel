@@ -28,6 +28,7 @@
           "items": {
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Notes",
           "type": "array"
         },
@@ -105,6 +106,7 @@
       "items": {
         "type": "string"
       },
+      "maxItems": 100,
       "title": "Notes",
       "type": "array"
     },

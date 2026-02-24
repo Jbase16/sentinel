@@ -25,6 +25,7 @@
           "items": {
             "type": "string"
           },
+          "maxItems": 64,
           "title": "Tags",
           "type": "array"
         },
@@ -72,6 +73,7 @@
       "items": {
         "$ref": "#/$defs/EndpointCandidate"
       },
+      "maxItems": 20000,
       "title": "Endpoints",
       "type": "array"
     },

@@ -15,13 +15,13 @@ from typing import Dict, Any, List, Optional, Tuple, Set
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from core.base.session import ScanSession
+from core.web.contracts.enums import VulnerabilityClass
 from core.wraith.mutation_engine import (
     ActionOutcome,
     HttpMethod,
     MutationEngine,
     MutationPayload,
     PayloadEncoding,
-    VulnerabilityClass,
 )
 from core.wraith.waf_retry import get_or_create_waf_engine, waf_aware_send
 from core.wraith.execution_policy import build_policy_runtime
@@ -36,7 +36,7 @@ _SQLI_ERROR_PATTERNS = [
     r"unterminated string literal", r"sqlstate\["
 ]
 _SQLI_ERROR_RE = re.compile("|".join(_SQLI_ERROR_PATTERNS), re.IGNORECASE)
-_SQLI_TIME_THRESHOLD_S = 4.5
+_SQLI_TIME_THRESHOLD_S = 3.0  # 3s is enough margin over typical response times
 _PATH_TRAV_MARKERS = ["root:x:0:0", "[boot loader]", "daemon:x:", "nobody:x:"]
 _CONFIRM_THRESHOLD = 0.80
 _DISMISS_THRESHOLD = 0.25
@@ -72,7 +72,9 @@ class VulnVerifier:
             return await self._confirm_open_redirect(engine, url, headers, cookies, budget)
         if vuln_class == VulnerabilityClass.IDOR:
             return await self._confirm_idor(engine, url, headers, cookies, budget)
-            
+        if vuln_class == VulnerabilityClass.SSRF:
+            return await self._confirm_ssrf(engine, url, headers, cookies, budget)
+
         return await self._confirm_generic(engine, url, headers, cookies, budget)
 
     def _inject_query_param(self, url: str, param: str, payload: str) -> str:
@@ -172,6 +174,98 @@ class VulnVerifier:
             loc = str((getattr(r, "headers", {}) or {}).get("location", ""))
             if "evil.example.com" in loc:
                 return [(0.91, f"Open redirect confirmed: Location header → {loc}", f"{redirect_target} in {param}", "Open Redirect")], probes
+        return results, probes
+
+    async def _confirm_ssrf(
+        self,
+        engine: MutationEngine,
+        url: str,
+        headers: Dict[str, str],
+        cookies: Dict[str, str],
+        budget: int,
+    ) -> Tuple[List[Tuple[float, str, str, str]], int]:
+        """Confirm SSRF by injecting a canary URL into parameters that accept URLs.
+        
+        Strategy:
+        - Inject http://169.254.169.254/latest/meta-data/ (cloud metadata endpoint)
+          into any parameter whose name suggests a URL (url, href, redirect, src,
+          endpoint, host, next, target, fetch, load, image, icon, proxy, callback).
+        - A 200 response with AWS-style metadata content confirms cloud SSRF.
+        - A connection-refused or timeout error (vs. normal 200/404) suggests the
+          server attempted the connection — low-confidence SSRF indicator.
+        """
+        results, probes = [], 0
+        params = [k for k, _ in parse_qsl(urlparse(url).query or "", keep_blank_values=True)]
+        
+        # Focus on parameters that are likely to accept URLs
+        _URL_PARAM_HINTS = {
+            "url", "href", "redirect", "redirecturl", "next", "target",
+            "src", "source", "dest", "destination", "endpoint", "host",
+            "fetch", "load", "image", "icon", "proxy", "callback", "return",
+            "returnurl", "goto", "link", "uri", "path", "resource",
+        }
+        url_params = [p for p in params if p.lower().strip("_-[]") in _URL_PARAM_HINTS] or params[:1]
+        
+        if not url_params:
+            return results, probes
+
+        canary_targets = [
+            "http://169.254.169.254/latest/meta-data/",  # AWS metadata
+            "http://metadata.google.internal/computeMetadata/v1/",  # GCP metadata
+        ]
+        
+        _SSRF_RESPONSE_MARKERS = [
+            "ami-id", "instance-id", "local-ipv4",       # AWS EC2 metadata keys
+            "computeMetadata",                            # GCP metadata
+            "hostname", "placement",                      # Generic cloud metadata
+        ]
+
+        for param in url_params[:min(budget, 2)]:
+            for canary in canary_targets[:1]:  # 1 canary per param to respect budget
+                if probes >= budget:
+                    break
+                probe_url = self._inject_query_param(url, param, canary)
+                payload = MutationPayload(
+                    value=canary,
+                    encoding=PayloadEncoding.NONE,
+                    vuln_class=VulnerabilityClass.SSRF,
+                    description="SSRF cloud metadata probe",
+                )
+                outcome, _, _ = await waf_aware_send(
+                    engine,
+                    probe_url,
+                    payload,
+                    method=HttpMethod.GET,
+                    headers={**headers, "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())},
+                )
+                probes += 1
+                body = self._get_resp_body(outcome)
+                resp = getattr(outcome, "response", None)
+                status = getattr(resp, "status_code", 0)
+
+                # High confidence: server fetched and returned cloud metadata
+                for marker in _SSRF_RESPONSE_MARKERS:
+                    if marker in body:
+                        return [
+                            (
+                                0.93,
+                                f"SSRF confirmed: server returned cloud metadata marker '{marker}'",
+                                f"canary={canary} in {param}",
+                                "SSRF",
+                            )
+                        ], probes
+
+                # Low confidence: server made a connection attempt (got unexpected response)
+                if status not in (0, 200, 301, 302, 400, 403, 404, 422) and 100 <= status < 600:
+                    results.append(
+                        (
+                            0.45,
+                            f"SSRF possible: unexpected HTTP {status} for cloud metadata canary",
+                            f"canary={canary} in {param}",
+                            "SSRF",
+                        )
+                    )
+
         return results, probes
 
     async def _confirm_idor(self, engine: MutationEngine, url: str, headers: Dict[str, str], cookies: Dict[str, str], budget: int) -> Tuple[List[Tuple[float, str, str, str]], int]:

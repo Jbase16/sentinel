@@ -62,16 +62,16 @@ class EventEnvelope(BaseModel):
 
 class WebSurfaceDiscoveredPayload(BaseModel):
     source: SurfaceSource
-    discovered_urls: List[HttpUrl] = Field(default_factory=list)
-    discovered_assets: List[HttpUrl] = Field(default_factory=list)
-    discovered_forms: List[HttpUrl] = Field(default_factory=list)
+    discovered_urls: List[HttpUrl] = Field(default_factory=list, max_length=20000)
+    discovered_assets: List[HttpUrl] = Field(default_factory=list, max_length=20000)
+    discovered_forms: List[HttpUrl] = Field(default_factory=list, max_length=20000)
     depth: int = Field(ge=0, le=20)
     page_count: int = Field(ge=0, le=20000)
 
 
 class WebEndpointRegisteredPayload(BaseModel):
     source: SurfaceSource
-    endpoints: List[EndpointCandidate] = Field(default_factory=list)
+    endpoints: List[EndpointCandidate] = Field(default_factory=list, max_length=20000)
     js_asset: Optional[HttpUrl] = None
 
 
@@ -100,7 +100,7 @@ class WebDeltaDetectedPayload(BaseModel):
     baseline: Optional[Dict[str, Any]] = None  # BaselineSignature serialized
     delta: DeltaVector
     severity: DeltaSeverity = DeltaSeverity.INFO
-    notes: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list, max_length=100)
 
 
 class WebFindingConfirmedPayload(BaseModel):

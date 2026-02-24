@@ -169,6 +169,7 @@
           "items": {
             "type": "string"
           },
+          "maxItems": 100,
           "title": "Notes",
           "type": "array"
         },
@@ -220,6 +221,7 @@
           "items": {
             "$ref": "#/$defs/PrincipalId"
           },
+          "maxItems": 100,
           "title": "Affected Principals",
           "type": "array"
         },
@@ -227,6 +229,7 @@
           "items": {
             "$ref": "#/$defs/ArtifactRef"
           },
+          "maxItems": 100,
           "title": "Artifacts",
           "type": "array"
         },
@@ -283,6 +286,7 @@
           "items": {
             "$ref": "#/$defs/HttpExchange"
           },
+          "maxItems": 100,
           "title": "Request Sequence",
           "type": "array"
         },
@@ -305,8 +309,10 @@
           "type": "string"
         },
         "version": {
-          "$ref": "#/$defs/EvidenceBundleVersion",
-          "default": "1.0"
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
         },
         "vuln_class": {
           "$ref": "#/$defs/VulnerabilityClass"
@@ -324,13 +330,6 @@
       ],
       "title": "EvidenceBundle",
       "type": "object"
-    },
-    "EvidenceBundleVersion": {
-      "enum": [
-        "1.0"
-      ],
-      "title": "EvidenceBundleVersion",
-      "type": "string"
     },
     "FindingId": {
       "properties": {
@@ -360,6 +359,7 @@
         "request_body_b64": {
           "anyOf": [
             {
+              "maxLength": 10000000,
               "type": "string"
             },
             {
@@ -383,6 +383,7 @@
         "response_body_b64": {
           "anyOf": [
             {
+              "maxLength": 10000000,
               "type": "string"
             },
             {

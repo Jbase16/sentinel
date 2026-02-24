@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
+from typing import Literal
 
 from .enums import (
     DeltaSeverity,
-    EvidenceBundleVersion,
     ParamLocation,
     SurfaceSource,
     VulnerabilityClass,
@@ -33,6 +33,7 @@ class WebMission(BaseModel):
     origin: HttpUrl
     allowed_origins: List[str] = Field(
         default_factory=list,
+        max_length=100,
         description="Hostnames/origins allowed for this mission; origin host must be included.",
     )
 
@@ -62,7 +63,7 @@ class EndpointCandidate(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, default=0.5)
     requires_auth: bool = False
 
-    tags: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list, max_length=64)
 
 
 class ParamSpec(BaseModel):
@@ -92,7 +93,7 @@ class DeltaVector(BaseModel):
     timing_delta_ms: Optional[int] = None
 
     severity: DeltaSeverity = DeltaSeverity.INFO
-    notes: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list, max_length=100)
 
 
 class HttpExchange(BaseModel):
@@ -105,11 +106,11 @@ class HttpExchange(BaseModel):
     method: WebMethod
 
     request_headers: Dict[str, str] = Field(default_factory=dict)
-    request_body_b64: Optional[str] = Field(default=None, description="Base64-encoded body, redacted as needed")
+    request_body_b64: Optional[str] = Field(default=None, max_length=10_000_000, description="Base64-encoded body, redacted as needed")
 
     response_status: int = Field(ge=100, le=599)
     response_headers: Dict[str, str] = Field(default_factory=dict)
-    response_body_b64: Optional[str] = Field(default=None, description="Base64-encoded body, redacted as needed")
+    response_body_b64: Optional[str] = Field(default=None, max_length=10_000_000, description="Base64-encoded body, redacted as needed")
 
     captured_at: datetime = Field(default_factory=lambda: datetime.utcnow())
 
@@ -125,7 +126,7 @@ class EvidenceBundle(BaseModel):
     """
     Evidence contract: REQUIRED for confirmed findings.
     """
-    version: EvidenceBundleVersion = EvidenceBundleVersion.V1
+    version: Literal["1.0"] = "1.0"
 
     finding_id: FindingId
     mission_id: MissionId
@@ -137,13 +138,13 @@ class EvidenceBundle(BaseModel):
     summary: str = Field(min_length=1, max_length=8192)
 
     principal_id: PrincipalId
-    affected_principals: List[PrincipalId] = Field(default_factory=list)
+    affected_principals: List[PrincipalId] = Field(default_factory=list, max_length=100)
 
-    request_sequence: List[HttpExchange] = Field(default_factory=list)
+    request_sequence: List[HttpExchange] = Field(default_factory=list, max_length=100)
     baseline: Optional[BaselineSignature] = None
     delta: Optional[DeltaVector] = None
 
-    artifacts: List[ArtifactRef] = Field(default_factory=list)
+    artifacts: List[ArtifactRef] = Field(default_factory=list, max_length=100)
     replay_script_path: Optional[str] = Field(default=None, max_length=1024)
 
     created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
@@ -167,7 +168,7 @@ class FindingRecord(BaseModel):
     """
     finding_id: FindingId
     vuln_class: VulnerabilityClass
-    title: str
+    title: str = Field(min_length=3, max_length=256)
     confidence: float = Field(ge=0.0, le=1.0)
     confirmed: bool = False
 
