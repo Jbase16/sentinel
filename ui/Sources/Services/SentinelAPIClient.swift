@@ -135,7 +135,9 @@ public struct SentinelAPIClient: Sendable {
         personas: [[String: Any]]? = nil,
         oob: [String: Any]? = nil,
         scope: [String]? = nil,
-        scopeStrict: Bool = false
+        scopeStrict: Bool = false,
+        bountyHandle: String? = nil,
+        bountyJSON: [String: Any]? = nil
     )
         async throws
     {
@@ -160,6 +162,15 @@ public struct SentinelAPIClient: Sendable {
                 body["scope_strict"] = true
             }
         }
+        
+        // Bounty Integration
+        if let bountyHandle, !bountyHandle.isEmpty {
+            body["bounty_handle"] = bountyHandle
+        }
+        if let bountyJSON, !bountyJSON.isEmpty {
+            body["bounty_json"] = bountyJSON
+        }
+        
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)

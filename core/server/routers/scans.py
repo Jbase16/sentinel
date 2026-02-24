@@ -39,6 +39,10 @@ class ScanRequest(BaseModel):
     # Set strict=true to reject targets that don't match any inclusion rule.
     scope: Optional[List[str]] = None
     scope_strict: bool = False
+    
+    # Bounty Integration
+    bounty_handle: Optional[str] = None
+    bounty_json: Optional[Dict[str, Any]] = None
 
     @field_validator("target")
     @classmethod
@@ -250,24 +254,84 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             session.knowledge["oob"] = req.oob
 
         # ─── Scope enforcement ────────────────────────────────────────────
-        from core.scope import ScopeEnforcer, OutOfScopeError
-        scope_enforcer = (
-            ScopeEnforcer.from_lines(req.scope, strict=req.scope_strict)
-            if req.scope
-            else ScopeEnforcer.permissive()
-        )
-        # Fail-fast: the primary target itself must be in scope.
+        from core.base.scope import ScopeRegistry, ScopeRule, AssetType, ScopeDecision
+        from core.base.context import ScopeContext
+        from core.base.execution_policy import ExecutionPolicy
+        from core.cortex.capability_tiers import ExecutionMode
+        
+        registry = ScopeRegistry()
+        
+        # 1. Parse manual scope lines
+        if req.scope:
+            for line in req.scope:
+                decision = ScopeDecision.DENY if line.startswith("!") else ScopeDecision.ALLOW
+                target_str = line.lstrip("!")
+                # Rough inference for AssetType
+                if target_str.startswith("*."):
+                    asset_type = AssetType.WILDCARD
+                elif "/" in target_str and target_str[0].isdigit():
+                    asset_type = AssetType.CIDR
+                elif "://" in target_str:
+                    asset_type = AssetType.URL
+                elif "/" in target_str:
+                    asset_type = AssetType.PATH
+                else:
+                    asset_type = AssetType.DOMAIN
+                    
+                registry.add_rule(ScopeRule(asset_type=asset_type, target=target_str, decision=decision))
+        
+        # 2. Parse HackerOne integrations
+        if req.bounty_json:
+            from core.bounty.h1_client import HackerOneClient, parse_to_registry, H1ScopeDTO, H1ScopeElement
+            # Convert dict to DTO
+            dto = H1ScopeDTO(handle=req.bounty_json.get("handle", "unknown"))
+            for item in req.bounty_json.get("in_scope", []):
+                dto.in_scope.append(H1ScopeElement(
+                    asset_identifier=item.get("asset_identifier", ""),
+                    asset_type=item.get("asset_type", "URL"),
+                    eligible_for_bounty=item.get("eligible_for_submission", True),
+                    instruction=item.get("instruction", "")
+                ))
+            for item in req.bounty_json.get("out_of_scope", []):
+                dto.out_of_scope.append(H1ScopeElement(
+                    asset_identifier=item.get("asset_identifier", ""),
+                    asset_type=item.get("asset_type", "URL"),
+                    eligible_for_bounty=False,
+                    instruction=item.get("instruction", "")
+                ))
+            parse_to_registry(dto, registry)
+            
+        elif req.bounty_handle:
+            from core.bounty.h1_client import HackerOneClient, parse_to_registry
+            client = HackerOneClient()
+            dto = client.fetch_via_api(req.bounty_handle)
+            parse_to_registry(dto, registry)
+
+        # 3. Create Context
         try:
-            scope_enforcer.assert_in_scope(req.target)
-        except OutOfScopeError as exc:
+            emode = ExecutionMode(req.mode)
+        except ValueError:
+            emode = ExecutionMode.RESEARCH
+            
+        scope_context = ScopeContext(
+            registry=registry,
+            execution_policy=ExecutionPolicy(),
+            mode=emode,
+            scan_id=session.id
+        )
+
+        # Fail-fast: the primary target itself must be in scope.
+        check_decision = scope_context.registry.resolve(req.target)
+        is_bounty = scope_context.mode == ExecutionMode.BOUNTY
+        if check_decision.verdict == ScopeDecision.DENY or (check_decision.verdict == ScopeDecision.UNKNOWN and (is_bounty or req.scope_strict)):
             raise SentinelError(
                 ErrorCode.INVALID_REQUEST,
-                f"Target is outside the declared scope: {exc.violation.reason}",
-                details={"target": req.target, "scope": req.scope},
+                f"Target is outside the declared scope: {check_decision.reason_code.value}",
+                details={"target": req.target, "verdict": check_decision.verdict.value},
             )
-        # Store enforcer in session knowledge so internal tools can call it.
-        session.knowledge["scope_enforcer"] = scope_enforcer
-        logger.info("[Scope] %s", scope_enforcer.describe())
+            
+        # Bind ScopeContext physically to the session
+        session.scope_context = scope_context
         # ─────────────────────────────────────────────────────────────────
 
         session.set_external_log_sink(_log_sink_sync)

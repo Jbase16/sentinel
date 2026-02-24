@@ -264,6 +264,20 @@ struct ScanControlView: View {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty && !$0.hasPrefix("#") }
 
+            let bountyHandle = appState.bountyHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let bountyJSONTrimmed = appState.bountyJSONConfig.trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            let parsedBountyJSON: [String: Any]?
+            if bountyJSONTrimmed.isEmpty {
+                parsedBountyJSON = nil
+            } else {
+                parsedBountyJSON = parseJSONDict(appState.bountyJSONConfig)
+                if parsedBountyJSON == nil {
+                    print("[ScanControlView] Aborting startScan: invalid HackerOne JSON")
+                    return
+                }
+            }
+
             appState.startScan(
                 target: scanTarget,
                 modules: modules,
@@ -271,7 +285,9 @@ struct ScanControlView: View {
                 personas: parsedPersonas,
                 oob: parsedOob,
                 scope: scopeLines.isEmpty ? nil : scopeLines,
-                scopeStrict: appState.scopeStrict
+                scopeStrict: appState.scopeStrict,
+                bountyHandle: bountyHandle.isEmpty ? nil : bountyHandle,
+                bountyJSON: parsedBountyJSON
             )
         } else {
             print(
@@ -361,14 +377,17 @@ private struct AdvancedScanConfigView: View {
                 Spacer()
                 Picker("", selection: $tab) {
                     Text("Scope").tag(0)
-                    Text("Personas").tag(1)
-                    Text("OOB").tag(2)
+                    Text("HackerOne").tag(1)
+                    Text("Personas").tag(2)
+                    Text("OOB").tag(3)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 200)
+                .frame(width: 250)
                 Button("Clear All") {
                     appState.scopeRules = []
                     appState.scopeStrict = false
+                    appState.bountyHandle = ""
+                    appState.bountyJSONConfig = ""
                     personasJSON = ""
                     oobJSON = ""
                 }
@@ -385,6 +404,8 @@ private struct AdvancedScanConfigView: View {
                 if tab == 0 {
                     scopeTab
                 } else if tab == 1 {
+                    hackerOneTab
+                } else if tab == 2 {
                     personasTab
                 } else {
                     oobTab
@@ -402,10 +423,12 @@ private struct AdvancedScanConfigView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Scope Rules")
                     .font(.subheadline).bold()
-                Text("One rule per line. Prefix with ! to exclude. Supports wildcards, CIDR, and /regex/.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(
+                    "One rule per line. Prefix with ! to exclude. Supports wildcards, CIDR, and /regex/."
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             // Rule list
@@ -418,7 +441,8 @@ private struct AdvancedScanConfigView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 4) {
-                        ForEach(Array(appState.scopeRules.enumerated()), id: \.offset) { idx, rule in
+                        ForEach(Array(appState.scopeRules.enumerated()), id: \.offset) {
+                            idx, rule in
                             HStack(spacing: 6) {
                                 // Kind badge
                                 ScopeRuleBadge(rule: rule)
@@ -451,10 +475,13 @@ private struct AdvancedScanConfigView: View {
 
             // Add rule row
             HStack(spacing: 6) {
-                TextField("e.g. *.example.com  or  !staging.example.com  or  10.0.0.0/24", text: $newRuleText)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
-                    .onSubmit { addRule() }
+                TextField(
+                    "e.g. *.example.com  or  !staging.example.com  or  10.0.0.0/24",
+                    text: $newRuleText
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+                .onSubmit { addRule() }
 
                 Button("Add", action: addRule)
                     .disabled(newRuleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -465,9 +492,11 @@ private struct AdvancedScanConfigView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Strict mode")
                         .font(.caption).bold()
-                    Text("Block requests to any target not explicitly in-scope (even with no inclusion rules).")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    Text(
+                        "Block requests to any target not explicitly in-scope (even with no inclusion rules)."
+                    )
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
                 }
             }
             .toggleStyle(.switch)
@@ -483,6 +512,55 @@ private struct AdvancedScanConfigView: View {
         guard !rule.isEmpty else { return }
         appState.scopeRules.append(rule)
         newRuleText = ""
+    }
+
+    // MARK: - HackerOne Tab
+
+    private var hackerOneTab: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("HackerOne Integration")
+                .font(.subheadline).bold()
+            Text(
+                "Provide a program handle (if authenticated via SENTINEL_H1_TOKEN) or paste the JSON payload from the HackerOne API."
+            )
+            .font(.caption2)
+            .foregroundColor(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Text("Handle:")
+                    .font(.caption)
+                    .frame(width: 60, alignment: .trailing)
+                TextField("e.g. security-program", text: $appState.bountyHandle)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .padding(.top, 4)
+
+            Text("Or paste JSON Configuration:")
+                .font(.caption)
+                .padding(.top, 4)
+
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $appState.bountyJSONConfig)
+                    .font(.system(size: 11, design: .monospaced))
+                    .frame(minHeight: 140)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25)))
+
+                if appState.bountyJSONConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                    Text(
+                        "{\n  \"handle\": \"example\",\n  \"in_scope\": [...],\n  \"out_of_scope\": [...]\n}"
+                    )
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray.opacity(0.6))
+                    .padding(8)
+                    .allowsHitTesting(false)
+                }
+            }
+
+            Spacer()
+        }
+        .padding()
     }
 
     // MARK: - Personas Tab
@@ -550,11 +628,11 @@ private struct ScopeRuleBadge: View {
 
     private var color: Color {
         switch label {
-        case "EXCL":  return .red
+        case "EXCL": return .red
         case "REGEX": return .purple
-        case "CIDR":  return .orange
-        case "WILD":  return .blue
-        default:      return .green
+        case "CIDR": return .orange
+        case "WILD": return .blue
+        default: return .green
         }
     }
 
@@ -699,10 +777,12 @@ struct ScanProgressHeader: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         Spacer()
-                        Text("\(formatSeconds(budget.timeUsedS))/\(formatSeconds(budget.timeMaxS)) used")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                            .monospacedDigit()
+                        Text(
+                            "\(formatSeconds(budget.timeUsedS))/\(formatSeconds(budget.timeMaxS)) used"
+                        )
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
                     }
                     ProgressView(value: budget.timeProgress)
                         .progressViewStyle(.linear)

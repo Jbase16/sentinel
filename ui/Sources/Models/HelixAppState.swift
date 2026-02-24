@@ -130,6 +130,10 @@ public class HelixAppState: ObservableObject {
     @Published var scopeRules: [String] = []
     @Published var scopeStrict: Bool = false
 
+    // HackerOne Scope Configuration
+    @Published var bountyHandle: String = ""
+    @Published var bountyJSONConfig: String = ""
+
     private let llm: LLMService
 
     init(llm: LLMService) {
@@ -293,9 +297,11 @@ public class HelixAppState: ObservableObject {
                         self.apiLogItems.append(LogItem(id: UUID(), text: text))
 
                         // Update operational UI state from select evidence keys.
-                        self.applyOperationalStateFromDecision(type: type, evidence: evidence ?? [:])
+                        self.applyOperationalStateFromDecision(
+                            type: type, evidence: evidence ?? [:])
                     case .nexusInsightFormed:
-                        self.applyOperationalStateFromNexusInsight(payload: event.payload, timestamp: event.timestamp)
+                        self.applyOperationalStateFromNexusInsight(
+                            payload: event.payload, timestamp: event.timestamp)
                     case .actionNeeded:
                         if let action = self.decodeAction(from: event.payload) {
                             if !self.pendingActions.contains(where: { $0.id == action.id }) {
@@ -611,7 +617,8 @@ public class HelixAppState: ObservableObject {
         // We intentionally keep this conservative: only consume keys we expect.
         if let executionMode = evidence["execution_mode"]?.stringValue {
             let tierCeiling = evidence["tier_ceiling"]?.stringValue
-            let allowedTiers = (evidence["allowed_tiers"]?.value as? [Any])?.compactMap { "\($0)" } ?? []
+            let allowedTiers =
+                (evidence["allowed_tiers"]?.value as? [Any])?.compactMap { "\($0)" } ?? []
             let budget = parseBudgetSnapshot(from: evidence["budget"]?.value)
             self.capabilityGateSnapshot = CapabilityGateSnapshot(
                 executionMode: executionMode,
@@ -667,7 +674,9 @@ public class HelixAppState: ObservableObject {
         }
     }
 
-    private func applyOperationalStateFromNexusInsight(payload: [String: AnyCodable], timestamp: Double) {
+    private func applyOperationalStateFromNexusInsight(
+        payload: [String: AnyCodable], timestamp: Double
+    ) {
         let actionType = payload["action_type"]?.stringValue ?? "unknown"
         let summary = payload["summary"]?.stringValue ?? ""
         let target = payload["target"]?.stringValue ?? "unknown"
@@ -692,7 +701,8 @@ public class HelixAppState: ObservableObject {
                 (details["waf_name"] as? String)
                 ?? (details["waf"] as? String)
                 ?? "Unknown WAF"
-            self.wafStatus = WAFStatus(wafName: wafName, lastUpdated: Date(timeIntervalSince1970: timestamp))
+            self.wafStatus = WAFStatus(
+                wafName: wafName, lastUpdated: Date(timeIntervalSince1970: timestamp))
         }
     }
 
@@ -798,7 +808,9 @@ public class HelixAppState: ObservableObject {
         personas: [[String: Any]]? = nil,
         oob: [String: Any]? = nil,
         scope: [String]? = nil,
-        scopeStrict: Bool = false
+        scopeStrict: Bool = false,
+        bountyHandle: String? = nil,
+        bountyJSON: [String: Any]? = nil
     ) {
         print("[AppState] startScan invoked target=\(target) mode=\(mode.rawValue)")
         Task {
@@ -811,7 +823,9 @@ public class HelixAppState: ObservableObject {
                     personas: personas,
                     oob: oob,
                     scope: scope,
-                    scopeStrict: scopeStrict
+                    scopeStrict: scopeStrict,
+                    bountyHandle: bountyHandle,
+                    bountyJSON: bountyJSON
                 )
                 print("[AppState] apiClient.startScan succeeded")
             } catch {
@@ -976,7 +990,8 @@ public class HelixAppState: ObservableObject {
 
             var entryNodes = backendEntryNodes
             if entryNodes.isEmpty {
-                entryNodes = nodes
+                entryNodes =
+                    nodes
                     .filter { inboundCounts[$0.id, default: 0] == 0 }
                     .map { $0.id }
             }
@@ -989,7 +1004,9 @@ public class HelixAppState: ObservableObject {
                 }.map { $0.id }
             }
 
-            if entryNodes.isEmpty, let highestPressure = nodes.max(by: { ($0.pressure ?? 0) < ($1.pressure ?? 0) }) {
+            if entryNodes.isEmpty,
+                let highestPressure = nodes.max(by: { ($0.pressure ?? 0) < ($1.pressure ?? 0) })
+            {
                 entryNodes = [highestPressure.id]
             }
 
@@ -999,7 +1016,8 @@ public class HelixAppState: ObservableObject {
                 criticalNodes = nodes.filter { ($0.pressure ?? 0) >= 0.7 }.map { $0.id }
             }
             if criticalNodes.isEmpty {
-                criticalNodes = nodes
+                criticalNodes =
+                    nodes
                     .sorted { ($0.pressure ?? 0) > ($1.pressure ?? 0) }
                     .prefix(5)
                     .map { $0.id }
@@ -1164,8 +1182,8 @@ extension HelixAppState {
         bountyReportError = nil
 
         let sessionId = apiResults?.scan?.sessionId ?? engineStatus?.scanState?.sessionId
-        let minSev    = bountyMinSeverity
-        let platform  = bountyPlatform
+        let minSev = bountyMinSeverity
+        let platform = bountyPlatform
 
         Task {
             do {
