@@ -58,6 +58,11 @@ class GhostAddon:
         from core.cortex.reasoning import get_reasoning_engine
         self.reasoning_engine = get_reasoning_engine()
         
+        # [SESSION BRIDGE]
+        # Intercept auth headers and cookies for Wraith tools
+        from core.wraith.session_bridge import SessionBridge
+        self.session_bridge = SessionBridge(session)
+        
         logger.info("[Ghost] CAL integration enabled - traffic will emit Evidence")
 
     def request(self, flow: http.HTTPFlow):
@@ -91,6 +96,10 @@ class GhostAddon:
             # [MIMIC INTEGRATION]
             # Mine the Route
             self.shadow_spec.observe(method, url)
+            
+            # [SESSION BRIDGE]
+            # Capture outbound authentication tokens/cookies
+            self.session_bridge.observe_request(flow)
             
             # ═══════════════════════════════════════════════════════════════
             # CAL INTEGRATION: Emit Evidence for this request
@@ -177,6 +186,10 @@ class GhostAddon:
             # if "application/json" in flow.response.headers.get("Content-Type", ""):
             #     # TODO: Decode and pass to self.shadow_spec.observe(..., response_body=json)
             #     pass
+            
+            # [SESSION BRIDGE]
+            # Capture inbound Set-Cookie authentication
+            self.session_bridge.observe_response(flow)
             
             # Lazarus Engine: De-obfuscation (async)
             # Note: We use create_task here because mitmproxy's response() hook is sync

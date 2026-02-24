@@ -7,12 +7,8 @@ from urllib.parse import urlparse
 from core.toolkit.internal_tool import InternalTool, InternalToolContext
 from core.wraith.execution_policy import build_policy_runtime
 from core.wraith.mutation_engine import HttpMethod, MutationRequest
-from core.wraith.personas import (
-    DifferentialAnalyzer,
-    Persona,
-    PersonaManager,
-)
-from core.wraith.session_manager import AuthSessionManager, parse_personas_config
+from core.wraith.personas import PersonaManager
+from core.wraith.auth_diff_scanner import AuthDiffScanner
 
 
 _SEVERITY_SCORE = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
@@ -61,55 +57,12 @@ class WraithPersonaDiffTool(InternalTool):
         context: InternalToolContext,
         queue: asyncio.Queue[str],
     ) -> List[Dict[str, Any]]:
-        personas_cfg = context.knowledge.get("personas")
-        if not isinstance(personas_cfg, list) or not personas_cfg:
-            await self.log(queue, "No personas configured (knowledge['personas'] missing). Skipping.")
+        scanner = AuthDiffScanner(context.session)
+        if not await scanner.initialize():
+            await self.log(queue, "AuthDiffScanner failed to initialize. Skipping.")
             return []
-
-        base_url = self._origin(target)
-        # Pre-auth/login once per scan (loads persisted sessions, replays login flows as needed).
-        session_bridge = await AuthSessionManager.from_knowledge(context.knowledge, base_url=target)
-        if session_bridge is not None and session_bridge.personas:
-            personas = list(session_bridge.personas)
-        else:
-            personas, _ = parse_personas_config(base_url, personas_cfg)
-        if not personas:
-            await self.log(queue, "Personas config present but invalid/empty after parsing. Skipping.")
-            return []
-
-        requested_baseline = str(context.knowledge.get("persona_baseline") or "Admin")
-        baseline_persona = requested_baseline
-        available_names = {p.name for p in personas}
-        if baseline_persona not in available_names:
-            admin_name = next(
-                (p.name for p in personas if str(getattr(p.persona_type, "value", "")).lower() == "admin"),
-                None,
-            )
-            baseline_persona = admin_name or next(
-                (p.name for p in personas if str(getattr(p.persona_type, "value", "")).lower() != "anonymous"),
-                requested_baseline,
-            )
-            await self.log(queue, f"Baseline persona '{requested_baseline}' not found; using '{baseline_persona}'")
-
-        policy_runtime = build_policy_runtime(
-            context=context,
-            tool_name=self.name,
-            target=target,
-            default_rate_limit_ms=120,
-            default_request_budget=max(30, self.MAX_TARGET_URLS * max(2, len(personas))),
-            default_retry_ceiling=2,
-        )
-
-        mgr = PersonaManager(personas=personas, policy_runtime=policy_runtime)
-        await self.log(queue, f"Initializing personas (count={len(personas)}, baseline={baseline_persona})")
-
-        ok = await mgr.initialize()
-        if not ok:
-            await self.log(queue, "One or more personas failed to authenticate; continuing with available sessions.")
 
         try:
-            analyzer = DifferentialAnalyzer(manager=mgr, baseline_persona=baseline_persona, skip_anonymous=False)
-
             candidate_urls = self._collect_candidate_urls(target, context.existing_findings)[: self.MAX_TARGET_URLS]
             if not candidate_urls:
                 await self.log(queue, "No candidate URLs found in findings metadata; skipping.")
@@ -120,14 +73,9 @@ class WraithPersonaDiffTool(InternalTool):
 
             for url, source_tool in candidate_urls:
                 await self.log(queue, f"Diff replay: {url} (source={source_tool})")
-                req = MutationRequest(
-                    url=url,
-                    method=HttpMethod.GET,
-                    headers={"Accept": "application/json"},
-                    timeout=12.0,
-                )
-
-                findings = await analyzer.analyze(req)
+                # The scanner handles logging the finding directly to the central session,
+                # but we will also process it for the tool return queue just in case.
+                findings = await scanner.scan_endpoint(url, method="GET")
                 for df in findings:
                     issue_type = df.issue_type.value
                     key = f"{issue_type}|{url}|{df.test_persona}|{df.baseline_persona}"
@@ -172,10 +120,9 @@ class WraithPersonaDiffTool(InternalTool):
                     out.append(finding)
 
             await self.log(queue, f"Persona diff complete (findings={len(out)})")
-            await self.log(queue, f"Policy metrics: {policy_runtime.metrics()}")
             return out
         finally:
-            await mgr.close()
+            await scanner.close()
 
     def _origin(self, target: str) -> str:
         parsed = urlparse(target)
