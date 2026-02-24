@@ -54,6 +54,7 @@ class BaselineHandle:
     principal_id: PrincipalId
     method: WebMethod
     url: str
+    exchange: HttpExchange
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,19 @@ class MutatingTransport:
         # Mock request id generation
         request_id = RequestId(value=f"req-{ctx.bump_request_counter():08d}")
         
+        body_b64 = base64.b64encode(resp_body).decode('ascii') if resp_body else None
+        
+        exchange = HttpExchange(
+            request_id=request_id,
+            url=url, # type: ignore
+            method=method,
+            request_headers=headers or {},
+            request_body_b64=base64.b64encode(body).decode('ascii') if body else None,
+            response_status=status,
+            response_headers=resp_headers,
+            response_body_b64=body_b64
+        )
+        
         sig = self._differ.baseline(status, resp_headers, resp_body, ttfb_ms, total_ms)
         
         handle = BaselineHandle(
@@ -124,7 +138,8 @@ class MutatingTransport:
             request_id=request_id,
             principal_id=ctx.principal_id,
             method=method,
-            url=url
+            url=url,
+            exchange=exchange
         )
         self._baselines[baseline_key] = handle
         return handle

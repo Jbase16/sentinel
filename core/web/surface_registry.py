@@ -9,9 +9,14 @@ from pydantic import HttpUrl
 from .contracts.models import EndpointCandidate
 
 
+from urllib.parse import urlparse, urlunparse
+
 def _surface_key(url: str) -> str:
     # Deterministic dedup key. Normalize elsewhere if needed.
-    return url.strip()
+    # Strip fragments for deduplication
+    parsed = urlparse(url.strip())
+    # Rebuild without fragment
+    return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ''))
 
 
 @dataclass(frozen=True)

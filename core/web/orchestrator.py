@@ -22,10 +22,7 @@ class WebOrchestrator:
     def __init__(self, policy: ExecutionPolicy, underlying_bus: UnderlyingBus) -> None:
         self.policy = policy
         self.strict_bus = StrictEventBus(underlying_bus=underlying_bus, strict_mode=True)
-        # Using typing.cast or ignoring typing issues since ExecutionPolicy protocols might have slight overlaps
-        # but conceptually match.
-        self.transport = MutatingTransport(policy=self.policy, differ=None, bus=self.strict_bus) # type: ignore
-        # Wait, the transport needs a real Differ! Let's import BaselineBuilder and DeltaEngine.
+        
         from .diff.baseline import BaselineBuilder
         from .diff.delta import DeltaEngine
         
@@ -33,11 +30,12 @@ class WebOrchestrator:
             def __init__(self):
                 self.b = BaselineBuilder()
                 self.d = DeltaEngine()
-            def baseline(self, status, headers, body, ttfb, total):
+            def baseline(self, status: int, headers: dict[str, str], body: bytes, ttfb: int, total: int):
                 return self.b.build(status, headers, body, ttfb, total)
-            def diff(self, base, status, headers, body, ttfb, total):
+            def diff(self, base, status: int, headers: dict[str, str], body: bytes, ttfb: int, total: int):
                 return self.d.diff(base, status, headers, body, ttfb, total)
 
+        # Using typing.cast or ignoring typing issues since ExecutionPolicy protocols might have slight overlaps
         self.transport = MutatingTransport(policy=self.policy, differ=RealDiffer(), bus=self.strict_bus) # type: ignore
         self.crawler = HttpCrawler(policy=self.policy, bus=self.strict_bus) # type: ignore
         self.registry = SurfaceRegistry()
