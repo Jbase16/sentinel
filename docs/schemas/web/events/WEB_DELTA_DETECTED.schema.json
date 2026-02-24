@@ -1,0 +1,133 @@
+{
+  "$defs": {
+    "DeltaSeverity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "DeltaSeverity",
+      "type": "string"
+    },
+    "DeltaVector": {
+      "properties": {
+        "body_length_delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body Length Delta"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/DeltaSeverity",
+          "default": "info"
+        },
+        "status_delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "mutated_status - baseline_status",
+          "title": "Status Delta"
+        },
+        "structural_delta": {
+          "default": 0.0,
+          "description": "0..1 distance",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Structural Delta",
+          "type": "number"
+        },
+        "timing_delta_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timing Delta Ms"
+        }
+      },
+      "title": "DeltaVector",
+      "type": "object"
+    },
+    "VulnerabilityClass": {
+      "enum": [
+        "reflection",
+        "sqli",
+        "idor",
+        "ssrf",
+        "general"
+      ],
+      "title": "VulnerabilityClass",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "baseline": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Baseline"
+    },
+    "delta": {
+      "$ref": "#/$defs/DeltaVector"
+    },
+    "notes": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Notes",
+      "type": "array"
+    },
+    "severity": {
+      "$ref": "#/$defs/DeltaSeverity",
+      "default": "info"
+    },
+    "target_url": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Target Url",
+      "type": "string"
+    },
+    "vuln_class": {
+      "$ref": "#/$defs/VulnerabilityClass"
+    }
+  },
+  "required": [
+    "vuln_class",
+    "target_url",
+    "delta"
+  ],
+  "title": "WebDeltaDetectedPayload",
+  "type": "object"
+}

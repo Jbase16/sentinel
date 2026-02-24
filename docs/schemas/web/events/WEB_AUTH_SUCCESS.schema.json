@@ -1,0 +1,66 @@
+{
+  "$defs": {
+    "PrincipalId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "PrincipalId",
+      "type": "object"
+    },
+    "WebAuthMode": {
+      "enum": [
+        "none",
+        "form",
+        "scripted",
+        "imported"
+      ],
+      "title": "WebAuthMode",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "auth_mode": {
+      "$ref": "#/$defs/WebAuthMode"
+    },
+    "login_url": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Login Url",
+      "type": "string"
+    },
+    "principal_id": {
+      "$ref": "#/$defs/PrincipalId"
+    },
+    "session_fingerprint": {
+      "description": "non-secret hash of session state",
+      "maxLength": 256,
+      "minLength": 8,
+      "title": "Session Fingerprint",
+      "type": "string"
+    },
+    "success_signal": {
+      "description": "e.g. cookie name, redirect, DOM marker",
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Success Signal",
+      "type": "string"
+    }
+  },
+  "required": [
+    "auth_mode",
+    "principal_id",
+    "login_url",
+    "success_signal",
+    "session_fingerprint"
+  ],
+  "title": "WebAuthSuccessPayload",
+  "type": "object"
+}

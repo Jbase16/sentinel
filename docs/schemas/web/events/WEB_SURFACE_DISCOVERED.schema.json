@@ -1,0 +1,68 @@
+{
+  "$defs": {
+    "SurfaceSource": {
+      "enum": [
+        "crawler",
+        "js_intel",
+        "browser",
+        "manual"
+      ],
+      "title": "SurfaceSource",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "depth": {
+      "maximum": 20,
+      "minimum": 0,
+      "title": "Depth",
+      "type": "integer"
+    },
+    "discovered_assets": {
+      "items": {
+        "format": "uri",
+        "maxLength": 2083,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Discovered Assets",
+      "type": "array"
+    },
+    "discovered_forms": {
+      "items": {
+        "format": "uri",
+        "maxLength": 2083,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Discovered Forms",
+      "type": "array"
+    },
+    "discovered_urls": {
+      "items": {
+        "format": "uri",
+        "maxLength": 2083,
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": "Discovered Urls",
+      "type": "array"
+    },
+    "page_count": {
+      "maximum": 20000,
+      "minimum": 0,
+      "title": "Page Count",
+      "type": "integer"
+    },
+    "source": {
+      "$ref": "#/$defs/SurfaceSource"
+    }
+  },
+  "required": [
+    "source",
+    "depth",
+    "page_count"
+  ],
+  "title": "WebSurfaceDiscoveredPayload",
+  "type": "object"
+}

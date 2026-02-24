@@ -1,0 +1,519 @@
+{
+  "$defs": {
+    "ArtifactId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "ArtifactId",
+      "type": "object"
+    },
+    "ArtifactRef": {
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/ArtifactId"
+        },
+        "kind": {
+          "description": "e.g. har, screenshot, log, pcaps, html",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "description": "Repo-local or absolute path",
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 16,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "kind",
+        "path"
+      ],
+      "title": "ArtifactRef",
+      "type": "object"
+    },
+    "BaselineSignature": {
+      "properties": {
+        "body_hash": {
+          "maxLength": 256,
+          "minLength": 8,
+          "title": "Body Hash",
+          "type": "string"
+        },
+        "dom_hash": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 8,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dom Hash"
+        },
+        "json_shape_hash": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 8,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Json Shape Hash"
+        },
+        "normalized_hash": {
+          "maxLength": 256,
+          "minLength": 8,
+          "title": "Normalized Hash",
+          "type": "string"
+        },
+        "status_code": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Status Code",
+          "type": "integer"
+        },
+        "total_ms": {
+          "anyOf": [
+            {
+              "maximum": 600000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Ms"
+        },
+        "ttfb_ms": {
+          "anyOf": [
+            {
+              "maximum": 600000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ttfb Ms"
+        }
+      },
+      "required": [
+        "status_code",
+        "body_hash",
+        "normalized_hash"
+      ],
+      "title": "BaselineSignature",
+      "type": "object"
+    },
+    "DeltaSeverity": {
+      "enum": [
+        "info",
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "DeltaSeverity",
+      "type": "string"
+    },
+    "DeltaVector": {
+      "properties": {
+        "body_length_delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body Length Delta"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/DeltaSeverity",
+          "default": "info"
+        },
+        "status_delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "mutated_status - baseline_status",
+          "title": "Status Delta"
+        },
+        "structural_delta": {
+          "default": 0.0,
+          "description": "0..1 distance",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Structural Delta",
+          "type": "number"
+        },
+        "timing_delta_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timing Delta Ms"
+        }
+      },
+      "title": "DeltaVector",
+      "type": "object"
+    },
+    "EvidenceBundleVersion": {
+      "enum": [
+        "1.0"
+      ],
+      "title": "EvidenceBundleVersion",
+      "type": "string"
+    },
+    "FindingId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "FindingId",
+      "type": "object"
+    },
+    "HttpExchange": {
+      "description": "Redacted snapshot of a single request/response exchange.\nAvoid raw secrets by contract: redaction must be done before storing here.",
+      "properties": {
+        "captured_at": {
+          "format": "date-time",
+          "title": "Captured At",
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/WebMethod"
+        },
+        "request_body_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base64-encoded body, redacted as needed",
+          "title": "Request Body B64"
+        },
+        "request_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Request Headers",
+          "type": "object"
+        },
+        "request_id": {
+          "$ref": "#/$defs/RequestId"
+        },
+        "response_body_b64": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base64-encoded body, redacted as needed",
+          "title": "Response Body B64"
+        },
+        "response_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Response Headers",
+          "type": "object"
+        },
+        "response_status": {
+          "maximum": 599,
+          "minimum": 100,
+          "title": "Response Status",
+          "type": "integer"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "url",
+        "method",
+        "response_status"
+      ],
+      "title": "HttpExchange",
+      "type": "object"
+    },
+    "MissionId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "MissionId",
+      "type": "object"
+    },
+    "PrincipalId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "PrincipalId",
+      "type": "object"
+    },
+    "RequestId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "RequestId",
+      "type": "object"
+    },
+    "ScanId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "ScanId",
+      "type": "object"
+    },
+    "SessionId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "SessionId",
+      "type": "object"
+    },
+    "VulnerabilityClass": {
+      "enum": [
+        "reflection",
+        "sqli",
+        "idor",
+        "ssrf",
+        "general"
+      ],
+      "title": "VulnerabilityClass",
+      "type": "string"
+    },
+    "WebMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "title": "WebMethod",
+      "type": "string"
+    }
+  },
+  "description": "Evidence contract: REQUIRED for confirmed findings.",
+  "properties": {
+    "affected_principals": {
+      "items": {
+        "$ref": "#/$defs/PrincipalId"
+      },
+      "title": "Affected Principals",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/ArtifactRef"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "baseline": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BaselineSignature"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "delta": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeltaVector"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "finding_id": {
+      "$ref": "#/$defs/FindingId"
+    },
+    "mission_id": {
+      "$ref": "#/$defs/MissionId"
+    },
+    "principal_id": {
+      "$ref": "#/$defs/PrincipalId"
+    },
+    "replay_script_path": {
+      "anyOf": [
+        {
+          "maxLength": 1024,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Replay Script Path"
+    },
+    "request_sequence": {
+      "items": {
+        "$ref": "#/$defs/HttpExchange"
+      },
+      "title": "Request Sequence",
+      "type": "array"
+    },
+    "scan_id": {
+      "$ref": "#/$defs/ScanId"
+    },
+    "session_id": {
+      "$ref": "#/$defs/SessionId"
+    },
+    "summary": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 256,
+      "minLength": 3,
+      "title": "Title",
+      "type": "string"
+    },
+    "version": {
+      "$ref": "#/$defs/EvidenceBundleVersion",
+      "default": "1.0"
+    },
+    "vuln_class": {
+      "$ref": "#/$defs/VulnerabilityClass"
+    }
+  },
+  "required": [
+    "finding_id",
+    "mission_id",
+    "scan_id",
+    "session_id",
+    "vuln_class",
+    "title",
+    "summary",
+    "principal_id"
+  ],
+  "title": "EvidenceBundle",
+  "type": "object"
+}

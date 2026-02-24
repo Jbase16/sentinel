@@ -1,0 +1,70 @@
+{
+  "$defs": {
+    "FindingId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "FindingId",
+      "type": "object"
+    },
+    "VulnerabilityClass": {
+      "enum": [
+        "reflection",
+        "sqli",
+        "idor",
+        "ssrf",
+        "general"
+      ],
+      "title": "VulnerabilityClass",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "evidence_ready": {
+      "default": true,
+      "title": "Evidence Ready",
+      "type": "boolean"
+    },
+    "finding_id": {
+      "$ref": "#/$defs/FindingId"
+    },
+    "target_url": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Target Url",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 256,
+      "minLength": 3,
+      "title": "Title",
+      "type": "string"
+    },
+    "vuln_class": {
+      "$ref": "#/$defs/VulnerabilityClass"
+    }
+  },
+  "required": [
+    "finding_id",
+    "vuln_class",
+    "title",
+    "confidence",
+    "target_url"
+  ],
+  "title": "WebFindingConfirmedPayload",
+  "type": "object"
+}

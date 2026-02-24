@@ -1,0 +1,102 @@
+{
+  "$defs": {
+    "EndpointCandidate": {
+      "properties": {
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "method": {
+          "$ref": "#/$defs/WebMethod",
+          "default": "GET"
+        },
+        "requires_auth": {
+          "default": false,
+          "title": "Requires Auth",
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/SurfaceSource"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "source"
+      ],
+      "title": "EndpointCandidate",
+      "type": "object"
+    },
+    "SurfaceSource": {
+      "enum": [
+        "crawler",
+        "js_intel",
+        "browser",
+        "manual"
+      ],
+      "title": "SurfaceSource",
+      "type": "string"
+    },
+    "WebMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "title": "WebMethod",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "endpoints": {
+      "items": {
+        "$ref": "#/$defs/EndpointCandidate"
+      },
+      "title": "Endpoints",
+      "type": "array"
+    },
+    "js_asset": {
+      "anyOf": [
+        {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Js Asset"
+    },
+    "source": {
+      "$ref": "#/$defs/SurfaceSource"
+    }
+  },
+  "required": [
+    "source"
+  ],
+  "title": "WebEndpointRegisteredPayload",
+  "type": "object"
+}
