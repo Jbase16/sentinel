@@ -143,6 +143,7 @@ class EvidenceBundle(BaseModel):
     request_sequence: List[HttpExchange] = Field(default_factory=list, max_length=100)
     baseline: Optional[BaselineSignature] = None
     delta: Optional[DeltaVector] = None
+    vulnerable_param: Optional[ParamSpec] = None
 
     artifacts: List[ArtifactRef] = Field(default_factory=list, max_length=100)
     replay_script_path: Optional[str] = Field(default=None, max_length=1024)

@@ -10,6 +10,7 @@ from .crawler import HttpCrawler, ExecutionPolicy
 from .event_bus import StrictEventBus, UnderlyingBus
 from .transport import MutatingTransport, MutationResult
 from .mutate.reflection import ReflectionMutator
+from .evidence_service import EvidenceService
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,9 @@ class WebOrchestrator:
         self.transport = MutatingTransport(policy=self.policy, differ=RealDiffer(), bus=self.strict_bus) # type: ignore
         self.crawler = HttpCrawler(policy=self.policy, bus=self.strict_bus) # type: ignore
         self.registry = SurfaceRegistry()
+        
+        # In a real setup, artifacts_dir would come from configuration/mission config
+        self.evidence_service = EvidenceService(bus=self.strict_bus, artifacts_dir="artifacts")
 
     def run_single_principal_scan(self, mission: WebMission, ctx: WebContext) -> List[MutationResult]:
         """
@@ -78,6 +82,23 @@ class WebOrchestrator:
                 budget_index=budget_index
             )
             
+            # Step 6 Evidence Creation for confirmed results
+            for res in endpoint_results:
+                self.evidence_service.confirm(
+                    mission=mission,
+                    ctx=ctx,
+                    vuln_class=reflection.vuln_class,
+                    param_spec=res.param_spec,
+                    handle=self.transport._baselines.get(self.transport._compute_baseline_key(
+                        principal_id=ctx.principal_id,
+                        method=endpoint.method,
+                        url=str(endpoint.url)
+                    )), # type: ignore
+                    mutation=res,
+                    title="Reflected Parameter",
+                    summary="Deterministic reflection canary detected in response body."
+                )
+
             results.extend(endpoint_results)
             budget_index += len(endpoint_results)
             

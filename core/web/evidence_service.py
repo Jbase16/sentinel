@@ -4,13 +4,12 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ..contracts.ids import FindingId
-from ..contracts.models import EvidenceBundle, WebMission, ParamSpec, HttpExchange, ArtifactRef
-from ..contracts.enums import VulnerabilityClass
-from ..contracts.events import EventEnvelope, EventType, WebEvidenceBundleCreatedPayload, WebFindingConfirmedPayload
-from ..context import WebContext
-from ..transport import BaselineHandle, MutationResult
-from ..event_bus import SentinelEventBus
+from .contracts.ids import FindingId, ArtifactId
+from .contracts.models import EvidenceBundle, WebMission, ParamSpec, HttpExchange, ArtifactRef
+from .contracts.enums import VulnerabilityClass
+from .contracts.events import EventEnvelope, EventType, WebEvidenceBundleCreatedPayload, WebFindingConfirmedPayload
+from .context import WebContext
+from .transport import BaselineHandle, MutationResult, SentinelEventBus
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ logger = logging.getLogger(__name__)
 class ReplayGenerator:
     """Generates a deterministic local replay python script."""
     def generate(self, finding_id: FindingId, mutation_exchange: HttpExchange, evidence_path: Path) -> Path:
-        script_dir = evidence_path.parent / "replays"
+        script_dir = evidence_path.parent.parent / "replays"
         script_dir.mkdir(parents=True, exist_ok=True)
         script_path = script_dir / f"{finding_id.value}.py"
         
@@ -95,7 +94,11 @@ class EvidenceBuilder:
         script_path = replay_gen.generate(finding_id, mutation.exchange, bundle_path)
         
         artifacts = [
-            ArtifactRef(artifact_id=f"art-{finding_id_str}-replay", artifact_type="replay_script", file_path=str(script_path))
+            ArtifactRef(
+                artifact_id=ArtifactId(value=f"art-{finding_id_str}-replay"),
+                kind="replay_script",
+                path=str(script_path)
+            )
         ]
         
         bundle = EvidenceBundle(
@@ -106,22 +109,17 @@ class EvidenceBuilder:
             principal_id=ctx.principal_id,
             vuln_class=vuln_class,
             title=title,
-            severity=mutation.delta.severity,
-            confidence=0.9, # V1 Hardcode
-            target_url=handle.url, # type: ignore
-            method=handle.method,
-            vulnerable_param=param_spec,
             summary=summary,
-            allowed_origins=mission.allowed_origins,
             request_sequence=[handle.exchange, mutation.exchange],
-            baseline_signature=handle.signature,
-            delta_vector=mutation.delta,
+            baseline=handle.signature,
+            delta=mutation.delta,
+            vulnerable_param=param_spec,
             artifacts=artifacts,
+            replay_script_path=str(script_path),
             notes=["Auto-generated Evidence Bundle"]
         )
         
         # Dump to disk
-        # Use mode="json" to serialize HttpUrl/Datetime properly
         bundle_path.write_text(json.dumps(bundle.model_dump(mode="json"), indent=2))
         
         return bundle
@@ -182,9 +180,10 @@ class EvidenceService:
             payload=WebFindingConfirmedPayload(
                 finding_id=bundle.finding_id,
                 vuln_class=vuln_class,
-                target_url=bundle.target_url, # type: ignore
-                severity=bundle.severity,
-                confidence=bundle.confidence,
+                title=title,
+                target_url=mutation.exchange.url, # type: ignore
+                severity=mutation.delta.severity,
+                confidence=0.9, # V1 deterministic Reflection is high confidence
                 evidence_ready=True
             ).model_dump(mode="json")
         ))

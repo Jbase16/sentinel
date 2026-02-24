@@ -1,6 +1,12 @@
-import logging
 import time
+import os
+import glob
+import json
+import logging
 from typing import Dict, Any, List
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("smoke_test")
 
 import httpx
 from pydantic import HttpUrl
@@ -85,6 +91,26 @@ def run_smoke_test():
     logger.info("Event Counts:")
     for etype, count in bus.event_counts.items():
         logger.info(f"  {etype}: {count}")
+        
+    assert bus.event_counts.get("WEB_EVIDENCE_BUNDLE_CREATED", 0) == 1, "Missing evidence bundle event"
+    assert bus.event_counts.get("WEB_FINDING_CONFIRMED", 0) == 1, "Missing finding confirmed event"
+
+    evidence_files = glob.glob("artifacts/evidence/*.json")
+    assert len(evidence_files) == 1, f"Expected 1 evidence file, found {len(evidence_files)}"
+    
+    with open(evidence_files[0], "r") as f:
+        bundle = json.load(f)
+        assert len(bundle["request_sequence"]) == 2, "Expected baseline and mutated exchange in sequence"
+        assert bundle["vulnerable_param"]["name"] == "q", "Expected 'q' param to be vulnerable"
+        assert bundle["finding_id"]["value"].startswith("f-"), "Expected deterministic finding_id"
+        
+    replay_files = glob.glob("artifacts/replays/*.py")
+    assert len(replay_files) == 1, f"Expected 1 replay file, found {len(replay_files)}"
+    with open(replay_files[0], "r") as f:
+        content = f.read()
+        assert "sntnl_rflct_" in content, "Expected canary in replay script"
+        
+    logger.info("All Evidence Generation Assertions Passed!")
 
 
 if __name__ == "__main__":

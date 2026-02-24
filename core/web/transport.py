@@ -64,8 +64,10 @@ class MutationResult:
     Contains the resulting delta and full network exchange.
     """
     exchange: HttpExchange
-    baseline: BaselineSignature
+    baseline_exchange: HttpExchange
+    baseline_signature: BaselineSignature
     delta: DeltaVector
+    param_spec: Any = None
 
 
 class MutatingTransport:
@@ -235,6 +237,8 @@ class MutatingTransport:
         
         return MutationResult(
             exchange=exchange,
-            baseline=handle.signature,
-            delta=delta
+            baseline_exchange=handle.exchange,
+            baseline_signature=handle.signature,
+            delta=delta,
+            param_spec=param_spec
         )
