@@ -315,8 +315,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             
         scope_context = ScopeContext(
             registry=registry,
-            execution_policy=ExecutionPolicy(),
-            mode=emode,
+            policy=ExecutionPolicy(),
+            mode=emode.value,
             scan_id=session.id
         )
 
