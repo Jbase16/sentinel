@@ -131,11 +131,11 @@ struct NetworkGraphView: View {
                 .padding(.bottom, 20)
             }
         }
-        .onChange(of: appState.showDecisionLayerInGraph) {
+        .onChange(of: appState.showDecisionLayerInGraph) { _ in
             appState.applyGraphLayerVisibility()
             appState.fetchAnalysis()
         }
-        .onChange(of: appState.hideLowSignalGraphNodes) {
+        .onChange(of: appState.hideLowSignalGraphNodes) { _ in
             appState.applyGraphLayerVisibility()
             appState.fetchAnalysis()
         }

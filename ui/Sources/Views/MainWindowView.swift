@@ -309,12 +309,6 @@ struct SentinelTimelineView: View {
                                 }
                                 let progress = max(0, min(1, value.location.x / geo.size.width))
                                 dragProgress = progress
-
-                                // Live update? Or throttle?
-                                // For performance, maybe throttle updates to seek()
-                                let total = Double(appState.allEvents.count)
-                                let targetIndex = Int(progress * total)
-                                appState.seek(to: targetIndex)
                             }
                             .onEnded { value in
                                 dragProgress = nil

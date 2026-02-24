@@ -160,6 +160,14 @@ public class HelixAppState: ObservableObject {
 
         // Setup Combine bindings for LLM state
         setupLLMBindings()
+
+        // Forward CortexStream changes so UI components correctly re-render when nodes/edges change
+        self.cortexStream.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+            .store(in: &cancellables)
     }
 
     private func connectServices() {
@@ -440,7 +448,10 @@ public class HelixAppState: ObservableObject {
     }
 
     func applyGraphLayerVisibility() {
-        guard let graph = latestPressureGraph else { return }
+        guard let graph = latestPressureGraph else {
+            self.refreshGraph()
+            return
+        }
         cortexStream.updateFromPressureGraph(
             graph,
             includeDecisionLayer: showDecisionLayerInGraph,
