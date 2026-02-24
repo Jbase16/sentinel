@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import List, Protocol, Set, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from html.parser import HTMLParser
 
 from pydantic import HttpUrl
 
 from .contracts.errors import BudgetExceeded, PolicyViolation, ScopeViolation
-from .contracts.events import EventEnvelope, EventType, WebSurfaceDiscoveredPayload
-from .contracts.models import WebMission
-from .contracts.enums import SurfaceSource
+from .contracts.events import EventEnvelope, EventType, WebSurfaceDiscoveredPayload, WebEndpointRegisteredPayload
+from .contracts.models import WebMission, EndpointCandidate
+from .contracts.enums import SurfaceSource, WebMethod
 from .surface_registry import SurfaceRegistry
 from .context import WebContext
 
@@ -69,12 +70,88 @@ class HttpCrawler:
             status, headers, body = self._policy.http_get(mission, ctx, url)
             pages += 1
 
-            # NOTE: parsing intentionally not implemented here; Agent implements safely.
-            # Must extract: href/src links, form actions, script src.
-            # Must enqueue in deterministic sorted order.
-            # discovered_urls/assets/forms must be absolute.
-            # This method MUST still emit event with whatever was found so far.
-            # Agent fills in parsing and adds to registry.
+            # Deterministic, minimal parsing using stdlib. No JS, no execution.
+            class MinimalExtractor(HTMLParser):
+                def __init__(self, base: str):
+                    super().__init__()
+                    self.base = base
+                    self.links = []
+                    self.forms = []
+                    
+                def handle_starttag(self, tag, attrs):
+                    attr_dict = dict(attrs)
+                    if tag == "a" and "href" in attr_dict:
+                        href = attr_dict["href"].strip()
+                        if href and not href.startswith(("javascript:", "mailto:", "tel:")):
+                            self.links.append(urljoin(self.base, href))
+                    elif tag == "form" and "action" in attr_dict:
+                        action = attr_dict["action"].strip()
+                        method = attr_dict.get("method", "get").upper()
+                        if action:
+                            self.forms.append((urljoin(self.base, action), method))
+                            
+            extractor = MinimalExtractor(url)
+            try:
+                # Use ignore on decode to prevent utf-8 failure crashing deterministic loop
+                extractor.feed(body.decode("utf-8", errors="ignore"))
+            except Exception:
+                pass
+                
+            new_urls = []
+            for link in extractor.links:
+                # Very basic origin constraint: must be on allowed origin
+                parsed_link = urlparse(link)
+                link_origin = f"{parsed_link.scheme}://{parsed_link.netloc}"
+                if link_origin in mission.allowed_origins:
+                    if not registry.has_url(link):
+                        new_urls.append(link)
+                        discovered_urls.append(link)
+            
+            # Enqueue discovered links in deterministic order to the back of BFS queue
+            for link in sorted(new_urls):
+                queue.append((link, depth + 1))
+                
+            registry.add_urls(new_urls)
+            
+            new_endpoints = []
+            
+            # 1. Links with query parameters are GET endpoint candidates
+            for link in new_urls:
+                if "?" in link:
+                    new_endpoints.append(EndpointCandidate(
+                        url=link, # type: ignore
+                        method=WebMethod.GET,
+                        source=SurfaceSource.CRAWLER,
+                        confidence=0.9
+                    ))
+                    
+            # 2. Forms are endpoint candidates
+            for form_action, form_method in extractor.forms:
+                discovered_forms.append(form_action)
+                wm = WebMethod.POST if form_method == "POST" else WebMethod.GET
+                new_endpoints.append(EndpointCandidate(
+                    url=form_action, # type: ignore
+                    method=wm,
+                    source=SurfaceSource.CRAWLER,
+                    confidence=1.0
+                ))
+                
+            # Sort endpoints for determinism before registry insertion
+            new_endpoints.sort(key=lambda e: f"{e.method.value}|{str(e.url)}")
+            
+            if new_endpoints:
+                registry.add_endpoints(new_endpoints)
+                self._bus.emit(EventEnvelope(
+                    event_type=EventType.WEB_ENDPOINT_REGISTERED,
+                    mission_id=mission.mission_id,
+                    scan_id=mission.scan_id,
+                    session_id=mission.session_id,
+                    principal_id=ctx.principal_id,
+                    payload=WebEndpointRegisteredPayload(
+                        source=SurfaceSource.CRAWLER,
+                        endpoints=new_endpoints
+                    ).model_dump(mode="json")
+                ))
 
         payload = WebSurfaceDiscoveredPayload(
             source=SurfaceSource.CRAWLER,

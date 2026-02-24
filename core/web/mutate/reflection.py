@@ -43,7 +43,7 @@ class ReflectionMutator:
             if budget_index + i >= mission.exploit_ceiling:
                 break
                 
-            canary = f"sntnl_rflct_{hashlib.md5(k.encode()).hexdigest()[:8]}"
+            canary = f"sntnl_rflct_{hashlib.md5((k + str(ctx.request_counter)).encode()).hexdigest()[:8]}"
             
             mutated_params = list(params)
             mutated_params[i] = (k, canary)
