@@ -162,7 +162,7 @@ class GhostAddon:
         except Exception as e:
             logger.error(f"[Ghost] Request processing error: {e}")
 
-    def response(self, flow: http.HTTPFlow):
+    async def response(self, flow: http.HTTPFlow):
         """
         Intercept responses to identify tech stack / leaks.
         """
@@ -192,12 +192,10 @@ class GhostAddon:
             self.session_bridge.observe_response(flow)
             
             # Lazarus Engine: De-obfuscation (async)
-            # Note: We use create_task here because mitmproxy's response() hook is sync
-            # but LazarusEngine.response() is async (it needs to call AI).
-            # This allows the HTTP response to flow through without blocking.
+            # We await this so the response is held until the AI is done rewriting it
             if self.lazarus.should_process(flow):
                 self.session.log(f"[Lazarus] De-obfuscating JS: {flow.request.pretty_url}")
-                asyncio.create_task(self._process_lazarus(flow))
+                await self._process_lazarus(flow)
                 
         except Exception as e:
             logger.error(f"[Ghost] Response processing error: {e}")
