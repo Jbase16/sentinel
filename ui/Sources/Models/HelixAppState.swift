@@ -11,6 +11,7 @@
 // - Depends on: [To be documented]
 //
 
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -839,6 +840,16 @@ public class HelixAppState: ObservableObject {
                     bountyJSON: bountyJSON
                 )
                 print("[AppState] apiClient.startScan succeeded")
+
+                // Auto-open target if Ghost Protocol is active
+                if self.isGhostActive, let url = URL(string: target),
+                    ["http", "https"].contains(url.scheme?.lowercased())
+                {
+                    await MainActor.run {
+                        print("[AppState] Ghost Protocol is active, opening browser to \(url)")
+                        NSWorkspace.shared.open(url)
+                    }
+                }
             } catch {
                 print("[AppState] Failed to start scan")
                 print("  error type: \(type(of: error))")
