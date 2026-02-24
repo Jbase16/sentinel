@@ -1075,36 +1075,6 @@ class AIEngine:
         except Exception as e:
             logger.error(f"Failed to parse LLM JSON response or create proposals: {e}")
             return {"proposals": [], "next_steps": []}
-        # Conditional branch.
-        if not response_json:
-            return {"findings": [], "next_steps": []}
-
-        # Error handling block.
-        try:
-            clean_json = self._clean_json_response(response_json)
-            data = json.loads(clean_json)
-            findings = data.get("findings", [])
-            next_steps = data.get("next_steps", [])
-            
-            # Normalize findings
-            normalized_findings = []
-            for f in findings:
-                normalized_findings.append({
-                    "tool": tool,
-                    "type": f.get("type", "Unknown"),
-                    "severity": f.get("severity", "LOW").upper(),
-                    "value": f.get("value", ""),
-                    "proof": f.get("technical_details", ""),
-                    "ai_generated": True
-                })
-                
-            return {
-                "findings": normalized_findings,
-                "next_steps": next_steps
-            }
-        except json.JSONDecodeError:
-            logger.error(f"Failed to parse LLM JSON response: {response_json[:200]}...")
-            return {"findings": [], "next_steps": []}
 
     def _clean_json_response(self, text: str) -> str:
         """Function _clean_json_response."""

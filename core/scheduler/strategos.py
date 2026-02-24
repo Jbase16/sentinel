@@ -291,8 +291,8 @@ class InsightQueue:
             # to avoid tight loops while still preserving the item.
             try:
                 insight.priority = _clamp_int(getattr(insight, "priority", 5) + 1, 0, 9)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("[InsightQueue] Priority clamp failed for %s: %s", insight.action_type, _e)
             await self.enqueue(insight)
 
             async with self._lock:
@@ -519,8 +519,8 @@ class Strategos:
                 for k in ("timeout_seconds", "timeout", "max_seconds"):
                     if k in tool_def:
                         return float(tool_def[k])
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[Strategos] Tool timeout lookup failed for %s, using default: %s", tool, _e)
         return DEFAULT_TOOL_TIMEOUT_SECONDS
 
     def _determine_recon_skip_reason(self, target_classification: Any) -> Optional[ReconSkipReason]:
@@ -1047,8 +1047,8 @@ class Strategos:
                     if "://" in raw:
                         try:
                             finding_port = urlparse(raw).port
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            logger.debug("[Strategos] URL parse failed for raw value %r: %s", raw[:80], _e)
                     # If finding references a different port, it's host surface, not target surface
                     if finding_port is not None and finding_port != declared_port:
                         return None
