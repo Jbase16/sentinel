@@ -1,4 +1,0 @@
-# file: /Users/jason/Developer/sentinelforge/core/data/pressure_graph/min_fix_set.py
-# hypothesis_version: 6.148.8
-
-[0.0, 0.3, 0.5, 1.0, 'adj', 'capacity', 'flow', 'inf', 'node_to_in_id', 'node_to_out_id', 'super_sink', 'super_source']

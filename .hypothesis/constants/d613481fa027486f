@@ -1,4 +1,0 @@
-# file: /Users/jason/Developer/sentinelforge/core/data/pressure_graph/counterfactual.py
-# hypothesis_version: 6.148.8
-
-[0.0, 'deltas', 'remediation', 'residual_attack_path']

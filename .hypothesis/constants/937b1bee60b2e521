@@ -1,4 +1,0 @@
-# file: /Users/jason/Developer/sentinelforge/core/data/pressure_graph/models.py
-# hypothesis_version: 6.148.8
-
-[0.0, 0.1, 0.5, 1.0, 'PressureEdge', 'PressureNode', 'amplifies', 'enables', 'reaches', 'requires']

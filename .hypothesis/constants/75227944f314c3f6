@@ -1,4 +1,0 @@
-# file: /Users/jason/Developer/sentinelforge/core/data/pressure_graph/manager.py
-# hypothesis_version: 6.148.8
-
-[0.0, 0.3, 0.5, 0.8, 0.9, 0.95, 1.0, 3.0, 5.0, 7.0, 10.0, 'AMPLIFIES', 'CAUSES', 'CRITICAL', 'ENABLES', 'HIGH', 'INFO', 'LOW', 'MEDIUM', 'REACHES', 'REQUIRES', 'account', 'admin', 'asset', 'baseline_pressures', 'chokepoints', 'confidence', 'created_at', 'credential_leak', 'critical_paths', 'cvss', 'edge_count', 'edge_type', 'edges_changed', 'error', 'excessive_trust', 'exploitability', 'exposed_service', 'exposure', 'id', 'identity_issue', 'internal', 'issues_changed', 'killchain', 'length', 'minimal_fix_sets', 'node_count', 'node_id', 'node_type', 'open_port', 'path', 'pressure', 'pressure_metrics', 'proof', 'root', 'severity', 'source', 'target', 'tool', 'top_remediations', 'transfer_factor', 'trust', 'trust_relationship', 'type', 'unknown', 'user', 'vulnerability', 'weak_auth']
