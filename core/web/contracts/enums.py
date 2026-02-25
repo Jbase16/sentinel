@@ -5,9 +5,8 @@ from enum import Enum
 
 class WebAuthMode(str, Enum):
     NONE = "none"
-    FORM = "form"
-    SCRIPTED = "scripted"
-    IMPORTED = "imported"
+    STATIC_HEADER = "static_header"
+    FORM_LOGIN = "form_login"
 
 
 class ParamLocation(str, Enum):

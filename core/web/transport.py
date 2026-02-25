@@ -146,6 +146,19 @@ class MutatingTransport:
         self._baselines[baseline_key] = handle
         return handle
 
+    def get_registered_baseline(
+        self,
+        principal_id: PrincipalId,
+        method: WebMethod,
+        url: str,
+        body: Optional[bytes] = None
+    ) -> BaselineHandle:
+        key = self._compute_baseline_key(principal_id, method, url, body)
+        handle = self._baselines.get(key)
+        if handle is None:
+            raise ValueError("No baseline registered for key.")
+        return handle
+
     def mutate(
         self,
         mission: WebMission,

@@ -75,7 +75,9 @@ class EvidenceBuilder:
         handle: BaselineHandle,
         mutation: MutationResult,
         title: str,
-        summary: str
+        summary: str,
+        affected_principals: Optional[List[PrincipalId]] = None,
+        confidence: float = 0.9
     ) -> EvidenceBundle:
         
         # 1. Deterministic Hash ID
@@ -107,6 +109,7 @@ class EvidenceBuilder:
             scan_id=mission.scan_id,
             session_id=mission.session_id,
             principal_id=ctx.principal_id,
+            affected_principals=affected_principals or [],
             vuln_class=vuln_class,
             title=title,
             summary=summary,
@@ -143,7 +146,9 @@ class EvidenceService:
         handle: BaselineHandle,
         mutation: MutationResult,
         title: str,
-        summary: str
+        summary: str,
+        affected_principals: Optional[List[PrincipalId]] = None,
+        confidence: float = 0.9
     ) -> EvidenceBundle:
         
         bundle = self.builder.build(
@@ -154,7 +159,9 @@ class EvidenceService:
             handle=handle,
             mutation=mutation,
             title=title,
-            summary=summary
+            summary=summary,
+            affected_principals=affected_principals,
+            confidence=confidence
         )
         
         # Event 1: Bundle Created
@@ -183,7 +190,7 @@ class EvidenceService:
                 title=title,
                 target_url=mutation.exchange.url, # type: ignore
                 severity=mutation.delta.severity,
-                confidence=0.9, # V1 deterministic Reflection is high confidence
+                confidence=confidence,
                 evidence_ready=True
             ).model_dump(mode="json")
         ))

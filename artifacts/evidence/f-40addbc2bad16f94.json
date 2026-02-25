@@ -1,0 +1,97 @@
+{
+  "version": "1.0",
+  "finding_id": {
+    "value": "f-40addbc2bad16f94"
+  },
+  "mission_id": {
+    "value": "m-idor-test"
+  },
+  "scan_id": {
+    "value": "s-idor-test"
+  },
+  "session_id": {
+    "value": "ss-idor-test"
+  },
+  "vuln_class": "idor",
+  "title": "Insecure Direct Object Reference (IDOR)",
+  "summary": "Cross-principal authorization bypass detected. Principal B successfully accessed Principal A's baseline resource with structurally identical response.",
+  "principal_id": {
+    "value": "p-attk123"
+  },
+  "affected_principals": [
+    {
+      "value": "p-owner123"
+    },
+    {
+      "value": "p-attk123"
+    }
+  ],
+  "request_sequence": [
+    {
+      "request_id": {
+        "value": "req-00000001"
+      },
+      "url": "http://localhost:8081/profile?user=123",
+      "method": "GET",
+      "request_headers": {},
+      "request_body_b64": null,
+      "response_status": 200,
+      "response_headers": {
+        "server": "BaseHTTP/0.6 Python/3.14.2",
+        "date": "Wed, 25 Feb 2026 06:28:49 GMT",
+        "content-type": "text/html"
+      },
+      "response_body_b64": "PGh0bWw+PGJvZHk+VXNlciBwcm9maWxlPC9ib2R5PjwvaHRtbD4=",
+      "captured_at": "2026-02-25T06:28:49.590276"
+    },
+    {
+      "request_id": {
+        "value": "req-00000001"
+      },
+      "url": "http://localhost:8081/profile?user=123",
+      "method": "GET",
+      "request_headers": {},
+      "request_body_b64": null,
+      "response_status": 200,
+      "response_headers": {
+        "server": "BaseHTTP/0.6 Python/3.14.2",
+        "date": "Wed, 25 Feb 2026 06:28:49 GMT",
+        "content-type": "text/html"
+      },
+      "response_body_b64": "PGh0bWw+PGJvZHk+VXNlciBwcm9maWxlPC9ib2R5PjwvaHRtbD4=",
+      "captured_at": "2026-02-25T06:28:49.597823"
+    }
+  ],
+  "baseline": {
+    "status_code": 200,
+    "body_hash": "30a10a7a90cc8beab22d1284b5b64cdfe1faadbca3329d3a177841c5c1781e82",
+    "normalized_hash": "30a10a7a90cc8beab22d1284b5b64cdfe1faadbca3329d3a177841c5c1781e82",
+    "dom_hash": null,
+    "json_shape_hash": null,
+    "ttfb_ms": 0,
+    "total_ms": 1
+  },
+  "delta": {
+    "status_delta": null,
+    "body_length_delta": null,
+    "structural_delta": 0.0,
+    "timing_delta_ms": 0,
+    "severity": "high",
+    "notes": [
+      "Cross-principal identical response detected."
+    ]
+  },
+  "vulnerable_param": null,
+  "artifacts": [
+    {
+      "artifact_id": {
+        "value": "art-f-40addbc2bad16f94-replay"
+      },
+      "kind": "replay_script",
+      "path": "artifacts/replays/f-40addbc2bad16f94.py",
+      "sha256": null
+    }
+  ],
+  "replay_script_path": "artifacts/replays/f-40addbc2bad16f94.py",
+  "created_at": "2026-02-25T06:28:49.603801"
+}

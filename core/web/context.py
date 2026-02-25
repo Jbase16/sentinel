@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Optional
 
 from .contracts.ids import PrincipalId
+import httpx
 
 
 @dataclass
@@ -18,6 +19,7 @@ class WebContext:
     csrf_tokens: Dict[str, str] = field(default_factory=dict)
     auth_tokens: Dict[str, str] = field(default_factory=dict)
     request_counter: int = 0
+    client: httpx.Client = field(default_factory=lambda: httpx.Client(verify=False, follow_redirects=True))
 
     def bump_request_counter(self) -> int:
         self.request_counter += 1

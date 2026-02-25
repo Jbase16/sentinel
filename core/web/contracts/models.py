@@ -56,6 +56,14 @@ class WebMission(BaseModel):
         return [x.strip() for x in v if x.strip()]
 
 
+class PrincipalProfile(BaseModel):
+    principal_id: PrincipalId
+    login_url: Optional[HttpUrl] = None
+    username: Optional[str] = Field(default=None, max_length=128)
+    password: Optional[str] = Field(default=None, max_length=128)
+    extra_headers: Dict[str, str] = Field(default_factory=dict, description="e.g., predefined tokens or custom identifiers")
+
+
 class EndpointCandidate(BaseModel):
     url: HttpUrl
     method: WebMethod = WebMethod.GET

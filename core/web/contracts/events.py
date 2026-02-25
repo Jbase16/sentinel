@@ -26,7 +26,7 @@ from .models import DeltaVector, EndpointCandidate, EvidenceBundle, HttpExchange
 class EventType(str):
     WEB_SURFACE_DISCOVERED = "WEB_SURFACE_DISCOVERED"
     WEB_ENDPOINT_REGISTERED = "WEB_ENDPOINT_REGISTERED"
-    WEB_AUTH_SUCCESS = "WEB_AUTH_SUCCESS"
+    WEB_AUTH_ESTABLISHED = "WEB_AUTH_ESTABLISHED"
     WEB_MUTATION_ATTEMPT = "WEB_MUTATION_ATTEMPT"
     WEB_DELTA_DETECTED = "WEB_DELTA_DETECTED"
     WEB_FINDING_CONFIRMED = "WEB_FINDING_CONFIRMED"
@@ -75,10 +75,10 @@ class WebEndpointRegisteredPayload(BaseModel):
     js_asset: Optional[HttpUrl] = None
 
 
-class WebAuthSuccessPayload(BaseModel):
+class WebAuthEstablishedPayload(BaseModel):
     auth_mode: WebAuthMode
     principal_id: PrincipalId
-    login_url: HttpUrl
+    login_url: Optional[HttpUrl] = None
     success_signal: str = Field(min_length=1, max_length=256, description="e.g. cookie name, redirect, DOM marker")
     session_fingerprint: str = Field(min_length=8, max_length=256, description="non-secret hash of session state")
 
@@ -121,7 +121,7 @@ class WebEvidenceBundleCreatedPayload(BaseModel):
 EventPayload = Union[
     WebSurfaceDiscoveredPayload,
     WebEndpointRegisteredPayload,
-    WebAuthSuccessPayload,
+    WebAuthEstablishedPayload,
     WebMutationAttemptPayload,
     WebDeltaDetectedPayload,
     WebFindingConfirmedPayload,

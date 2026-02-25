@@ -89,11 +89,11 @@ class WebOrchestrator:
                     ctx=ctx,
                     vuln_class=reflection.vuln_class,
                     param_spec=res.param_spec,
-                    handle=self.transport._baselines.get(self.transport._compute_baseline_key(
+                    handle=self.transport.get_registered_baseline(
                         principal_id=ctx.principal_id,
                         method=endpoint.method,
                         url=str(endpoint.url)
-                    )), # type: ignore
+                    ),
                     mutation=res,
                     title="Reflected Parameter",
                     summary="Deterministic reflection canary detected in response body."
@@ -103,4 +103,66 @@ class WebOrchestrator:
             budget_index += len(endpoint_results)
             
         logger.info(f"Scan complete. Generated {len(results)} reflection mutation results.")
+        return results
+
+    def run_multi_principal_scan(self, mission: WebMission, ctx_a: WebContext, ctx_b: WebContext) -> List[MutationResult]:
+        """
+        Executes IDOR Multi-Principal scanning. 
+        Crawls as Principal A, then attempts to access all discovered resources as Principal B.
+        """
+        from .mutate.idor import MultiPrincipalDiffEngine
+        
+        logger.info(f"Starting multi-principal IDOR scan for mission {mission.mission_id}")
+        
+        # 1. Surface Discovery under Principal A
+        logger.info(f"Crawling origin as Principal A: {mission.origin}")
+        self.crawler.crawl(mission, ctx_a, self.registry)
+        
+        urls, assets, endpoints = self.registry.snapshot()
+        logger.info(f"Discovered {len(urls)} URLs, {len(endpoints)} endpoint candidates")
+        
+        results: List[MutationResult] = []
+        idor_engine = MultiPrincipalDiffEngine()
+        
+        budget_index = 0
+        for endpoint in endpoints:
+            if budget_index >= mission.exploit_ceiling:
+                logger.warning("Exploit ceiling reached, halting mutations.")
+                break
+                
+            if endpoint.method.value != "GET":
+                continue
+                
+            endpoint_results = idor_engine.run(
+                mission=mission,
+                ctx_a=ctx_a,
+                ctx_b=ctx_b,
+                transport=self.transport,
+                url=str(endpoint.url),
+                method=endpoint.method,
+                budget_index=budget_index
+            )
+            
+            for res in endpoint_results:
+                self.evidence_service.confirm(
+                    mission=mission,
+                    ctx=ctx_b,  # Context B is the attacker context in this finding
+                    vuln_class=idor_engine.vuln_class,
+                    param_spec=None,
+                    handle=self.transport.get_registered_baseline(
+                        principal_id=ctx_a.principal_id,
+                        method=endpoint.method,
+                        url=str(endpoint.url)
+                    ),
+                    mutation=res,
+                    title="Insecure Direct Object Reference (IDOR)",
+                    summary="Cross-principal authorization bypass detected. Principal B successfully accessed Principal A's baseline resource with structurally identical response.",
+                    affected_principals=[ctx_a.principal_id, ctx_b.principal_id],
+                    confidence=0.95
+                )
+
+            results.extend(endpoint_results)
+            budget_index += 1  # 1 mutation attempt per endpoint
+            
+        logger.info(f"Cross-principal scan complete. Generated {len(results)} IDOR mutation results.")
         return results

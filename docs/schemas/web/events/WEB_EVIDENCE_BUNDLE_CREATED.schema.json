@@ -316,6 +316,17 @@
         },
         "vuln_class": {
           "$ref": "#/$defs/VulnerabilityClass"
+        },
+        "vulnerable_param": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParamSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -436,6 +447,67 @@
         "value"
       ],
       "title": "MissionId",
+      "type": "object"
+    },
+    "ParamLocation": {
+      "enum": [
+        "query",
+        "path",
+        "json",
+        "form",
+        "header"
+      ],
+      "title": "ParamLocation",
+      "type": "string"
+    },
+    "ParamSpec": {
+      "properties": {
+        "example_value": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Example Value"
+        },
+        "location": {
+          "$ref": "#/$defs/ParamLocation"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "reflection_hint": {
+          "default": false,
+          "title": "Reflection Hint",
+          "type": "boolean"
+        },
+        "type_guess": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Guess"
+        }
+      },
+      "required": [
+        "name",
+        "location"
+      ],
+      "title": "ParamSpec",
       "type": "object"
     },
     "PrincipalId": {
