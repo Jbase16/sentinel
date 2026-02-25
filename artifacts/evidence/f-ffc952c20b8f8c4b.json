@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "finding_id": {
-    "value": "f-4b64ff3a7c8d55d9"
+    "value": "f-ffc952c20b8f8c4b"
   },
   "mission_id": {
     "value": "m-idor-test"
@@ -16,7 +16,7 @@
   "title": "Insecure Direct Object Reference (IDOR)",
   "summary": "Cross-principal authorization bypass detected. Principal B successfully accessed Principal A's baseline resource with structurally identical response.",
   "principal_id": {
-    "value": "p-attk123"
+    "value": "p-owner123"
   },
   "affected_principals": [
     {
@@ -26,46 +26,68 @@
       "value": "p-attk123"
     }
   ],
+  "principal_states": [
+    {
+      "principal_id": {
+        "value": "p-owner123"
+      },
+      "cookies": {
+        "session_id": "sess_owner",
+        "csrf_token": "csrf_owner"
+      },
+      "user_agent": ""
+    },
+    {
+      "principal_id": {
+        "value": "p-attk123"
+      },
+      "cookies": {
+        "session_id": "sess_attacker",
+        "csrf_token": "csrf_attacker"
+      },
+      "user_agent": ""
+    }
+  ],
   "request_sequence": [
     {
       "request_id": {
-        "value": "req-00000002"
+        "value": "req-00000001"
       },
-      "url": "http://localhost:8081/search?q=test",
+      "url": "http://localhost:8081/profile?user=123",
       "method": "GET",
       "request_headers": {},
       "request_body_b64": null,
       "response_status": 200,
       "response_headers": {
         "server": "BaseHTTP/0.6 Python/3.14.2",
-        "date": "Wed, 25 Feb 2026 06:48:07 GMT",
+        "date": "Wed, 25 Feb 2026 07:02:56 GMT",
         "content-type": "text/html"
       },
-      "response_body_b64": "PGh0bWw+PGJvZHk+U2VhcmNoIHJlc3VsdHM8L2JvZHk+PC9odG1sPg==",
-      "captured_at": "2026-02-25T06:48:07.118066"
+      "response_body_b64": "PGh0bWw+PGJvZHk+VXNlciBwcm9maWxlPC9ib2R5PjwvaHRtbD4=",
+      "captured_at": "2026-02-25T07:02:56.513623"
     },
     {
       "request_id": {
-        "value": "req-00000002"
+        "value": "req-00000001"
       },
-      "url": "http://localhost:8081/search?q=test",
+      "url": "http://localhost:8081/profile?user=123",
       "method": "GET",
       "request_headers": {},
       "request_body_b64": null,
       "response_status": 200,
       "response_headers": {
         "server": "BaseHTTP/0.6 Python/3.14.2",
-        "date": "Wed, 25 Feb 2026 06:48:07 GMT",
+        "date": "Wed, 25 Feb 2026 07:02:56 GMT",
         "content-type": "text/html"
       },
-      "response_body_b64": "PGh0bWw+PGJvZHk+U2VhcmNoIHJlc3VsdHM8L2JvZHk+PC9odG1sPg==",
-      "captured_at": "2026-02-25T06:48:07.125991"
+      "response_body_b64": "PGh0bWw+PGJvZHk+VXNlciBwcm9maWxlPC9ib2R5PjwvaHRtbD4=",
+      "captured_at": "2026-02-25T07:02:56.520603"
     }
   ],
   "baseline": {
     "status_code": 200,
-    "body_hash": "c09b806edf7eea1e54b1f518bdf3d4ceb52426483c45411396a155d72cd9cdc8",
-    "normalized_hash": "c09b806edf7eea1e54b1f518bdf3d4ceb52426483c45411396a155d72cd9cdc8",
+    "body_hash": "30a10a7a90cc8beab22d1284b5b64cdfe1faadbca3329d3a177841c5c1781e82",
+    "normalized_hash": "30a10a7a90cc8beab22d1284b5b64cdfe1faadbca3329d3a177841c5c1781e82",
     "dom_hash": null,
     "json_shape_hash": null,
     "ttfb_ms": 0,
@@ -85,13 +107,14 @@
   "artifacts": [
     {
       "artifact_id": {
-        "value": "art-f-4b64ff3a7c8d55d9-replay"
+        "value": "art-f-ffc952c20b8f8c4b-replay"
       },
       "kind": "replay_script",
-      "path": "artifacts/replays/f-4b64ff3a7c8d55d9.py",
-      "sha256": null
+      "path": "artifacts/replays/f-ffc952c20b8f8c4b.py",
+      "sha256": "6e89530b89da418e22da03169c92cd95ffa82f8e1d62b8841b8b2d36c4298197"
     }
   ],
-  "replay_script_path": "artifacts/replays/f-4b64ff3a7c8d55d9.py",
-  "created_at": "2026-02-25T06:48:07.132702"
+  "replay_script_path": "artifacts/replays/f-ffc952c20b8f8c4b.py",
+  "artifact_hash": "08e406ea3672152dac2d0a9ca27053a48acba021d75370fcc0a94b0a5ad321cf",
+  "created_at": "2026-02-25T07:02:56.526324"
 }

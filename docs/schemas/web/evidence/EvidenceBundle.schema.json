@@ -396,6 +396,32 @@
       "title": "PrincipalId",
       "type": "object"
     },
+    "PrincipalSnapshot": {
+      "properties": {
+        "cookies": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "maxProperties": 100,
+          "title": "Cookies",
+          "type": "object"
+        },
+        "principal_id": {
+          "$ref": "#/$defs/PrincipalId"
+        },
+        "user_agent": {
+          "default": "",
+          "maxLength": 512,
+          "title": "User Agent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "principal_id"
+      ],
+      "title": "PrincipalSnapshot",
+      "type": "object"
+    },
     "RequestId": {
       "properties": {
         "value": {
@@ -473,6 +499,20 @@
       "title": "Affected Principals",
       "type": "array"
     },
+    "artifact_hash": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 16,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Hash"
+    },
     "artifacts": {
       "items": {
         "$ref": "#/$defs/ArtifactRef"
@@ -516,6 +556,14 @@
     },
     "principal_id": {
       "$ref": "#/$defs/PrincipalId"
+    },
+    "principal_states": {
+      "items": {
+        "$ref": "#/$defs/PrincipalSnapshot"
+      },
+      "maxItems": 100,
+      "title": "Principal States",
+      "type": "array"
     },
     "replay_script_path": {
       "anyOf": [

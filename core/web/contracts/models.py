@@ -64,6 +64,12 @@ class PrincipalProfile(BaseModel):
     extra_headers: Dict[str, str] = Field(default_factory=dict, description="e.g., predefined tokens or custom identifiers")
 
 
+class PrincipalSnapshot(BaseModel):
+    principal_id: PrincipalId
+    cookies: Dict[str, str] = Field(default_factory=dict, max_length=100)
+    user_agent: str = Field(default="", max_length=512)
+
+
 class EndpointCandidate(BaseModel):
     url: HttpUrl
     method: WebMethod = WebMethod.GET
@@ -147,6 +153,7 @@ class EvidenceBundle(BaseModel):
 
     principal_id: PrincipalId
     affected_principals: List[PrincipalId] = Field(default_factory=list, max_length=100)
+    principal_states: List[PrincipalSnapshot] = Field(default_factory=list, max_length=100)
 
     request_sequence: List[HttpExchange] = Field(default_factory=list, max_length=100)
     baseline: Optional[BaselineSignature] = None
@@ -155,6 +162,7 @@ class EvidenceBundle(BaseModel):
 
     artifacts: List[ArtifactRef] = Field(default_factory=list, max_length=100)
     replay_script_path: Optional[str] = Field(default=None, max_length=1024)
+    artifact_hash: Optional[str] = Field(default=None, min_length=16, max_length=128)
 
     created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
 

@@ -86,7 +86,7 @@ class WebOrchestrator:
             for res in endpoint_results:
                 self.evidence_service.confirm(
                     mission=mission,
-                    ctx=ctx,
+                    contexts=[ctx],
                     vuln_class=reflection.vuln_class,
                     param_spec=res.param_spec,
                     handle=self.transport.get_registered_baseline(
@@ -146,7 +146,7 @@ class WebOrchestrator:
             for res in endpoint_results:
                 self.evidence_service.confirm(
                     mission=mission,
-                    ctx=ctx_b,  # Context B is the attacker context in this finding
+                    contexts=[ctx_a, ctx_b],
                     vuln_class=idor_engine.vuln_class,
                     param_spec=None,
                     handle=self.transport.get_registered_baseline(
@@ -157,7 +157,6 @@ class WebOrchestrator:
                     mutation=res,
                     title="Insecure Direct Object Reference (IDOR)",
                     summary="Cross-principal authorization bypass detected. Principal B successfully accessed Principal A's baseline resource with structurally identical response.",
-                    affected_principals=[ctx_a.principal_id, ctx_b.principal_id],
                     confidence=0.95
                 )
 

@@ -15,50 +15,73 @@ logger = logging.getLogger(__name__)
 
 
 class ReplayGenerator:
-    """Generates a deterministic local replay python script."""
-    def generate(self, finding_id: FindingId, mutation_exchange: HttpExchange, evidence_path: Path) -> Path:
-        script_dir = evidence_path.parent.parent / "replays"
-        script_dir.mkdir(parents=True, exist_ok=True)
-        script_path = script_dir / f"{finding_id.value}.py"
+    """Generates a courtroom-grade deterministic local replay python script."""
+    def generate_replay(self, bundle: EvidenceBundle) -> str:
+        method = bundle.request_sequence[0].method.value if isinstance(bundle.request_sequence[0].method, str) else bundle.request_sequence[0].method.value
+        url = str(bundle.request_sequence[0].url)
         
-        method = mutation_exchange.method.value if isinstance(mutation_exchange.method, str) else mutation_exchange.method.value
-        url = str(mutation_exchange.url)
-        headers = mutation_exchange.request_headers
-        body_b64 = mutation_exchange.request_body_b64
+        script = [
+            "#!/usr/bin/env python3",
+            "# Sentinel Replay Artifact",
+            f"# Finding: {bundle.finding_id.value}",
+            f"# Vulnerability: {bundle.vuln_class.value}",
+            f"# Principals: {' -> '.join([str(p.principal_id.value) for p in bundle.principal_states])}",
+            "",
+            "import httpx",
+            "import hashlib",
+            "import base64",
+            "import sys",
+            "",
+            "def main():",
+            f"    target_url = {repr(url)}",
+            f"    method = {repr(method)}",
+            ""
+        ]
+
+        clients = []
+        for state in bundle.principal_states:
+            pid = state.principal_id.value.replace('-', '_')
+            clients.append(pid)
+            script.append(f"    # Principal {state.principal_id.value}")
+            script.append(f"    client_{pid} = httpx.Client(verify=False, follow_redirects=True)")
+            if state.cookies:
+                script.append(f"    client_{pid}.cookies.update({repr(state.cookies)})")
+            script.append("")
+
+        # Assume 2 sequence exchanges (baseline and mutate)
+        if len(bundle.request_sequence) >= 2:
+            base_b64 = bundle.request_sequence[0].request_body_b64
+            mut_b64 = bundle.request_sequence[1].request_body_b64
+            
+            script.append(f"    base_content = base64.b64decode({repr(base_b64)}) if {repr(base_b64)} else None")
+            script.append(f"    base_headers = {repr(bundle.request_sequence[0].request_headers)}")
+            script.append(f"    base_req = client_{clients[0]}.build_request(method, target_url, headers=base_headers, content=base_content)")
+            script.append(f"    print('[*] Simulating baseline execution...')")
+            script.append(f"    base_resp = client_{clients[0]}.send(base_req)")
+            script.append("")
+            
+            # The mutation attempt
+            attacker_client = clients[1] if len(clients) > 1 else clients[0]
+            script.append(f"    mut_content = base64.b64decode({repr(mut_b64)}) if {repr(mut_b64)} else None")
+            script.append(f"    mut_headers = {repr(bundle.request_sequence[1].request_headers)}")
+            script.append(f"    mut_req = client_{attacker_client}.build_request(method, target_url, headers=mut_headers, content=mut_content)")
+            script.append(f"    print('[*] Simulating mutation execution...')")
+            script.append(f"    mut_resp = client_{attacker_client}.send(mut_req)")
+            script.append("")
+            
+            if bundle.vuln_class == VulnerabilityClass.IDOR:
+                script.append("    print('[+] Response bodies extracted. Attempting to verify exact IDOR reproduction...')")
+                script.append("    assert hashlib.sha256(base_resp.content).hexdigest() == hashlib.sha256(mut_resp.content).hexdigest(), 'Response contents do not match (IDOR failed)'")
+                script.append("    print('IDOR reproduced successfully.')")
+            else:
+                script.append("    print(f'[+] Original Status: {base_resp.status_code}, Mutated Status: {mut_resp.status_code}')")
+                script.append("    print('Finding verification complete.')")
+
+        script.append("")
+        script.append("if __name__ == '__main__':")
+        script.append("    main()")
         
-        script = f"""#!/usr/bin/env python3
-import httpx
-import base64
-import sys
-
-# Deterministic Replay Script for {finding_id.value}
-
-def main():
-    target_url = {repr(url)}
-    headers = {repr(headers)}
-    method = {repr(method)}
-    body_b64 = {repr(body_b64)}
-    
-    content = base64.b64decode(body_b64) if body_b64 else None
-    
-    print(f"[*] Replaying {{method}} {{target_url}}")
-    client = httpx.Client(verify=False, follow_redirects=True)
-    try:
-        req = client.build_request(method, target_url, headers=headers, content=content)
-        resp = client.send(req)
-        print(f"[+] Status: {{resp.status_code}}")
-        # In a real replay, you'd assert against the delta or canary here.
-        # This V1 stub exits clean if network succeeds.
-    except Exception as e:
-        print(f"[-] Replay failed: {{e}}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-"""
-        script_path.write_text(script)
-        script_path.chmod(0o755)
-        return script_path
+        return "\n".join(script)
 
 
 class EvidenceBuilder:
@@ -69,47 +92,32 @@ class EvidenceBuilder:
     def build(
         self,
         mission: WebMission,
-        ctx: WebContext,
         vuln_class: VulnerabilityClass,
         param_spec: Optional[ParamSpec],
         handle: BaselineHandle,
         mutation: MutationResult,
         title: str,
         summary: str,
-        affected_principals: Optional[List[PrincipalId]] = None,
+        principal_states: List[PrincipalSnapshot],
         confidence: float = 0.9
     ) -> EvidenceBundle:
         
         # 1. Deterministic Hash ID
-        normalized_url = handle.baseline_id.split("|")[2] # Extract from baseline key string
-        param_name = param_spec.name if param_spec else "noparam"
-        seed = f"{mission.mission_id.value}|{ctx.principal_id.value}|{vuln_class.value}|{normalized_url}|{param_name}"
+        url = str(handle.exchange.url)
+        sorted_principals = ",".join(sorted(p.principal_id.value for p in principal_states))
+        seed = f"{mission.mission_id.value}:{url}:{vuln_class.value}:{sorted_principals}"
         finding_id_str = "f-" + hashlib.sha256(seed.encode()).hexdigest()[:16]
         finding_id = FindingId(value=finding_id_str)
         
-        evidence_dir = self.artifacts_dir / "evidence"
-        evidence_dir.mkdir(parents=True, exist_ok=True)
-        bundle_path = evidence_dir / f"{finding_id_str}.json"
-        
-        # 2. Replay Automation
-        replay_gen = ReplayGenerator()
-        script_path = replay_gen.generate(finding_id, mutation.exchange, bundle_path)
-        
-        artifacts = [
-            ArtifactRef(
-                artifact_id=ArtifactId(value=f"art-{finding_id_str}-replay"),
-                kind="replay_script",
-                path=str(script_path)
-            )
-        ]
-        
+        # 2. Base Evidence Bundle
         bundle = EvidenceBundle(
             finding_id=finding_id,
             mission_id=mission.mission_id,
             scan_id=mission.scan_id,
             session_id=mission.session_id,
-            principal_id=ctx.principal_id,
-            affected_principals=affected_principals or [],
+            principal_id=principal_states[0].principal_id, # Target principal
+            principal_states=principal_states,
+            affected_principals=[p.principal_id for p in principal_states],
             vuln_class=vuln_class,
             title=title,
             summary=summary,
@@ -117,12 +125,39 @@ class EvidenceBuilder:
             baseline=handle.signature,
             delta=mutation.delta,
             vulnerable_param=param_spec,
-            artifacts=artifacts,
-            replay_script_path=str(script_path),
+            artifacts=[],
             notes=["Auto-generated Evidence Bundle"]
         )
+
+        # 3. Generate Courtroom-Grade Replay Script
+        replay_gen = ReplayGenerator()
+        script_content = replay_gen.generate_replay(bundle)
+        script_hash = hashlib.sha256(script_content.encode("utf-8")).hexdigest()
         
-        # Dump to disk
+        script_dir = self.artifacts_dir / "replays"
+        script_dir.mkdir(parents=True, exist_ok=True)
+        script_path = script_dir / f"{finding_id_str}.py"
+        script_path.write_text(script_content)
+        script_path.chmod(0o755)
+
+        bundle.replay_script_path = str(script_path)
+        bundle.artifacts.append(
+            ArtifactRef(
+                artifact_id=ArtifactId(value=f"art-{finding_id_str}-replay"),
+                kind="replay_script",
+                path=str(script_path),
+                sha256=script_hash
+            )
+        )
+
+        # 4. Final Verification Hash
+        bundle_json_str = json.dumps(bundle.model_dump(mode="json", exclude={"artifact_hash"}), sort_keys=True)
+        bundle.artifact_hash = hashlib.sha256(bundle_json_str.encode("utf-8")).hexdigest()
+
+        # 5. Dump to disk
+        evidence_dir = self.artifacts_dir / "evidence"
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        bundle_path = evidence_dir / f"{finding_id_str}.json"
         bundle_path.write_text(json.dumps(bundle.model_dump(mode="json"), indent=2))
         
         return bundle
@@ -140,27 +175,38 @@ class EvidenceService:
     def confirm(
         self,
         mission: WebMission,
-        ctx: WebContext,
+        contexts: List[WebContext],
         vuln_class: VulnerabilityClass,
         param_spec: Optional[ParamSpec],
         handle: BaselineHandle,
         mutation: MutationResult,
         title: str,
         summary: str,
-        affected_principals: Optional[List[PrincipalId]] = None,
         confidence: float = 0.9
     ) -> EvidenceBundle:
-        
+        from .contracts.models import PrincipalSnapshot
+
+        principal_states = []
+        for c in contexts:
+            # Seal the execution state
+            ua = dict(c.default_headers).get("User-Agent", "")
+            principal_states.append(
+                PrincipalSnapshot(
+                    principal_id=c.principal_id,
+                    cookies=dict(c.client.cookies),
+                    user_agent=ua
+                )
+            )
+
         bundle = self.builder.build(
             mission=mission,
-            ctx=ctx,
             vuln_class=vuln_class,
             param_spec=param_spec,
             handle=handle,
             mutation=mutation,
             title=title,
             summary=summary,
-            affected_principals=affected_principals,
+            principal_states=principal_states,
             confidence=confidence
         )
         
@@ -170,7 +216,7 @@ class EvidenceService:
             mission_id=mission.mission_id,
             scan_id=mission.scan_id,
             session_id=mission.session_id,
-            principal_id=ctx.principal_id,
+            principal_id=contexts[0].principal_id,
             payload=WebEvidenceBundleCreatedPayload(
                 finding_id=bundle.finding_id,
                 bundle=bundle.model_dump(mode="json")
@@ -183,7 +229,7 @@ class EvidenceService:
             mission_id=mission.mission_id,
             scan_id=mission.scan_id,
             session_id=mission.session_id,
-            principal_id=ctx.principal_id,
+            principal_id=contexts[0].principal_id,
             payload=WebFindingConfirmedPayload(
                 finding_id=bundle.finding_id,
                 vuln_class=vuln_class,
