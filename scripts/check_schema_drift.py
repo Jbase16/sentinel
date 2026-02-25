@@ -11,6 +11,7 @@ from pydantic import BaseModel
 # ---- SAME IMPORTS AS GENERATOR ----
 from core.web.contracts.models import (
     EvidenceBundle,
+    FindingRecord,
 )
 from core.web.contracts.events import (
     EventEnvelope,
@@ -53,6 +54,7 @@ def main() -> None:
 
     ok &= compare(EventEnvelope, SCHEMA_ROOT / "event-envelope.schema.json")
     ok &= compare(EvidenceBundle, SCHEMA_ROOT / "evidence" / "EvidenceBundle.schema.json")
+    ok &= compare(FindingRecord, SCHEMA_ROOT / "evidence" / "FindingRecord.schema.json")
 
     ok &= compare(WebAuthEstablishedPayload, EVENTS_ROOT / "WEB_AUTH_ESTABLISHED.schema.json")
     ok &= compare(WebDeltaDetectedPayload, EVENTS_ROOT / "WEB_DELTA_DETECTED.schema.json")

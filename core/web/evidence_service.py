@@ -10,8 +10,27 @@ from .contracts.enums import VulnerabilityClass
 from .contracts.events import EventEnvelope, EventType, WebEvidenceBundleCreatedPayload, WebFindingConfirmedPayload
 from .context import WebContext
 from .transport import BaselineHandle, MutationResult, SentinelEventBus
+from .diff.delta import DeltaVector
 
 logger = logging.getLogger(__name__)
+
+class ConfidenceScorer:
+    """Calculates algorithmic confidence based on delta signals."""
+    def score(self, vuln_class: VulnerabilityClass, delta: DeltaVector) -> float:
+        if vuln_class == VulnerabilityClass.IDOR:
+            # Baseline is expected to be structurally similar and 2xx/3xx matches
+            if delta.status_delta in (0, None) and delta.structural_delta < 0.05:
+                # Same status, structurally identical => high confidence IDOR
+                return 0.95
+            if delta.status_delta in (0, None):
+                # Same status, but larger structural drift => medium confidence IDOR
+                return 0.75
+            return 0.0
+        elif vuln_class == VulnerabilityClass.REFLECTION:
+            # Structural Delta doesn't strictly matter for reflection,
+            # if we confirm it, the canary was found natively in the response.
+            return 0.90
+        return 0.5
 
 
 class ReplayGenerator:
@@ -32,9 +51,14 @@ class ReplayGenerator:
             "import base64",
             "import sys",
             "",
+            "def normalize_body(b: bytes) -> bytes:",
+            "    return b.strip() if b else b''",
+            "",
             "def main():",
             f"    target_url = {repr(url)}",
             f"    method = {repr(method)}",
+            f"    expected_norm_hash = {repr(bundle.baseline.normalized_hash)}",
+            f"    expected_raw_hash = {repr(bundle.baseline.body_hash)}",
             ""
         ]
 
@@ -58,6 +82,11 @@ class ReplayGenerator:
             script.append(f"    base_req = client_{clients[0]}.build_request(method, target_url, headers=base_headers, content=base_content)")
             script.append(f"    print('[*] Simulating baseline execution...')")
             script.append(f"    base_resp = client_{clients[0]}.send(base_req)")
+            script.append(f"    base_norm = hashlib.sha256(normalize_body(base_resp.content)).hexdigest()")
+            script.append(f"    base_raw = hashlib.sha256(base_resp.content).hexdigest()")
+            script.append(f"    assert base_norm == expected_norm_hash, 'Baseline reproduction failed: normalized body hash mismatch.'")
+            script.append(f"    if base_raw == expected_raw_hash:")
+            script.append(f"        print('  [+] Exact raw baseline body match verified.')")
             script.append("")
             
             # The mutation attempt
@@ -67,11 +96,12 @@ class ReplayGenerator:
             script.append(f"    mut_req = client_{attacker_client}.build_request(method, target_url, headers=mut_headers, content=mut_content)")
             script.append(f"    print('[*] Simulating mutation execution...')")
             script.append(f"    mut_resp = client_{attacker_client}.send(mut_req)")
+            script.append(f"    mut_norm = hashlib.sha256(normalize_body(mut_resp.content)).hexdigest()")
             script.append("")
             
             if bundle.vuln_class == VulnerabilityClass.IDOR:
                 script.append("    print('[+] Response bodies extracted. Attempting to verify exact IDOR reproduction...')")
-                script.append("    assert hashlib.sha256(base_resp.content).hexdigest() == hashlib.sha256(mut_resp.content).hexdigest(), 'Response contents do not match (IDOR failed)'")
+                script.append("    assert mut_norm == expected_norm_hash, 'Response contents do not structurally match the established baseline (IDOR failed)'")
                 script.append("    print('IDOR reproduced successfully.')")
             else:
                 script.append("    print(f'[+] Original Status: {base_resp.status_code}, Mutated Status: {mut_resp.status_code}')")
@@ -182,9 +212,9 @@ class EvidenceService:
         mutation: MutationResult,
         title: str,
         summary: str,
-        confidence: float = 0.9
+        confidence: Optional[float] = None
     ) -> EvidenceBundle:
-        from .contracts.models import PrincipalSnapshot
+        from .contracts.models import PrincipalSnapshot, FindingRecord
 
         principal_states = []
         for c in contexts:
@@ -198,6 +228,10 @@ class EvidenceService:
                 )
             )
 
+        if confidence is None:
+            scorer = ConfidenceScorer()
+            confidence = scorer.score(vuln_class, mutation.delta)
+
         bundle = self.builder.build(
             mission=mission,
             vuln_class=vuln_class,
@@ -209,6 +243,29 @@ class EvidenceService:
             principal_states=principal_states,
             confidence=confidence
         )
+        
+        # Map EvidenceBundle to FindingRecord
+        record = FindingRecord(
+            finding_id=bundle.finding_id,
+            vuln_class=vuln_class,
+            title=title,
+            confidence=confidence,
+            confirmed=True,
+            target_url=mutation.exchange.url, # type: ignore
+            endpoint=None, # Optional mapping from registry if needed later
+            evidence_bundle_id=bundle.finding_id.value,
+            metadata={
+                "evidence_path": f"artifacts/evidence/{bundle.finding_id.value}.json",
+                "replay_path": bundle.replay_script_path,
+                "artifact_hash": bundle.artifact_hash
+            }
+        )
+        
+        # Persist FindingRecord
+        record_dir = self.builder.artifacts_dir / "findings"
+        record_dir.mkdir(parents=True, exist_ok=True)
+        record_path = record_dir / f"{bundle.finding_id.value}.json"
+        record_path.write_text(json.dumps(record.model_dump(mode="json"), indent=2))
         
         # Event 1: Bundle Created
         self.bus.emit(EventEnvelope(

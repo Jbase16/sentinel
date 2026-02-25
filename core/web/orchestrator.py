@@ -156,8 +156,7 @@ class WebOrchestrator:
                     ),
                     mutation=res,
                     title="Insecure Direct Object Reference (IDOR)",
-                    summary="Cross-principal authorization bypass detected. Principal B successfully accessed Principal A's baseline resource with structurally identical response.",
-                    confidence=0.95
+                    summary="Cross-principal authorization bypass detected. Principal B successfully accessed Principal A's baseline resource with structurally identical response."
                 )
 
             results.extend(endpoint_results)

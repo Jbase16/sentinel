@@ -1,73 +1,89 @@
-
-# Build artifacts
-# Logs and temporary files
-# Python venv and caches
-# Swift Package Manager (if unused)
-# Xcode Generation
-# macOS cruft
-# Logs and temporary files
-*.log
-*.out
-logs/
-*.pyc
-*.tmp
-# Keep xcodeproj but ignore user-specific data inside it
-xcuserdata/
-*.xcuserstate
-*.zip
+# OS / editor
 .DS_Store
-.swiftpm/
+.vscode/
+.zencoder/
+.claude/
+
+# Python env / caches
 .venv/
-DerivedData/
-ui/.xcodeDerivedData/
-__pycache__/
-ui/.build/
-ui/build/
-build/
 venv/
 .analysis-venv/
-userdata/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+sentinelforge.egg-info/
 
-tests/test_aegis_phase1.py
+# Build artifacts
+build/
+dist/
+ui/.build/
+ui/Tests/.build/
+ui/build/
+ui/.swiftpm/
+DerivedData/
+ui/.xcodeDerivedData/
+xcuserdata/
+ui/SentinelForge.xcodeproj/xcuserdata/
+*.xcuserstate
 
-tests/test_thanatos_phase1.py
-tests/test_thanatos_phase2.py
-.claude/agents/senior-engineer.md
+# Logs / runtime output
+*.log
+*.out
+/logs/
+/client_log
+/srv_log
+/test_out_log
+/output.txt
+/tracked_files.txt
+/test_output.txt
+/conflict.log
+/ollama.log
+/server.log
+/backend.log
+/diff_output.txt
+/replay_log
 
-# Ad-hoc Verification Scripts
-verify_*.py
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+/archive_stage/
+/artifacts/
+/reports/
 
-# Internal Documentation & Scratchpads
-AGENTS.md
-CODE_REVIEW_*.md
-COMPLETED_TODOS_SUMMARY*
-GITHUB_ACTIONS_SETUP.md
-MoreTODO.md
-TODO_*.md
-TRIAD.md
-WARP.md
-sentinel-update.md
-work.md
-test_output.txt
+# Local/private project files
+/live_fuzz_campaign.py
+/CLAUDE.md
+/sentinel.code-workspace
+/work.md
+/sentinel-update.md
+/MoreTODO.md
+/TODO.md
+/TODO_*.md
+/COMPLETED_TODOS_SUMMARY*
+/TRIAD.md
+/WARP.md
+/GITHUB_ACTIONS_SETUP.md
+/CODE_REVIEW_*.md
+/AGENTS.md
+/amp/AGENTS.md
+
+# Root-only ad-hoc scripts
+/verify_*.py
+
+# Tests intentionally excluded from commits
+/tests/test_aegis_phase1.py
+/tests/test_thanatos_phase1.py
+/tests/test_thanatos_phase2.py
+
+# Archived binaries
+/docs/archive/audits/*.docx
+/SentinelForge_*.docx
+
+# Misc
+*.tmp
 *.zip
-conflict.log
-sentinel-update.md
-work.md
-test_output.txt
-*.zip
-conflict.log
-ollama.log
-server.log
-
-# Scan Reports
-reports/
-
-# Private / Local Config
-live_fuzz_campaign.py
-TODO.md
-CLAUDE.md
-sentinel.code-workspace
-
-# Archive
-archive_stage/
-sentinel/
+/sentinel/
