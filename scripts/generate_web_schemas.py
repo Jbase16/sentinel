@@ -13,7 +13,7 @@ from core.web.contracts.models import (
 )
 from core.web.contracts.events import (
     EventEnvelope,
-    WebAuthSuccessPayload,
+    WebAuthEstablishedPayload,
     WebDeltaDetectedPayload,
     WebEndpointRegisteredPayload,
     WebEvidenceBundleCreatedPayload,
@@ -40,7 +40,7 @@ def main() -> None:
     write_schema(EventEnvelope, SCHEMA_ROOT / "event-envelope.schema.json")
     write_schema(EvidenceBundle, SCHEMA_ROOT / "evidence" / "EvidenceBundle.schema.json")
 
-    write_schema(WebAuthSuccessPayload, EVENTS_ROOT / "WEB_AUTH_SUCCESS.schema.json")
+    write_schema(WebAuthEstablishedPayload, EVENTS_ROOT / "WEB_AUTH_ESTABLISHED.schema.json")
     write_schema(WebDeltaDetectedPayload, EVENTS_ROOT / "WEB_DELTA_DETECTED.schema.json")
     write_schema(WebEndpointRegisteredPayload, EVENTS_ROOT / "WEB_ENDPOINT_REGISTERED.schema.json")
     write_schema(WebEvidenceBundleCreatedPayload, EVENTS_ROOT / "WEB_EVIDENCE_BUNDLE_CREATED.schema.json")

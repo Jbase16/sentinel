@@ -12,13 +12,14 @@ logger = logging.getLogger("smoke_test_idor")
 import httpx
 from pydantic import HttpUrl
 
-from core.web.contracts.models import WebMission
-from core.web.contracts.enums import VulnerabilityClass
+from core.web.contracts.models import WebMission, PrincipalProfile
+from core.web.contracts.enums import VulnerabilityClass, WebAuthMode
 from core.web.contracts.ids import MissionId, ScanId, SessionId, PrincipalId
 from core.web.context import WebContext
 from core.web.orchestrator import WebOrchestrator
 from core.web.crawler import ExecutionPolicy
 from core.web.event_bus import UnderlyingBus
+from core.web.auth_manager import AuthManager
 
 class HttpxPolicy(ExecutionPolicy):
     
@@ -26,10 +27,7 @@ class HttpxPolicy(ExecutionPolicy):
         pass
         
     def http_get(self, mission: WebMission, ctx: WebContext, url: str, headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], bytes]:
-        # Inject the principal ID as an auth header to simulate differentiation
-        effective_headers = headers or {}
-        effective_headers["X-Test-Principal"] = ctx.principal_id.value
-        resp = ctx.client.get(url, headers=effective_headers)
+        resp = ctx.client.get(url, headers=headers)
         return resp.status_code, dict(resp.headers), resp.content
 
     def http_request(
@@ -43,10 +41,7 @@ class HttpxPolicy(ExecutionPolicy):
     ) -> tuple[int, dict[str, str], bytes, int, int]:
         start = time.perf_counter()
         
-        effective_headers = headers or {}
-        effective_headers["X-Test-Principal"] = ctx.principal_id.value
-        
-        req = ctx.client.build_request(method, url, headers=effective_headers, content=body)
+        req = ctx.client.build_request(method, url, headers=headers, content=body)
         resp = ctx.client.send(req)
         end = time.perf_counter()
         total_ms = int((end - start) * 1000)
@@ -80,14 +75,36 @@ def run_smoke_test():
         allowed_origins=[target_url],
         max_depth=2,
         max_pages=50,
-        exploit_ceiling=200
+        exploit_ceiling=200,
+        auth_mode=WebAuthMode.FORM_LOGIN,
+        principal_count=2
     )
     
     ctx_a = WebContext(principal_id=PrincipalId(value="p-owner123"))
+    prof_a = PrincipalProfile(
+        principal_id=ctx_a.principal_id,
+        login_url=HttpUrl(f"{target_url}/login"), # type: ignore
+        username="owner",
+        password="password!"
+    )
+
     ctx_b = WebContext(principal_id=PrincipalId(value="p-attk123"))
+    prof_b = PrincipalProfile(
+        principal_id=ctx_b.principal_id,
+        login_url=HttpUrl(f"{target_url}/login"), # type: ignore
+        username="attacker",
+        password="password!"
+    )
     
     policy = HttpxPolicy()
     bus = LoggingBus()
+    
+    from core.web.event_bus import StrictEventBus
+    strict_bus = StrictEventBus(underlying_bus=bus, strict_mode=True)
+    
+    auth_mgr = AuthManager(bus=strict_bus)
+    auth_mgr.bootstrap(mission, ctx_a, prof_a)
+    auth_mgr.bootstrap(mission, ctx_b, prof_b)
     
     orchestrator = WebOrchestrator(policy=policy, underlying_bus=bus)
     

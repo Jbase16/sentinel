@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from .events import (
     EventEnvelope,
-    WebAuthSuccessPayload,
+    WebAuthEstablishedPayload,
     WebDeltaDetectedPayload,
     WebEndpointRegisteredPayload,
     WebEvidenceBundleCreatedPayload,
@@ -33,7 +33,7 @@ def all_contract_schemas() -> Dict[str, Dict[str, Any]]:
         "EventEnvelope": pydantic_schema(EventEnvelope),
         "WEB_SURFACE_DISCOVERED": pydantic_schema(WebSurfaceDiscoveredPayload),
         "WEB_ENDPOINT_REGISTERED": pydantic_schema(WebEndpointRegisteredPayload),
-        "WEB_AUTH_SUCCESS": pydantic_schema(WebAuthSuccessPayload),
+        "WEB_AUTH_ESTABLISHED": pydantic_schema(WebAuthEstablishedPayload),
         "WEB_MUTATION_ATTEMPT": pydantic_schema(WebMutationAttemptPayload),
         "WEB_DELTA_DETECTED": pydantic_schema(WebDeltaDetectedPayload),
         "WEB_FINDING_CONFIRMED": pydantic_schema(WebFindingConfirmedPayload),

@@ -14,7 +14,7 @@ from core.web.contracts.models import (
 )
 from core.web.contracts.events import (
     EventEnvelope,
-    WebAuthSuccessPayload,
+    WebAuthEstablishedPayload,
     WebDeltaDetectedPayload,
     WebEndpointRegisteredPayload,
     WebEvidenceBundleCreatedPayload,
@@ -54,7 +54,7 @@ def main() -> None:
     ok &= compare(EventEnvelope, SCHEMA_ROOT / "event-envelope.schema.json")
     ok &= compare(EvidenceBundle, SCHEMA_ROOT / "evidence" / "EvidenceBundle.schema.json")
 
-    ok &= compare(WebAuthSuccessPayload, EVENTS_ROOT / "WEB_AUTH_SUCCESS.schema.json")
+    ok &= compare(WebAuthEstablishedPayload, EVENTS_ROOT / "WEB_AUTH_ESTABLISHED.schema.json")
     ok &= compare(WebDeltaDetectedPayload, EVENTS_ROOT / "WEB_DELTA_DETECTED.schema.json")
     ok &= compare(WebEndpointRegisteredPayload, EVENTS_ROOT / "WEB_ENDPOINT_REGISTERED.schema.json")
     ok &= compare(WebEvidenceBundleCreatedPayload, EVENTS_ROOT / "WEB_EVIDENCE_BUNDLE_CREATED.schema.json")

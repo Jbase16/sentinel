@@ -40,6 +40,28 @@ class DummyHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/login":
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length).decode("utf-8")
+            params = urllib.parse.parse_qs(post_data)
+            username = params.get("username", [""])[0]
+            
+            if username:
+                self.send_response(302)
+                self.send_header("Set-Cookie", f"session_id=sess_{username}; Path=/")
+                # Also set a fake CSRF token for testing
+                self.send_header("Set-Cookie", f"csrf_token=csrf_{username}; Path=/")
+                self.send_header("Location", "/profile")
+                self.end_headers()
+            else:
+                self.send_response(401)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
 def run_server():
     server = HTTPServer(("localhost", 8081), DummyHandler)
     server.serve_forever()

@@ -17,9 +17,8 @@
     "WebAuthMode": {
       "enum": [
         "none",
-        "form",
-        "scripted",
-        "imported"
+        "static_header",
+        "form_login"
       ],
       "title": "WebAuthMode",
       "type": "string"
@@ -30,11 +29,19 @@
       "$ref": "#/$defs/WebAuthMode"
     },
     "login_url": {
-      "format": "uri",
-      "maxLength": 2083,
-      "minLength": 1,
-      "title": "Login Url",
-      "type": "string"
+      "anyOf": [
+        {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Login Url"
     },
     "principal_id": {
       "$ref": "#/$defs/PrincipalId"
@@ -57,10 +64,9 @@
   "required": [
     "auth_mode",
     "principal_id",
-    "login_url",
     "success_signal",
     "session_fingerprint"
   ],
-  "title": "WebAuthSuccessPayload",
+  "title": "WebAuthEstablishedPayload",
   "type": "object"
 }
