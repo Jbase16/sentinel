@@ -77,7 +77,8 @@ def run_smoke_test():
         max_pages=50,
         exploit_ceiling=200,
         auth_mode=WebAuthMode.FORM_LOGIN,
-        principal_count=2
+        principal_count=2,
+        allow_secret_artifacts=True
     )
     
     ctx_a = WebContext(principal_id=PrincipalId(value="p-owner123"))

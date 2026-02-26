@@ -258,6 +258,28 @@
           ],
           "default": null
         },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "confidence_notes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Confidence Notes",
+          "type": "array"
+        },
         "created_at": {
           "format": "date-time",
           "title": "Created At",

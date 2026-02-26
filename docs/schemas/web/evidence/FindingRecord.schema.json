@@ -1,0 +1,172 @@
+{
+  "$defs": {
+    "EndpointCandidate": {
+      "properties": {
+        "confidence": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "method": {
+          "$ref": "#/$defs/WebMethod",
+          "default": "GET"
+        },
+        "requires_auth": {
+          "default": false,
+          "title": "Requires Auth",
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/SurfaceSource"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Tags",
+          "type": "array"
+        },
+        "url": {
+          "format": "uri",
+          "maxLength": 2083,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "source"
+      ],
+      "title": "EndpointCandidate",
+      "type": "object"
+    },
+    "FindingId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "FindingId",
+      "type": "object"
+    },
+    "SurfaceSource": {
+      "enum": [
+        "crawler",
+        "js_intel",
+        "browser",
+        "manual"
+      ],
+      "title": "SurfaceSource",
+      "type": "string"
+    },
+    "VulnerabilityClass": {
+      "enum": [
+        "reflection",
+        "sqli",
+        "idor",
+        "ssrf",
+        "general"
+      ],
+      "title": "VulnerabilityClass",
+      "type": "string"
+    },
+    "WebMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "title": "WebMethod",
+      "type": "string"
+    }
+  },
+  "description": "Minimal normalized finding record suitable for piping into existing FindingsStore.",
+  "properties": {
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "confirmed": {
+      "default": false,
+      "title": "Confirmed",
+      "type": "boolean"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "endpoint": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EndpointCandidate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "evidence_bundle_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Optional pointer if stored separately",
+      "title": "Evidence Bundle Id"
+    },
+    "finding_id": {
+      "$ref": "#/$defs/FindingId"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "target_url": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Target Url",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 256,
+      "minLength": 3,
+      "title": "Title",
+      "type": "string"
+    },
+    "vuln_class": {
+      "$ref": "#/$defs/VulnerabilityClass"
+    }
+  },
+  "required": [
+    "finding_id",
+    "vuln_class",
+    "title",
+    "confidence",
+    "target_url"
+  ],
+  "title": "FindingRecord",
+  "type": "object"
+}

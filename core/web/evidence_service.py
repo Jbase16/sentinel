@@ -11,33 +11,43 @@ from .contracts.events import EventEnvelope, EventType, WebEvidenceBundleCreated
 from .context import WebContext
 from .transport import BaselineHandle, MutationResult, SentinelEventBus
 from .diff.delta import DeltaVector
+from .diff.baseline import _normalize_body
 
 logger = logging.getLogger(__name__)
 
 class ConfidenceScorer:
     """Calculates algorithmic confidence based on delta signals."""
-    def score(self, vuln_class: VulnerabilityClass, delta: DeltaVector) -> float:
+    def score(self, vuln_class: VulnerabilityClass, delta: DeltaVector, baseline_status: int, mutated_status: int) -> tuple[float, List[str]]:
+        notes = []
+        score = 0.0
+        
         if vuln_class == VulnerabilityClass.IDOR:
-            # Baseline is expected to be structurally similar and 2xx/3xx matches
-            if delta.status_delta in (0, None) and delta.structural_delta < 0.05:
-                # Same status, structurally identical => high confidence IDOR
-                return 0.95
             if delta.status_delta in (0, None):
-                # Same status, but larger structural drift => medium confidence IDOR
-                return 0.75
-            return 0.0
+                score += 0.35
+                notes.append("Status matches baseline.")
+            if delta.structural_delta <= 0.05:
+                score += 0.35
+                notes.append(f"Structural delta is very low ({delta.structural_delta:.4f}).")
+            
+            if baseline_status in range(200, 300) and mutated_status in range(200, 300):
+                score += 0.15
+                notes.append("Both baseline and mutation returned 2xx Success.")
+            
+            if score == 0.0:
+                notes.append("No strong IDOR signals matched.")
+                
+            score = max(0.0, min(1.0, score))
+            return score, notes
+            
         elif vuln_class == VulnerabilityClass.REFLECTION:
-            # Structural Delta doesn't strictly matter for reflection,
-            # if we confirm it, the canary was found natively in the response.
-            return 0.90
-        return 0.5
+            return 0.90, ["Reflection native canary match assumed by mutator."]
+            
+        return 0.5, ["Unknown vulnerability class, defaulting to 0.5."]
 
 
 class ReplayGenerator:
     """Generates a courtroom-grade deterministic local replay python script."""
     def generate_replay(self, bundle: EvidenceBundle) -> str:
-        method = bundle.request_sequence[0].method.value if isinstance(bundle.request_sequence[0].method, str) else bundle.request_sequence[0].method.value
-        url = str(bundle.request_sequence[0].url)
         
         script = [
             "#!/usr/bin/env python3",
@@ -55,8 +65,6 @@ class ReplayGenerator:
             "    return b.strip() if b else b''",
             "",
             "def main():",
-            f"    target_url = {repr(url)}",
-            f"    method = {repr(method)}",
             f"    expected_norm_hash = {repr(bundle.baseline.normalized_hash)}",
             f"    expected_raw_hash = {repr(bundle.baseline.body_hash)}",
             ""
@@ -74,16 +82,25 @@ class ReplayGenerator:
 
         # Assume 2 sequence exchanges (baseline and mutate)
         if len(bundle.request_sequence) >= 2:
+            base_url = str(bundle.request_sequence[0].url)
+            base_method = bundle.request_sequence[0].method.value if isinstance(bundle.request_sequence[0].method, str) else bundle.request_sequence[0].method.value
             base_b64 = bundle.request_sequence[0].request_body_b64
+            
+            mut_url = str(bundle.request_sequence[1].url)
+            mut_method = bundle.request_sequence[1].method.value if isinstance(bundle.request_sequence[1].method, str) else bundle.request_sequence[1].method.value
             mut_b64 = bundle.request_sequence[1].request_body_b64
             
+            script.append(f"    base_url = {repr(base_url)}")
+            script.append(f"    base_method = {repr(base_method)}")
             script.append(f"    base_content = base64.b64decode({repr(base_b64)}) if {repr(base_b64)} else None")
             script.append(f"    base_headers = {repr(bundle.request_sequence[0].request_headers)}")
-            script.append(f"    base_req = client_{clients[0]}.build_request(method, target_url, headers=base_headers, content=base_content)")
+            script.append(f"    base_req = client_{clients[0]}.build_request(base_method, base_url, headers=base_headers, content=base_content)")
             script.append(f"    print('[*] Simulating baseline execution...')")
             script.append(f"    base_resp = client_{clients[0]}.send(base_req)")
             script.append(f"    base_norm = hashlib.sha256(normalize_body(base_resp.content)).hexdigest()")
             script.append(f"    base_raw = hashlib.sha256(base_resp.content).hexdigest()")
+            script.append(f"    print(f'  [+] Baseline Status: {{base_resp.status_code}}')")
+            script.append(f"    print(f'  [+] Baseline Norm Hash: {{base_norm}}')")
             script.append(f"    assert base_norm == expected_norm_hash, 'Baseline reproduction failed: normalized body hash mismatch.'")
             script.append(f"    if base_raw == expected_raw_hash:")
             script.append(f"        print('  [+] Exact raw baseline body match verified.')")
@@ -91,12 +108,16 @@ class ReplayGenerator:
             
             # The mutation attempt
             attacker_client = clients[1] if len(clients) > 1 else clients[0]
+            script.append(f"    mut_url = {repr(mut_url)}")
+            script.append(f"    mut_method = {repr(mut_method)}")
             script.append(f"    mut_content = base64.b64decode({repr(mut_b64)}) if {repr(mut_b64)} else None")
             script.append(f"    mut_headers = {repr(bundle.request_sequence[1].request_headers)}")
-            script.append(f"    mut_req = client_{attacker_client}.build_request(method, target_url, headers=mut_headers, content=mut_content)")
+            script.append(f"    mut_req = client_{attacker_client}.build_request(mut_method, mut_url, headers=mut_headers, content=mut_content)")
             script.append(f"    print('[*] Simulating mutation execution...')")
             script.append(f"    mut_resp = client_{attacker_client}.send(mut_req)")
             script.append(f"    mut_norm = hashlib.sha256(normalize_body(mut_resp.content)).hexdigest()")
+            script.append(f"    print(f'  [+] Mutation Status: {{mut_resp.status_code}}')")
+            script.append(f"    print(f'  [+] Mutation Norm Hash: {{mut_norm}}')")
             script.append("")
             
             if bundle.vuln_class == VulnerabilityClass.IDOR:
@@ -129,8 +150,9 @@ class EvidenceBuilder:
         title: str,
         summary: str,
         principal_states: List[PrincipalSnapshot],
-        confidence: float = 0.9
-    ) -> EvidenceBundle:
+        confidence: Optional[float] = None,
+        confidence_notes: Optional[List[str]] = None
+    ) -> tuple[EvidenceBundle, Path]:
         
         # 1. Deterministic Hash ID
         url = str(handle.exchange.url)
@@ -155,6 +177,8 @@ class EvidenceBuilder:
             baseline=handle.signature,
             delta=mutation.delta,
             vulnerable_param=param_spec,
+            confidence=confidence,
+            confidence_notes=confidence_notes or [],
             artifacts=[],
             notes=["Auto-generated Evidence Bundle"]
         )
@@ -190,7 +214,7 @@ class EvidenceBuilder:
         bundle_path = evidence_dir / f"{finding_id_str}.json"
         bundle_path.write_text(json.dumps(bundle.model_dump(mode="json"), indent=2))
         
-        return bundle
+        return bundle, bundle_path
 
 
 class EvidenceService:
@@ -220,19 +244,27 @@ class EvidenceService:
         for c in contexts:
             # Seal the execution state
             ua = dict(c.default_headers).get("User-Agent", "")
+            cookies = dict(c.client.cookies)
+            if not getattr(mission, "allow_secret_artifacts", False):
+                cookies = {k: "***REDACTED***" for k in cookies.keys()}
+                
             principal_states.append(
                 PrincipalSnapshot(
                     principal_id=c.principal_id,
-                    cookies=dict(c.client.cookies),
+                    cookies=cookies,
                     user_agent=ua
                 )
             )
 
         if confidence is None:
             scorer = ConfidenceScorer()
-            confidence = scorer.score(vuln_class, mutation.delta)
+            base_status = handle.signature.status_code
+            mut_status = mutation.exchange.response_status or 0
+            confidence, confidence_notes = scorer.score(vuln_class, mutation.delta, base_status, mut_status)
+        else:
+            confidence_notes = ["Manually overridden confidence score."]
 
-        bundle = self.builder.build(
+        bundle, bundle_path = self.builder.build(
             mission=mission,
             vuln_class=vuln_class,
             param_spec=param_spec,
@@ -241,7 +273,8 @@ class EvidenceService:
             title=title,
             summary=summary,
             principal_states=principal_states,
-            confidence=confidence
+            confidence=confidence,
+            confidence_notes=confidence_notes
         )
         
         # Map EvidenceBundle to FindingRecord
@@ -253,9 +286,9 @@ class EvidenceService:
             confirmed=True,
             target_url=mutation.exchange.url, # type: ignore
             endpoint=None, # Optional mapping from registry if needed later
-            evidence_bundle_id=bundle.finding_id.value,
+            evidence_bundle_id=bundle.finding_id.value, # To be renamed later but satisfies current schema
             metadata={
-                "evidence_path": f"artifacts/evidence/{bundle.finding_id.value}.json",
+                "evidence_path": str(bundle_path),
                 "replay_path": bundle.replay_script_path,
                 "artifact_hash": bundle.artifact_hash
             }

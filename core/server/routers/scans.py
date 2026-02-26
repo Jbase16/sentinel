@@ -494,7 +494,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             exit_code = int(tool_error["exit_code"])
                         return findings
                     except asyncio.CancelledError:
-                        state.cancel_requested.set()
+                        # Local task cancellation (e.g., from Strategos tool timeout)
+                        # should NOT poison the global scan state.
                         raise
                     except Exception as exc:
                         session.log(f"[Strategos] Tool failed ({tool}): {exc}")

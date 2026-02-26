@@ -43,6 +43,7 @@ class WebMission(BaseModel):
     exploit_ceiling: int = Field(ge=0, le=200000, default=1000)
     oob_allowed: bool = False
     destructive_methods_allowed: bool = False
+    allow_secret_artifacts: bool = False
 
     auth_mode: WebAuthMode = WebAuthMode.NONE
     principal_count: int = Field(ge=1, le=10, default=1)
@@ -159,6 +160,8 @@ class EvidenceBundle(BaseModel):
     baseline: Optional[BaselineSignature] = None
     delta: Optional[DeltaVector] = None
     vulnerable_param: Optional[ParamSpec] = None
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    confidence_notes: List[str] = Field(default_factory=list, max_length=100)
 
     artifacts: List[ArtifactRef] = Field(default_factory=list, max_length=100)
     replay_script_path: Optional[str] = Field(default=None, max_length=1024)
