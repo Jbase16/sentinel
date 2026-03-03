@@ -115,8 +115,10 @@ def get_report_composer(
     finding_store=Depends(get_finding_store),
     graph_analyzer: GraphAnalyzer = Depends(get_graph_analyzer),
 ) -> ReportComposer:
+    from core.data.evidence_store import EvidenceStore
     return ReportComposer(
         finding_store=finding_store,
+        evidence_ledger=EvidenceStore.instance(),
         graph_analyzer=graph_analyzer,
     )
 

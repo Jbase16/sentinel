@@ -12,6 +12,7 @@ from core.ai.ai_engine import AIEngine
 from core.ai.reporting import ReportComposer
 from core.server.state import get_state
 from core.errors import SentinelError, ErrorCode
+from core.data.db import Database
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,25 @@ async def generate_section(
     state = get_state()
     session = await state.get_session(session_id)
 
-    # ReportComposer tolerates session=None — it falls back to global stores.
+    if not session and not context:
+        db = Database.instance()
+        await db.init()
+        findings = await db.get_findings(session_id)
+        issues = await db.get_issues(session_id)
+        _, db_edges = await db.load_graph_snapshot(session_id)
+
+        if findings or issues:
+            context = {
+                "session_id": session_id,
+                "findings": findings,
+                "issues": issues,
+                "risk": {},
+                "killchain": db_edges,
+                "reasoning": {},
+                "decisions": [],
+            }
+
+    # ReportComposer tolerates session=None — it falls back to global stores if context_override is missing.
     composer = ReportComposer(session)
 
     if section not in composer.SECTIONS:
