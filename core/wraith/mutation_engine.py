@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TYPE_CH
 from urllib.parse import urlencode, urlparse, urljoin, parse_qsl
 
 import httpx
+from core.net.http_factory import create_async_client
 from core.wraith.execution_policy import PolicyViolation
 
 if TYPE_CHECKING:
@@ -841,11 +842,7 @@ class MutationEngine:
             httpx.AsyncClient instance
         """
         if self._client is None:
-            self._client = httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=httpx.Timeout(15.0, connect=5.0),
-                verify=False,  # Security scanner — may hit self-signed certs
-            )
+            self._client = create_async_client()
         return self._client
     
     async def close(self) -> None:

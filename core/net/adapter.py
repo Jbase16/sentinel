@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional, Mapping
 from core.base.context import ScopeContext
 from core.base.scope import ScopeDecision
 from core.base.exceptions import ScopePolicyViolationError, ExecutionPolicyViolationError
+from core.net.http_factory import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class SentinelHTTPClient:
     """
     def __init__(self, context: ScopeContext, underlying_client: Optional[httpx.AsyncClient] = None):
         self.context = context
-        self.client = underlying_client or httpx.AsyncClient(verify=False, follow_redirects=True)
+        self.client = underlying_client or create_async_client()
         
     async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """

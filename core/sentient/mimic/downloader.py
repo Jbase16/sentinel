@@ -51,6 +51,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 from core.base.config import get_config
+from core.net.http_factory import create_async_client
 
 # Safety fuse: prevents unsafe operations
 # Default to true, but overridden by config in factory
@@ -333,7 +334,7 @@ class AssetDownloader:
         if self._rate_limit > 0:
             await asyncio.sleep(1.0 / float(self._rate_limit))
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        async with create_async_client() as client:
             response = await client.get(url, timeout=timeout)
             response.raise_for_status()
             content_bytes = response.content
@@ -408,7 +409,7 @@ class AssetDownloader:
             target=parsed.netloc,
             base_url=target.rstrip("/"),
         )
-        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        async with create_async_client() as client:
             try:
                 response = await client.get(target, timeout=8.0)
                 if response.status_code == 200:
@@ -599,7 +600,7 @@ class AssetDownloader:
         self._robots_loaded_for.add(base)
         robots_url = urljoin(base + "/", "robots.txt")
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            async with create_async_client() as client:
                 response = await client.get(robots_url, timeout=4.0)
             if response.status_code != 200:
                 return

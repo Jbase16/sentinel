@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 
 import httpx
+from core.net.http_factory import create_async_client
 
 from core.cortex.events import GraphEvent, GraphEventType, get_event_bus
 from core.sentient.mimic.downloader import AssetDownloader, AssetType
@@ -194,7 +195,7 @@ class MIMICPhaseOrchestrator:
         Probe for build manifests in priority order.
         Returns (ManifestType, manifest_data) or (NONE, None).
         """
-        async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+        async with create_async_client() as client:
             for probe_path in self.MANIFEST_PROBES:
                 url = urljoin(self.target, probe_path)
                 try:
@@ -212,7 +213,7 @@ class MIMICPhaseOrchestrator:
 
         # Check for Next.js __NEXT_DATA__ in HTML
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            async with create_async_client() as client:
                 resp = await client.get(self.target, timeout=5.0)
                 if resp.status_code == 200 and "__NEXT_DATA__" in resp.text:
                     # Extract __NEXT_DATA__ from script tag
@@ -317,7 +318,7 @@ class MIMICPhaseOrchestrator:
 
         # Fetch root HTML to find script tags
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            async with create_async_client() as client:
                 resp = await client.get(self.target, timeout=5.0)
                 if resp.status_code == 200:
                     # Extract script src attributes

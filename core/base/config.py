@@ -358,6 +358,54 @@ class MimicConfig:
 
 
 @dataclass(frozen=True)
+class NetworkConfig:
+    """Outbound HTTP / TLS configuration for all scanner traffic.
+
+    Controls TLS certificate verification behavior across the entire platform.
+    Every outbound httpx client is created through ``core.net.http_factory``
+    which reads these settings.
+
+    Security notes:
+    - ``tls_verify=False`` is the default because security scanners routinely
+      hit targets with self-signed, expired, or mismatched certificates.
+    - For production bounty work you may want ``tls_verify=True`` with a
+      custom ``ca_bundle`` if the target uses a private CA.
+    - ``connect_timeout`` and ``request_timeout`` provide sane defaults that
+      prevent indefinite hangs against unresponsive targets.
+    """
+    # TLS certificate verification
+    # False = skip verification (scanner default — targets may have bad certs)
+    # True  = verify against system trust store (or ca_bundle if provided)
+    tls_verify: bool = False
+
+    # Optional path to a CA bundle file (PEM format)
+    # Only used when tls_verify is True.  None = use system default trust store.
+    ca_bundle: Optional[str] = None
+
+    # Default timeouts (seconds) for outbound HTTP
+    connect_timeout: float = 5.0
+    request_timeout: float = 15.0
+
+    # Follow redirects by default (most scanner workflows need this)
+    follow_redirects: bool = True
+
+    @property
+    def verify(self):
+        """Return the value suitable for httpx ``verify`` parameter."""
+        if not self.tls_verify:
+            return False
+        if self.ca_bundle:
+            return self.ca_bundle
+        return True
+
+    @property
+    def timeout(self):
+        """Return an httpx.Timeout built from our config values."""
+        import httpx
+        return httpx.Timeout(self.request_timeout, connect=self.connect_timeout)
+
+
+@dataclass(frozen=True)
 class NexusConfig:
     """Logic chaining configuration (NEXUS - The Chain Reactor).
 
@@ -607,6 +655,9 @@ class SentinelConfig:
     # OMEGA module settings (orchestration of all three pillars)
     omega: OmegaConfig = field(default_factory=OmegaConfig)
 
+    # Network / TLS settings (outbound HTTP behavior)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
+
     # Capability model settings (Phase 3-Lite)
     capability_model: CapabilityModelConfig = field(default_factory=CapabilityModelConfig)
 
@@ -777,6 +828,16 @@ class SentinelConfig:
 
         capability_model = CapabilityModelConfig.from_env_and_yaml()
 
+        # Network / TLS config
+        ca_bundle_path = os.getenv("SENTINEL_CA_BUNDLE")
+        network = NetworkConfig(
+            tls_verify=os.getenv("SENTINEL_TLS_VERIFY", "false").lower() == "true",
+            ca_bundle=ca_bundle_path if ca_bundle_path else None,
+            connect_timeout=float(os.getenv("SENTINEL_CONNECT_TIMEOUT", "5.0")),
+            request_timeout=float(os.getenv("SENTINEL_REQUEST_TIMEOUT", "15.0")),
+            follow_redirects=os.getenv("SENTINEL_FOLLOW_REDIRECTS", "true").lower() == "true",
+        )
+
         return cls(
             ai=ai,
             security=security,
@@ -788,6 +849,7 @@ class SentinelConfig:
             mimic=mimic,
             nexus=nexus,
             omega=omega,
+            network=network,
             capability_model=capability_model,
             debug=os.getenv("SENTINEL_DEBUG", "false").lower() == "true",
             api_host=os.getenv("SENTINEL_API_HOST", "127.0.0.1"),

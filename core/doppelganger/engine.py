@@ -7,6 +7,7 @@ import time
 from typing import Optional, Dict, Any, Tuple
 
 import httpx
+from core.net.http_factory import create_async_client
 
 from .models import Persona, Credential
 
@@ -93,7 +94,7 @@ class DoppelgangerEngine:
         login_endpoint = f"{target_url.rstrip('/')}/rest/user/login"
 
         try:
-            async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
+            async with create_async_client() as client:
                 resp = await client.post(
                     login_endpoint,
                     json={"email": credential.username, "password": credential.password},

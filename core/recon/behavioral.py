@@ -256,7 +256,16 @@ class BehavioralRecon:
         self.log = log_fn or (lambda msg: None)
         # Conditional branch.
         if verify_ssl is None:
-            verify_ssl = os.getenv("ARAULTRA_BEHAVIORAL_STRICT_SSL", "").lower() in ("1", "true", "yes", "on")
+            env_val = os.getenv("ARAULTRA_BEHAVIORAL_STRICT_SSL", "")
+            if env_val:
+                verify_ssl = env_val.lower() in ("1", "true", "yes", "on")
+            else:
+                # Fall back to platform-wide NetworkConfig
+                try:
+                    from core.base.config import get_config
+                    verify_ssl = get_config().network.tls_verify
+                except Exception:
+                    verify_ssl = False
         self.verify_ssl = verify_ssl
         self._ssl_context = ssl.create_default_context()
         # Conditional branch.

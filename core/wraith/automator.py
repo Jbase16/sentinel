@@ -102,6 +102,7 @@ class WraithAutomator:
         """
         import httpx
         from core.wraith.evasion import WraithEngine
+        from core.net.http_factory import create_async_client
 
         vuln_class = ftype.split("::")[-1] if "::" in ftype else "unknown"
         evasion = WraithEngine.instance()
@@ -113,10 +114,8 @@ class WraithAutomator:
         # Resolve target URL: if target is a bare hostname, prepend http://
         target_url = target if target.startswith("http") else f"http://{target}"
 
-        async with httpx.AsyncClient(
+        async with create_async_client(
             timeout=httpx.Timeout(10.0, connect=5.0),
-            verify=False,
-            follow_redirects=True,
         ) as client:
             # --- Capture baseline response for differential analysis ---
             baseline_status = None

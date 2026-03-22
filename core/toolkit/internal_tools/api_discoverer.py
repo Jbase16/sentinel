@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse, urlunparse
 
 import httpx
+from core.net.http_factory import create_async_client
 
 from core.toolkit.internal_tool import InternalTool, InternalToolContext
 from core.wraith.execution_policy import build_policy_runtime, PolicyViolation
@@ -130,10 +131,8 @@ class APIDiscovererTool(InternalTool):
             await self.log(queue, f"Findings mining: {len(mined_findings)} endpoints")
 
         # Strategy 3: Active path probing
-        async with httpx.AsyncClient(
-            follow_redirects=True,
+        async with create_async_client(
             timeout=self.REQUEST_TIMEOUT,
-            verify=False,
             headers={**headers, "User-Agent": "Mozilla/5.0 (compatible; SentinelForge/1.0)"},
             cookies=cookies,
         ) as client:
