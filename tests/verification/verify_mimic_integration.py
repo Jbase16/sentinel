@@ -1,95 +1,87 @@
 """
 Verification Script for Project MIMIC Integration.
-Scenario:
-1. Instantiate GhostAddon (wiring check).
-2. Simulate a proxy request (Ghost Intercept).
-3. Assert that ShadowSpec (MIMIC) learned the route.
+
+Tests the MimicSession pipeline: asset ingestion -> route mining -> event emission.
 """
-import sys
-from unittest.mock import MagicMock
-# Mock mitmproxy package hierarchy explicitly
-mock_mitmproxy = MagicMock()
-sys.modules['mitmproxy'] = mock_mitmproxy
-sys.modules['mitmproxy.http'] = MagicMock()
-sys.modules['mitmproxy.options'] = MagicMock()
-sys.modules['mitmproxy.tools'] = MagicMock()
-sys.modules['mitmproxy.tools.dump'] = MagicMock()
+import asyncio
+from unittest.mock import MagicMock, call
+from core.base.sequence import GlobalSequenceAuthority
+from core.mimic.models import Asset, sha256_bytes
+from core.mimic.session import MimicSession
 
-from core.ghost.proxy import GhostAddon
-from core.base.session import ScanSession
-
-class MockFlow:
-    def __init__(self, method, url, host):
-        self.request = MagicMock()
-        self.request.pretty_url = url
-        self.request.method = method
-        self.request.host = host
-        self.request.query = {}
-        self.response = MagicMock()
-        self.response.headers = {}
 
 def run_test():
-    print("🔌 Initializing MIMIC Integration Test...")
-    
-    # 1. Setup
-    session = MagicMock(spec=ScanSession)
-    session.log = MagicMock()
-    session.findings = MagicMock()
-    # Mocking strategy to avoid AI calls
-    from core.ai.strategy import StrategyEngine
-    StrategyEngine.propose_attacks = MagicMock()
-    
-    addon = GhostAddon(session)
-    
-    # Check Wiring
-    assert addon.shadow_spec is not None
-    print("✅ ShadowSpec Wired to GhostAddon")
-    assert addon.strategy.shadow_spec is not None
-    print("✅ ShadowSpec Wired to StrategyEngine")
-    
-    # 2. Simulate User Traffic
-    # Request 1: /api/users/1
-    flow1 = MockFlow("GET", "http://target.com/api/users/1", "target.com")
-    addon.request(flow1)
-    
-    # Request 2: /api/users/2
-    flow2 = MockFlow("GET", "http://target.com/api/users/2", "target.com")
-    addon.request(flow2)
-    
-    print("🚀 Simulated Traffic Ingested")
-    
-    # 3. Verify MIMIC learned the structure
-    # We expect /api/users/{id}
-    # We need to dig into the miner state
-    # Root -> "api" -> "users" -> "{id}"
-    
-    miner = addon.shadow_spec.miner
-    root = miner.root
-    
-    # Traverse
-    # Empty root -> "api"
-    api_node = root.get_child("api")
-    assert api_node is not None
-    
-    users_node = api_node.get_child("users")
-    assert users_node is not None
-    
-    # The magic: "1" and "2" should be clustered into "{id}"
-    id_node = users_node.get_child("{id}")
-    if not id_node:
-        # Debug output if fail
-        print(f"FAILED: Children of 'users': {users_node.children.keys()}")
-    
-    assert id_node is not None
-    assert id_node.is_parameter == True
-    
-    # Check Endpoint
-    endpoint = id_node.endpoints.get("GET")
-    assert endpoint is not None
-    print(f"✅ Learned Endpoint: {endpoint.method} {endpoint.path_template}")
-    assert endpoint.path_template == "/api/users/{id}"
-    
-    print("\n🎉 MIMIC Integration Verified!")
+    print("MIMIC Integration Test (core.mimic pipeline)")
+
+    # 0. Initialize sequence authority (bypasses DB for testing)
+    GlobalSequenceAuthority.reset_for_testing()
+    GlobalSequenceAuthority.initialize_for_testing(start=1)
+
+    # 1. Setup mock EventBus
+    bus = MagicMock()
+
+    session = MimicSession(
+        scan_id="test-integration",
+        bus=bus,
+    )
+
+    # 2. Create a synthetic JS asset with known routes
+    js_content = b'''
+    fetch("/api/users")
+    axios.post("/api/orders")
+    fetch("/admin/settings")
+    const key = "AKIAIOSFODNN7EXAMPLE"
+    '''
+
+    asset = Asset(
+        asset_id="test-asset-001",
+        url="https://example.com/app.js",
+        content_type="application/javascript",
+        size_bytes=len(js_content),
+        sha256=sha256_bytes(js_content),
+        content=js_content,
+    )
+
+    # 3. Ingest the asset
+    asyncio.run(session.ingest_asset(asset=asset))
+
+    # 4. Verify routes were discovered
+    assert "/api/users" in session.routes, f"Missing /api/users in {session.routes}"
+    assert "/api/orders" in session.routes, f"Missing /api/orders in {session.routes}"
+    print("  Routes discovered: OK")
+
+    # 5. Verify hidden routes were flagged
+    assert "/admin/settings" in session.hidden_routes, f"Missing hidden /admin/settings"
+    print("  Hidden routes flagged: OK")
+
+    # 6. Verify secrets were detected
+    assert len(session.secrets) > 0, "No secrets detected"
+    assert any(s.secret_type == "aws_access_key_id" for s in session.secrets)
+    print("  Secrets detected: OK")
+
+    # 7. Verify events were emitted
+    assert bus.emit.call_count > 0, "No events emitted"
+    event_types = [c.args[0].type for c in bus.emit.call_args_list]
+    print(f"  Events emitted: {len(event_types)}")
+
+    # 8. Finalize and check summary
+    summary = session.finalize()
+    assert summary.assets_analyzed == 1
+    assert summary.routes_found >= 2
+    assert summary.hidden_routes_found >= 1
+    assert summary.secrets_found >= 1
+    print(f"  Summary: {summary.assets_analyzed} assets, "
+          f"{summary.routes_found} routes, "
+          f"{summary.hidden_routes_found} hidden, "
+          f"{summary.secrets_found} secrets")
+
+    # 9. Shutdown
+    session.shutdown()
+    assert len(session.assets) == 0, "Assets not cleared after shutdown"
+    print("  Shutdown: OK")
+
+    print("\nMIMIC Integration: all checks passed")
+
 
 if __name__ == "__main__":
     run_test()

@@ -52,13 +52,14 @@ def test_admin_surface_rule():
     ))
     
     engine = ReasoningEngine.get(bus) # Fresh instance
-    
+    engine.start()
+
     evidence = []
     def spy(event: GraphEvent):
         if event.type == EventType.NEXUS_HYPOTHESIS_FORMED:
             evidence.append(event.payload)
             
-    bus.subscribe(spy, event_types=[EventType.NEXUS_HYPOTHESIS_FORMED])
+    bus.subscribe_sync(spy, [EventType.NEXUS_HYPOTHESIS_FORMED])
     
     # Trigger
     bus.emit(GraphEvent(

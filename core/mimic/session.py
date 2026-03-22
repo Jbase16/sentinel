@@ -2,28 +2,61 @@ from __future__ import annotations
 
 import json
 import asyncio
+import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Set, Optional
 from functools import partial
 
 from core.cortex.events import EventBus, GraphEvent
 from core.contracts.events import EventType
-from core.mimic.models import Asset, Route, Secret, MimicSummary
+from core.mimic.models import Asset, Route, Secret, MimicSummary, sha256_bytes
 from core.mimic.miners.routes import mine_routes
 from core.mimic.miners.secrets import mine_secrets
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class MimicSession:
     scan_id: str
     bus: EventBus
+    config: Any = None  # MimicConfig from manager; kept as Any to avoid circular import
 
     assets: Dict[str, Asset] = field(default_factory=dict)
     routes: Set[str] = field(default_factory=set)
     hidden_routes: Set[str] = field(default_factory=set)
     secrets: List[Secret] = field(default_factory=list)
 
-    async def ingest_asset(self, asset: Asset) -> None:
+    async def ingest_asset(
+        self,
+        asset: Optional[Asset] = None,
+        *,
+        asset_id: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> None:
+        """Ingest an asset for route/secret mining.
+
+        Accepts either a full Asset object (from downloader pipeline)
+        or an asset_id + path pair (from EventBus download events).
+        """
+        if asset is None:
+            if asset_id is None or path is None:
+                return
+            # Build Asset from file path (EventBus pathway)
+            try:
+                raw = Path(path).read_bytes()
+            except (OSError, ValueError):
+                return
+            asset = Asset(
+                asset_id=asset_id,
+                url=path,
+                content_type=None,
+                size_bytes=len(raw),
+                sha256=sha256_bytes(raw),
+                content=raw,
+            )
+
         self.assets[asset.asset_id] = asset
 
         text = self._decode(asset.content)
@@ -119,6 +152,14 @@ class MimicSession:
             )
         )
         return summary
+
+    def shutdown(self) -> None:
+        """Release resources held by this session."""
+        self.assets.clear()
+        self.routes.clear()
+        self.hidden_routes.clear()
+        self.secrets.clear()
+        logger.debug("[MimicSession] Shutdown scan_id=%s", self.scan_id)
 
     def _decode(self, b: bytes) -> str | None:
         if not b:

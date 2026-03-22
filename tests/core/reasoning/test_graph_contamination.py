@@ -53,7 +53,7 @@ def test_hypothesis_isolation():
     def spy(event: GraphEvent):
         emitted_types.append(event.type)
         
-    bus.subscribe(spy)
+    bus.subscribe_sync(spy)
     
     # Trigger a hypothesis via Mimic event
     # scan_id = "isolation_test_scan" # This line is now defined earlier

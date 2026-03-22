@@ -1,54 +1,38 @@
 """
-Verification Script for Project MIMIC (Model Inferencer).
-Scenario:
-1. Feed complex JSON payload (User Profile).
-2. Expect correct APISchema structure.
+Verification Script for Project MIMIC (Secret Mining via core.mimic).
+
+Tests the regex-based mine_secrets() function against common secret patterns.
 """
-from core.sentient.mimic.model_inferencer import ModelInferencer
-from core.sentient.mimic.types import DataType
+from core.mimic.miners.secrets import mine_secrets, shannon_entropy
+
 
 def run_test():
-    print("🧠 Initializing Model Inferencer...")
-    
-    # 1. Simple Object
-    payload = {
-        "id": 123,
-        "name": "Alice",
-        "is_admin": False
-    }
-    
-    print(f"   Fed: {payload}")
-    schema = ModelInferencer.infer(payload)
-    
-    assert schema.type == DataType.OBJECT
-    assert schema.properties["id"].type == DataType.INTEGER
-    assert schema.properties["name"].type == DataType.STRING
-    assert schema.properties["is_admin"].type == DataType.BOOLEAN
-    
-    print("✅ Simple Object Inference Verified")
-    
-    # 2. Nested Object + Array
-    payload_complex = {
-        "user": {
-            "id": 1,
-            "roles": ["admin", "editor"],
-            "settings": {
-                "theme": "dark"
-            }
-        }
-    }
-    
-    print(f"   Fed: {payload_complex}")
-    schema_c = ModelInferencer.infer(payload_complex)
-    
-    user_prop = schema_c.properties["user"]
-    assert user_prop.type == DataType.OBJECT
-    assert user_prop.properties["roles"].type == DataType.ARRAY
-    assert user_prop.properties["roles"].items.type == DataType.STRING
-    assert user_prop.properties["settings"].properties["theme"].type == DataType.STRING
-    
-    print("✅ Complex/Nested Inference Verified")
-    print("\n🎉 MIMIC Inferencer Verified!")
+    print("Secret Miner Verification (core.mimic)")
+
+    # 1. AWS key detection
+    js_aws = 'const key = "AKIAIOSFODNN7EXAMPLE"'
+    secrets = mine_secrets("verify-asset-1", js_aws)
+    assert any(s.secret_type == "aws_access_key_id" for s in secrets), "Missing AWS key detection"
+    print("  AWS key detection: OK")
+
+    # 2. GitHub token detection
+    js_gh = 'const token = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"'
+    secrets = mine_secrets("verify-asset-2", js_gh)
+    assert any(s.secret_type == "github_token" for s in secrets), "Missing GitHub token"
+    print("  GitHub token detection: OK")
+
+    # 3. Redaction
+    for s in secrets:
+        assert "ghp_1234567890" not in s.redacted_preview, "Secret not redacted"
+    print("  Redaction: OK")
+
+    # 4. Shannon entropy helper
+    assert shannon_entropy("") == 0.0
+    assert shannon_entropy("aaaa") < shannon_entropy("abcdefgh")
+    print("  Shannon entropy: OK")
+
+    print("\nMIMIC Secret Miner: all checks passed")
+
 
 if __name__ == "__main__":
     run_test()
