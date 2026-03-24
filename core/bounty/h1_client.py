@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from core.base.scope import ScopeRegistry, ScopeRule, AssetType, ScopeDecision
+from core.net.http_factory import create_sync_client
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class HackerOneClient:
         dto = H1ScopeDTO(handle=handle)
 
         try:
-            with httpx.Client(timeout=_H1_TIMEOUT) as client:
+            with create_sync_client(timeout=httpx.Timeout(_H1_TIMEOUT)) as client:
                 resp = client.get(url, auth=auth)
                 resp.raise_for_status()
                 data = resp.json()
@@ -130,9 +131,8 @@ class HackerOneClient:
         dto = H1ScopeDTO(handle=handle)
 
         try:
-            with httpx.Client(
-                timeout=_H1_TIMEOUT,
-                follow_redirects=True,
+            with create_sync_client(
+                timeout=httpx.Timeout(_H1_TIMEOUT),
                 headers={"User-Agent": "SentinelForge/1.0"},
             ) as client:
                 resp = client.get(program_url)

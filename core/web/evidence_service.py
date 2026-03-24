@@ -47,6 +47,15 @@ class ConfidenceScorer:
 
 class ReplayGenerator:
     """Generates a courtroom-grade deterministic local replay python script."""
+
+    def __init__(self):
+        try:
+            from core.base.config import get_config
+            self._tls_verify = get_config().network.tls_verify
+        except Exception:
+            # Safe default: verify TLS in generated replay scripts
+            self._tls_verify = True
+
     def generate_replay(self, bundle: EvidenceBundle) -> str:
         
         script = [
@@ -75,7 +84,7 @@ class ReplayGenerator:
             pid = state.principal_id.value.replace('-', '_')
             clients.append(pid)
             script.append(f"    # Principal {state.principal_id.value}")
-            script.append(f"    client_{pid} = httpx.Client(verify=False, follow_redirects=True)")
+            script.append(f"    client_{pid} = httpx.Client(verify={repr(self._tls_verify)}, follow_redirects=True)")
             if state.cookies:
                 script.append(f"    client_{pid}.cookies.update({repr(state.cookies)})")
             script.append("")

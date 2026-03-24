@@ -6,6 +6,7 @@ from urllib.parse import parse_qsl, urlparse, urlunparse
 
 import httpx
 
+from core.net.http_factory import create_async_client
 from core.toolkit.internal_tool import InternalTool, InternalToolContext
 from core.wraith.execution_policy import build_policy_runtime, PolicyViolation
 from core.wraith.mutation_engine import (
@@ -298,7 +299,7 @@ class WraithOOBProbeTool(InternalTool):
 
             await self.log(queue, f"Polling OOB provider (probes={probes_sent}, timeout={poll_timeout_s:.0f}s)...")
             try:
-                async with httpx.AsyncClient(follow_redirects=True) as oob_client:
+                async with create_async_client() as oob_client:
                     evidence = await manager.poll_interactions_async(
                         client=oob_client,
                         policy_runtime=policy_runtime,

@@ -31,6 +31,10 @@ from datetime import datetime
 from typing import Callable, Dict, List, Optional
 from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from core.data.findings import findings_store
 from core.data.evidence import evidence_store
 
@@ -265,7 +269,11 @@ class BehavioralRecon:
                     from core.base.config import get_config
                     verify_ssl = get_config().network.tls_verify
                 except Exception:
-                    verify_ssl = False
+                    logger.warning(
+                        "NetworkConfig unavailable — defaulting to tls_verify=True "
+                        "for safety. Set ARAULTRA_BEHAVIORAL_STRICT_SSL=0 to override."
+                    )
+                    verify_ssl = True
         self.verify_ssl = verify_ssl
         self._ssl_context = ssl.create_default_context()
         # Conditional branch.

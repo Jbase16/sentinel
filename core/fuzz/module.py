@@ -29,6 +29,8 @@ from typing import Callable, List
 
 import httpx
 
+from core.net.http_factory import create_async_client
+
 LogFn = Callable[[str], None]
 
 # Starter payloads; expand with context-aware mutations later.
@@ -55,7 +57,7 @@ class ParamFuzzer:
         """AsyncFunction fuzz."""
         findings: List[dict] = []
 
-        async with httpx.AsyncClient(follow_redirects=True, verify=True, timeout=self.timeout) as client:
+        async with create_async_client(timeout=httpx.Timeout(self.timeout)) as client:
             for payload in PAYLOADS:
                 params = {param_name: payload}
                 try:

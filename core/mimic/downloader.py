@@ -8,6 +8,7 @@ from typing import Iterable, List, Optional, Set, Tuple
 import httpx
 
 from core.contracts.budget import Budget
+from core.net.http_factory import create_async_client
 from core.mimic.models import Asset, sha256_bytes
 
 
@@ -59,8 +60,7 @@ class AssetDownloader:
         limits = httpx.Limits(max_connections=self._concurrency, max_keepalive_connections=self._concurrency)
         timeout = httpx.Timeout(self._timeout_s)
 
-        async with httpx.AsyncClient(
-            follow_redirects=True,
+        async with create_async_client(
             timeout=timeout,
             limits=limits,
             headers={"User-Agent": self._user_agent},

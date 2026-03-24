@@ -20,12 +20,15 @@ The Command Deck Orchestrator.
 import logging
 from typing import Dict, List
 
+import httpx
+
 from core.engine.scanner_engine import ScannerEngine
 from core.cortex.reasoning import reasoning_engine
 from core.wraith.evasion import WraithEngine
 from core.ghost.flow import FlowMapper
 from core.forge.compiler import ExploitCompiler
 from core.base.task_router import TaskRouter
+from core.net.http_factory import create_async_client
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +144,7 @@ class Orchestrator:
                 if tool == "wraith_evasion":
                     # Deploy Wraith for WAF bypass
                     logger.info(f"      [Wraith] Deploying Evasion against {sub_target}")
-                    async with httpx.AsyncClient(timeout=30.0) as client:
+                    async with create_async_client(timeout=httpx.Timeout(30.0)) as client:
                         result = await WraithEngine.instance().stealth_send(
                             client=client,
                             url=sub_target,

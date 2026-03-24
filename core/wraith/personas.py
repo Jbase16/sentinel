@@ -34,6 +34,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from core.cortex.capability_tiers import CapabilityTier
+from core.net.http_factory import create_async_client
 from .execution_policy import ExecutionPolicyRuntime, PolicyViolation
 from .mutation_engine import (
     ActionOutcome,
@@ -441,7 +442,7 @@ class PersonaManager:
         
         for persona in self.personas:
             try:
-                client = httpx.AsyncClient(follow_redirects=True)
+                client = create_async_client()
                 session = PersonaSession(
                     persona=persona,
                     client=client,

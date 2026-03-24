@@ -366,17 +366,18 @@ class NetworkConfig:
     which reads these settings.
 
     Security notes:
-    - ``tls_verify=False`` is the default because security scanners routinely
-      hit targets with self-signed, expired, or mismatched certificates.
-    - For production bounty work you may want ``tls_verify=True`` with a
-      custom ``ca_bundle`` if the target uses a private CA.
+    - ``tls_verify=True`` is the default for production safety.  This ensures
+      the scanner validates certificates and does not silently MITM itself.
+    - Set ``SENTINEL_TLS_VERIFY=false`` to disable when hitting targets with
+      self-signed, expired, or mismatched certificates.
+    - Supply a custom ``ca_bundle`` if the target uses a private CA.
     - ``connect_timeout`` and ``request_timeout`` provide sane defaults that
       prevent indefinite hangs against unresponsive targets.
     """
     # TLS certificate verification
-    # False = skip verification (scanner default — targets may have bad certs)
     # True  = verify against system trust store (or ca_bundle if provided)
-    tls_verify: bool = False
+    # False = skip verification (opt-in — set SENTINEL_TLS_VERIFY=false)
+    tls_verify: bool = True
 
     # Optional path to a CA bundle file (PEM format)
     # Only used when tls_verify is True.  None = use system default trust store.
@@ -831,7 +832,7 @@ class SentinelConfig:
         # Network / TLS config
         ca_bundle_path = os.getenv("SENTINEL_CA_BUNDLE")
         network = NetworkConfig(
-            tls_verify=os.getenv("SENTINEL_TLS_VERIFY", "false").lower() == "true",
+            tls_verify=os.getenv("SENTINEL_TLS_VERIFY", "true").lower() != "false",
             ca_bundle=ca_bundle_path if ca_bundle_path else None,
             connect_timeout=float(os.getenv("SENTINEL_CONNECT_TIMEOUT", "5.0")),
             request_timeout=float(os.getenv("SENTINEL_REQUEST_TIMEOUT", "15.0")),

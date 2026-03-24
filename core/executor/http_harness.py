@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional, Tuple
 from datetime import datetime
 
 from core.thanatos.models import MutationOpType
+from core.net.http_factory import create_async_client
 from .models import ExecutionOrder, ExecutionResult, ExecutionStatus
 
 log = logging.getLogger("executor.http_harness")
@@ -16,7 +17,6 @@ MAX_RETRIES = 3
 BASE_TIMEOUT = 10.0
 MAX_REDIRECTS = 5
 USER_AGENT = "SentinelForge/1.0 (Governor-Approved)"
-VERIFY_TLS = False
 
 MAX_BODY_CHARS = 200_000  # cap evidence to keep memory sane
 
@@ -28,12 +28,10 @@ class HttpHarness:
     async def get_client(cls) -> httpx.AsyncClient:
         if cls._client is None or cls._client.is_closed:
             limits = httpx.Limits(max_keepalive_connections=20, max_connections=50)
-            cls._client = httpx.AsyncClient(
+            cls._client = create_async_client(
                 limits=limits,
                 headers={"User-Agent": USER_AGENT},
-                follow_redirects=True,
                 max_redirects=MAX_REDIRECTS,
-                verify=VERIFY_TLS,
             )
         return cls._client
 
