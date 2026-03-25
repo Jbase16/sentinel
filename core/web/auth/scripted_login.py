@@ -54,6 +54,10 @@ class ScriptedLoginProvider(AuthProvider):
         login_url: str,
     ) -> AuthResult:
         """Simple single-request API login (e.g., POST /api/auth/login)."""
+        # Scope guard
+        if ctx.scope_enforcer is not None:
+            ctx.scope_enforcer.assert_in_scope(login_url)
+
         payload: Dict[str, Any] = {}
         if profile.username:
             payload["email"] = profile.username
@@ -111,6 +115,10 @@ class ScriptedLoginProvider(AuthProvider):
         for i, step in enumerate(script):
             method = step.get("method", "POST").upper()
             url = self._interpolate(step.get("url", ""), context_vars)
+
+            # Scope guard: each step URL could differ
+            if ctx.scope_enforcer is not None:
+                ctx.scope_enforcer.assert_in_scope(url)
 
             json_body = step.get("json")
             if json_body and isinstance(json_body, dict):

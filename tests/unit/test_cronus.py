@@ -8,7 +8,7 @@ These tests verify the core functionality of:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
 
@@ -667,12 +667,12 @@ class TestReplayFunctionality:
                     "status_code": 200,
                     "response_time_ms": 100,
                     "confidence": 1.0,
-                    "probed_at": datetime.utcnow().isoformat(),
+                    "probed_at": datetime.now(UTC).isoformat(),
                     "error_message": None,
                 }
             ],
-            "started_at": datetime.utcnow().isoformat(),
-            "completed_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
+            "completed_at": datetime.now(UTC).isoformat(),
         }
 
         replayed = hunter.replay(report_data)

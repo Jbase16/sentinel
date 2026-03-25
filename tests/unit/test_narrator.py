@@ -20,7 +20,7 @@ def test_narrator_integration():
     """Function test_narrator_integration."""
     bus = EventBus()
     subscriber = MockSubscriber()
-    bus.subscribe(subscriber)
+    bus.subscribe_sync(subscriber)
     
     narrator = NarratorEngine(event_bus=bus)
     ledger = DecisionLedger()

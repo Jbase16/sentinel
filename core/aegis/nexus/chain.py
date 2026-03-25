@@ -40,7 +40,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from urllib.parse import urlparse, urljoin
@@ -99,7 +99,7 @@ class StepResult:
     response: Optional[Dict[str, Any]] = None
     proof: Optional[str] = None
     error_message: Optional[str] = None
-    executed_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    executed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     duration_ms: Optional[int] = None
 
     @property
@@ -150,7 +150,7 @@ class ExecutionProof:
     step_results: List[StepResult] = field(default_factory=list)
     completed_steps: int = 0
     total_steps: int = 0
-    started_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     completed_at: Optional[datetime] = None
     duration_seconds: float = 0.0
 
@@ -300,7 +300,7 @@ class ChainExecutor:
         # Update statistics
         self._execution_count += 1
 
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
 
         # Determine target (use override if provided)
         target = target_override if target_override else chain.steps[0].primitive.target
@@ -368,7 +368,7 @@ class ChainExecutor:
             return ChainResult(error=str(e))
 
         finally:
-            proof.completed_at = datetime.utcnow()
+            proof.completed_at = datetime.now(UTC)
             proof.duration_seconds = (proof.completed_at - started_at).total_seconds()
 
             # Emit completion event

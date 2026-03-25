@@ -50,7 +50,7 @@ class TLSAnalyzer:
         results = {
             "target": self.hostname,
             "port": self.port,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "versions": {},
             "certificate": {},
             "ciphers": [],

@@ -40,7 +40,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
@@ -116,7 +116,7 @@ class Primitive:
     reliability: ReliabilityLevel = ReliabilityLevel.MEDIUM
     confidence: float = 0.5
     enables: List[str] = field(default_factory=list)
-    discovered_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    discovered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     source: str = "unknown"
 
     def __post_init__(self):
@@ -177,7 +177,7 @@ class PrimitiveInventory:
     primitives: List[Primitive] = field(default_factory=list)
     by_type: Dict[PrimitiveType, List[Primitive]] = field(default_factory=dict)
     dependencies: Dict[str, List[str]] = field(default_factory=dict)
-    last_updated: datetime = field(default_factory=lambda: datetime.utcnow())
+    last_updated: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def add_primitive(self, primitive: Primitive) -> None:
         """Add a primitive to the inventory."""
@@ -197,7 +197,7 @@ class PrimitiveInventory:
             if primitive.id not in self.dependencies[enabled_id]:
                 self.dependencies[enabled_id].append(primitive.id)
 
-        self.last_updated = datetime.utcnow()
+        self.last_updated = datetime.now(UTC)
 
     def find_primitives_by_type(self, type: PrimitiveType) -> List[Primitive]:
         """Get all primitives of a specific type."""
@@ -504,7 +504,7 @@ class PrimitiveCollector:
                         reliability=reliability,
                         confidence=float(item.get("confidence", 0.5)),
                         enables=[str(v) for v in enables],
-                        discovered_at=discovered_at or datetime.utcnow(),
+                        discovered_at=discovered_at or datetime.now(UTC),
                         source=str(item.get("source", "unknown")),
                     )
                     inventory.add_primitive(primitive)
@@ -671,7 +671,7 @@ class PrimitiveCollector:
                 inventory.dependencies.setdefault(enabled_id, [])
                 if primitive.id not in inventory.dependencies[enabled_id]:
                     inventory.dependencies[enabled_id].append(primitive.id)
-        inventory.last_updated = datetime.utcnow()
+        inventory.last_updated = datetime.now(UTC)
 
 
 def create_primitive_collector(safe_mode: bool = SAFE_MODE) -> PrimitiveCollector:

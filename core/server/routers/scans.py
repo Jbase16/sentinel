@@ -51,7 +51,7 @@ class ScanRequest(BaseModel):
         if not v:
             logger.warning("Scan start rejected: empty target")
             raise ValueError("Target cannot be empty")
-        dangerous_patterns = [";", "&&", "||", "`", "$(", "\n", "\r"]
+        dangerous_patterns = [";", "&&", "||", "`", "$(", "\n", "\r", "|"]
         for pattern in dangerous_patterns:
             if pattern in v:
                 logger.warning(f"Scan start rejected: dangerous character '{pattern}' in target: {v}")
@@ -63,12 +63,12 @@ class ScanRequest(BaseModel):
             if not parsed.scheme:
                 logger.warning(f"Scan start rejected: missing URL scheme in target: {v}")
                 raise ValueError("Invalid target URL: missing scheme (e.g., http:// or https://)")
-            if not parsed.netloc:
-                logger.warning(f"Scan start rejected: missing network location in target: {v}")
-                raise ValueError("Invalid target URL: missing network location")
             if parsed.scheme not in ("http", "https"):
                 logger.warning(f"Scan start rejected: invalid scheme '{parsed.scheme}' in target: {v}")
                 raise ValueError("Invalid target URL: scheme must be http or https")
+            if not parsed.netloc:
+                logger.warning(f"Scan start rejected: missing network location in target: {v}")
+                raise ValueError("Invalid target URL: missing network location")
         except ValueError:
             raise
         except Exception as e:

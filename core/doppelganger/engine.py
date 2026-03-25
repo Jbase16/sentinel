@@ -13,6 +13,9 @@ from .models import Persona, Credential
 
 log = logging.getLogger("doppelganger.engine")
 
+# Avoid circular import — ScopeEnforcer is passed as Any at runtime
+_ScopeEnforcerType = Any
+
 
 def _b64url_decode(data: str) -> bytes:
     # JWT uses base64url without padding
@@ -80,8 +83,9 @@ class DoppelgangerEngine:
     Manages Personas and their active sessions.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, scope_enforcer: _ScopeEnforcerType = None) -> None:
         self.active_personas: Dict[str, Persona] = {}
+        self._scope_enforcer = scope_enforcer
 
     async def authenticate(self, credential: Credential, target_url: str) -> Optional[Persona]:
         """
@@ -93,6 +97,10 @@ class DoppelgangerEngine:
 
         login_endpoint = f"{target_url.rstrip('/')}/rest/user/login"
 
+        # Scope guard: reject out-of-scope login targets
+        if self._scope_enforcer is not None:
+            self._scope_enforcer.assert_in_scope(login_endpoint)
+
         try:
             async with create_async_client() as client:
                 resp = await client.post(
@@ -102,7 +110,7 @@ class DoppelgangerEngine:
                 )
 
                 if resp.status_code != 200:
-                    log.warning(f"🎭 Login failed status={resp.status_code} body={resp.text[:200]}")
+                    log.warning("🎭 Login failed status=%d (response body redacted)", resp.status_code)
                     return None
 
                 try:

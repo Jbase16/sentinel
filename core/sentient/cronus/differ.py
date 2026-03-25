@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -347,8 +347,8 @@ class SitemapDiffer:
         # Build report
         report = DiffReport(
             target=target,
-            timestamp_past=timestamp_past or datetime.utcnow(),
-            timestamp_present=timestamp_present or datetime.utcnow(),
+            timestamp_past=timestamp_past or datetime.now(UTC),
+            timestamp_present=timestamp_present or datetime.now(UTC),
             deleted=deleted,
             stable=stable,
             added=added,

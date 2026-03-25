@@ -56,6 +56,10 @@ class FormLoginProvider(AuthProvider):
             profile.principal_id, login_url,
         )
 
+        # Scope guard: reject login URLs that are out-of-scope
+        if ctx.scope_enforcer is not None:
+            ctx.scope_enforcer.assert_in_scope(login_url)
+
         # Step 1: GET the login page to discover hidden fields / CSRF tokens
         try:
             get_resp = ctx.client.get(login_url, follow_redirects=True)
@@ -99,6 +103,12 @@ class FormLoginProvider(AuthProvider):
             raise AuthenticationError(
                 f"Login POST failed for {profile.principal_id}: {exc}"
             ) from exc
+
+        # Scope guard: verify redirect chain didn't leave scope
+        if ctx.scope_enforcer is not None:
+            final_url = str(post_resp.url)
+            if final_url != login_url:
+                ctx.scope_enforcer.assert_in_scope(final_url)
 
         # Step 4: Validate the response
         cookies = dict(ctx.client.cookies)

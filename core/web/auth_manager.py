@@ -33,7 +33,11 @@ class AuthManager:
 
         if mission.auth_mode == WebAuthMode.FORM_LOGIN:
             login_url = str(profile.login_url)
-            
+
+            # Scope guard: reject out-of-scope login URLs
+            if ctx.scope_enforcer is not None:
+                ctx.scope_enforcer.assert_in_scope(login_url)
+
             # Simple V1 deterministic form POST (no javascript required)
             data = {}
             if profile.username:

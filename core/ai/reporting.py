@@ -30,7 +30,7 @@ import json
 import os
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Dict, Optional, Any, Tuple
 
 from core.data.findings_store import findings_store
@@ -299,7 +299,7 @@ class ReportComposer:
         if format == "json":
             return json.dumps({
                 "type": report_type,
-                "generated_at": datetime.utcnow().isoformat(),
+                "generated_at": datetime.now(UTC).isoformat(),
                 "sections": {
                     section: await self.generate_section(section, context_override=context_override)
                     for section in sections_to_generate
@@ -597,7 +597,7 @@ async def create_report_bundle(base_dir: str = "reports") -> ReportBundle:
         full_report += section_content + "\n\n"
 
     os.makedirs(base_dir, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     bundle_dir = os.path.join(base_dir, f"bundle-{timestamp}")
     os.makedirs(bundle_dir, exist_ok=True)
 

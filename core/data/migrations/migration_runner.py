@@ -8,7 +8,7 @@ Includes backup/restore functionality for safe rollbacks.
 import aiosqlite
 import logging
 import shutil
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List, Optional
@@ -271,7 +271,7 @@ class MigrationRunner:
             raise FileNotFoundError(f"Database not found: {self.db_path}")
 
         # Generate backup filename with timestamp
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         if label:
             backup_name = f"{self.db_path.stem}_{label}_{timestamp}{self.BACKUP_SUFFIX}"
         else:
@@ -328,7 +328,7 @@ class MigrationRunner:
             self._try_emit_log_event({
                 "message": "[MigrationRunner] Database restored from backup",
                 "backup_path": str(backup_path),
-                "restored_at": datetime.utcnow().isoformat(),
+                "restored_at": datetime.now(UTC).isoformat(),
             })
 
             # Remove safety backup if successful

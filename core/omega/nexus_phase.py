@@ -22,7 +22,7 @@ import logging
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -118,7 +118,7 @@ class ExploitChain:
     total_score: float
     chain_length: int
     requires_auth: bool
-    discovered_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    discovered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -191,7 +191,7 @@ class NEXUSPhaseOrchestrator:
 
     async def execute(self, primitives: List[Primitive]) -> NEXUSPhaseResult:
         """Execute NEXUS phase: collect primitives, discover chains, score and rank."""
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
 
         self.event_bus.emit(GraphEvent(
             type=GraphEventType.LOG,
@@ -223,7 +223,7 @@ class NEXUSPhaseOrchestrator:
         for chain in goal_chains:
             goal_distribution[chain.goal.value] += 1
 
-        completed_at = datetime.utcnow()
+        completed_at = datetime.now(UTC)
         duration = (completed_at - started_at).total_seconds()
 
         self.event_bus.emit(GraphEvent(

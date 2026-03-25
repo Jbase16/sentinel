@@ -10,6 +10,22 @@ from .diff.baseline import _json_shape_hash
 
 from .contracts.ids import RequestId, PrincipalId
 from .contracts.models import BaselineSignature, DeltaVector, WebMission, HttpExchange
+
+# Headers whose values must never appear in evidence or logs.
+_SENSITIVE_HEADERS = frozenset({
+    "authorization", "cookie", "set-cookie",
+    "x-api-key", "x-auth-token", "x-csrf-token", "x-xsrf-token",
+    "proxy-authorization", "www-authenticate",
+})
+_REDACTED = "[REDACTED]"
+
+
+def _redact_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    """Return a copy of *headers* with sensitive values replaced."""
+    return {
+        k: (_REDACTED if k.lower() in _SENSITIVE_HEADERS else v)
+        for k, v in headers.items()
+    }
 from .contracts.events import (
     EventEnvelope,
     EventType,
@@ -125,10 +141,10 @@ class MutatingTransport:
             request_id=request_id,
             url=url, # type: ignore
             method=method,
-            request_headers=headers or {},
+            request_headers=_redact_headers(headers or {}),
             request_body_b64=base64.b64encode(body).decode('ascii') if body else None,
             response_status=status,
-            response_headers=resp_headers,
+            response_headers=_redact_headers(resp_headers),
             response_body_b64=body_b64
         )
         

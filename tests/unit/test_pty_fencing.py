@@ -1,93 +1,105 @@
+"""
+Tests for PTY FD-fencing logic.
+
+Verifies that the reader loop respects FD ownership and that
+stale threads cannot read from recycled file descriptors.
+"""
+
 import unittest
 from unittest.mock import patch, MagicMock
-from core.engine.pty_manager import PTYSession, PTYManager
-import os
-import time
-import select
+
+# All OS-level calls must be mocked to prevent real forks / signals.
+_PTY = "core.engine.pty_manager"
+
 
 class TestPTYFencing(unittest.TestCase):
-    
-    @patch("core.engine.pty_manager.pty.fork")
-    @patch("threading.Thread")
-    def test_fence_check_terminates_ghost_reader(self, mock_thread, mock_fork):
-        # Setup
-        mock_fork.return_value = (100, 5) # pid, fd
-        
-        # We need to spy on the manager instance
+
+    def setUp(self):
+        # Reset the singleton so each test gets a clean PTYManager.
+        from core.engine.pty_manager import PTYManager
+        PTYManager._instance = None
+
+    def tearDown(self):
+        from core.engine.pty_manager import PTYManager
+        PTYManager._instance = None
+
+    @patch(f"{_PTY}.threading.Thread")
+    @patch(f"{_PTY}.os.waitpid", return_value=(0, 0))
+    @patch(f"{_PTY}.os.kill")
+    @patch(f"{_PTY}.os.close")
+    @patch(f"{_PTY}.pty.fork", return_value=(100, 5))
+    def test_fence_check_terminates_ghost_reader(
+        self, mock_fork, mock_close, mock_kill, mock_waitpid, mock_thread
+    ):
+        from core.engine.pty_manager import PTYManager
+
         manager = PTYManager.instance()
         session = manager.create_session("victim-session")
-        
-        # Simulate the reader loop logic manually to verify the fence logic
-        # Because threading is mocked, we can't run the real loop easily, 
-        # so we extract the logic or test the side-effect?
-        # Actually, let's just inspect the _reader_loop Code? 
-        # No, unit tests on the loop itself are hard without threads.
-        # Let's verify that create_session registers ownership.
-        
+
+        # Ownership should be registered on creation
         self.assertTrue(manager.verify_fd_ownership(5, "victim-session"))
-        
-        # Now simulate session close
+
+        # Simulate session close
+        mock_waitpid.return_value = (100, 0)  # child reaped on first try
         manager.close_session("victim-session")
-        
-        # Verify ownership is gone
+
+        # Ownership must be gone after close
         self.assertFalse(manager.verify_fd_ownership(5, "victim-session"))
 
+    @patch(f"{_PTY}.threading.Thread")
+    @patch(f"{_PTY}.os.waitpid", return_value=(0, 0))
+    @patch(f"{_PTY}.os.kill")
+    @patch(f"{_PTY}.os.close")
+    @patch(f"{_PTY}.select.select", return_value=([5], [], []))
+    @patch(f"{_PTY}.os.read", return_value=b"hello")
+    @patch(f"{_PTY}.pty.fork", return_value=(100, 5))
+    def test_reader_loop_respects_fence(
+        self, mock_fork, mock_read, mock_select, mock_close, mock_kill, mock_waitpid, mock_thread
+    ):
+        """
+        When verify_fd_ownership returns False, os.read must NOT be called.
+        """
+        from core.engine.pty_manager import PTYSession, PTYManager
 
-    @patch("core.engine.pty_manager.select.select")
-    @patch("core.engine.pty_manager.os.read")
-    @patch("core.engine.pty_manager.pty.fork")
-    def test_reader_loop_respects_fence(self, mock_fork, mock_read, mock_select):
-        """
-        Verify that if verify_fd_ownership returns False, read is NOT called.
-        """
-        mock_fork.return_value = (100, 5)
-        # Select returns 'ready'
-        mock_select.return_value = ([5], [], [])
-        
-        # Mock PTYManager.instance()
-        with patch("core.engine.pty_manager.PTYManager.instance") as mock_mgr_cls:
-            mock_mgr = MagicMock()
-            mock_mgr_cls.return_value = mock_mgr
-            # Crucial: Ownership check fails!
-            mock_mgr.verify_fd_ownership.return_value = False
-            
+        # Set up a manager where ownership check will fail
+        manager = PTYManager.instance()
+
+        with patch.object(manager, "verify_fd_ownership", return_value=False):
             session = PTYSession("ghost-session")
-            # We must override start() to not spawn thread, but PTYSession spawns in init.
-            # We can't prevent init spawning unless we patch Threading. 
-            # But we want to call _reader_loop synchronously for one iteration?
-            # PTYSession structure makes this hard.
-            # Let's just create a session with Thread patched, then call _reader_loop manually once.
-            pass
+            session.fd = 5
+            session.session_id = "ghost-session"
 
-    @patch("core.engine.pty_manager.threading.Thread")
-    @patch("core.engine.pty_manager.select.select")
-    @patch("core.engine.pty_manager.os.read")
-    @patch("core.engine.pty_manager.pty.fork")
-    def test_reader_loop_abort(self, mock_fork, mock_read, mock_select, mock_thread):
-        mock_fork.return_value = (100, 5)
-        mock_select.return_value = ([5], [], [])
-        
-        with patch("core.engine.pty_manager.PTYManager.instance") as mock_mgr_cls:
-            mock_mgr = MagicMock()
-            mock_mgr_cls.return_value = mock_mgr
-            mock_mgr.verify_fd_ownership.return_value = False
-            
+            # Run reader loop — it should break immediately due to fence failure
+            session._reader_loop()
+
+            # CRITICAL: os.read should NOT have been called
+            mock_read.assert_not_called()
+
+    @patch(f"{_PTY}.threading.Thread")
+    @patch(f"{_PTY}.os.waitpid", return_value=(0, 0))
+    @patch(f"{_PTY}.os.kill")
+    @patch(f"{_PTY}.os.close")
+    @patch(f"{_PTY}.select.select", return_value=([5], [], []))
+    @patch(f"{_PTY}.os.read", return_value=b"data")
+    @patch(f"{_PTY}.pty.fork", return_value=(100, 5))
+    def test_reader_loop_abort(
+        self, mock_fork, mock_read, mock_select, mock_close, mock_kill, mock_waitpid, mock_thread
+    ):
+        from core.engine.pty_manager import PTYSession, PTYManager
+
+        manager = PTYManager.instance()
+
+        with patch.object(manager, "verify_fd_ownership", return_value=False):
             session = PTYSession("test-id")
             session.fd = 5
             session.session_id = "test-id"
-            
-            # Run one iteration of reader loop by hacking "running"
-            # We can't easily break the while loop without side effects or max_iters.
-            # But the break in the code will stop it.
-            
-            # We'll rely on the break in the code to return (running logic)
-            # Actually, `break` breaks the loop. So `_reader_loop` should return immediately.
+
             session._reader_loop()
-            
-            # Assertions
-            mock_mgr.verify_fd_ownership.assert_called_with(5, "test-id")
-            # CRITICAL: os.read should NOT have been called because check failed
+
+            manager.verify_fd_ownership.assert_called_with(5, "test-id")
+            # os.read should NOT be called because ownership check failed
             mock_read.assert_not_called()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

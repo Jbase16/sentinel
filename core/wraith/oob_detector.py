@@ -17,7 +17,7 @@ import string
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
@@ -312,7 +312,7 @@ class InteractshProvider(OOBProvider):
         try:
             return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
-            return datetime.utcnow()
+            return datetime.now(UTC)
 
 
 class BurpCollaboratorProvider(OOBProvider):
@@ -645,7 +645,7 @@ class CustomWebhookProvider(OOBProvider):
         try:
             return datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
         except (ValueError, AttributeError):
-            return datetime.utcnow()
+            return datetime.now(UTC)
 
 
 class OOBManager:
@@ -703,7 +703,7 @@ class OOBManager:
 
         self.payload_registry[payload_id] = {
             "interaction_id": interaction_id,
-            "timestamp_registered": datetime.utcnow(),
+            "timestamp_registered": datetime.now(UTC),
             "metadata": metadata or {},
         }
         logger.debug(f"Registered payload: {payload_id}")
@@ -813,7 +813,7 @@ class OOBManager:
             evidence = OOBEvidence(
                 interaction_type=interaction_kind,
                 source_ip=interaction.get("source_ip", "unknown"),
-                timestamp=interaction.get("timestamp", datetime.utcnow()),
+                timestamp=interaction.get("timestamp", datetime.now(UTC)),
                 raw_data=interaction.get("raw_data", {}),
                 payload_id=payload_id,
                 correlation_id=str(uuid.uuid4()),

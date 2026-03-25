@@ -65,8 +65,8 @@ class SecurityConfig:
 
     # Which websites can connect to our API (prevents random sites from accessing it)
     # 127.0.0.1 and localhost both mean "this computer only"
-    # Port wildcards are only allowed for loopback in development mode.
-    allowed_origins: tuple = ("http://127.0.0.1:*", "http://localhost:*", "tauri://localhost")
+    # Port wildcards (http://localhost:*) require debug mode.
+    allowed_origins: tuple = ("http://127.0.0.1:8765", "http://localhost:8765", "tauri://localhost")
 
     # Should users need to authenticate before using the API?
     # False = anyone on localhost can use it (convenient for development)
@@ -742,7 +742,7 @@ class SentinelConfig:
         origins_str = os.getenv("SENTINEL_ALLOWED_ORIGINS", "")
         # Split "http://a.com,http://b.com" into tuple ("http://a.com", "http://b.com")
         # If empty, use localhost defaults
-        origins = tuple(origins_str.split(",")) if origins_str else ("http://127.0.0.1:*", "http://localhost:*")
+        origins = tuple(origins_str.split(",")) if origins_str else ("http://127.0.0.1:8765", "http://localhost:8765")
 
         security = SecurityConfig(
             api_token=token,
@@ -1047,10 +1047,20 @@ class OriginValidator:
                 )
 
             if assessment.port_has_wildcard:
-                if assessment.is_loopback:
-                    # Allow loopback wildcards in all modes for developer convenience
+                if assessment.is_loopback and config.debug:
+                    # Allow loopback port wildcards only in debug/development mode
                     continue
 
+                if assessment.is_loopback:
+                    raise CriticalSecurityBreach(
+                        "Loopback port wildcards require debug mode.",
+                        remediation=(
+                            "Either pin explicit ports or enable debug mode:\n"
+                            "  1. Use http://localhost:8765 instead of http://localhost:*\n"
+                            "  2. Or set SENTINEL_DEBUG=true for development"
+                        ),
+                        details={"origin": origin},
+                    )
                 raise CriticalSecurityBreach(
                     "Network origins may not use port wildcards.",
                     remediation=(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -40,7 +40,7 @@ class EventEnvelope(BaseModel):
     IMPORTANT: The Agent must not invent envelope fields.
     """
     event_type: str = Field(min_length=3, max_length=128)
-    occurred_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     mission_id: MissionId
     scan_id: ScanId

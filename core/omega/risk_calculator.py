@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -70,7 +70,7 @@ class OMEGARiskScore:
     nexus_score: PillarScore
     nexus_fired: bool  # Whether NEXUS had valid chains
     weights_used: Dict[str, float]  # Actual weights applied
-    calculated_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    calculated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> Dict[str, Any]:
         return {

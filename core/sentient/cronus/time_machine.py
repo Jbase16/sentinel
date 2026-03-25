@@ -42,7 +42,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse, urljoin, parse_qs, urlencode
@@ -190,7 +190,7 @@ class SnapshotResult:
     status_code: int
     content: Optional[str]  # May be None if too large or binary
     size_bytes: int
-    archived_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    archived_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -550,7 +550,7 @@ class TimeMachine:
 
         # Update query statistics
         self._query_count += 1
-        self._last_query_time = datetime.utcnow()
+        self._last_query_time = datetime.now(UTC)
         start_time = time.monotonic()
 
         # Emit CRONUS_QUERY_STARTED event

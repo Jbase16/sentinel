@@ -12,7 +12,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -125,7 +125,7 @@ class MIMICPhaseOrchestrator:
 
     async def execute(self) -> MIMICPhaseResult:
         """Execute MIMIC phase with manifest-first strategy."""
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
 
         self.event_bus.emit(GraphEvent(
             type=GraphEventType.LOG,
@@ -163,7 +163,7 @@ class MIMICPhaseOrchestrator:
         # Step 3: Extract secrets and endpoints
         secrets_found, hidden_endpoints = await self._analyze_assets()
 
-        completed_at = datetime.utcnow()
+        completed_at = datetime.now(UTC)
         duration = (completed_at - started_at).total_seconds()
 
         self.event_bus.emit(GraphEvent(
@@ -195,7 +195,7 @@ class MIMICPhaseOrchestrator:
         Probe for build manifests in priority order.
         Returns (ManifestType, manifest_data) or (NONE, None).
         """
-        async with create_async_client() as client:
+        async with create_async_client(follow_redirects=False) as client:
             for probe_path in self.MANIFEST_PROBES:
                 url = urljoin(self.target, probe_path)
                 try:
@@ -213,7 +213,7 @@ class MIMICPhaseOrchestrator:
 
         # Check for Next.js __NEXT_DATA__ in HTML
         try:
-            async with create_async_client() as client:
+            async with create_async_client(follow_redirects=False) as client:
                 resp = await client.get(self.target, timeout=5.0)
                 if resp.status_code == 200 and "__NEXT_DATA__" in resp.text:
                     # Extract __NEXT_DATA__ from script tag
@@ -318,7 +318,7 @@ class MIMICPhaseOrchestrator:
 
         # Fetch root HTML to find script tags
         try:
-            async with create_async_client() as client:
+            async with create_async_client(follow_redirects=False) as client:
                 resp = await client.get(self.target, timeout=5.0)
                 if resp.status_code == 200:
                     # Extract script src attributes

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -228,7 +228,7 @@ class ParseResult:
     imports: List[str] = field(default_factory=list)
     exports: List[str] = field(default_factory=list)
     parse_errors: List[str] = field(default_factory=list)
-    parsed_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    parsed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize result to dict."""

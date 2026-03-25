@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, HttpUrl, field_validator
@@ -48,7 +48,7 @@ class WebMission(BaseModel):
     auth_mode: WebAuthMode = WebAuthMode.NONE
     principal_count: int = Field(ge=1, le=10, default=1)
 
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("allowed_origins")
     @classmethod
@@ -60,9 +60,9 @@ class WebMission(BaseModel):
 class PrincipalProfile(BaseModel):
     principal_id: PrincipalId
     login_url: Optional[HttpUrl] = None
-    username: Optional[str] = Field(default=None, max_length=128)
-    password: Optional[str] = Field(default=None, max_length=128)
-    extra_headers: Dict[str, str] = Field(default_factory=dict, description="e.g., predefined tokens or custom identifiers")
+    username: Optional[str] = Field(default=None, max_length=128, exclude=True)
+    password: Optional[str] = Field(default=None, max_length=128, exclude=True)
+    extra_headers: Dict[str, str] = Field(default_factory=dict, exclude=True, description="e.g., predefined tokens or custom identifiers")
 
 
 class PrincipalSnapshot(BaseModel):
@@ -127,7 +127,7 @@ class HttpExchange(BaseModel):
     response_headers: Dict[str, str] = Field(default_factory=dict)
     response_body_b64: Optional[str] = Field(default=None, max_length=10_000_000, description="Base64-encoded body, redacted as needed")
 
-    captured_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ArtifactRef(BaseModel):
@@ -167,7 +167,7 @@ class EvidenceBundle(BaseModel):
     replay_script_path: Optional[str] = Field(default=None, max_length=1024)
     artifact_hash: Optional[str] = Field(default=None, min_length=16, max_length=128)
 
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("affected_principals")
     @classmethod
@@ -198,4 +198,4 @@ class FindingRecord(BaseModel):
     evidence_bundle_id: Optional[str] = Field(default=None, description="Optional pointer if stored separately")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
-    created_at: datetime = Field(default_factory=lambda: datetime.utcnow())
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

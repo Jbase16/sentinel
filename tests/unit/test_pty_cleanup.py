@@ -1,69 +1,91 @@
-import unittest
-from unittest.mock import patch, MagicMock
+"""
+Tests for PTY session cleanup — verifies zombie process reaping.
+
+All OS calls (fork, close, kill, waitpid) are mocked to prevent
+real process creation or signals.
+"""
+
 import os
-import time
-from core.engine.pty_manager import PTYSession
+import unittest
+from unittest.mock import patch, call
+
+_PTY = "core.engine.pty_manager"
+
 
 class TestPTYCleanup(unittest.TestCase):
-    
-    @patch("core.engine.pty_manager.pty.fork")
-    @patch("core.engine.pty_manager.os.close")
-    @patch("core.engine.pty_manager.os.kill")
-    @patch("core.engine.pty_manager.os.waitpid")
-    @patch("threading.Thread") # Prevent reader thread from starting
-    def test_close_calls_waitpid(self, mock_thread, mock_waitpid, mock_kill, mock_close, mock_fork):
-        # Setup
-        mock_fork.return_value = (1234, 5678) # pid, fd
-        # Mock waitpid to simulate child still alive initially, then reaped
-        # First call: (0, 0) -> WNOHANG, child alive
-        # Second call: (1234, 0) -> Blocking wait, child reaped
+
+    def setUp(self):
+        from core.engine.pty_manager import PTYManager
+        PTYManager._instance = None
+
+    def tearDown(self):
+        from core.engine.pty_manager import PTYManager
+        PTYManager._instance = None
+
+    @patch(f"{_PTY}.threading.Thread")
+    @patch(f"{_PTY}.time.sleep")
+    @patch(f"{_PTY}.os.waitpid")
+    @patch(f"{_PTY}.os.kill")
+    @patch(f"{_PTY}.os.close")
+    @patch(f"{_PTY}.pty.fork", return_value=(1234, 5678))
+    def test_close_calls_waitpid(
+        self, mock_fork, mock_close, mock_kill, mock_waitpid, mock_sleep, mock_thread
+    ):
+        # First waitpid (WNOHANG): child still alive → (0, 0)
+        # Second waitpid (blocking): child reaped → (1234, 0)
         mock_waitpid.side_effect = [(0, 0), (1234, 0)]
-        
+
+        from core.engine.pty_manager import PTYSession
         session = PTYSession("test-session")
-        
-        # Action
+
         session.close()
-        
-        # Verification
+
         # 1. FD closed
         mock_close.assert_called_with(5678)
-        
+
         # 2. SIGTERM sent
         mock_kill.assert_any_call(1234, 15)
-        
-        # 3. First waitpid (WNOHANG)
+
+        # 3. First waitpid (WNOHANG) — check if child exited
         mock_waitpid.assert_any_call(1234, os.WNOHANG)
-        
-        # 4. SIGKILL sent (because we returned 0,0 implying alive)
+
+        # 4. SIGKILL sent (child was still alive after SIGTERM)
         mock_kill.assert_any_call(1234, 9)
-        
-        # 5. Final blocking waitpid (Critical Fix Verification)
+
+        # 5. Final blocking waitpid to reap zombie
         mock_waitpid.assert_any_call(1234, 0)
 
-    @patch("core.engine.pty_manager.pty.fork")
-    @patch("core.engine.pty_manager.os.close")
-    @patch("core.engine.pty_manager.os.kill")
-    @patch("core.engine.pty_manager.os.waitpid")
-    @patch("threading.Thread")
-    def test_close_handles_already_dead(self, mock_thread, mock_waitpid, mock_kill, mock_close, mock_fork):
-        # Setup
-        mock_fork.return_value = (1234, 5678)
-        # Mock waitpid to simulate child already dead on first check
-        mock_waitpid.return_value = (1234, 0)
-        
+    @patch(f"{_PTY}.threading.Thread")
+    @patch(f"{_PTY}.time.sleep")
+    @patch(f"{_PTY}.os.waitpid", return_value=(1234, 0))
+    @patch(f"{_PTY}.os.kill")
+    @patch(f"{_PTY}.os.close")
+    @patch(f"{_PTY}.pty.fork", return_value=(1234, 5678))
+    def test_close_handles_already_dead(
+        self, mock_fork, mock_close, mock_kill, mock_waitpid, mock_sleep, mock_thread
+    ):
+        from core.engine.pty_manager import PTYSession
         session = PTYSession("test-session")
-        
-        # Action
-        session.close()
-        
-        # Verification
-        mock_close.assert_called_with(5678)
-        mock_kill.assert_called_with(1234, 15)
-        # Should call WNOHANG check
-        mock_waitpid.assert_called_with(1234, os.WNOHANG)
-        # Should NOT call SIGKILL or blocking waitpid
-        with self.assertRaises(AssertionError):
-             mock_kill.assert_any_call(1234, 9)
 
-if __name__ == '__main__':
+        session.close()
+
+        # FD closed
+        mock_close.assert_called_with(5678)
+
+        # SIGTERM sent
+        mock_kill.assert_called_with(1234, 15)
+
+        # WNOHANG check — child already dead → (1234, 0)
+        mock_waitpid.assert_called_with(1234, os.WNOHANG)
+
+        # SIGKILL should NOT be called (child was already dead)
+        kill_calls = mock_kill.call_args_list
+        sigkill_calls = [c for c in kill_calls if c == call(1234, 9)]
+        self.assertEqual(
+            len(sigkill_calls), 0,
+            "SIGKILL should not be sent when child is already dead"
+        )
+
+
+if __name__ == "__main__":
     unittest.main()

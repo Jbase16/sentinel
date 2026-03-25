@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Any, Iterable, List, Optional, Set, Tuple
 
 import httpx
 
@@ -11,6 +12,8 @@ from core.contracts.budget import Budget
 from core.net.http_factory import create_async_client
 from core.mimic.models import Asset, sha256_bytes
 
+
+logger = logging.getLogger(__name__)
 
 _JS_CSS_MAP_RE = re.compile(r".*\.(?:js|css|map)(?:\?.*)?$", re.IGNORECASE)
 
@@ -31,6 +34,7 @@ class AssetDownloader:
         concurrency: int = 6,
         timeout_s: float = 15.0,
         user_agent: str = "SentinelMimic/1.0",
+        scope_enforcer: Any = None,
     ) -> None:
         self._budget = budget
         self._max_assets = max_assets
@@ -39,6 +43,7 @@ class AssetDownloader:
         self._concurrency = concurrency
         self._timeout_s = timeout_s
         self._user_agent = user_agent
+        self._scope_enforcer = scope_enforcer
 
     def _filter_asset_url(self, url: str) -> bool:
         return bool(_JS_CSS_MAP_RE.match(url))
@@ -78,6 +83,13 @@ class AssetDownloader:
 
                     async with sem:
                         try:
+                            # Scope guard: reject out-of-scope asset URLs
+                            if self._scope_enforcer is not None:
+                                if not self._scope_enforcer.is_in_scope(url):
+                                    logger.warning("[AssetDownloader] Skipped out-of-scope URL: %s", url)
+                                    queue.task_done()
+                                    continue
+
                             # budget check (counts URLs)
                             self._budget.consume(metric="max_urls", amount=1) # Correct metric name
 

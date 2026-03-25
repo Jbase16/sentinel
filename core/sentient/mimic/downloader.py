@@ -43,7 +43,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -100,7 +100,7 @@ class DownloadedAsset:
     content: bytes | str
     size_bytes: int
     content_hash: str
-    downloaded_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    downloaded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     headers: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -177,7 +177,7 @@ class AssetManifest:
     target: str
     base_url: str
     assets: List[str] = field(default_factory=list)
-    discovered_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    discovered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def add_asset(self, asset_url: str) -> None:
         """Add an asset URL to the manifest."""

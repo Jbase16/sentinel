@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -103,7 +103,7 @@ class OmegaResult:
     hidden_routes: List[Dict[str, Any]] = field(default_factory=list)
     exploit_chains: List[Dict[str, Any]] = field(default_factory=list)
     combined_risk_score: float = 0.0
-    started_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     completed_at: Optional[datetime] = None
     duration_seconds: float = 0.0
 
@@ -191,7 +191,7 @@ class OmegaManager:
         # Update statistics
         self._run_count += 1
 
-        started_at = datetime.utcnow()
+        started_at = datetime.now(UTC)
         result = OmegaResult(
             config=config,
             target=config.target,
@@ -240,7 +240,7 @@ class OmegaManager:
             result.phase_results[OmegaPhase.COMPLETE] = risk_result
 
             # Finalize result
-            result.completed_at = datetime.utcnow()
+            result.completed_at = datetime.now(UTC)
             result.duration_seconds = (result.completed_at - started_at).total_seconds()
 
             logger.info(
@@ -253,7 +253,7 @@ class OmegaManager:
 
         except Exception as e:
             logger.error(f"[OmegaManager] OMEGA run failed: {e}")
-            result.completed_at = datetime.utcnow()
+            result.completed_at = datetime.now(UTC)
             result.duration_seconds = (result.completed_at - started_at).total_seconds()
             raise
 
@@ -294,7 +294,7 @@ class OmegaManager:
 
         # Default time range: 1 year ago to now
         if timestamp_end is None:
-            timestamp_end = datetime.utcnow()
+            timestamp_end = datetime.now(UTC)
         if timestamp_start is None:
             timestamp_start = timestamp_end - timedelta(days=365)
 

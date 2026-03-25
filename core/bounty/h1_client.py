@@ -74,8 +74,8 @@ class HackerOneClient:
                 data = resp.json()
         except httpx.HTTPStatusError as exc:
             logger.error(
-                "HackerOne API returned %d for program '%s': %s",
-                exc.response.status_code, handle, exc.response.text[:200],
+                "HackerOne API returned %d for program '%s' (response body redacted)",
+                exc.response.status_code, handle,
             )
             raise ValueError(
                 f"HackerOne API error for '{handle}': HTTP {exc.response.status_code}"

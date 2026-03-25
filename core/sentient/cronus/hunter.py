@@ -40,7 +40,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urljoin
@@ -124,7 +124,7 @@ class ZombieProbe:
     status_code: Optional[int] = None
     response_time_ms: Optional[int] = None
     confidence: float = 1.0
-    probed_at: datetime = field(default_factory=lambda: datetime.utcnow())
+    probed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     error_message: Optional[str] = None
 
     @property
@@ -575,7 +575,7 @@ class ZombieHunter:
 
         # Update statistics
         self._hunt_count += 1
-        self._last_hunt_time = datetime.utcnow()
+        self._last_hunt_time = datetime.now(UTC)
         start_time = time.monotonic()
 
         # Emit CRONUS_HUNT_STARTED event
@@ -593,11 +593,11 @@ class ZombieHunter:
         # Initialize report
         report = ZombieReport(
             target=target,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(UTC),
         )
 
         if not endpoints:
-            report.completed_at = datetime.utcnow()
+            report.completed_at = datetime.now(UTC)
             return report
 
         # Create semaphore for concurrency control
@@ -648,7 +648,7 @@ class ZombieHunter:
                 else:
                     report.inconclusive += 1
 
-        report.completed_at = datetime.utcnow()
+        report.completed_at = datetime.now(UTC)
 
         # Calculate duration
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -724,7 +724,7 @@ class ZombieHunter:
                 status_code=data.get("status_code"),
                 response_time_ms=data.get("response_time_ms"),
                 confidence=data.get("confidence", 1.0),
-                probed_at=datetime.fromisoformat(data["probed_at"]) if data.get("probed_at") else datetime.utcnow(),
+                probed_at=datetime.fromisoformat(data["probed_at"]) if data.get("probed_at") else datetime.now(UTC),
                 error_message=data.get("error_message"),
             )
 

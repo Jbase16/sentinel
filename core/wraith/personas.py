@@ -237,8 +237,8 @@ class PersonaSession:
             
             if resp.status_code >= 400:
                 logger.error(
-                    f"Login failed for '{self.persona.name}': "
-                    f"{resp.status_code} {resp.text[:200]}"
+                    "Login failed for '%s': HTTP %d (response body redacted)",
+                    self.persona.name, resp.status_code,
                 )
                 return False
             
