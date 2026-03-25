@@ -90,7 +90,7 @@ class Budget(BaseModel):
     def usage_report(self) -> Dict[str, Dict[str, float]]:
         """Return a snapshot of limits vs usage."""
         report = {}
-        for field in self.model_fields:
+        for field in self.__class__.model_fields:
             limit = getattr(self, field)
             # Only include numeric limits in the report
             if isinstance(limit, (int, float)):

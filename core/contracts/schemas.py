@@ -11,7 +11,7 @@ from enum import Enum
 import time
 from datetime import datetime
 from dataclasses import dataclass, field
-from pydantic import BaseModel, Field, HttpUrl, validator, conint, ConfigDict, field_validator
+from pydantic import BaseModel, Field, HttpUrl, conint, ConfigDict, field_validator
 
 # ---------------------------------------------------------------------------
 # Base Types (Moved from events.py to prevent circular deps)
@@ -135,8 +135,9 @@ class TrafficObservedPayload(OmegaEventPayload):
     body_hash: Optional[str] = Field(None, description="SHA256 of body if captured")
     size_bytes: int
     
-    @validator('headers')
-    def check_redaction(cls, v):
+    @field_validator('headers')
+    @classmethod
+    def check_redaction(cls, v: Dict[str, str]) -> Dict[str, str]:
         """Ensure sensitive headers are not leaking."""
         SENSITIVE = {'authorization', 'cookie', 'set-cookie', 'x-api-key'}
         for key in v.keys():

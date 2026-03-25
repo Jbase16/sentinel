@@ -108,15 +108,15 @@ def test_missing_field_pydantic():
 
 def test_event_bus_emits_violation_event():
     # Setup
-    bus = EventBus(validate=True)
+    bus = EventBus()
     set_strict_contract_mode(False) # We WANT to suppress raise, but catch the event
-    
+
     violations_captured = []
     def on_violation(event):
         if event.type == EventType.CONTRACT_VIOLATION:
             violations_captured.append(event)
-    
-    bus.subscribe(on_violation)
+
+    bus.subscribe_sync(on_violation, event_types=[EventType.CONTRACT_VIOLATION])
     
     # Emit invalid event
     invalid_payload = {
@@ -139,7 +139,7 @@ def test_event_bus_emits_violation_event():
     assert "mode" in str(v.payload["violations"])
 
 def test_strict_mode_raises():
-    bus = EventBus(validate=True)
+    bus = EventBus()
     # Fixture sets strict=True, but let's be explicit
     set_strict_contract_mode(True)
     

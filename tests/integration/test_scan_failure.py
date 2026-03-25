@@ -2,7 +2,7 @@
 import unittest
 import asyncio
 from unittest.mock import MagicMock, patch
-from core.server.api import start_scan, ScanRequest
+from core.server.routers.scans import start_scan, ScanRequest
 from core.errors import SentinelError, ErrorCode, SentinelSecurityError
 from core.base.sequence import GlobalSequenceAuthority
 from core.cortex.events import GraphEventType
@@ -21,11 +21,11 @@ class TestScanFailure(unittest.IsolatedAsyncioTestCase):
         # Mock dependencies
         mock_req = ScanRequest(target="example.com")
         
-        with patch('core.server.api.reasoning_engine') as mock_reasoning, \
+        with patch('core.server.routers.scans.reasoning_engine') as mock_reasoning, \
              patch('core.data.db.Database') as mock_db, \
-             patch('core.server.api.get_event_bus') as mock_get_bus, \
-             patch('core.server.api.logger') as mock_logger, \
-             patch('core.server.api.GraphEvent') as mock_graph_event:
+             patch('core.server.routers.scans.get_event_bus') as mock_get_bus, \
+             patch('core.server.routers.scans.logger') as mock_logger, \
+             patch('core.server.routers.scans.GraphEvent') as mock_graph_event:
             
             # Setup reasoning engine failure
             mock_reasoning.start_scan.side_effect = Exception("Simulated Reasoner Crash")

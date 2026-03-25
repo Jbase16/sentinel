@@ -3,7 +3,7 @@ import unittest
 import asyncio
 import json
 from unittest.mock import MagicMock, patch
-from core.server.api import terminal_websocket_pty
+from core.server.routers.realtime import terminal_websocket_pty
 from fastapi import WebSocket
 
 class TestPTYInteraction(unittest.IsolatedAsyncioTestCase):
@@ -25,8 +25,8 @@ class TestPTYInteraction(unittest.IsolatedAsyncioTestCase):
             mock_config.security.terminal_require_auth = False # Bypass auth for this unit test
             mock_get_config.return_value = mock_config
             
-            with patch('core.server.api.validate_websocket_connection', return_value=True), \
-                 patch('core.server.api.PTYManager') as mock_manager_cls:
+            with patch('core.server.routers.realtime.validate_websocket_connection', return_value=True), \
+                 patch('core.server.routers.realtime.PTYManager') as mock_manager_cls:
                 
                 # Mock PTY Session
                 mock_session = MagicMock()

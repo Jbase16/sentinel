@@ -1,6 +1,7 @@
 """Module blackbox: inline documentation for /Users/jason/Developer/sentinelforge/core/data/blackbox.py."""
 
 import asyncio
+import inspect
 import logging
 from typing import Callable, Any, Optional, Awaitable
 
@@ -65,7 +66,7 @@ class BlackBox:
                 
                 try:
                     # Execute the write
-                    if asyncio.iscoroutinefunction(func):
+                    if inspect.iscoroutinefunction(func):
                         result = await func(*args, **kwargs)
                     else:
                         result = func(*args, **kwargs)

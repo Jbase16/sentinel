@@ -2,7 +2,7 @@
 import unittest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from core.server.api import validate_websocket_connection
+from core.server.routers.realtime import validate_websocket_connection
 from core.base.config import SecurityConfig
 
 class TestCORSSecurity(unittest.IsolatedAsyncioTestCase):
@@ -17,7 +17,7 @@ class TestCORSSecurity(unittest.IsolatedAsyncioTestCase):
         mock_ws = AsyncMock()
         mock_ws.headers = {"origin": "http://malicious.com"}
         
-        with patch("core.server.api.get_config") as mock_get_cfg:
+        with patch("core.server.routers.realtime.get_config") as mock_get_cfg:
             mock_cfg = MagicMock()
             mock_cfg.security.require_auth = False # Dev mode
             mock_cfg.security.allowed_origins = ["http://localhost:3000"]
@@ -35,7 +35,7 @@ class TestCORSSecurity(unittest.IsolatedAsyncioTestCase):
         mock_ws = AsyncMock()
         mock_ws.headers = {"origin": "http://malicious.com"}
         
-        with patch("core.server.api.get_config") as mock_get_cfg:
+        with patch("core.server.routers.realtime.get_config") as mock_get_cfg:
             mock_cfg = MagicMock()
             mock_cfg.security.require_auth = True # Prod mode
             mock_cfg.security.allowed_origins = ["http://localhost:3000"]
