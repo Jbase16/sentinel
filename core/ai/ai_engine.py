@@ -717,7 +717,7 @@ class AIEngine:
                 # questions ("how many criticals", "list all ports") from these
                 # EXACT totals instead of the 30-item sample below — so it stays
                 # accurate even on scans far larger than the context window.
-                from core.ai.scan_briefing import build_scan_briefing, severity_rank
+                from core.ai.scan_briefing import build_scan_briefing, select_relevant_findings
 
                 briefing_target = (
                     next((f.get("target") for f in findings if f.get("target")), None)
@@ -731,14 +731,15 @@ class AIEngine:
                     graph_dto=graph_dto,
                 ) + "\n\n"
 
-                # --- Per-finding detail (most-severe first, capped) ---
-                # When capped, show the WORST findings rather than an arbitrary
-                # slice; totals above remain complete.
-                detail = sorted(findings, key=lambda f: severity_rank(f.get("severity")))
-                shown = detail[:30]
+                # --- Per-finding detail (question-relevant first, then most-severe; capped) ---
+                # Drill-down: findings the user asked about (by host/port/type/id)
+                # are surfaced even if low-severity; remaining slots fill by
+                # severity. Totals in the briefing above stay complete.
+                shown = select_relevant_findings(question, findings, limit=30)
                 context_block += (
                     f"PER-FINDING DETAIL (showing {len(shown)} of {len(findings)}, "
-                    "most-severe first — use the briefing totals above for counts):\n"
+                    "question-relevant + most-severe first — use the briefing totals "
+                    "above for counts):\n"
                 )
                 if context_session_id:
                     context_block += f"(session_id: {context_session_id})\n"

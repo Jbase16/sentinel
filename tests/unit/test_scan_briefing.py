@@ -152,3 +152,51 @@ class TestKeyTotalsAreQuotable:
     def test_instructs_not_to_recount(self):
         brief = build_scan_briefing(_big_scan(), [], target="x")
         assert "do not recount" in brief.lower() or "never recount" in brief.lower()
+
+
+class TestSelectRelevantFindings:
+    """Run #25 drill-down: a finding the user asks about must reach the detail
+    slice even when it is low-severity and outside the top-N-by-severity cut."""
+
+    def test_empty_returns_empty(self):
+        from core.ai.scan_briefing import select_relevant_findings
+        assert select_relevant_findings("anything", []) == []
+
+    def test_no_terms_falls_back_to_severity_order(self):
+        from core.ai.scan_briefing import select_relevant_findings
+        findings = [
+            _finding("a", "Open Port", "INFO", "x"),
+            _finding("b", "SQL Injection", "CRITICAL", "x"),
+        ]
+        # Stopword-only question → pure severity order (critical first).
+        out = select_relevant_findings("what did you find", findings, limit=10)
+        assert out[0]["id"] == "b"
+
+    def test_asked_port_surfaces_low_sev_over_criticals(self):
+        from core.ai.scan_briefing import select_relevant_findings
+        # 40 criticals + 1 INFO port; only 30 slots. A naive severity cut would
+        # drop the INFO port — relevance must rescue and rank it first.
+        findings = [_finding(f"c{i}", "SQL Injection", "CRITICAL", "x") for i in range(40)]
+        findings.append(_finding("p8443", "Open Port", "INFO", "x", {"port": 8443}))
+        out = select_relevant_findings("what about port 8443?", findings, limit=30)
+        assert out[0]["id"] == "p8443", "asked-about port not surfaced first"
+
+    def test_asked_host_surfaces_its_low_sev_finding(self):
+        from core.ai.scan_briefing import select_relevant_findings
+        findings = [_finding(f"c{i}", "Open Port", "INFO", "https://a.example.com") for i in range(40)]
+        findings.append(_finding("rare", "Session Cookie Misconfiguration", "LOW",
+                                 "https://target.example.com", {"host": "target.example.com"}))
+        out = select_relevant_findings("tell me about target.example.com", findings, limit=30)
+        assert any(f["id"] == "rare" for f in out)
+
+    def test_limit_respected(self):
+        from core.ai.scan_briefing import select_relevant_findings
+        findings = [_finding(f"f{i}", "Open Port", "INFO", "x") for i in range(50)]
+        assert len(select_relevant_findings("ports", findings, limit=10)) == 10
+
+    def test_deterministic(self):
+        from core.ai.scan_briefing import select_relevant_findings
+        findings = [_finding(f"f{i}", "Open Port", "INFO", "x", {"port": 8000 + i}) for i in range(20)]
+        a = select_relevant_findings("port 8005", findings, limit=5)
+        b = select_relevant_findings("port 8005", findings, limit=5)
+        assert [f["id"] for f in a] == [f["id"] for f in b]

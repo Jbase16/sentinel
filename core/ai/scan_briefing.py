@@ -30,6 +30,7 @@ whole scan's shape even when it can only see some individual findings.
 """
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Sequence
 from urllib.parse import urlparse
@@ -58,6 +59,66 @@ def severity_rank(value: Any) -> int:
         return _SEVERITY_ORDER.index(sev)
     except ValueError:
         return len(_SEVERITY_ORDER)
+
+
+# Generic question words that should NOT match findings (else every finding
+# looks "relevant"). Kept small and security-domain-aware.
+_QUESTION_STOPWORDS = frozenset({
+    "the", "and", "what", "which", "show", "tell", "about", "any", "are",
+    "was", "were", "for", "you", "find", "found", "this", "that", "with",
+    "how", "many", "give", "list", "more", "did", "does", "have", "has",
+    "from", "scan", "finding", "findings", "issue", "issues", "all", "there",
+    "can", "could", "would", "should", "explain", "describe", "details",
+})
+
+
+def select_relevant_findings(
+    question: str,
+    findings: Sequence[Dict[str, Any]],
+    *,
+    limit: int = 30,
+) -> List[Dict[str, Any]]:
+    """
+    Choose which findings get FULL per-finding detail in the chat context
+    (Calibration Run #25 — drill-down).
+
+    The detail slice is capped by the 8192-token budget, so a naive
+    "most-severe N" cut hides any finding the user actually asked about when
+    it is not in the top N. This selector ranks by:
+      1. relevance to the question — term overlap with a finding's
+         id/type/target/message/metadata, so "what about port 8443?" surfaces
+         the 8443 finding even if it is rank-90 by severity;
+      2. then severity (most severe first) to fill the remaining slots.
+
+    Deterministic; falls back to pure severity order when the question has no
+    meaningful (non-stopword) terms.
+    """
+    items = [f for f in findings if isinstance(f, dict)]
+    if not items:
+        return []
+
+    terms = {
+        t for t in re.findall(r"[a-z0-9._:/-]{3,}", (question or "").lower())
+        if t not in _QUESTION_STOPWORDS
+    }
+
+    def relevance(f: Dict[str, Any]) -> int:
+        if not terms:
+            return 0
+        parts = [str(f.get(k, "")) for k in ("id", "type", "target", "message")]
+        meta = f.get("metadata")
+        if isinstance(meta, dict):
+            parts += [f"{k} {v}" for k, v in meta.items()]
+        hay = " ".join(parts).lower()
+        return sum(1 for t in terms if t in hay)
+
+    # relevance desc, then most-severe first (-rank), then stable id tiebreak.
+    ranked = sorted(
+        items,
+        key=lambda f: (relevance(f), -severity_rank(f.get("severity")), str(f.get("id", ""))),
+        reverse=True,
+    )
+    return ranked[:limit]
 
 
 def _host_of(finding: Dict[str, Any]) -> str:
