@@ -1,4 +1,8 @@
-FROM /Volumes/ByteMe/SentinelForge/models/sentinel-9b-god-tier-Q4_K_M.gguf
+# Build with:  ollama create sentinel-9b-god-tier -f Modelfile
+# The gguf must exist at ./models/ relative to where you run `ollama create`.
+# If you only have the safetensors model, convert it first with llama.cpp's
+# convert_hf_to_gguf.py and quantize to Q4_K_M.
+FROM ./models/sentinel-9b-god-tier-Q4_K_M.gguf
 
 # PARAMETERS
 PARAMETER temperature 0.2

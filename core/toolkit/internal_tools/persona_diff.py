@@ -57,7 +57,41 @@ class WraithPersonaDiffTool(InternalTool):
         context: InternalToolContext,
         queue: asyncio.Queue[str],
     ) -> List[Dict[str, Any]]:
-        scanner = AuthDiffScanner(context.session)
+        # InternalToolContext carries session_id (str), not the live ScanSession
+        # object that AuthDiffScanner needs. Resolve via the global state.
+        # See docs/CALIBRATION_RUN_006.md Bug #9.
+        from core.server.state import get_state
+        from core.wraith.session_manager import AuthSessionManager
+
+        session = await get_state().get_session(context.session_id)
+        if session is None:
+            await self.log(
+                queue,
+                f"persona_diff: could not resolve ScanSession for id={context.session_id}; "
+                "skipping (the session may have been cleaned up).",
+            )
+            return []
+
+        # Bridge knowledge.personas -> AuthSessionManager so AuthDiffScanner can
+        # find the auth material it needs. from_knowledge() is idempotent and
+        # caches the bridge in session.knowledge["session_bridge"]; it returns
+        # None if no personas are configured (clean degrade). Without this call
+        # AuthDiffScanner.initialize() warns "No AuthSessionManager found" and
+        # exits with zero findings even when personas ARE configured.
+        # See docs/CALIBRATION_RUN_008.md Bug #10.
+        bridge = await AuthSessionManager.from_knowledge(
+            session.knowledge,
+            base_url=target,
+        )
+        if bridge is None:
+            await self.log(
+                queue,
+                "persona_diff: no personas configured in knowledge.personas; skipping. "
+                "Pass --personas <file> to pysentinel to enable differential-auth testing.",
+            )
+            return []
+
+        scanner = AuthDiffScanner(session)
         if not await scanner.initialize():
             await self.log(queue, "AuthDiffScanner failed to initialize. Skipping.")
             return []

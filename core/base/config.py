@@ -20,6 +20,7 @@
 
 import os
 import secrets
+import threading
 import logging
 import re
 from pathlib import Path
@@ -69,10 +70,12 @@ class SecurityConfig:
     allowed_origins: tuple = ("http://127.0.0.1:8765", "http://localhost:8765", "tauri://localhost")
 
     # Should users need to authenticate before using the API?
-    # False = anyone on localhost can use it (convenient for development)
-    # True = must provide api_token with each request (enable for production)
-    # Note: Boot interlock still prevents network-exposed + no-auth configurations
-    require_auth: bool = False
+    # True = must provide api_token with each request (default, safe for bug-bounty work)
+    # False = anyone on localhost (and any process running as your user) can hit the API
+    # Note: Boot interlock additionally blocks network-exposed + no-auth configurations.
+    # Override per-environment with SENTINEL_REQUIRE_AUTH=false (only do this in
+    # trusted hermetic test environments, never on a laptop running bounty scans).
+    require_auth: bool = True
 
     # Can users run terminal commands through the UI?
     # True = yes (convenient but potentially dangerous if exposed remotely)
@@ -182,7 +185,12 @@ class ScanConfig:
     # List of "restricted" tools that require explicit human approval
     # These are active/intrusive tools that could trigger alerts or cause damage
     # (nmap sends probe packets, sqlmap tests for SQL injection, etc.)
-    # Also includes system tools (brew, pip) that could modify the environment
+    #
+    # NOTE: Installer-class tools (brew, pip, apt, etc.) are intentionally NOT
+    # in this list. The action dispatcher must never invoke package installation
+    # in response to AI suggestions — that path is a prompt-injection sink.
+    # Tool installation, if needed, belongs in an explicit user-driven flow,
+    # not in the scan-time dispatcher.
     restricted_tools: tuple = (
         "nmap",
         "nikto",
@@ -193,8 +201,6 @@ class ScanConfig:
         "feroxbuster",
         "sqlmap",
         "masscan",
-        "brew",
-        "pip",
     )
 
 
@@ -693,15 +699,24 @@ class SentinelConfig:
 
     def _write_token_file(self) -> None:
         """
-        Write the current API token to ~/.sentinelforge/api_token.
+        Persist the current API token to ~/.sentinelforge/api_token.
 
-        This enables the Swift UI to discover the token that the Python backend
-        generated at startup. The file is chmod 0600 (owner read/write only).
+        Idempotent: if the file already contains the same token (the
+        common case when the config was loaded *from* the file via
+        from_env), this is a no-op. We only write if the contents differ.
 
-        Security: Token changes each restart, limiting exposure window.
+        This prevents the historical bug where any code path that
+        accidentally materialised a second SentinelConfig (see
+        get_config/set_config) would silently regenerate the API token,
+        rewrite the file, and desynchronise the in-memory singleton
+        used by the auth handler from what's on disk.
         """
         token_path = self.storage.base_dir / "api_token"
         try:
+            current = token_path.read_text() if token_path.exists() else ""
+            if current == self.security.api_token:
+                # Already in sync — do not log or touch the file.
+                return
             token_path.write_text(self.security.api_token)
             token_path.chmod(0o600)
             logging.getLogger(__name__).info(f"[Config] API token written to {token_path}")
@@ -731,11 +746,31 @@ class SentinelConfig:
             max_concurrent_requests=int(os.getenv("SENTINEL_AI_MAX_CONCURRENT", "2")),
         )
 
-        # Get API token from environment, generate random one if not provided
+        # Resolve the API token with this precedence:
+        #   1. SENTINEL_API_TOKEN env var (explicit, overrides everything)
+        #   2. ~/.sentinelforge/api_token file (persistent across restarts)
+        #   3. Generate a new cryptographically random token (first-time setup)
+        #
+        # Reading from the file makes the token stable across backend
+        # restarts and — critically — across any accidental second
+        # materialisation of SentinelConfig (see _write_token_file's docstring).
+        # When two configs both read from the file, they get the same token,
+        # so the auth handler never desynchronises from disk.
         token = os.getenv("SENTINEL_API_TOKEN")
-        # Conditional branch.
         if not token:
-            # No token provided, generate a cryptographically secure random token
+            base_dir = Path(os.getenv("SENTINEL_DATA_DIR", str(Path.home() / ".sentinelforge")))
+            existing_token_path = base_dir / "api_token"
+            if existing_token_path.exists():
+                try:
+                    file_token = existing_token_path.read_text().strip()
+                    # Sanity check: real tokens are ≥32 url-safe chars.
+                    if len(file_token) >= 32 and all(
+                        c.isalnum() or c in "-_" for c in file_token
+                    ):
+                        token = file_token
+                except OSError:
+                    pass  # fall through to generate
+        if not token:
             token = secrets.token_urlsafe(32)
 
         # Parse allowed origins (comma-separated list from environment)
@@ -747,7 +782,7 @@ class SentinelConfig:
         security = SecurityConfig(
             api_token=token,
             allowed_origins=origins,
-            require_auth=os.getenv("SENTINEL_REQUIRE_AUTH", "false").lower() == "true",
+            require_auth=os.getenv("SENTINEL_REQUIRE_AUTH", "true").lower() == "true",
             terminal_enabled=os.getenv("SENTINEL_TERMINAL_ENABLED", "true").lower() == "true",
             terminal_require_auth=os.getenv("SENTINEL_TERMINAL_REQUIRE_AUTH", "false").lower() == "true",
             clipboard_enabled=os.getenv("SENTINEL_CLIPBOARD_ENABLED", "true").lower() == "true",
@@ -1143,6 +1178,62 @@ def validate_security_posture(config: "SentinelConfig") -> None:
     SecurityInterlock.verify_safe_boot(config)
 
 
+def normalize_tool_path() -> List[str]:
+    """
+    Ensure system tool paths appear BEFORE any venv/conda paths in PATH.
+
+    Without this, shutil.which("httpx") may return a Python httpx library
+    installed in a neighbouring venv instead of the ProjectDiscovery
+    binary in /opt/homebrew/bin. We mirror the Swift launcher's path
+    ordering (see BackendManager.swift:354) so a backend launched via
+    CLI gets the same tool resolution as one launched via the GUI.
+
+    Idempotent: re-running this has no effect if PATH is already
+    normalised. Returns the list of paths actually prepended (mostly
+    for logging/testing).
+    """
+    home = Path.home()
+    preferred = [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+        "/usr/sbin",
+        "/sbin",
+        str(home / "go" / "bin"),
+    ]
+
+    current = os.environ.get("PATH", "")
+    existing_parts = [p for p in current.split(os.pathsep) if p]
+
+    seen: set = set()
+    new_parts: List[str] = []
+    prepended: List[str] = []
+
+    for p in preferred:
+        if p in seen:
+            continue
+        if not Path(p).exists():
+            continue
+        new_parts.append(p)
+        seen.add(p)
+        # Only count as "prepended" if it wasn't already in PATH or
+        # was in PATH after a venv-bin path.
+        if p not in existing_parts or any(
+            "venv" in q or "conda" in q or "/.virtualenvs/" in q
+            for q in existing_parts[: existing_parts.index(p) if p in existing_parts else 0]
+        ):
+            prepended.append(p)
+
+    for p in existing_parts:
+        if p not in seen:
+            new_parts.append(p)
+            seen.add(p)
+
+    os.environ["PATH"] = os.pathsep.join(new_parts)
+    return prepended
+
+
 def get_sensitive_endpoints() -> tuple:
     """
     Return the list of endpoints that should ALWAYS require authentication
@@ -1170,8 +1261,15 @@ def get_sensitive_endpoints() -> tuple:
 # ============================================================================
 # These functions provide access to the one shared configuration instance.
 
-# Private module variable holding the singleton config (starts as None)
+# Private module variable holding the singleton config (starts as None).
+# Materialisation is guarded by _config_lock — without the lock, two
+# coroutines/threads can both pass the `_config is None` check and each
+# create a SentinelConfig (each generating its own random api_token in the
+# absence of a persisted token file). The persisted-token-file fallback in
+# from_env() makes this safe even if a second materialisation slips through,
+# but defence-in-depth: the lock prevents the duplicate work entirely.
 _config: Optional[SentinelConfig] = None
+_config_lock = threading.Lock()
 
 
 def get_config() -> SentinelConfig:
@@ -1179,17 +1277,22 @@ def get_config() -> SentinelConfig:
     Get the global configuration instance.
 
     Singleton pattern: only creates the config once, then reuses it.
-    This ensures all parts of the application use the same settings.
+    Thread-safe via _config_lock. All callers — including epistemic.cas
+    and epistemic.ledger — MUST use this function rather than calling
+    SentinelConfig.from_env() directly, or they bypass the singleton.
 
     Returns:
         The shared SentinelConfig instance (creates it if it doesn't exist yet)
     """
-    global _config  # Access the module-level _config variable
-    # Conditional branch.
-    if _config is None:
-        # First time being called - load config from environment
-        _config = SentinelConfig.from_env()
-    return _config
+    global _config
+    if _config is not None:
+        return _config
+    with _config_lock:
+        # Re-check inside the lock; another caller may have materialised
+        # the singleton while we were waiting to acquire.
+        if _config is None:
+            _config = SentinelConfig.from_env()
+        return _config
 
 
 def set_config(config: SentinelConfig) -> None:

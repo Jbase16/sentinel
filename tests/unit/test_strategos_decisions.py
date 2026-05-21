@@ -151,16 +151,51 @@ class TestStrategosFindingsIngestion:
 
 class TestStrategosWalkAway:
     """Test the 'walk away' logic for bug bounty mode."""
-    
+
     def test_walk_away_on_no_surface_delta(self):
-        """Should walk away if no new surface discovered."""
+        """Should walk away if no new surface discovered AFTER actually running tools.
+
+        This is the legitimate walk-away signal: surface enumeration ran, the
+        engine probed the target, and produced zero new surface. The target
+        is boring; don't burn cycles deep-scanning it.
+        """
         brain = Strategos()
         brain.context = ScanContext(target="example.com")
         brain.context.phase_index = 3  # After surface enumeration
         brain.context.surface_delta_this_intent = 0
         brain.context.knowledge["mode"] = ScanMode.BUG_BOUNTY
-        
+        # Implicit: last_assessment defaults to CONTINUE_ENGAGEMENT (tools ran).
+
         next_intent = brain._decide_next_step(INTENT_SURFACE_ENUMERATION)
-        
+
         # In bug bounty mode with no surface, should terminate (walk away)
         assert next_intent is None, f"Expected None (walk away) but got {next_intent}"
+
+    def test_no_walk_away_when_surface_enum_skipped_by_policy(self):
+        """Bug #7 regression — must NOT walk away when surface_enum was skipped
+        because policy blocked all selected tools.
+
+        Reproduction shape (RUN_002 against loopback Juice Shop):
+          - bug_bounty mode
+          - surface_enum had nmap/naabu selected, both blocked by loopback policy
+          - last_assessment was SKIP_NO_TOOLS (no tools actually ran)
+          - surface_delta == 0 only because nothing got a chance to probe
+
+        Expected: continue to INTENT_VULN_SCANNING with whatever surface earlier
+        phases already discovered, not abort.
+        """
+        brain = Strategos()
+        brain.context = ScanContext(target="example.com")
+        brain.context.phase_index = 3
+        brain.context.surface_delta_this_intent = 0
+        brain.context.knowledge["mode"] = ScanMode.BUG_BOUNTY
+        # The critical signal: surface_enum was skipped, not tried-and-failed.
+        brain.context.knowledge["last_assessment"] = "SKIP_NO_TOOLS"
+
+        next_intent = brain._decide_next_step(INTENT_SURFACE_ENUMERATION)
+
+        assert next_intent == INTENT_VULN_SCANNING, (
+            f"Expected to advance to INTENT_VULN_SCANNING when surface_enum was "
+            f"policy-skipped (not actually probed), but got {next_intent}. "
+            f"See docs/CALIBRATION_RUN_002.md Bug #7."
+        )

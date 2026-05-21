@@ -55,10 +55,23 @@ class AuthDiffScanner:
         if not getattr(auth_bridge, "_initialized", False):
             await auth_bridge.initialize()
             
-        # Initialize PersonaManager using the personas from the bridge
+        # Initialize PersonaManager using the personas from the bridge.
+        #
+        # NOTE: policy_runtime expects an ExecutionPolicyRuntime (the executor
+        # with `execute_http`), not an ExecutionPolicy (the config dataclass).
+        # The old code passed `session.scope_context.policy` which is the
+        # config object — calling `execute_http` on it raised
+        # `'ExecutionPolicy' object has no attribute 'execute_http'`.
+        # See docs/CALIBRATION_RUN_008.md Bug #11.
+        #
+        # Pass None to fall back to direct httpx requests (login flow degrades
+        # gracefully — no rate limiting / retry policy, but functional).
+        # The right long-term fix is to construct a runtime via
+        # `core.wraith.execution_policy.build_policy_runtime` from the
+        # InternalToolContext, but that requires plumbing context into here.
         self.manager = PersonaManager(
             personas=auth_bridge.personas,
-            policy_runtime=self.session.scope_context.policy if hasattr(self.session, "scope_context") else None
+            policy_runtime=None,
         )
         
         # Populate session material straight from the bridge

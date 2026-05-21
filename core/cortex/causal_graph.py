@@ -1672,15 +1672,38 @@ class CausalGraphBuilder:
             if str(node_id) not in id_to_title:
                 id_to_title[str(node_id)] = str(attrs.get("title", node_id))
 
+        # Node-attribute lookup for severity-aware chain scoring.
+        _node_attrs = {str(n): a for n, a in self.graph.nodes(data=True)}
+
+        def _chain_max_severity(ids: List[str]) -> float:
+            best = 0.0
+            for nid in ids:
+                sev = str(_node_attrs.get(nid, {}).get("severity", "info")).lower()
+                best = max(best, SEVERITY_SCORES.get(sev, 1.0))
+            return best
+
         attack_chains = []
         for idx, chain in enumerate(raw_chains[:100]):
-            if not chain:
+            # A chain needs at least one edge — a single node is not an attack
+            # chain. `all_simple_paths` returns single-node paths when a node is
+            # both root and leaf (isolated finding); those were rendering as
+            # bogus length-1 "chains" (Calibration Run #22).
+            if not chain or len(chain) < 2:
                 continue
             chain_ids = [str(node_id) for node_id in chain]
-            chain_score = 0.0
+            edge_strength = 0.0
             for source, target in zip(chain_ids, chain_ids[1:]):
                 edge_attrs = self.graph.get_edge_data(source, target) or {}
-                chain_score += float(edge_attrs.get("strength", 1.0))
+                edge_strength += float(edge_attrs.get("strength", 1.0))
+            # Severity-aware score: weight the chain by the worst finding it
+            # traverses (normalized 0-1). A chain of only INFO findings (e.g.
+            # "Subdomain -> Open Port" co-location) scores ~0.1×edge_strength
+            # and sinks below a real chain ending in a HIGH/CRITICAL finding.
+            # Previously every 2-node chain scored a flat ~1.0 regardless of
+            # severity, making benign co-location look as dangerous as a real
+            # exploit path.
+            max_sev = _chain_max_severity(chain_ids)
+            chain_score = edge_strength * (max_sev / 10.0)
             attack_chains.append({
                 "id": f"chain_{idx + 1}",
                 "node_ids": chain_ids,
@@ -1690,6 +1713,9 @@ class CausalGraphBuilder:
                 "length": len(chain_ids),
                 "score": round(chain_score, 3),
             })
+
+        # Surface the most dangerous chains first.
+        attack_chains.sort(key=lambda c: c["score"], reverse=True)
 
         pressure_payload = [
             {

@@ -18,9 +18,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
+class ChatTurn(BaseModel):
+    role: str = Field(..., max_length=16)
+    content: str = Field(..., max_length=8000)
+
+
 class ChatRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=32000)
     session_id: str | None = Field(default=None, min_length=1, max_length=128)
+    # Prior conversation turns for multi-turn memory. The endpoint is stateless;
+    # the client replays the thread. Bounded to keep the prompt inside budget.
+    history: list[ChatTurn] | None = Field(default=None, max_length=50)
 
 @router.get("/status", dependencies=[Depends(verify_token)])
 async def get_ai_status():
@@ -35,10 +43,12 @@ async def chat_with_ai(req: ChatRequest):
     Streams the response token-by-token.
     """
     ai = AIEngine.instance()
-    
+
+    history = [turn.model_dump() for turn in req.history] if req.history else None
+
     # Use streaming response for real-time feel
     return StreamingResponse(
-        ai.stream_chat(req.prompt, session_id=req.session_id),
+        ai.stream_chat(req.prompt, session_id=req.session_id, history=history),
         media_type="text/plain"
     )
 

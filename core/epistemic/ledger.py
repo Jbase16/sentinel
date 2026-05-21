@@ -142,7 +142,10 @@ class EvidenceLedger:
     """
 
     def __init__(self, config: Optional[SentinelConfig] = None):
-        self.config = config or SentinelConfig.from_env()
+        # Use the global singleton when no config is injected.
+        # See core/epistemic/cas.py for the historical-bug rationale.
+        from core.base.config import get_config
+        self.config = config or get_config()
         self.cas = ContentAddressableStorage(self.config)
         
         # 1. Immutable Stores (The "What")

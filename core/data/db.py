@@ -437,14 +437,19 @@ class Database:
         self.blackbox.fire_and_forget(self._save_session_impl, session_data)
 
     async def _save_session_impl(self, session_data: Dict[str, Any]):
+        # end_time is intentionally part of the column set so that scan completion
+        # handlers in core/server/routers/scans.py can persist the terminal state.
+        # When the scan is still running, end_time is None / NULL. See Bug #4 in
+        # docs/CALIBRATION_RUN_004.md for the full history.
         await self._execute_internal(
             """
-            INSERT INTO sessions (id, target, status, start_time, logs)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO sessions (id, target, status, start_time, end_time, logs)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 target=excluded.target,
                 status=excluded.status,
                 start_time=excluded.start_time,
+                end_time=excluded.end_time,
                 logs=excluded.logs
         """,
             (
@@ -452,6 +457,7 @@ class Database:
                 session_data["target"],
                 session_data.get("status"),
                 session_data.get("start_time"),
+                session_data.get("end_time"),
                 json.dumps(session_data.get("logs", [])),
             ),
         )

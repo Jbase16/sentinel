@@ -27,7 +27,14 @@ class ContentAddressableStorage:
     """
 
     def __init__(self, config: Optional[SentinelConfig] = None):
-        self.config = config or SentinelConfig.from_env()
+        # Use the global singleton when no config is injected.
+        # Historical bug: this used SentinelConfig.from_env() directly,
+        # which created a new SentinelConfig with a fresh random api_token
+        # every time CAS was instantiated mid-scan — desynchronising the
+        # token file from the auth handler's in-memory token. See
+        # docs/CALIBRATION_RUN_001.md Bug #2.
+        from core.base.config import get_config
+        self.config = config or get_config()
         # Storage root: ~/.sentinelforge/evidence/blobs
         self.blob_dir = self.config.storage.evidence_path / "blobs"
         self._ensure_storage()

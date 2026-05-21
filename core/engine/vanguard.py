@@ -9,7 +9,6 @@ from core.toolkit.tools import get_installed_tools
 
 logger = logging.getLogger(__name__)
 
-_sslyze_warned = False
 
 class Vanguard:
     """
@@ -68,15 +67,6 @@ class Vanguard:
             # fingerprints.json check
             # This is hardcoded for now, ideal would be config-based assets
             pass
-
-        # 3. Python Compatibility Checks
-        if tool == "sslyze":
-            global _sslyze_warned
-            if sys.version_info >= (3, 13):
-                if not _sslyze_warned:
-                    logger.warning(f"[{tool}] Incompatible with Python {sys.version}.x (nassl issue).")
-                    _sslyze_warned = True
-                return False
 
         return True
 

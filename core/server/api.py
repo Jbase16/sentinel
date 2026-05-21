@@ -26,7 +26,7 @@ from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from core.base.config import get_config, setup_logging, SecurityInterlock
+from core.base.config import get_config, setup_logging, SecurityInterlock, normalize_tool_path
 from core.server.state import get_state
 from core.data.db import Database
 from core.errors import SentinelError
@@ -82,6 +82,17 @@ async def lifespan(app: FastAPI):
     }
 
     setup_logging(config)
+
+    # Normalise the spawned-subprocess PATH so shutil.which() resolves
+    # system tools (/opt/homebrew/bin/httpx, etc.) before any venv-shadowed
+    # binaries (e.g. the Python httpx HTTP-client package which installs
+    # a console_script of the same name). Without this, the scheduler
+    # selects nuclei/nikto/httpx but the wrong binary is executed.
+    # See docs/CALIBRATION_RUN_001.md Bug #1.
+    prepended_paths = normalize_tool_path()
+    if prepended_paths:
+        logger.info(f"[Startup] PATH normalised; prepended: {prepended_paths}")
+
     logger.info(f"SentinelForge API Starting on {config.api_host}:{config.api_port}")
     logger.info(
         "[Startup] build_sha=%s build_id=%s module=%s",

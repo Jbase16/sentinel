@@ -74,34 +74,6 @@ class ToolRegistry:
             "cost": 2,
             "intrusiveness": 1, 
         },
-        "httprobe": {
-            "intent": INTENT_ACTIVE_LIVE_CHECK,
-            "phase": PHASE_2_LIGHT,
-            "cost": 2,
-            "intrusiveness": 1,
-        },
-        "whatweb": {
-            "intent": INTENT_ACTIVE_LIVE_CHECK,
-            "phase": PHASE_2_LIGHT,
-            "cost": 1,
-            "intrusiveness": 1,
-            "gates": ["protocol:http", "protocol:https"]
-        },
-        "wafw00f": {
-            "intent": INTENT_ACTIVE_LIVE_CHECK,
-            "phase": PHASE_2_LIGHT,
-            "cost": 1,
-            "intrusiveness": 1,
-             "gates": ["protocol:http", "protocol:https"]
-        },
-
-        "pshtt": {
-            "intent": INTENT_ACTIVE_LIVE_CHECK,
-            "phase": PHASE_2_LIGHT,
-            "cost": 2,
-            "intrusiveness": 1,
-            "gates": ["protocol:https"]
-        },
         "testssl": {
             "intent": INTENT_ACTIVE_LIVE_CHECK,
             "phase": PHASE_2_LIGHT,
@@ -152,14 +124,7 @@ class ToolRegistry:
              "intrusiveness": 3,
              "gates": ["protocol:http", "protocol:https"]
         },
-        "dirsearch": {
-            "intent": INTENT_SURFACE_ENUMERATION,
-            "phase": PHASE_3_SURFACE,
-            "cost": 3,
-            "intrusiveness": 3, 
-            "gates": ["protocol:http", "protocol:https"]
-        },
-        
+
         # --- Phase 4: Conditional Deep (Specifics) ---
         "nuclei_safe": {
             "intent": INTENT_VULN_SCANNING,

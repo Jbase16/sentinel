@@ -18,6 +18,51 @@ _SEVERITY_BADGE = {
 }
 
 
+def _finding_heading(finding: Dict[str, Any]) -> str:
+    """Compose a finding heading as ``type: distinguishing-detail`` so
+    multiple findings of the same type (7 missing headers, 4 open ports)
+    render distinct, useful headings instead of 7 identical 'Missing
+    Security Header' lines."""
+    ftype = finding.get("type") or "Finding"
+    meta = finding.get("metadata") or {}
+    detail = ""
+    if meta.get("header"):
+        detail = str(meta["header"])
+    elif meta.get("port") is not None:
+        detail = f"port {meta['port']}"
+    elif meta.get("version"):
+        detail = f"v{meta['version']}"
+    else:
+        msg = (finding.get("message") or "").strip()
+        # Use a short, single-line message as the detail.
+        if msg and len(msg) <= 60 and "\n" not in msg and msg.lower() != str(ftype).lower():
+            detail = msg
+    return f"{ftype}: {detail}" if detail else str(ftype)
+
+
+def _as_entry_list(result: Any) -> List[Dict[str, Any]]:
+    """Normalize a store's "list-everything" return into a list of dict entries.
+
+    Stores expose this differently:
+      - some return a list of entry dicts
+      - EvidenceStore.get_all() returns a DICT keyed by entry id
+
+    ``list(some_dict)`` returns the dict's KEYS (ids), not the entries —
+    which is what crashed report generation (an int id reached
+    ``ev.get("type")``). We take ``.values()`` for dicts, and defensively
+    keep only dict-shaped entries so a stray scalar can never reach the
+    renderer's ``.get()`` calls.
+    """
+    if isinstance(result, dict):
+        items = list(result.values())
+    else:
+        try:
+            items = list(result)
+        except TypeError:
+            return []
+    return [item for item in items if isinstance(item, dict)]
+
+
 class ReportComposer:
     """
     Aggregates Sentinel intelligence into a structured JSON report and a Markdown rendering.
@@ -79,14 +124,14 @@ class ReportComposer:
         for name in ("get_all", "list", "all_findings"):
             m = getattr(self._finding_store, name, None)
             if callable(m):
-                return list(m())
+                return _as_entry_list(m())
         return []
 
     def _safe_list_evidence(self) -> List[Dict[str, Any]]:
         for name in ("get_all", "list", "all_entries"):
             m = getattr(self._evidence_ledger, name, None)
             if callable(m):
-                return list(m())
+                return _as_entry_list(m())
         return []
 
     def _safe_graph_analysis(self, include_attack_paths: bool, max_paths: int) -> Dict[str, Any]:
@@ -101,7 +146,11 @@ class ReportComposer:
     def _build_summary(self, findings: List[Dict[str, Any]]) -> Dict[str, Any]:
         by_risk: Dict[str, int] = {}
         for f in findings:
-            risk = str(f.get("risk", "unknown")).lower()
+            # Findings carry `severity` ("MEDIUM"/"INFO"); older shapes used
+            # `risk`. Read severity first, fall back to risk — reading only
+            # `risk` made every finding "unknown" and produced an EMPTY
+            # severity table even with 17 findings (Calibration Run #21).
+            risk = str(f.get("severity") or f.get("risk") or "unknown").lower()
             by_risk[risk] = by_risk.get(risk, 0) + 1
         return {"total_findings": len(findings), "by_risk": by_risk}
 
@@ -192,7 +241,10 @@ class ReportComposer:
             for idx, f in enumerate(sorted_findings, start=1):
                 sev_raw = str(f.get("risk") or f.get("severity") or "unknown").lower()
                 badge = _SEVERITY_BADGE.get(sev_raw, sev_raw.upper())
-                title = f.get("title") or f.get("name") or f.get("type") or f"Finding #{idx}"
+                # Heading: prefer an explicit title, else compose type +
+                # distinguishing detail so 7 "Missing Security Header" findings
+                # don't render as 7 identical headings (Calibration Run #21).
+                title = f.get("title") or f.get("name") or _finding_heading(f) or f"Finding #{idx}"
                 finding_id = f.get("id") or f.get("finding_id") or ""
                 target_url = f.get("target") or f.get("asset") or f.get("url") or target
                 tool = f.get("tool") or f.get("source") or ""
@@ -275,19 +327,45 @@ class ReportComposer:
                 lines.append("")
 
         # ── 4. Evidence ────────────────────────────────────────────────────
+        # Cap the rendered evidence list. A scan can capture hundreds/thousands
+        # of artifacts (one per tool observation); dumping all of them buries
+        # the report. Show the first N and summarize the remainder.
+        _EVIDENCE_RENDER_CAP = 25
         if evidence:
+            total_ev = len(evidence)
+            shown = evidence[:_EVIDENCE_RENDER_CAP]
             lines.append("## Evidence")
             lines.append("")
-            lines.append(
-                f"The following {len(evidence)} evidence artifact(s) were captured during the assessment:"
-            )
+            if total_ev > _EVIDENCE_RENDER_CAP:
+                lines.append(
+                    f"{total_ev} evidence artifact(s) were captured; showing the "
+                    f"first {_EVIDENCE_RENDER_CAP}:"
+                )
+            else:
+                lines.append(
+                    f"The following {total_ev} evidence artifact(s) were captured during the assessment:"
+                )
             lines.append("")
-            for ev in evidence:
-                ev_type = ev.get("type") or "artifact"
-                ev_desc = ev.get("description") or ev.get("url") or ""
+            for ev in shown:
+                if not isinstance(ev, dict):
+                    # Defensive: never call .get() on a non-dict entry
+                    # (this is exactly what crashed report generation before).
+                    continue
+                # Evidence entries from EvidenceStore carry tool/summary/id;
+                # fall back to the older type/description/url shape if present.
+                ev_type = ev.get("type") or ev.get("tool") or "artifact"
+                ev_desc = (
+                    ev.get("description")
+                    or ev.get("summary")
+                    or ev.get("url")
+                    or ""
+                )
                 ev_id = ev.get("id") or ""
-                lines.append(f"- **{ev_type.upper()}**{': ' + ev_desc if ev_desc else ''}"
-                              f"{' (`' + ev_id + '`)' if ev_id else ''}")
+                lines.append(f"- **{str(ev_type).upper()}**{': ' + str(ev_desc) if ev_desc else ''}"
+                              f"{' (`' + str(ev_id) + '`)' if ev_id else ''}")
+            if total_ev > _EVIDENCE_RENDER_CAP:
+                lines.append(f"- _… and {total_ev - _EVIDENCE_RENDER_CAP} more artifact(s) "
+                             f"(full set available in the scan record)._")
             lines.append("")
             lines.append("---")
             lines.append("")

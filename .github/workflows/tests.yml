@@ -1,0 +1,71 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  unit-and-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-asyncio
+
+      - name: Run unit tests
+        run: pytest tests/unit/ -v --tb=short
+        env:
+          SENTINEL_DEBUG: "true"
+
+      - name: Run security tests
+        run: pytest tests/security/ -v --tb=short
+        env:
+          SENTINEL_DEBUG: "true"
+
+      - name: Run integration tests (non-network)
+        run: |
+          pytest tests/integration/ -v --tb=short \
+            --ignore=tests/integration/test_ghost_lazarus_integration.py \
+            --ignore=tests/integration/test_ghost_wraith_e2e.py \
+            --ignore=tests/integration/test_full_scan.py \
+            -k "not network and not slow"
+        env:
+          SENTINEL_DEBUG: "true"
+        continue-on-error: true   # integration suite may have env-sensitive cases; do not block merges yet
+
+  static-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install scanners
+        run: |
+          pip install --upgrade pip
+          pip install bandit semgrep
+
+      - name: Bandit
+        run: bandit -r core/ -ll -c .bandit
+        continue-on-error: true   # advisory until findings are triaged
+
+      - name: Semgrep
+        run: semgrep --config=auto --error --severity ERROR core/
+        continue-on-error: true   # advisory until findings are triaged

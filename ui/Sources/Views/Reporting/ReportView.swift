@@ -88,7 +88,10 @@ struct ReportView: View {
                         List(appState.apiResults?.findings ?? []) { finding in
                             HStack {
                                 VStack(alignment: .leading) {
-                                    Text(finding.title ?? "Untitled Finding").font(
+                                    // Raw findings carry `type`/`message`, not `title`
+                                    // (title is only set by the bounty-report endpoint).
+                                    // Fall back type → message so it's never "Untitled".
+                                    Text(finding.title ?? finding.message ?? finding.type).font(
                                         .system(size: 13, weight: .medium))
                                     Text(finding.severity).font(.caption).foregroundColor(
                                         .secondary)

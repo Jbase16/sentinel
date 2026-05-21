@@ -1,0 +1,41 @@
+[
+  {
+    "name": "anonymous",
+    "persona_type": "anonymous",
+    "base_url": "http://127.0.0.1:3003"
+  },
+
+  {
+    "_comment": "Placeholder user persona. Fill in real credentials before running real persona-diff IDOR testing. As-is, the login flow will probably fail and this persona will fall back to anonymous.",
+    "name": "user",
+    "persona_type": "user",
+    "base_url": "http://127.0.0.1:3003",
+    "login_flow": {
+      "endpoint": "/api/login",
+      "method": "POST",
+      "username_param": "email",
+      "password_param": "password",
+      "username_value": "user@megashop.test",
+      "password_value": "REPLACE_ME",
+      "token_extract_path": "data.token",
+      "content_type": "application/json"
+    }
+  },
+
+  {
+    "_comment": "Placeholder admin persona. Same caveats as 'user'. The interesting differential is admin-vs-user accessing the SAME endpoint — that's where IDOR shows up.",
+    "name": "admin",
+    "persona_type": "admin",
+    "base_url": "http://127.0.0.1:3003",
+    "login_flow": {
+      "endpoint": "/api/login",
+      "method": "POST",
+      "username_param": "email",
+      "password_param": "password",
+      "username_value": "admin@megashop.test",
+      "password_value": "REPLACE_ME",
+      "token_extract_path": "data.token",
+      "content_type": "application/json"
+    }
+  }
+]

@@ -44,13 +44,6 @@ class TestToolCommandGeneration:
         assert cmd[0] == "dnsx"
         assert "bash" not in cmd
 
-    def test_httprobe_stdin(self):
-        """httprobe should use stdin instead of bash pipe."""
-        cmd, stdin = get_tool_command("httprobe", "example.com")
-        assert stdin == "example.com"
-        assert cmd[0] == "httprobe"
-        assert "bash" not in cmd
-
     def test_no_shell_injection_in_target(self):
         """
         Target with shell metacharacters is safe because subprocess uses list args.

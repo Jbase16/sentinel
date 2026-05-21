@@ -36,6 +36,9 @@ API_BASE = "http://127.0.0.1:8765"
 TOKEN_PATH = Path.home() / ".sentinelforge" / "api_token"
 SSE_ENDPOINTS = ("/v1/events/stream", "/v1/events")
 
+# Re-import here so type hints resolve even if typing isn't imported above.
+from typing import Optional, Dict, Any  # noqa: E402
+
 
 class SentinelCLI:
     def __init__(self):
@@ -67,7 +70,17 @@ class SentinelCLI:
             print(f"❌ Connection failed: {e}")
             return False
 
-    async def start_scan(self, target: str, modules: List[str] = None, mode: str = "standard") -> str:
+    async def start_scan(
+        self,
+        target: str,
+        modules: List[str] = None,
+        mode: str = "standard",
+        scope: Optional[List[str]] = None,
+        scope_strict: bool = False,
+        personas: Optional[List[Dict[str, Any]]] = None,
+        oob: Optional[Dict[str, Any]] = None,
+        restrictions: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Start a new scan session"""
         payload = {
             "target": target,
@@ -76,8 +89,20 @@ class SentinelCLI:
         }
         if modules:
             payload["modules"] = modules
-        
-        print(f"🚀 Starting scan for target: {target} (Mode: {mode})")
+        if scope:
+            payload["scope"] = scope
+            payload["scope_strict"] = scope_strict
+        if personas:
+            payload["personas"] = personas
+        if oob:
+            payload["oob"] = oob
+        if restrictions:
+            payload["restrictions"] = restrictions
+
+        scope_note = f" | scope={len(scope)} rules ({'strict' if scope_strict else 'permissive'})" if scope else ""
+        personas_note = f" | personas={len(personas)}" if personas else ""
+        oob_note = f" | oob={oob.get('provider', '?')}" if oob else ""
+        print(f"🚀 Starting scan for target: {target} (Mode: {mode}){scope_note}{personas_note}{oob_note}")
         try:
             resp = await self.client.post("/v1/scans/start", json=payload)
             resp.raise_for_status()
@@ -260,7 +285,17 @@ class SentinelCLI:
             status_icon = "✅" if exit_code == 0 else "❌"
             print(f"{status_icon} [TOOL] {tool} finished ({findings} findings, exit: {exit_code})")
 
-    async def run(self, target: str, modules: List[str] = None, mode: str = "standard"):
+    async def run(
+        self,
+        target: str,
+        modules: List[str] = None,
+        mode: str = "standard",
+        scope: Optional[List[str]] = None,
+        scope_strict: bool = False,
+        personas: Optional[List[Dict[str, Any]]] = None,
+        oob: Optional[Dict[str, Any]] = None,
+        restrictions: Optional[Dict[str, Any]] = None,
+    ):
         if not await self.check_connection():
             return
 
@@ -271,7 +306,12 @@ class SentinelCLI:
         await asyncio.sleep(0.5)
 
         # Kick off the scan
-        await self.start_scan(target, modules, mode)
+        await self.start_scan(
+            target, modules, mode,
+            scope=scope, scope_strict=scope_strict,
+            personas=personas, oob=oob,
+            restrictions=restrictions,
+        )
 
         # Wait for scan to complete (signaled by self.running = False in stream_events)
         while self.running:
@@ -287,14 +327,147 @@ class SentinelCLI:
             pass
 
 
+def _load_scope_file(path: str) -> List[str]:
+    """Read a scope file (one rule per line, # comments, blank lines ignored)."""
+    rules: List[str] = []
+    p = Path(path)
+    if not p.exists():
+        print(f"❌ scope file not found: {path}")
+        sys.exit(2)
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        rules.append(line)
+    if not rules:
+        print(f"❌ scope file {path} has no non-comment rules")
+        sys.exit(2)
+    return rules
+
+
+def _load_personas_file(path: str) -> List[Dict[str, Any]]:
+    """Read a persona JSON file. Must be a list of persona dicts, each with a 'name' field.
+
+    Personas drive wraith_persona_diff (differential authentication testing).
+    Without personas configured, the wraith_persona_diff tool is silently
+    skipped at intent selection — see core/scheduler/strategos.py:_select_tools.
+    """
+    p = Path(path)
+    if not p.exists():
+        print(f"❌ personas file not found: {path}")
+        sys.exit(2)
+    try:
+        data = json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        print(f"❌ personas file {path} is not valid JSON: {e}")
+        sys.exit(2)
+    if not isinstance(data, list) or not data:
+        print(f"❌ personas file {path} must be a non-empty JSON list of persona objects")
+        sys.exit(2)
+    for i, persona in enumerate(data):
+        if not isinstance(persona, dict):
+            print(f"❌ personas[{i}] must be a JSON object")
+            sys.exit(2)
+        if not persona.get("name"):
+            print(f"❌ personas[{i}] missing required 'name' field")
+            sys.exit(2)
+    return data
+
+
+def _load_oob_file(path: str) -> Dict[str, Any]:
+    """Read an OOB config JSON file. Must contain 'provider' and 'base_domain'.
+
+    OOB drives wraith_oob_probe (out-of-band callback detection). Without
+    this configured, the tool is silently skipped.
+    """
+    p = Path(path)
+    if not p.exists():
+        print(f"❌ OOB config file not found: {path}")
+        sys.exit(2)
+    try:
+        data = json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        print(f"❌ OOB config file {path} is not valid JSON: {e}")
+        sys.exit(2)
+    if not isinstance(data, dict):
+        print(f"❌ OOB config must be a JSON object")
+        sys.exit(2)
+    for field in ("provider", "base_domain"):
+        if not data.get(field):
+            print(f"❌ OOB config missing required '{field}' field")
+            sys.exit(2)
+    return data
+
+
+def _load_restrictions_file(path: str) -> Dict[str, Any]:
+    """Read a restrictions.json file produced by ``sentinel-ingest``.
+
+    Returns the parsed dict; the server-side policy_enforcer translates
+    it into a ``PolicyEnforcement`` and applies it before scan start.
+    Missing or malformed files exit the CLI with code 2 — better to fail
+    loud than silently scan without the restrictions the operator
+    intended to apply.
+    """
+    p = Path(path)
+    if not p.exists():
+        print(f"❌ restrictions file not found: {path}")
+        sys.exit(2)
+    try:
+        data = json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        print(f"❌ restrictions file {path} is not valid JSON: {e}")
+        sys.exit(2)
+    if not isinstance(data, dict):
+        print(f"❌ restrictions file must be a JSON object")
+        sys.exit(2)
+    # Don't validate further here — the server's policy_enforcer is the
+    # authoritative parser and surfaces schema mismatches as warnings.
+    return data
+
+
 async def main():
     parser = argparse.ArgumentParser(description="SentinelForge Headless Scanner")
     parser.add_argument("--target", help="Target URL/IP to scan")
     parser.add_argument("--modules", help="Comma-separated list of tools to run (optional)")
     parser.add_argument("--mode", default="standard", help="Scan mode (standard, bug_bounty, stealth, passive)")
-    
+    parser.add_argument(
+        "--scope",
+        type=str,
+        default=None,
+        help="Path to a scope file (one rule per line). Required for bug-bounty work.",
+    )
+    parser.add_argument(
+        "--scope-strict",
+        action="store_true",
+        help="Reject targets that don't match any inclusion rule. Recommended for bounty scans.",
+    )
+    parser.add_argument(
+        "--personas",
+        type=str,
+        default=None,
+        help="Path to a JSON file with persona profiles (list of objects with at least 'name'). "
+             "Unlocks wraith_persona_diff for differential-auth IDOR testing.",
+    )
+    parser.add_argument(
+        "--oob",
+        type=str,
+        default=None,
+        help="Path to a JSON file with OOB provider config (object with 'provider' and 'base_domain'). "
+             "Unlocks wraith_oob_probe for out-of-band callback detection (SQLi/XXE/SSRF/RCE).",
+    )
+    parser.add_argument(
+        "--restrictions",
+        type=str,
+        default=None,
+        help="Path to a <program>-restrictions.json file produced by "
+             "`sentinel-ingest`. Enforces program-policy at scan-time: bans "
+             "categorically-disallowed tools (e.g. nuclei_mutating under NO_DOS), "
+             "caps rate limits, and refuses the scan entirely if the policy "
+             "blocks automated scanning.",
+    )
+
     args = parser.parse_args()
-    
+
     target = args.target
     if not target:
         try:
@@ -308,6 +481,17 @@ async def main():
         return
 
     modules = args.modules.split(",") if args.modules else None
+    scope = _load_scope_file(args.scope) if args.scope else None
+    personas = _load_personas_file(args.personas) if args.personas else None
+    oob = _load_oob_file(args.oob) if args.oob else None
+    restrictions = _load_restrictions_file(args.restrictions) if args.restrictions else None
+
+    # Defensive: bounty mode without a scope file is almost always a misconfiguration.
+    # Bug-bounty work treats "no scope" as "deny everything", so the scan will
+    # produce nothing useful. Warn loudly.
+    if args.mode == "bug_bounty" and scope is None:
+        print("⚠ WARNING: --mode bug_bounty without --scope will reject everything.")
+        print("   Pass --scope <file> with explicit allow rules.")
 
     cli = SentinelCLI()
     
@@ -323,7 +507,12 @@ async def main():
         # Windows/some environments don't support add_signal_handler in this context
         pass
 
-    await cli.run(target, modules, args.mode)
+    await cli.run(
+        target, modules, args.mode,
+        scope=scope, scope_strict=args.scope_strict,
+        personas=personas, oob=oob,
+        restrictions=restrictions,
+    )
 
 if __name__ == "__main__":
     try:

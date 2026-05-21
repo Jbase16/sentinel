@@ -133,6 +133,12 @@ class ReportGenerateRequest(BaseModel):
     format: str = Field("markdown", description="markdown|json")
     include_attack_paths: bool = Field(True)
     max_paths: int = Field(5, ge=1, le=50)
+    # Scope the report to a specific scan session. If omitted, the most
+    # recent session is used. Without this, the report read the GLOBAL
+    # cross-session finding store (every finding from every scan ever) —
+    # producing findings/evidence that didn't belong to the scan the
+    # operator was looking at (Calibration Run #21).
+    session_id: Optional[str] = Field(None)
 
 
 class ReportGenerateResponse(BaseModel):
@@ -154,13 +160,71 @@ class PoCResponse(BaseModel):
     created_at: str
 
 
+class _ListStore:
+    """Minimal store adapter wrapping a pre-fetched list of entries.
+
+    Lets us build a session-scoped ReportComposer from DB rows without the
+    composer depending on session plumbing — it just calls ``get_all()``."""
+    def __init__(self, items):
+        self._items = list(items or [])
+
+    def get_all(self):
+        return list(self._items)
+
+
+async def _resolve_session_id(db, requested: Optional[str]) -> Optional[str]:
+    """Explicit session_id wins; otherwise fall back to the most-recent
+    session so the report describes the scan the operator just ran."""
+    if requested:
+        return requested
+    try:
+        rows = await db.fetch_all(
+            "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1"
+        )
+        if rows:
+            return rows[0][0]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[reporting] could not resolve latest session: %s", e)
+    return None
+
+
 @router.post("/reporting/generate", response_model=ReportGenerateResponse)
-def generate_report(
+async def generate_report(
     req: ReportGenerateRequest,
-    composer: ReportComposer = Depends(get_report_composer),
+    graph_analyzer: GraphAnalyzer = Depends(get_graph_analyzer),
 ) -> ReportGenerateResponse:
+    from core.data.db import Database
+
+    db = Database.instance()
+    session_id = await _resolve_session_id(db, req.session_id)
+
+    if session_id:
+        # Session-scoped: pull THIS scan's findings + evidence from the DB,
+        # not the global cross-session singletons. This is what makes the
+        # report agree with the Target Scan tab and the Bounty report.
+        findings = await db.get_findings(session_id)
+        evidence = await db.get_evidence(session_id)
+        composer = ReportComposer(
+            finding_store=_ListStore(findings),
+            evidence_ledger=_ListStore(evidence),
+            graph_analyzer=graph_analyzer,
+        )
+        # Prefer the session's real target if the caller didn't pin one.
+        session_data = await db.get_session(session_id)
+        target = req.target or (session_data or {}).get("target") or "target"
+    else:
+        # No sessions at all — fall back to the global stores (legacy path).
+        from core.data.findings_store import get_finding_store
+        from core.data.evidence_store import EvidenceStore
+        composer = ReportComposer(
+            finding_store=get_finding_store(),
+            evidence_ledger=EvidenceStore.instance(),
+            graph_analyzer=graph_analyzer,
+        )
+        target = req.target
+
     artifact = composer.generate(
-        target=req.target,
+        target=target,
         scope=req.scope,
         report_format=req.format,
         include_attack_paths=req.include_attack_paths,
