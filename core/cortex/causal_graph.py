@@ -74,6 +74,13 @@ SEVERITY_SCORES: Dict[str, float] = {
     "info": 1.0,
 }
 
+# Edge strength for HEURISTIC co-location edges — findings that merely share a
+# target in a plausible kill-chain order (recon→service→vuln, inferred by
+# _infer_dependencies Rules 1-4), where enablement is NOT confirmed. Weighted
+# well below a real (explicit or capability-confirmed) edge so co-location
+# chains rank below genuine enablement chains in export_dto scoring (Run #25).
+CO_LOCATION_EDGE_STRENGTH: float = 0.3
+
 # Short-lived DTO cache to avoid repeated full rebuilds during UI polling bursts.
 _GRAPH_DTO_CACHE_TTL_SECONDS = 1.0
 _graph_dto_cache: Dict[str, Dict[str, Any]] = {}
@@ -142,6 +149,9 @@ class CausalGraphBuilder:
         self.findings_map: Dict[str, Finding] = {}
         self._inferred_enablement_edges: List[Dict[str, Any]] = []
         self._chain_dependency_pairs: Set[Tuple[str, str]] = set()
+        # Heuristic co-location edges (Rules 1-4): shared-target ordering, not
+        # confirmed enablement. Tracked so build() can weight them low.
+        self._colocation_pairs: Set[Tuple[str, str]] = set()
 
     def build(self, findings: List[Dict[str, Any]]) -> nx.DiGraph:
         """
@@ -160,6 +170,7 @@ class CausalGraphBuilder:
         self.findings_map.clear()
         self._inferred_enablement_edges = []
         self._chain_dependency_pairs = set()
+        self._colocation_pairs = set()
 
         # Convert dicts to Finding objects
         findings_obj = []
@@ -225,6 +236,7 @@ class CausalGraphBuilder:
                     edge_attrs: Dict[str, Any] = {}
 
                     if enablement_edge is not None:
+                        # Confirmed enablement (Rule 5, capability-driven).
                         # Preserve existing chain semantics where already present.
                         if edge_key not in self._chain_dependency_pairs:
                             relationship = "enablement"
@@ -235,6 +247,16 @@ class CausalGraphBuilder:
                             "enabled_at": float(enablement_edge.get("enabled_at", time.time())),
                             "enablement_edge": True,
                         })
+                    elif edge_key in self._colocation_pairs:
+                        # Heuristic co-location (Rules 1-4): the two findings only
+                        # share a target in a plausible kill-chain order — enablement
+                        # is NOT confirmed. Label distinctly and weight low so
+                        # co-location chains rank below real enablement chains.
+                        relationship = "co_located"
+                        edge_attrs["strength"] = CO_LOCATION_EDGE_STRENGTH
+                        edge_attrs["colocation_edge"] = True
+                    # else: an explicit, declared `requires` dependency — keep the
+                    # default "enables" (no strength → treated as a full 1.0 edge).
 
                     self.graph.add_edge(
                         prerequisite_id,
@@ -761,6 +783,14 @@ class CausalGraphBuilder:
         """
         self._inferred_enablement_edges = []
         self._chain_dependency_pairs = set()
+        self._colocation_pairs = set()
+
+        # Snapshot the EXPLICIT requires (declared on the findings) before the
+        # heuristic rules add any. Co-location edges are then exactly the pairs
+        # the rules introduced = (post-rule chain pairs) - (explicit pairs).
+        explicit_pairs: Set[Tuple[str, str]] = {
+            (source_id, f.id) for f in findings for source_id in f.requires
+        }
 
         # Group findings by target
         by_target: Dict[str, List[Finding]] = defaultdict(list)
@@ -821,6 +851,11 @@ class CausalGraphBuilder:
             for finding in findings
             for source_id in finding.requires
         }
+
+        # Co-location edges = pairs introduced by the heuristic rules above
+        # (Rules 1-4), i.e. everything in the chain pairs that was NOT an
+        # explicit, declared dependency. These get a low edge strength in build().
+        self._colocation_pairs = self._chain_dependency_pairs - explicit_pairs
 
         # Rule 5 (Phase 2): Information/access findings enable downstream capabilities.
         enablement_edges = self._infer_information_enablement_edges(findings)
@@ -1439,6 +1474,11 @@ class CausalGraphBuilder:
         attrs = edge_attrs or {}
         relationship = str(raw_relationship or "").strip().lower()
         enablement_class = str(attrs.get("enablement_class", "")).strip().lower()
+
+        # Heuristic shared-target edges render distinctly (and faintly) so the
+        # graph visually separates "near" from "enables".
+        if relationship in {"co_located", "colocation"} or attrs.get("colocation_edge"):
+            return "CO_LOCATED"
 
         if relationship in {"enablement", "enables"}:
             if enablement_class == "port_disclosure":

@@ -405,7 +405,7 @@ def test_export_dto_includes_attack_chains_and_pressure_points():
 
     assert dto["edges"], "Expected at least one edge in exported DTO"
     edge = dto["edges"][0]
-    assert edge["type"] in {"EXPOSES", "VULNERABLE_TO", "HAS_PORT", "USES_TECH"}
+    assert edge["type"] in {"EXPOSES", "VULNERABLE_TO", "HAS_PORT", "USES_TECH", "CO_LOCATED"}
     assert "relationship_raw" in edge.get("data", {})
 
 
@@ -828,8 +828,51 @@ def test_export_dto_chain_score_is_severity_aware():
         f"severity-blind scoring: critical chain {severe['score']} "
         f"!> info chain {benign['score']}"
     )
-    # Pure-INFO co-location is deprioritized: 1 edge * (info 1.0 / 10) = 0.1.
-    assert benign["score"] == pytest.approx(0.1, abs=0.001)
-    # The escalation path is driven by the worst finding it traverses:
-    # 2 edges * (critical 9.5 / 10) = 1.9 — an order of magnitude above noise.
-    assert severe["score"] == pytest.approx(1.9, abs=0.001)
+    # These recon→service→vuln edges are HEURISTIC co-location (Rules 1-4), so
+    # each edge weighs CO_LOCATION_EDGE_STRENGTH (0.3), not a full 1.0 (Run #25).
+    # Benign: 1 co-location edge (0.3) * (info 1.0 / 10) = 0.03.
+    assert benign["score"] == pytest.approx(0.03, abs=0.001)
+    # Severe: 2 co-location edges (0.6) * (critical 9.5 / 10) = 0.57 — still an
+    # order of magnitude above the benign co-location noise.
+    assert severe["score"] == pytest.approx(0.57, abs=0.001)
+
+
+def test_export_dto_marks_colocation_edges_distinctly():
+    # Run #25: recon→service→vuln edges inferred purely from a SHARED TARGET are
+    # co-location, not confirmed enablement. They must be labeled distinctly and
+    # weighted low so they don't masquerade as real exploit dependencies.
+    from core.cortex.causal_graph import CO_LOCATION_EDGE_STRENGTH
+
+    builder = CausalGraphBuilder()
+    builder.build(_run22_chain_findings())
+
+    edges = list(builder.graph.edges(data=True))
+    assert edges, "expected inferred edges"
+    for src, dst, data in edges:
+        assert data.get("relationship") == "co_located", (src, dst, data)
+        assert data.get("strength") == CO_LOCATION_EDGE_STRENGTH
+        assert data.get("colocation_edge") is True
+
+    dto = builder.export_dto(session_id="run25")
+    assert dto["edges"]
+    assert all(e["type"] == "CO_LOCATED" for e in dto["edges"]), (
+        f"co-location edges should render as CO_LOCATED: "
+        f"{[e['type'] for e in dto['edges']]}"
+    )
+
+
+def test_explicit_requires_is_not_downgraded_to_colocation():
+    # A DECLARED dependency is a real edge, not heuristic co-location — it keeps
+    # the full-strength "enables" relationship.
+    builder = CausalGraphBuilder()
+    builder.build([
+        {"id": "a", "type": "Foothold", "severity": "high", "title": "a",
+         "target": "x", "metadata": {}},
+        {"id": "b", "type": "Escalation", "severity": "high", "title": "b",
+         "target": "x", "requires": ["a"], "metadata": {}},
+    ])
+    data = builder.graph.get_edge_data("a", "b")
+    assert data is not None, "explicit requires edge missing"
+    assert data.get("relationship") == "enables"
+    assert data.get("colocation_edge") is not True
+    assert ("a", "b") not in builder._colocation_pairs
