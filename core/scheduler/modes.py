@@ -52,11 +52,9 @@ class ModeRegistry:
         # Disable Heavy Artillery
         "masscan": ToolOverlay(disabled=True),
         "amass": ToolOverlay(disabled=True), # Too slow/heavy usually
-        "dirsearch": ToolOverlay(cost_modifier=1), # Make it expensive
-        
+
         # Boost Smart Tools
         "httpx": ToolOverlay(priority_boost=10),
-        "whatweb": ToolOverlay(priority_boost=5),
         "subjack": ToolOverlay(priority_boost=5), # High impact, low noise
         
         # Restrict Noisy Tools
@@ -76,7 +74,6 @@ class ModeRegistry:
         "nuclei_safe": ToolOverlay(disabled=True),
         "nuclei_mutating": ToolOverlay(disabled=True),
         "nuclei": ToolOverlay(disabled=True),
-        "dirsearch": ToolOverlay(disabled=True),
         "wfuzz": ToolOverlay(disabled=True),
         "jaeles": ToolOverlay(disabled=True),
         "eyewitness": ToolOverlay(disabled=True),

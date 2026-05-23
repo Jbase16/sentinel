@@ -31,6 +31,7 @@ import logging
 import os
 import re
 import threading
+import traceback
 from collections import deque
 from urllib.parse import urlparse
 from typing import Any, AsyncGenerator, Deque, Dict, List, Optional, Set, Tuple
@@ -906,6 +907,21 @@ class ScannerEngine:
 
                     import uuid
 
+                    # ─── Wait-loop watchdog state (Bug #12 observability) ───
+                    # When the loop spins for too long without any task
+                    # reaching `done`, dump async-task stacks so we can see
+                    # WHICH coroutine is suspended on WHICH await. Without
+                    # this, the only signal of a hang is silence.
+                    #
+                    # Threshold: 1.2× tool_timeout_seconds. Real tools that
+                    # take their full timeout still update _last_progress on
+                    # the timeout exit; only true hangs sit longer.
+                    _wd_loop = asyncio.get_running_loop()
+                    _wd_last_progress = _wd_loop.time()
+                    _wd_warn_threshold = self._tool_timeout_seconds() * 1.2
+                    _wd_task_started: Dict[str, float] = {}
+                    _wd_warned = False
+
                     while self._pending_tasks or self._running_tasks:
                         if local_cancel.is_set():
                             await self._queue.put("[scanner] cancellation requested; stopping new tasks")
@@ -926,6 +942,7 @@ class ScannerEngine:
                             self._running_tasks[exec_id] = asyncio.create_task(
                                 self._run_tool_task(exec_id, tool, target, self._queue, args, local_cancel)
                             )
+                            _wd_task_started[exec_id] = _wd_loop.time()
                             await self._queue.put(f"[scanner] Started {tool} ({exec_id})")
 
                         if not self._running_tasks:
@@ -935,6 +952,20 @@ class ScannerEngine:
 
                         while not self._queue.empty():
                             yield self._queue.get_nowait()
+
+                        if done:
+                            # Real progress — reset watchdog state
+                            _wd_last_progress = _wd_loop.time()
+                            _wd_warned = False
+                        else:
+                            # No task completed this tick. Check if we've
+                            # been stalled long enough to warrant the dump.
+                            elapsed_stall = _wd_loop.time() - _wd_last_progress
+                            if elapsed_stall > _wd_warn_threshold and not _wd_warned:
+                                self._emit_hang_diagnostic(
+                                    elapsed_stall, _wd_task_started, _wd_loop
+                                )
+                                _wd_warned = True
 
                         for finished in done:
                             exec_id = next((eid for eid, t in self._running_tasks.items() if t is finished), None)
@@ -946,6 +977,7 @@ class ScannerEngine:
                                 self._results_map[exec_id] = exc
                                 await self._queue.put(f"[{exec_id}] task error: {exc}")
                             del self._running_tasks[exec_id]
+                            _wd_task_started.pop(exec_id, None)
 
                         # Check for cancellation after every iteration, not just when no tasks completed
                         # This ensures the stop button works reliably even during long-running tools
@@ -1483,17 +1515,82 @@ class ScannerEngine:
     ) -> List[dict]:
         """
         Run a single tool with resilience wrapper.
+
+        Observability (see docs/CALIBRATION_RUN_009.md Bug #12): wraps the
+        core executor in entry/exit timer logs so the operational record
+        captures wall-clock duration per tool. When the wait-loop watchdog
+        (in run_scan) fires, these timer entries are the breadcrumbs that
+        narrow down WHICH tool's task is the source of a stall.
         """
         async def _core_executor():
              return await self._execute_tool(exec_id, tool, target, queue, args, cancel_flag)
 
         # Initialize resilience context with engine reference
         ctx = ResilienceContext(self, max_retries=3)
+
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        logger.info(f"[ToolTask] entry exec_id={exec_id} tool={tool}")
         try:
-             return await ctx.execute_with_retry(_core_executor)
-        except Exception:
-             # Errors logged by resilience context, propagate up
-             raise
+            result = await ctx.execute_with_retry(_core_executor)
+            elapsed = loop.time() - start
+            logger.info(
+                f"[ToolTask] exit  exec_id={exec_id} tool={tool} "
+                f"elapsed={elapsed:.1f}s findings={len(result) if isinstance(result, list) else '?'}"
+            )
+            return result
+        except Exception as exc:
+            elapsed = loop.time() - start
+            logger.warning(
+                f"[ToolTask] error exec_id={exec_id} tool={tool} "
+                f"elapsed={elapsed:.1f}s err={type(exc).__name__}: {exc}"
+            )
+            # Errors logged by resilience context; propagate up
+            raise
+
+    def _emit_hang_diagnostic(
+        self,
+        elapsed_stall: float,
+        task_started: Dict[str, float],
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """
+        Dump async-task state when the scan loop has stalled.
+
+        Fires once per stall episode from the wait-loop watchdog (see
+        run_scan). Walks `self._running_tasks` and prints each task's
+        suspended-frame stack via `Task.get_stack()`, plus per-task elapsed
+        time since dispatch. The combination — frame location + elapsed
+        time — pinpoints exactly which coroutine is waiting on what.
+
+        See docs/CALIBRATION_RUN_009.md Bug #12 for the symptom this
+        diagnostic was added to capture.
+        """
+        now = loop.time()
+        running = list(self._running_tasks.items())
+        logger.warning(
+            "[ScannerEngine] WATCHDOG: scan-loop stalled for %.0fs with %d task(s) running",
+            elapsed_stall,
+            len(running),
+        )
+        for exec_id, task in running:
+            elapsed_task = now - task_started.get(exec_id, now)
+            try:
+                stack = task.get_stack(limit=8)
+                if stack:
+                    formatted = "".join(traceback.format_list(traceback.extract_stack(stack[-1])))
+                    stack_summary = formatted.strip() or "(stack empty)"
+                else:
+                    stack_summary = "(task has no stack — likely completed but not yet collected)"
+            except Exception as exc:  # pragma: no cover — defensive
+                stack_summary = f"(could not introspect stack: {exc})"
+            logger.warning(
+                "[ScannerEngine] WATCHDOG task exec_id=%s elapsed=%.1fs done=%s\n%s",
+                exec_id,
+                elapsed_task,
+                task.done(),
+                stack_summary,
+            )
 
     def enable_stealth_mode(self):
         """

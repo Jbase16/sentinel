@@ -1,0 +1,29 @@
+# Scope file for the Juice Shop calibration lab.
+#
+# Format: one rule per line.
+#   - Plain hostname or IP             -> DOMAIN rule (exact match), ALLOW
+#   - "*.example.com"                  -> WILDCARD rule (subdomains only)
+#   - "10.0.0.0/24"                    -> CIDR rule
+#   - "!something"                     -> explicit DENY (overrides allows)
+#   - Lines starting with # or blank   -> ignored
+#
+# WHY THIS IS NECESSARY:
+# Sentinel's scope enforcer runs in bug-bounty mode by default for safety,
+# which means "deny by default" — any target not matched by an ALLOW rule
+# is rejected, including loopback addresses. That's correct for real bounty
+# work but it means the lab needs an explicit opt-in for 127.0.0.1.
+#
+# DO NOT add real bounty target rules to this file. Keep this file pinned
+# to the lab so calibration scans cannot accidentally hit a live target.
+
+# Allow only the loopback Juice Shop endpoint
+127.0.0.1
+
+# Defensive denies — make it impossible to accidentally scan a real target
+# from a calibration run, even if someone edits the allow rule above.
+!*.com
+!*.net
+!*.org
+!*.io
+!*.app
+!*.dev

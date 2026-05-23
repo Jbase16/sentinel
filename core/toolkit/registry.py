@@ -248,32 +248,11 @@ _tool_data = [
         target_type="url"
     ),
     ToolDefinition(
-        name="wafw00f",
-        label="wafw00f (WAF detection)",
-        cmd_template=["wafw00f", "{target}"],
-        aggressive=False,
-        target_type="url"
-    ),
-    ToolDefinition(
-        name="dirsearch",
-        label="dirsearch (content discovery)",
-        cmd_template=["dirsearch", "-u", "{target}", "-w", COMMON_WORDLIST, "-q"],
-        aggressive=True,
-        target_type="url"
-    ),
-    ToolDefinition(
         name="testssl",
         label="testssl.sh (TLS/SSL config)",
         cmd_template=["testssl.sh", "{target}"],
         aggressive=False,
         target_type="host"
-    ),
-    ToolDefinition(
-        name="whatweb",
-        label="whatweb (fingerprint tech stack)",
-        cmd_template=["whatweb", "{target}"],
-        aggressive=False,
-        target_type="url"
     ),
     ToolDefinition(
         name="nuclei_safe",
@@ -382,29 +361,6 @@ _tool_data = [
         aggressive=False,
         target_type="domain"
     ),
-    ToolDefinition(
-        name="sslyze",
-        label="sslyze (TLS scanner)",
-        cmd_template=["sslyze", "{target}"],
-        aggressive=False,
-        target_type="host"
-    ),
-    ToolDefinition(
-        name="httprobe",
-        label="httprobe (HTTP availability)",
-        cmd_template=["httprobe"],
-        aggressive=False,
-        target_type="host",
-        binary_name="httprobe",
-        stdin_input=True
-    ),
-    ToolDefinition(
-        name="pshtt",
-        label="pshtt (HTTPS observatory)",
-        cmd_template=["pshtt", "{target}"],
-        aggressive=False,
-        target_type="domain"
-    ),
 ]
 
 for tool in _tool_data:
@@ -475,7 +431,7 @@ TOOLS_REQUIRING_PUBLIC_DOMAIN = {"amass", "subfinder", "dnsx", "assetfinder"}
 # Tools that require root/sudo privileges
 TOOLS_REQUIRING_ROOT = {"masscan"}
 # TLS/SSL tools — only meaningful when target scheme is https or port 443 discovered
-TOOLS_REQUIRING_TLS = {"testssl", "pshtt", "sslyze"}
+TOOLS_REQUIRING_TLS = {"testssl"}
 # Host-wide port scanners — on loopback these find the host's ports, not the app's
 TOOLS_HOST_WIDE_PORT_SCAN = {"naabu", "nmap", "masscan"}
 

@@ -54,6 +54,10 @@ ui/SentinelForge.xcodeproj/xcuserdata/
 /artifacts/
 /reports/
 
+# Local model weights — multi-GB; never commit (live in Ollama / on disk)
+*.gguf
+/models/*.gguf
+
 # Local/private project files
 /live_fuzz_campaign.py
 /CLAUDE.md

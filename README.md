@@ -94,12 +94,17 @@ pip install -r requirements.txt
 
 ### Running the Engine
 ```bash
-# Start the API & Hypervisor
-python3 -m uvicorn core.server.api:app --reload --port 8000
+# Start the API & Hypervisor (binds 127.0.0.1:8765 by default)
+python3 -m uvicorn core.server.api:app --reload --port 8765
 
-# Launch a Scan Session
-python3 -m core.cli scan --target example.com --mode comprehensive
+# Launch a scan via the headless CLI
+python3 pysentinel.py --target https://example.com --mode standard
 ```
+
+The API generates a Bearer token at startup and writes it to
+`~/.sentinelforge/api_token` (mode 0600). Clients (CLI, Swift UI) read it
+from there. With `SENTINEL_REQUIRE_AUTH=true` (the default), every request
+must carry `Authorization: Bearer <token>`.
 
 ---
 

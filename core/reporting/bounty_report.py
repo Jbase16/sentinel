@@ -259,11 +259,36 @@ def render_summary_report(
 # Builder: finding dict → BountyReport
 # ---------------------------------------------------------------------------
 
+def _distinguishing_label(finding: Dict[str, Any]) -> str:
+    """A short label identifying what makes this finding distinct within its
+    (type, asset) group — the header name, the port, the version, etc.
+
+    Used to enumerate grouped findings in one report instead of silently
+    discarding all-but-one (the over-dedup bug). Returns "" when there's no
+    meaningful distinguishing detail."""
+    meta = finding.get("metadata") or {}
+    if meta.get("header"):
+        return str(meta["header"])
+    if meta.get("port") is not None:
+        proto = meta.get("protocol")
+        return f"port {meta['port']}/{proto}" if proto else f"port {meta['port']}"
+    if meta.get("version"):
+        return f"v{meta['version']}"
+    if meta.get("url"):
+        return str(meta["url"])
+    # Fall back to a trimmed message if it's short and specific.
+    msg = (finding.get("message") or "").strip()
+    if msg and len(msg) <= 80:
+        return msg
+    return ""
+
+
 def build_report(
     finding: Dict[str, Any],
     scan_id: str = "",
     evidence_items: Optional[List[Dict[str, Any]]] = None,
     platform: str = "hackerone",
+    group_labels: Optional[List[str]] = None,
 ) -> BountyReport:
     """
     Convert a SentinelForge finding dict into a BountyReport.
@@ -273,6 +298,10 @@ def build_report(
         scan_id:        The scan session ID (for audit trail).
         evidence_items: Optional list of evidence dicts from EvidenceStore.
         platform:       Target platform ("hackerone", "bugcrowd", "intigriti").
+        group_labels:   When several findings of the same (type, asset) were
+                        grouped into this one report, the distinguishing labels
+                        of ALL of them (e.g. the 7 missing header names). The
+                        summary enumerates them so no instance is lost.
 
     Returns:
         BountyReport ready for .to_markdown() or .to_dict().
@@ -294,6 +323,15 @@ def build_report(
 
     # --- Summary
     summary = _build_summary(finding, vuln_type, sev, cvss)
+
+    # --- Enumerate grouped instances so none are silently dropped.
+    distinct = [lbl for lbl in (group_labels or []) if lbl]
+    if len(distinct) > 1:
+        joined = ", ".join(f"`{d}`" for d in distinct)
+        summary += (
+            f"\n\nThis finding covers **{len(distinct)} instances** of "
+            f"{vuln_type} on `{asset_short}`: {joined}."
+        )
 
     # --- Steps to reproduce
     steps = _build_steps(finding, evidence_items)
@@ -341,8 +379,13 @@ def build_reports(
     order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
     min_idx = order.get(min_severity.upper(), 3)
 
-    # Deduplicate by (type, asset)
-    seen: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    # Group by (type, asset) — but ENUMERATE the group rather than discard
+    # all-but-one. The old code kept a single finding per (type, asset), so
+    # 7 distinct missing-header findings collapsed into one report that named
+    # only one header. We now keep the highest-severity finding as the
+    # primary AND collect every sibling's distinguishing label so the report
+    # enumerates all instances (Calibration Run #20 fix).
+    groups: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
     for f in findings:
         sev = (f.get("severity") or "INFO").upper()
         if order.get(sev, 99) > min_idx:
@@ -350,14 +393,22 @@ def build_reports(
         vuln_type = f.get("type") or f.get("title") or ""
         asset = f.get("asset") or f.get("target") or ""
         key = (vuln_type.lower(), asset.lower())
-        existing = seen.get(key)
-        if existing is None or order.get(sev, 99) < order.get((existing.get("severity") or "INFO").upper(), 99):
-            seen[key] = f
+        groups.setdefault(key, []).append(f)
 
-    reports = [
-        build_report(f, scan_id=scan_id, evidence_items=evidence_items, platform=platform)
-        for f in seen.values()
-    ]
+    reports = []
+    for group in groups.values():
+        # Primary = highest severity in the group.
+        primary = min(group, key=lambda f: order.get((f.get("severity") or "INFO").upper(), 99))
+        # Distinct labels across the whole group (dedup, preserve order).
+        labels: List[str] = []
+        for f in group:
+            lbl = _distinguishing_label(f)
+            if lbl and lbl not in labels:
+                labels.append(lbl)
+        reports.append(build_report(
+            primary, scan_id=scan_id, evidence_items=evidence_items,
+            platform=platform, group_labels=labels,
+        ))
 
     # Sort: CRITICAL → HIGH → MEDIUM → LOW → INFO, then by CVSS descending
     reports.sort(key=lambda r: (order.get(r.severity.upper(), 99), -r.cvss.base_score))
@@ -382,15 +433,23 @@ def _build_summary(
     risk_desc, _ = _IMPACT_PHRASES.get(sev, _IMPACT_PHRASES["MEDIUM"])
     target = finding.get("target") or finding.get("host") or "the target"
     description = finding.get("description") or finding.get("message") or ""
-    confidence_hedge = " appears to" if cvss.confidence == "LOW" else ""
+    # Grammatical hedge: LOW-confidence findings get "may be present" /
+    # "potential" framing instead of asserting the vuln exists. The old code
+    # inserted " appears to" mid-clause, producing "appears to was identified".
+    low_conf = cvss.confidence == "LOW"
 
     if description and len(description) > 30:
-        # Use existing description, prepend context
-        return f"A {risk_desc} vulnerability{confidence_hedge} exists in `{target}`. {description}"
+        verb = "may be present" if low_conf else "exists"
+        return f"A {risk_desc} vulnerability {verb} in `{target}`. {description}"
 
     # Generate from vuln type
+    lead = (
+        f"A potential {risk_desc} {vuln_type} vulnerability was flagged in `{target}`"
+        if low_conf else
+        f"A {risk_desc} {vuln_type} vulnerability was identified in `{target}`"
+    )
     return (
-        f"A {risk_desc} {vuln_type} vulnerability{confidence_hedge} was identified in `{target}`. "
+        f"{lead}. "
         f"This finding was detected automatically by SentinelForge and has been assigned a "
         f"CVSS 3.1 base score of {cvss.base_score} ({cvss.severity_label})."
     )

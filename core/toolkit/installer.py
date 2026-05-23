@@ -45,32 +45,6 @@ INSTALLERS: Dict[str, Dict] = {
         "verify_cmd": ["-version"],
     },
     
-    # Python pip-based tools
-    "whatweb": {
-        "strategies": [{"cmd": ["pip", "install", "whatweb"]}],
-        "verify_cmd": ["--version"],
-    },
-    "wafw00f": {
-        "strategies": [{"cmd": ["pip", "install", "wafw00f"]}],
-        "verify_cmd": ["--version"],
-    },
-    "dirsearch": {
-        "strategies": [{"cmd": ["pip", "install", "dirsearch"]}],
-        "verify_cmd": ["--version"],
-    },
-    "pshtt": {
-        "strategies": [{"cmd": ["pip", "install", "pshtt"]}],
-        "verify_cmd": ["--version"],
-    },
-
-    # Go-based tools
-    "httprobe": {
-        "strategies": [
-            {"cmd": ["go", "install", "github.com/tomnomnom/httprobe@latest"], "prerequisite": "go"},
-        ],
-        "verify_cmd": ["--help"],
-    },
-    
     # Homebrew special cases
     "dnsx": {
         "strategies": [
@@ -80,10 +54,6 @@ INSTALLERS: Dict[str, Dict] = {
     },
     "amass": {
         "strategies": [{"cmd": ["brew", "install", "amass"]}],
-        "verify_cmd": ["--version"],
-    },
-    "sslyze": {
-        "strategies": [{"cmd": ["brew", "install", "sslyze"]}],
         "verify_cmd": ["--version"],
     },
     "feroxbuster": {

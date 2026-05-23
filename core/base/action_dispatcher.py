@@ -135,23 +135,22 @@ class ActionDispatcher(Observable):
             "timestamp": logging.Formatter.formatTime(logging.Formatter(), logging.LogRecord("",0,"","",0,0,0))
         }
 
+        # VALIDATION: Apply argument-safety check to *every* tool, regardless
+        # of safe/restricted classification. The EXEC parser also does this,
+        # but defense-in-depth: if a future caller bypasses the parser, the
+        # dispatcher still refuses shell-metachar args.
+        try:
+            CommandValidator.validate_safe_args([tool] + list(args))
+        except ValueError as e:
+            logger.warning(f"Action rejected by validator: {e}")
+            return "DROPPED"
+
         # Decision 1: Is this a safe tool? (passive reconnaissance)
         if tool in config.scan.safe_tools:
-            # VALIDATION: Even safe tools must have safe arguments
-            try:
-                # Validate the "virtual" command chain: tool + args
-                # We pretend it's a list like ["tool", "arg1", ...]
-                validation_tokens = [tool] + list(args)
-                CommandValidator.validate_safe_args(validation_tokens)
-                # Stricter check: bans shell operators completely in args
-            except ValueError as e:
-                logger.warning(f"Action rejected by validator: {e}")
-                return "DROPPED"
-
             # Auto-approve and immediately emit for execution
             self.action_approved.emit(full_action)
             return "AUTO_APPROVED"
-        
+
         # Decision 2: Is this a restricted tool? (active scanning, needs approval)
         if tool in config.scan.restricted_tools:
             # Add to pending queue and ask human for approval

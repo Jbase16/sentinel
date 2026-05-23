@@ -781,6 +781,14 @@ public class HelixAppState: ObservableObject {
 
     /// Send a message to the AI.
     func send(_ text: String) {
+        // Capture prior turns for multi-turn memory (Calibration Run #24)
+        // BEFORE appending the new user message + assistant placeholder, so the
+        // history reflects the conversation up to (not including) this prompt.
+        let history: [[String: String]] = thread.messages
+            .filter { $0.role != .system && !$0.text.isEmpty }
+            .suffix(16)
+            .map { ["role": $0.role.rawValue, "content": $0.text] }
+
         let userMsg = ChatMessage(role: .user, text: text)
         thread.append(userMsg)
 
@@ -789,7 +797,7 @@ public class HelixAppState: ObservableObject {
         thread.append(assistantMsg)
 
         let sessionID = currentChatSessionID()
-        llm.generate(prompt: text, sessionID: sessionID) { [weak self] token in
+        llm.generate(prompt: text, sessionID: sessionID, history: history) { [weak self] token in
             guard let self else { return }
             // Update the last message directly
             if var last = self.thread.messages.last, last.role == .assistant {

@@ -415,32 +415,22 @@ public struct SentinelAPIClient: Sendable {
     }
 
     // MARK: - Chat & AI
-    // TODO: Replace with /v1/chat so the chat call matches the backend API.
+    //
+    // The chat endpoint `POST /v1/ai/chat` takes a JSON body {"prompt",
+    // "session_id"} and returns a text/plain TOKEN STREAM (not JSON) — use
+    // `streamChat` below. A prior non-streaming `chatQuery` was removed in
+    // Calibration Run #23: it had zero callers and was doubly wrong — it sent
+    // the question as a `?question=` query param instead of the JSON `prompt`
+    // field (→ 422), and it JSON-decoded a streaming text/plain response.
 
-    public func chatQuery(question: String) async throws -> String {
-        guard let url = URL(string: "/v1/ai/chat", relativeTo: baseURL) else {
-            throw APIError.badStatus
-        }
-        var request = authenticatedRequest(url: url, method: "POST")
-
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: true)!
-        components.queryItems = [URLQueryItem(name: "question", value: question)]
-        request.url = components.url
-
-        struct ChatResponse: Decodable {
-            let response: String
-        }
-
-        let (data, response) = try await session.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw Self.parseAPIError(data: data, response: response)
-        }
-        let chatResponse = try JSONDecoder().decode(ChatResponse.self, from: data)
-        return chatResponse.response
-    }
-
-    /// Stream context-aware chat from Python backend (plain text chunks, not SSE)
-    public func streamChat(prompt: String, sessionID: String? = nil) -> AsyncThrowingStream<String, Error> {
+    /// Stream context-aware chat from Python backend (plain text chunks, not SSE).
+    /// `history` carries prior turns ([["role": "user"|"assistant", "content": …]])
+    /// so the backend has multi-turn memory (Calibration Run #24).
+    public func streamChat(
+        prompt: String,
+        sessionID: String? = nil,
+        history: [[String: String]]? = nil
+    ) -> AsyncThrowingStream<String, Error> {
         print("[Swift] Attempting to stream chat...")
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -456,16 +446,23 @@ public struct SentinelAPIClient: Sendable {
                 {
                     body["session_id"] = sessionID
                 }
+                if let history, !history.isEmpty {
+                    body["history"] = history
+                }
                 do {
                     request.httpBody = try JSONSerialization.data(withJSONObject: body)
                     let (bytes, response) = try await session.bytes(for: request)
                     print("[Swift] Received response headers: \(response)")
 
+                    // Preserve line structure (Calibration Run #23). `bytes.lines`
+                    // strips the trailing newline from each line, and LLMService
+                    // concatenates chunks verbatim (`streamedResponse += token`).
+                    // Dropping the "\n" collapsed the model's structured output —
+                    // finding lists, attack chains, EXEC status lines, markdown —
+                    // into one unreadable run-on blob. Re-add the newline on every
+                    // line, including blank ones (paragraph breaks).
                     for try await line in bytes.lines {
-                        let chunk = line.trimmingCharacters(in: .newlines)
-                        if !chunk.isEmpty {
-                            continuation.yield(chunk)
-                        }
+                        continuation.yield(line + "\n")
                     }
                     continuation.finish()
                 } catch {
@@ -603,7 +600,8 @@ public struct SentinelAPIClient: Sendable {
         scope: String?,
         format: String,
         includeAttackPaths: Bool,
-        maxPaths: Int
+        maxPaths: Int,
+        sessionId: String? = nil
     ) async throws -> ReportGenerateResponse {
         guard let url = URL(string: "/v1/cortex/reporting/generate", relativeTo: baseURL) else {
             throw APIError.badStatus
@@ -619,6 +617,12 @@ public struct SentinelAPIClient: Sendable {
         ]
         if let scope {
             body["scope"] = scope
+        }
+        // Scope the report to the active scan session so it describes THIS
+        // scan, not the global cross-session finding store. The backend also
+        // falls back to the most-recent session when this is omitted.
+        if let sessionId, !sessionId.isEmpty {
+            body["session_id"] = sessionId
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

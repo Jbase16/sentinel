@@ -4,8 +4,66 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from .types import PoCArtifact, iso_now
+
+
+def _normalize_ftype(raw_type: str) -> str:
+    """Map a classifier finding-type name to a PoC template category.
+
+    The classifier emits Title-Case names with spaces ("Open Port",
+    "Missing Security Header"); the templates dispatch on snake_case keys
+    ("open_port"). Without this translation, EVERY finding fell through to
+    the empty generic fallback — the Proof Lab produced zero commands for
+    100% of real findings (Calibration Run #20 finding).
+
+    Uses substring matching so naming variants ("Java Framework Detected",
+    "Php Framework Detected") map to the same category without an
+    exhaustive table.
+    """
+    t = (raw_type or "").strip().lower().replace("_", " ")
+
+    # Most specific first.
+    if "framework" in t or "version" in t or "outdated" in t:
+        return "version_disclosure"
+    if "header" in t:
+        return "missing_header"
+    if "cookie" in t:
+        return "cookie_misconfig"
+    if "directory listing" in t or "index of" in t:
+        return "directory_listing"
+    if "open port" in t or t in ("port open", "service open"):
+        return "open_port"
+    if "subdomain" in t or "dns" in t:
+        # Subdomain takeover / DNS records both verify via dig + HEAD.
+        return "subdomain" if "subdomain" in t else "dns_issue"
+    if "tls" in t or "ssl" in t or "certificate" in t:
+        return "tls_issue"
+    if any(k in t for k in (
+        "backup", "ssrf", "nikto", "enumeration", "business logic",
+        "endpoint", "exposure", "disclosure", "directory", "waf", "listing",
+        "misconfiguration",
+    )):
+        return "http_fetch"
+    if "http" in t or "web" in t or "endpoint" in t:
+        return "http_endpoint"
+    return "generic"
+
+
+def _parse_target(target: str) -> Tuple[str, str, Optional[int], str]:
+    """Parse a target (URL or bare host[:port]) into (scheme, host, port, path)."""
+    if not target:
+        return "", "", None, ""
+    t = target.strip()
+    if "://" not in t:
+        t = "//" + t  # let urlparse treat it as netloc
+    parsed = urlparse(t, scheme="")
+    scheme = (parsed.scheme or "").lower()
+    host = parsed.hostname or ""
+    port = parsed.port
+    path = parsed.path or ""
+    return scheme, host, port, path
 
 
 @dataclass(frozen=True)
@@ -92,15 +150,36 @@ class PoCGenerator:
         if not finding_id:
             raise ValueError("Finding is missing id/finding_id")
 
-        ftype = str(finding.get("type") or finding.get("finding_type") or "unknown").lower()
+        raw_type = str(finding.get("type") or finding.get("finding_type") or "unknown")
+        ftype = _normalize_ftype(raw_type)
 
-        # Common fields (best-effort, no hard dependency on internal schemas)
-        host = (finding.get("host") or finding.get("hostname") or target_hint or "").strip()
-        ip = (finding.get("ip") or "").strip()
-        port = finding.get("port")
-        protocol = (finding.get("protocol") or "tcp").strip().lower()
-        scheme = (finding.get("scheme") or "").strip().lower()
-        path = (finding.get("path") or "/").strip() or "/"
+        # Field extraction. The classifier stores host/port/scheme/path inside
+        # ``metadata`` and the host in ``target`` (a URL or bare host) — NOT at
+        # the top level. The old code only read top-level fields, so even when a
+        # template matched it had no host/port. We pull from metadata + target.
+        meta = finding.get("metadata") or {}
+
+        host = (
+            finding.get("host") or finding.get("hostname")
+            or meta.get("host") or ""
+        ).strip()
+        ip = (finding.get("ip") or meta.get("ip") or "").strip()
+        port = finding.get("port") if finding.get("port") is not None else meta.get("port")
+        protocol = (finding.get("protocol") or meta.get("protocol") or "tcp").strip().lower()
+        scheme = (finding.get("scheme") or meta.get("scheme") or "").strip().lower()
+        path = (finding.get("path") or meta.get("path") or "").strip()
+
+        # Derive host/scheme/port/path from the target URL when not explicit.
+        target = (finding.get("target") or finding.get("asset") or target_hint or "").strip()
+        if target:
+            t_scheme, t_host, t_port, t_path = _parse_target(target)
+            host = host or t_host
+            scheme = scheme or t_scheme
+            if port is None:
+                port = t_port
+            path = path or t_path
+        if not path:
+            path = "/"
 
         host_or_ip = host or ip
         if host_or_ip:
@@ -157,7 +236,12 @@ class PoCGenerator:
         # ----- Common template helpers
         def http_url() -> str:
             p = f":{port_i}" if port_i and port_i not in (80, 443) else ""
-            s = scheme if scheme in ("http", "https") else "http"
+            # Default to https when scheme is unknown: modern web targets are
+            # https-first, and an http:// header/cookie check against an
+            # https-only host would just redirect (or fail), producing a
+            # misleading PoC. Port 80 still implies http via the scheme-default
+            # logic above.
+            s = scheme if scheme in ("http", "https") else "https"
             safe_path = path if path.startswith("/") else f"/{path}"
             return f"{s}://{host}{p}{safe_path}"
 
@@ -224,13 +308,108 @@ class PoCGenerator:
             ]
             return PoCTemplate(title=title, risk="medium", commands=cmds, notes=notes)
 
-        # Generic fallback (safe, but less helpful)
+        # ----- Missing security header: prove the header is absent in the response
+        if ftype == "missing_header":
+            header = str(raw.get("metadata", {}).get("header") or "").strip()
+            url = http_url()
+            title = (
+                f"Verify missing `{header}` header on {host}" if header
+                else f"Verify missing security header on {host}"
+            )
+            cmds = [f"curl -sS -I {url}"]
+            grep_note = (
+                f"The `{header}` header should be ABSENT from the response above, "
+                f"confirming the finding."
+                if header else
+                "The flagged security header should be ABSENT from the response above."
+            )
+            notes = [
+                "HEAD request prints the response headers (read-only).",
+                grep_note,
+            ]
+            return PoCTemplate(title=title, risk="low", commands=cmds, notes=notes)
+
+        # ----- Session cookie misconfiguration: inspect Set-Cookie attributes
+        if ftype == "cookie_misconfig":
+            url = http_url()
+            title = f"Verify cookie attributes on {host}"
+            cmds = [f"curl -sS -I {url}"]
+            notes = [
+                "Inspect the `Set-Cookie` header(s) in the response above.",
+                "The finding flags missing Secure / HttpOnly / SameSite attributes — "
+                "confirm which are absent.",
+            ]
+            return PoCTemplate(title=title, risk="low", commands=cmds, notes=notes)
+
+        # ----- Directory listing: prove the auto-index renders
+        if ftype == "directory_listing":
+            url = http_url()
+            title = f"Verify directory listing on {host}"
+            cmds = [f"curl -sS {url}"]
+            notes = [
+                "The response body should contain an auto-generated index "
+                "(e.g. 'Index of /', 'Parent Directory'), confirming listing is enabled.",
+                "Read-only GET; no files are written or modified.",
+            ]
+            return PoCTemplate(title=title, risk="medium", commands=cmds, notes=notes)
+
+        # ----- Discovered subdomain: confirm it resolves + responds
+        if ftype == "subdomain":
+            title = f"Verify subdomain {host} is live"
+            cmds = [f"dig +short {host} A"]
+            if scheme in ("http", "https") or port_i in (80, 443):
+                cmds.append(f"curl -sS -I {http_url()}")
+            else:
+                cmds.append(f"curl -sS -I https://{host}/")
+            notes = [
+                "Confirms the subdomain resolves and serves a response.",
+                "For subdomain-takeover findings, check for a dangling CNAME and a "
+                "third-party 'no such app' fingerprint in the response.",
+            ]
+            return PoCTemplate(title=title, risk="medium", commands=cmds, notes=notes)
+
+        # ----- Version / framework disclosure: surface the version banner
+        if ftype == "version_disclosure":
+            url = http_url()
+            ver = str(raw.get("metadata", {}).get("version") or "").strip()
+            title = (
+                f"Verify version disclosure ({ver}) on {host}" if ver
+                else f"Verify version/framework disclosure on {host}"
+            )
+            cmds = [f"curl -sS -I {url}"]
+            notes = [
+                "Inspect the `Server` / `X-Powered-By` headers in the response above.",
+                "Cross-reference the disclosed version against known CVEs for that "
+                "component to establish impact.",
+            ]
+            return PoCTemplate(title=title, risk="low", commands=cmds, notes=notes)
+
+        # ----- Generic read-only HTTP verification (nikto/ssrf/backup/dir-enum/etc.)
+        if ftype == "http_fetch":
+            url = http_url()
+            title = f"Verify finding at {host}"
+            cmds = [
+                f"curl -sS -I {url}",
+                f"curl -sS -o /dev/null -w '%{{http_code}}\\n' {url}",
+            ]
+            notes = [
+                "Read-only HEAD + status-code check to confirm the flagged resource "
+                "is reachable and responds as reported.",
+                "Inspect the supporting evidence for the specific indicator to confirm.",
+            ]
+            return PoCTemplate(title=title, risk=str(raw.get("severity") or raw.get("risk") or "info").lower(),
+                               commands=cmds, notes=notes)
+
+        # Generic fallback (safe, but less helpful) — should now be rare.
         title = f"Verify finding {ftype} for {host or 'target'}"
         cmds = []
-        if host:
+        if host and scheme in ("http", "https"):
+            cmds.append(f"curl -sS -I {http_url()}")
+        elif host:
             cmds.append(f"nmap -sV {host}")
         notes = [
-            "Finding type not mapped to a specialized template; emitted generic version detection only.",
+            "Finding type not mapped to a specialized template; emitted a generic "
+            "read-only reachability check.",
         ]
         return PoCTemplate(title=title, risk=str(raw.get("risk") or "unknown"), commands=cmds, notes=notes)
 

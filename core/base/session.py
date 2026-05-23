@@ -20,6 +20,7 @@
 import uuid
 import time
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Deque, Optional
@@ -121,7 +122,15 @@ class ScanSession:
         
         # Record when this scan started (Unix timestamp: seconds since 1970)
         self.start_time = time.time()
-        
+
+        # Record when this scan ended (Unix timestamp). None while scan is in progress;
+        # set by the scan-run handlers in core/server/routers/scans.py when the scan
+        # reaches a terminal state (completed / cancelled / error). Without this, every
+        # row in the sessions table is left as "Created" with no end_time forever,
+        # which makes the inspector's --latest pick old rows and makes operational
+        # diagnostics opaque. See docs/CALIBRATION_RUN_004.md Bug #4.
+        self.end_time: Optional[float] = None
+
         # Current status of the scan ("Created", "Running", "Complete", "Failed", etc.)
         self.status = "Created"
         
@@ -341,12 +350,36 @@ class ScanSession:
         """
         self._external_log_sink = log_fn
 
+    @staticmethod
+    def _format_ts(ts: Optional[float]) -> Optional[str]:
+        """
+        Convert a Unix timestamp (float) to an ISO 8601 UTC string.
+
+        The ``sessions.start_time`` and ``sessions.end_time`` columns are
+        ``TEXT`` and the schema default uses ``datetime('now')`` which
+        produces ISO strings. If we pass through a raw float, SQLite stores
+        the string representation of the float (e.g. ``"1778906131.17429"``)
+        which breaks any lexicographic ORDER BY across mixed-vintage rows.
+
+        Formatting here is the single point of contract between the in-memory
+        float representation (convenient for duration arithmetic) and the
+        on-disk string representation (sortable, human-readable, schema-aligned).
+
+        See docs/CALIBRATION_RUN_004.md Bug #3 for the historical drift.
+        """
+        if ts is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
+
     def to_dict(self) -> Dict:
         """
         Serialize this session to a dictionary (for API responses).
-        
+
         Returns a JSON-friendly summary of the session state.
-        
+
         Returns:
             Dictionary with session metadata and statistics
         """
@@ -360,7 +393,11 @@ class ScanSession:
             "status": self.status,  # Current state (Created/Running/Complete)
             "findings_count": len(self.findings.get_all()),  # How many vulnerabilities found
             "issues_count": len(self.issues.get_all()),  # How many confirmed exploits
-            "start_time": self.start_time,  # When scan began (Unix timestamp)
+            # ISO 8601 UTC strings — format-on-serialize so the DB column gets
+            # a sortable string and the in-memory float keeps its arithmetic
+            # ergonomics. See _format_ts docstring for the full rationale.
+            "start_time": self._format_ts(self.start_time),
+            "end_time": self._format_ts(self.end_time),
             "ghost_active": self.ghost is not None,  # Is proxy running?
             "logs": logs_list  # Include logs for persistence
         }

@@ -205,6 +205,13 @@ def is_origin_allowed(origin: str, allowed_patterns: Iterable[str]) -> bool:
     """
     from urllib.parse import urlparse
 
+    # An absent/empty Origin header must never match an allow pattern. Without
+    # this guard, a None origin reaches `origin.startswith(...)` below and
+    # raises AttributeError, which a caller could turn into a 500 instead of a
+    # clean 403 (defensive — found via test_command_validation).
+    if not origin:
+        return False
+
     if not allowed_patterns:
         return False
 

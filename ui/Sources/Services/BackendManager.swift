@@ -330,7 +330,11 @@ class BackendManager: ObservableObject {
         // (e.g., Docker-era SENTINEL_API_HOST/PORT) that can break connectivity.
         env["SENTINEL_API_HOST"] = "127.0.0.1"
         env["SENTINEL_API_PORT"] = "8765"
-        env["SENTINEL_REQUIRE_AUTH"] = "false"
+        // SENTINEL_REQUIRE_AUTH is intentionally not set here.
+        // The backend defaults to require_auth=true; the Swift app reads the
+        // token from ~/.sentinelforge/api_token and passes it as a Bearer
+        // header on every request (see SentinelAPIClient). Even on loopback,
+        // any other process running as your user can otherwise hit the API.
 
         // If Docker-era Ollama endpoints are still set, normalize to localhost.
         if let ollamaURL = env["SENTINEL_OLLAMA_URL"],

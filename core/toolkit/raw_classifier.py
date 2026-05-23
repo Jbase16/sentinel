@@ -32,11 +32,14 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
+import socket
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Tuple
+from functools import lru_cache
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from core.toolkit.fingerprinters import ContentHasher
 
 ManagementPortMap = {
@@ -49,6 +52,107 @@ ManagementPortMap = {
     4848: "GlassFish Admin",
     5432: "PostgreSQL",
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# CDN edge detection (Calibration Run #17/#18)
+#
+# When a target is fronted by a CDN (Cloudflare, Fastly, etc.), naive port
+# scanning hits the CDN edge IP, NOT the program's origin. The "open ports"
+# found (22/SSH, 5432/Postgres, 3389/RDP, ...) belong to the CDN's
+# infrastructure, not the target — they're noise that drowns out real
+# findings (90% of the first gitlab.com scan was this).
+#
+# We detect CDN fronting by resolving the target host and checking its IP
+# against published CDN CIDR ranges. Port findings on a CDN-fronted host are
+# DEMOTED to INFO and annotated "cdn_edge" — we keep the information (the
+# operator can still see it) but get it out of the actionable MEDIUM/LOW
+# tier so it doesn't bury real signal.
+#
+# Ranges are a curated subset of the most common CDNs' published blocks.
+# This is best-effort: catching Cloudflare (by far the most common) handles
+# the majority of real-world targets. Extend as needed.
+# ─────────────────────────────────────────────────────────────────────────
+_CDN_CIDRS: Dict[str, List[Any]] = {
+    "cloudflare": [
+        ipaddress.ip_network(c) for c in (
+            "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22",
+            "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+            "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22",
+            "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+            "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+            "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32",
+            "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29",
+            "2c0f:f248::/32",
+        )
+    ],
+    "fastly": [
+        ipaddress.ip_network(c) for c in (
+            "151.101.0.0/16", "199.232.0.0/16",
+        )
+    ],
+}
+
+
+@lru_cache(maxsize=512)
+def _resolve_host(host: str) -> Optional[str]:
+    """Resolve a hostname to an IPv4 string, cached. Returns None on any
+    failure. The classifier is otherwise pure text-parsing; this is the one
+    network touch, bounded by a short timeout + LRU cache so repeated calls
+    for the same scan target are free."""
+    try:
+        socket.setdefaulttimeout(3.0)
+        return socket.gethostbyname(host)
+    except (socket.gaierror, socket.timeout, OSError, UnicodeError):
+        return None
+
+
+def _host_from_target(target: str) -> str:
+    """Extract the bare host from a target that may be a URL or host:port."""
+    t = (target or "").strip()
+    if "://" in t:
+        from urllib.parse import urlparse
+        t = urlparse(t).hostname or ""
+    else:
+        # Strip any :port suffix (but not for bracketed IPv6 — keep simple).
+        t = t.split("/")[0].split(":")[0]
+    return t
+
+
+def cdn_for_target(target: str, *, resolver=None) -> Optional[str]:
+    """Return the CDN name if ``target`` resolves into a known CDN range,
+    else None. ``resolver`` is injectable for deterministic tests.
+
+    Accepts a URL, a bare host, or a host:port. If the host is already an
+    IP literal it is checked directly (no DNS).
+
+    Note: ``resolver`` defaults to the module-level ``_resolve_host`` via
+    a call-time lookup (NOT a default argument) so that monkeypatching
+    ``_resolve_host`` in tests is honored."""
+    if resolver is None:
+        resolver = _resolve_host
+    host = _host_from_target(target)
+    if not host:
+        return None
+    ip_str = host if _looks_like_ip(host) else resolver(host)
+    if not ip_str:
+        return None
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return None
+    for cdn_name, nets in _CDN_CIDRS.items():
+        if any(addr in net for net in nets):
+            return cdn_name
+    return None
+
+
+def _looks_like_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value.strip("[]"))
+        return True
+    except ValueError:
+        return False
 
 CMS_SIGNATURES = {
     # Pattern structure: cms_name + delimiter + version
@@ -248,11 +352,17 @@ FRAMEWORK_PATTERNS: Dict[str, re.Pattern[str]] = {
     "node": re.compile(r"node\.js/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
     
     # Generic language runtimes (Java, PHP)
-    # These may match overly broad contexts (e.g., "Java" in prose)
-    # Trade-off: Prioritize detection completeness over precision
-    # Downstream filtering should validate context (e.g., presence in X-Powered-By header)
-    "java": re.compile(r"java/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
-    "php": re.compile(r"php/?\s*([0-9]+(?:\.[0-9]+){0,2})?", re.IGNORECASE),
+    # These are word-isolated to avoid matching substrings inside hostnames
+    # ("testphp.vulnweb.com", "javascript.example.com") and to prevent the
+    # version group from bridging newlines (e.g. "wp-config.php\n403 GET"
+    # was being captured as version="403" before Bug #5).
+    # \b anchors:        word-boundary on both sides → exact-token match
+    # [/ \t]+ separator: slash/space/tab only — newline cannot bridge to
+    #                    unrelated content on a later line
+    # Version group remains optional so a bare "PHP" in headers still
+    # produces an informational finding with version="".
+    "java": re.compile(r"\bjava(?:[/ \t]+([0-9]+(?:\.[0-9]+){0,2}))?\b", re.IGNORECASE),
+    "php": re.compile(r"\bphp(?:[/ \t]+([0-9]+(?:\.[0-9]+){0,2}))?\b", re.IGNORECASE),
 }
 
 FRAMEWORK_MINIMUMS = {
@@ -352,9 +462,65 @@ def classify(tool: str, target: str, output: str) -> List[dict]:
 # ----------------------------------------------------------------------
 
 
+def _make_open_port_finding(
+    *,
+    tool: str,
+    target: str,
+    port: int,
+    proto: str,
+    host: str,
+    proof: str,
+    cdn: Optional[str],
+    service: str = "",
+    extra_tags: Optional[List[str]] = None,
+) -> "RawFinding":
+    """Build an Open Port RawFinding, CDN-aware.
+
+    When ``cdn`` is set (the target resolves to a known CDN edge), the
+    finding is demoted to INFO and annotated — the port belongs to the
+    CDN's infrastructure, not the program's origin, so it should not sit
+    in the actionable MEDIUM/LOW tier. We keep the finding (operator
+    visibility) rather than dropping it (silent data loss)."""
+    tags = ["exposure"] + (extra_tags or [])
+    families = ["exposure"]
+    metadata: Dict[str, object] = {"port": port, "host": host}
+    if proto:
+        metadata["protocol"] = proto
+    if service:
+        metadata["service"] = service
+
+    if cdn:
+        severity = "INFO"
+        tags.append("cdn-edge")
+        metadata["cdn_edge"] = cdn
+        suffix = f" (CDN edge: {cdn} — not origin)"
+    else:
+        severity = "MEDIUM" if port in ManagementPortMap else "LOW"
+        suffix = ""
+
+    if port in ManagementPortMap:
+        tags.append("management-surface")
+
+    base_msg = f"{host}:{port}" + (f"/{proto}" if proto and proto != "tcp" else "")
+    return RawFinding(
+        type="Open Port",
+        severity=severity,
+        tool=tool,
+        target=target,
+        message=base_msg + suffix,
+        proof=proof,
+        tags=tags,
+        families=families,
+        metadata=metadata,
+    )
+
+
 def _handle_nmap(target: str, output: str) -> List[RawFinding]:
     """Function _handle_nmap."""
     findings: List[RawFinding] = []
+    # CDN fronting: if the target resolves to a CDN edge, its open ports are
+    # the CDN's, not the origin's — demote + annotate (Calibration Run #18).
+    cdn = cdn_for_target(target)
     # Loop over items.
     for line in output.splitlines():
         if "open" not in line or "/" not in line:
@@ -369,16 +535,26 @@ def _handle_nmap(target: str, output: str) -> List[RawFinding]:
 
         tags = ["exposure"]
         families = ["exposure"]
-        metadata = {"port": port, "service": service}
-        severity = "LOW"
+        metadata: Dict[str, object] = {"port": port, "service": service}
 
-        if port in ManagementPortMap:
+        if cdn:
+            # CDN edge — informational only, annotated.
+            severity = "INFO"
+            tags.append("cdn-edge")
+            metadata["cdn_edge"] = cdn
+        elif port in ManagementPortMap:
             tags.extend(["management-surface", ManagementPortMap[port].lower()])
             families.append("exposure")
             severity = "MEDIUM"
+        else:
+            severity = "LOW"
 
         if port == 443 or service in ("https", "http", "http-proxy"):
             tags.append("surface-http")
+
+        message = f"{port_proto} {service}".strip()
+        if cdn:
+            message += f" (CDN edge: {cdn} — not origin)"
 
         findings.append(
             RawFinding(
@@ -386,7 +562,7 @@ def _handle_nmap(target: str, output: str) -> List[RawFinding]:
                 severity=severity,
                 tool="nmap",
                 target=target,
-                message=f"{port_proto} {service}".strip(),
+                message=message,
                 proof=line.strip(),
                 tags=tags,
                 families=families,
@@ -1019,6 +1195,8 @@ def _handle_masscan(target: str, output: str) -> List[RawFinding]:
     #   (tcp|udp) = exact alternation; masscan doesn't report other protocols (SCTP, etc.) in standard mode
     #   Future-proofing: If masscan adds protocols, pattern would need |(sctp|...) extension
     pattern = re.compile(r"Discovered open port (\d+)/(tcp|udp) on ([^\s]+)")
+    # CDN fronting check once for the scan target (Calibration Run #18).
+    cdn = cdn_for_target(target)
     # Loop over items.
     for line in output.splitlines():
         match = pattern.search(line)
@@ -1028,16 +1206,10 @@ def _handle_masscan(target: str, output: str) -> List[RawFinding]:
         proto = match.group(2)
         host = match.group(3)
         findings.append(
-            RawFinding(
-                type="Open Port",
-                severity="MEDIUM" if port in ManagementPortMap else "LOW",
-                tool="masscan",
-                target=target,
-                message=f"{host}:{port}/{proto}",
-                proof=line.strip(),
-                tags=["exposure", "masscan"],
-                families=["exposure"],
-                metadata={"port": port, "protocol": proto, "host": host},
+            _make_open_port_finding(
+                tool="masscan", target=target, port=port, proto=proto,
+                host=host, proof=line.strip(), cdn=cdn,
+                extra_tags=["masscan"],
             )
         )
     return findings
@@ -1046,6 +1218,9 @@ def _handle_masscan(target: str, output: str) -> List[RawFinding]:
 def _handle_naabu(target: str, output: str) -> List[RawFinding]:
     """Function _handle_naabu."""
     findings: List[RawFinding] = []
+    # Detect CDN fronting once for the whole scan target — if the target
+    # resolves to a CDN edge, these ports are the CDN's, not the origin's.
+    cdn = cdn_for_target(target)
     # Loop over items.
     for line in output.splitlines():
         clean = _strip_ansi(line).strip()
@@ -1056,16 +1231,10 @@ def _handle_naabu(target: str, output: str) -> List[RawFinding]:
             continue
         port = int(port_str)
         findings.append(
-            RawFinding(
-                type="Open Port",
-                severity="MEDIUM" if port in ManagementPortMap else "LOW",
-                tool="naabu",
-                target=target,
-                message=f"{host}:{port}",
-                proof=clean,
-                tags=["exposure", "surface-expansion"],
-                families=["exposure"],
-                metadata={"port": port, "host": host},
+            _make_open_port_finding(
+                tool="naabu", target=target, port=port, proto="tcp",
+                host=host, proof=clean, cdn=cdn,
+                extra_tags=["surface-expansion"],
             )
         )
     return findings
@@ -1566,33 +1735,85 @@ def _detect_secrets(target: str, output: str) -> List[RawFinding]:
 
 
 def _detect_security_headers(target: str, output: str) -> List[RawFinding]:
-    """Function _detect_security_headers."""
+    """Detect missing security headers across the FULL response chain.
+
+    Redirect-attribution fix (Calibration Run #17/#18): when a tool follows
+    redirects, the output contains one response block per hop. The old
+    per-block logic flagged a header as "absent" if ANY single hop lacked
+    it — so gitlab.com's 301 (which correctly sets HSTS) redirecting to
+    about.gitlab.com (which doesn't) produced a false "HSTS absent on
+    gitlab.com" finding, when HSTS was in fact present on the target's own
+    response.
+
+    Correct behavior: a header is "present" if it appears in ANY hop of
+    the response chain; "absent" only if NO hop carries it. This evaluates
+    the target's response chain as a whole and avoids attributing a
+    redirect destination's missing headers to the original target.
+    """
     findings = []
     blocks = [block for block in output.split("\n\n") if "http/" in block.lower()]
-    # Loop over items.
-    for block in blocks:
-        lowered = block.lower()
-        uses_https = "https://" in lowered or target.lower().startswith("https")
-        for header in SECURITY_HEADERS:
-            if header in lowered:
-                continue
-            severity = "MEDIUM"
-            if header == "strict-transport-security" and uses_https:
-                severity = "HIGH"
-            findings.append(
-                RawFinding(
-                    type="Missing Security Header",
-                    severity=severity,
-                    tool="scanner",
-                    target=target,
-                    message=f"{header} absent",
-                    proof=block[:400],
-                    tags=["header-missing", header],
-                    families=["misconfiguration"],
-                    metadata={"header": header},
-                )
+    if not blocks:
+        return findings
+
+    combined = "\n\n".join(blocks).lower()
+    uses_https = "https://" in combined or target.lower().startswith("https")
+    redirect_hops = len(blocks)
+
+    for header in SECURITY_HEADERS:
+        # Present anywhere in the chain → not a finding.
+        if header in combined:
+            continue
+        severity = "MEDIUM"
+        if header == "strict-transport-security" and uses_https:
+            severity = "HIGH"
+        metadata: Dict[str, object] = {"header": header}
+        if redirect_hops > 1:
+            # Surface that the chain had redirects, so the operator knows
+            # the header is absent across all hops (not a per-hop artifact).
+            metadata["redirect_hops"] = redirect_hops
+        findings.append(
+            RawFinding(
+                type="Missing Security Header",
+                severity=severity,
+                tool="scanner",
+                target=target,
+                message=f"{header} absent",
+                proof=blocks[-1][:400],  # final response block as evidence
+                tags=["header-missing", header],
+                families=["misconfiguration"],
+                metadata=metadata,
             )
+        )
     return findings
+
+
+# testssl's "client simulation" section lists TLS *clients* (Java, Safari,
+# Chrome, OpenSSL, etc.) connecting TO the server to show which handshakes
+# the server supports. Those are NOT frameworks running ON the server —
+# but the framework regex happily matches "Java 8u442" / "Java 17.0.3" in
+# that section, producing false "Java Framework Detected" findings (caught
+# during the first live GitLab scan, Calibration Run #17).
+#
+# We detect the context by the TLS-handshake tokens that appear on the
+# SAME line as the client name in testssl's output, e.g.:
+#   "Java 8u442 (OpenJDK)  TLSv1.3  TLS_AES_256_GCM_SHA384  253 bit ECDH (X25519)"
+# A framework banner from a real server header never carries these tokens.
+_TLS_HANDSHAKE_MARKERS = re.compile(
+    r"TLSv1\.|SSLv[23]|TLS_(?:AES|CHACHA|ECDHE|DHE|RSA)|bit ECDH|\bECDH\b|"
+    r"\bcipher(?:suite)?\b",
+    re.IGNORECASE,
+)
+
+
+def _is_tls_client_sim_line(output: str, match_start: int) -> bool:
+    """True if the match falls on a line carrying TLS-handshake tokens —
+    i.e. a testssl client-simulation entry, not a server framework banner."""
+    line_start = output.rfind("\n", 0, match_start) + 1
+    line_end = output.find("\n", match_start)
+    if line_end == -1:
+        line_end = len(output)
+    line = output[line_start:line_end]
+    return bool(_TLS_HANDSHAKE_MARKERS.search(line))
 
 
 def _detect_frameworks(target: str, output: str) -> List[RawFinding]:
@@ -1601,6 +1822,10 @@ def _detect_frameworks(target: str, output: str) -> List[RawFinding]:
     # Loop over items.
     for framework, pattern in FRAMEWORK_PATTERNS.items():
         for match in pattern.finditer(output):
+            # Skip matches inside testssl client-simulation output — those
+            # are TLS clients probing the server, not server-side frameworks.
+            if _is_tls_client_sim_line(output, match.start()):
+                continue
             version = match.group(1) or ""
             findings.append(
                 RawFinding(

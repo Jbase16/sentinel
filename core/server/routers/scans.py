@@ -44,6 +44,17 @@ class ScanRequest(BaseModel):
     bounty_handle: Optional[str] = None
     bounty_json: Optional[Dict[str, Any]] = None
 
+    # Phase 2H: program-policy enforcement.
+    # ``restrictions`` is the parsed body of a ``<program>-restrictions.json``
+    # file produced by ``sentinel-ingest``. When set, the engine applies the
+    # corresponding ``PolicyEnforcement`` *before* scan execution — refusing
+    # the scan entirely if any hard restriction has ``enforcement: block_scan``,
+    # otherwise injecting banned_tools / rate limits / strict-scope into
+    # ExecutionPolicy + ScopeContext.
+    # Operators set this via ``pysentinel --restrictions <path>``; the CLI
+    # reads the file and passes the parsed dict in the request body.
+    restrictions: Optional[Dict[str, Any]] = None
+
     @field_validator("target")
     @classmethod
     def validate_target(cls, v: str) -> str:
@@ -264,6 +275,14 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         # 1. Parse manual scope lines
         if req.scope:
             for line in req.scope:
+                # Strip inline comments emitted by sentinel-ingest's scope_compiler.
+                # Lines may look like: "gitlab.com  # max_severity=critical"
+                # We split on the two-space-hash marker so legitimate single-#
+                # patterns (rare but possible) don't get truncated.
+                if "  #" in line:
+                    line = line.split("  #", 1)[0].strip()
+                if not line:
+                    continue
                 decision = ScopeDecision.DENY if line.startswith("!") else ScopeDecision.ALLOW
                 target_str = line.lstrip("!")
                 # Rough inference for AssetType
@@ -312,10 +331,58 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             emode = ExecutionMode(req.mode)
         except ValueError:
             emode = ExecutionMode.RESEARCH
-            
+
+        # Phase 2H: Apply program-policy enforcement BEFORE constructing the
+        # ScopeContext so banned_tools / rate limit / scope_strict are baked
+        # into the ExecutionPolicy that ScopeContext holds. ``req.restrictions``
+        # is the parsed body of a ``<program>-restrictions.json`` produced by
+        # ``sentinel-ingest``; the policy_enforcer translates it into the
+        # PolicyEnforcement struct, then we copy fields onto ExecutionPolicy.
+        execution_policy = ExecutionPolicy()
+        enforcement = None
+        scope_strict_effective = req.scope_strict
+        if req.restrictions:
+            from core.intel.policy_enforcer import enforce as _enforce_restrictions
+            enforcement = _enforce_restrictions(req.restrictions)
+
+            # Hard block: if any restriction's enforcement is "block_scan"
+            # with severity "hard", refuse the scan with a clear reason.
+            if enforcement.scan_blocked:
+                logger.warning(
+                    "Scan request rejected by hard restriction: %s",
+                    enforcement.scan_blocked_reason,
+                )
+                raise SentinelError(
+                    ErrorCode.SCAN_TARGET_INVALID,
+                    f"Scan blocked by program policy: {enforcement.scan_blocked_reason}",
+                    details={
+                        "blocked_reason": enforcement.scan_blocked_reason,
+                        "warnings": enforcement.warnings,
+                    },
+                )
+
+            # Soft enforcement: bake disabled tools + rate limit into the
+            # ExecutionPolicy that ScopeContext holds.
+            enforcement.apply_to_execution_policy(execution_policy)
+
+            # Scope-strict: a NO_THIRD_PARTY restriction enforces strict scope
+            # regardless of what the operator requested. Restrictions tighten,
+            # never loosen.
+            if enforcement.scope_strict:
+                scope_strict_effective = True
+
+            # Required attestations: log them. The CLI is responsible for
+            # asking the operator BEFORE sending the request; if those got
+            # bypassed, the engine logs but does not block (the operator may
+            # have a legitimate non-CLI flow).
+            for attestation in enforcement.required_attestations:
+                logger.info("[policy] required attestation: %s", attestation)
+            for warning in enforcement.warnings:
+                logger.warning("[policy] %s", warning)
+
         scope_context = ScopeContext(
             registry=registry,
-            policy=ExecutionPolicy(),
+            policy=execution_policy,
             mode=emode.value,
             scan_id=session.id
         )
@@ -323,13 +390,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         # Fail-fast: the primary target itself must be in scope.
         check_decision = scope_context.registry.resolve(req.target)
         is_bounty = scope_context.mode == ExecutionMode.BOUNTY
-        if check_decision.verdict == ScopeDecision.DENY or (check_decision.verdict == ScopeDecision.UNKNOWN and (is_bounty or req.scope_strict)):
+        if check_decision.verdict == ScopeDecision.DENY or (check_decision.verdict == ScopeDecision.UNKNOWN and (is_bounty or scope_strict_effective)):
             raise SentinelError(
-                ErrorCode.INVALID_REQUEST,
+                ErrorCode.SCAN_TARGET_INVALID,
                 f"Target is outside the declared scope: {check_decision.reason_code.value}",
                 details={"target": req.target, "verdict": check_decision.verdict.value},
             )
-            
+
         # Bind ScopeContext physically to the session
         session.scope_context = scope_context
         # ─────────────────────────────────────────────────────────────────
@@ -348,6 +415,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             if requested_tools
             else installed_tools
         )
+        # Phase 2H: subtract any banned_tools the policy enforcement set
+        # (e.g. nuclei_mutating disabled by NO_DOS). banned_tools is a Set;
+        # check for None defensively since older policies may not have it.
+        banned = execution_policy.banned_tools or set()
+        if banned:
+            removed = [t for t in allowed_tools if t in banned]
+            if removed:
+                logger.info(
+                    "[policy] removing %d tool(s) banned by program policy: %s",
+                    len(removed), sorted(removed),
+                )
+            allowed_tools = [t for t in allowed_tools if t not in banned]
         
         state.scan_state = {
             "target": req.target,
@@ -524,6 +603,12 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 state.scan_state["status"] = "completed"
                 state.scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
+                # Mirror engine-state into the ScanSession object so to_dict()
+                # serializes the terminal state. Without this, session.status
+                # stays "Created" and end_time stays None — see Bug #4.
+                session.status = "completed"
+                session.end_time = time.time()
+
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("completed", len(session.findings.get_all()), duration, scan_id=session.id)
 
@@ -538,6 +623,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
 
             except asyncio.CancelledError:
                 state.scan_state["status"] = "cancelled"
+                session.status = "cancelled"
+                session.end_time = time.time()
                 duration = time.time() - start_time
                 event_bus.emit_scan_completed("cancelled", len(session.findings.get_all()), duration, scan_id=session.id)
 
@@ -552,6 +639,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
 
             except Exception as e:
                 state.scan_state["status"] = "error"
+                session.status = "error"
+                session.end_time = time.time()
                 logger.error(f"Scan error: {e}", exc_info=True)
                 payload = {"error": str(e), "target": req.target, "scan_id": session.id}
                 if isinstance(e, SentinelError):

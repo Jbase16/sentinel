@@ -273,6 +273,114 @@ class OllamaClient:
             return False
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Self-knowledge manifesto (Calibration Run #23).
+#
+# This is the system-prompt "identity" injected into every chat turn. It is
+# a CONTRACT: every capability it claims must be backed by code the chat
+# path can actually invoke, and it must not contradict the COMMAND PROTOCOL
+# assembled in stream_chat(). A system prompt that over-claims (e.g. "I can
+# read your clipboard") induces confabulation — the model will assert it did
+# something it cannot do, which is corrosive for a security assistant whose
+# entire value is trustworthy analysis.
+#
+# The chat path's REAL capabilities:
+#   * analyze the session's findings/issues/causal-graph (read-only context)
+#   * dispatch scan tools via the >>> EXEC protocol, safety-gated through the
+#     ActionDispatcher (see _try_dispatch_exec)
+# It explicitly CANNOT read the clipboard, touch the filesystem, or install
+# software — naming those non-capabilities suppresses confabulation.
+#
+# Extracted to a module constant so the contract is unit-testable
+# (tests/unit/test_ai_manifesto_contract.py).
+# ─────────────────────────────────────────────────────────────────────
+SENTINEL_IDENTITY_MANIFESTO = (
+    "SYSTEM IDENTITY:\n"
+    "You are Sentinel, the AI brain of the SentinelForge offensive security platform. "
+    "You are not a generic chatbot; you are an embedded security operator.\n\n"
+    "YOUR CAPABILITIES:\n"
+    "1. ANALYSIS: You read the live scan context — raw findings, enriched issues, "
+    "and the causal attack graph — and reason over them. This context is read-only.\n"
+    "2. VISUALIZATION: You analyze the same data that feeds the Force-Directed Attack Graph.\n"
+    "3. SCAN ORCHESTRATION: You can request a scan tool (nmap, httpx, nikto, nuclei, etc.) "
+    "by emitting the EXEC command protocol defined below. Every request is safety-gated "
+    "through the Action Dispatcher and only executes against an ACTIVE scan.\n"
+    "4. REPORTING: You are the engine behind the Report Composer, capable of drafting "
+    "Executive Summaries and Attack Narratives from the session's findings.\n"
+    "5. YOUR LIMITS (do not claim otherwise): You CANNOT read the clipboard, access the "
+    "filesystem, run arbitrary shell commands, or install software. Installing tools is a "
+    "separate, user-driven flow. If asked to do something outside these capabilities, say "
+    "so plainly instead of pretending to do it.\n\n"
+    "OPERATIONAL RULES:\n"
+    "- Be concise, technical, and objective.\n"
+    "- If you see vulnerabilities, explain the business impact.\n"
+    "- If asked about the app, explain your role within SentinelForge.\n"
+    "- ALWAYS reference specific findings and issues from the scan context when answering.\n"
+    "- Distinguish between CONFIRMED findings (directly observed), PROBABLE findings (likely based on evidence), "
+    "and HYPOTHESIZED findings (inferred from patterns).\n"
+    "- When discussing attack chains, reference the specific enablement relationships between findings.\n"
+)
+
+
+def format_conversation_history(
+    history: Optional[List[Dict[str, Any]]],
+    *,
+    char_budget: int = 3000,
+    max_turns: int = 16,
+) -> str:
+    """
+    Render recent conversation turns into a prompt block within a budget
+    (Calibration Run #24 — chat memory).
+
+    The chat endpoint is stateless per request, so the client replays the
+    thread. To stay inside the 8192-token window we keep the MOST RECENT
+    turns and drop the oldest (a follow-up refers to the latest exchange),
+    bounded by both a turn count and a character budget.
+
+    Security: each USER turn is passed through the same EXEC-marker sanitizer
+    as the live question, so a planted ">>> EXEC:" in history cannot reach
+    the dispatch path by being echoed back.
+
+    Returns "" when there is nothing usable to render.
+    """
+    if not history:
+        return ""
+
+    from core.ai.exec_protocol import sanitize_user_question
+
+    cleaned: List[tuple[str, str]] = []
+    for turn in history:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role", "")).strip().lower()
+        content = str(turn.get("content", "")).strip()
+        if role not in ("user", "assistant") or not content:
+            continue
+        if role == "user":
+            content = sanitize_user_question(content)
+        cleaned.append((role, content))
+
+    if not cleaned:
+        return ""
+
+    # Walk newest→oldest, accepting turns until the budget is hit, then flip
+    # back to chronological order for the prompt.
+    kept: List[str] = []
+    used = 0
+    for role, content in reversed(cleaned[-max_turns:]):
+        speaker = "User" if role == "user" else "Sentinel"
+        snippet = f"{speaker}: {content}"
+        if kept and used + len(snippet) > char_budget:
+            break
+        kept.append(snippet)
+        used += len(snippet)
+
+    if not kept:
+        return ""
+    kept.reverse()
+    return "CONVERSATION SO FAR (most recent turns; for follow-up context):\n" + "\n".join(kept) + "\n"
+
+
 class AIEngine:
     """
     Central analysis engine.
@@ -568,6 +676,7 @@ class AIEngine:
         self,
         question: str,
         session_id: Optional[str] = None,
+        history: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Stream answer to a natural-language question based on stored
@@ -596,35 +705,45 @@ class AIEngine:
         except Exception as exc:
             logger.debug("[AIEngine] Attack-path deterministic guard failed: %s", exc)
 
-        # Self-Knowledge Manifesto
-        manifesto = (
-            "SYSTEM IDENTITY:\n"
-            "You are Sentinel, the AI brain of the SentinelForge offensive security platform. "
-            "You are not a generic chatbot; you are an embedded security operator.\n\n"
-            "YOUR CAPABILITIES:\n"
-            "1. RECON: You can orchestrate scans using Nmap, Httpx, Nikto, and other tools via the Scan Console.\n"
-            "2. VISUALIZATION: You analyze data that feeds into the Force-Directed Attack Graph.\n"
-            "3. AUTONOMY: You can suggest follow-up attacks. If a tool is dangerous (e.g. Nmap), you must request permission via the Action Dispatcher.\n"
-            "4. REPORTING: You are the engine behind the Report Composer, capable of drafting Executive Summaries and Attack Narratives.\n"
-            "5. SYSTEM ACCESS: You can read the user's clipboard if asked, and you can suggest installing tools via 'brew' or 'pip'.\n\n"
-            "OPERATIONAL RULES:\n"
-            "- Be concise, technical, and objective.\n"
-            "- If you see vulnerabilities, explain the business impact.\n"
-            "- If asked about the app, explain your role within SentinelForge.\n"
-            "- ALWAYS reference specific findings and issues from the scan context when answering.\n"
-            "- Distinguish between CONFIRMED findings (directly observed), PROBABLE findings (likely based on evidence), "
-            "and HYPOTHESIZED findings (inferred from patterns).\n"
-            "- When discussing attack chains, reference the specific enablement relationships between findings.\n"
-        )
+        # Self-Knowledge Manifesto (module constant — see SENTINEL_IDENTITY_MANIFESTO).
+        manifesto = SENTINEL_IDENTITY_MANIFESTO
 
         if self.client:
             context_block = ""
             if findings or issues:
-                # --- Raw findings context ---
-                context_block = "LIVE SCAN CONTEXT — RAW FINDINGS:\n"
+                # --- Scan Intelligence Briefing (Calibration Run #24) ---
+                # A complete, computed digest of the ENTIRE scan, injected ABOVE
+                # the (capped) per-finding detail. The model answers quantitative
+                # questions ("how many criticals", "list all ports") from these
+                # EXACT totals instead of the 30-item sample below — so it stays
+                # accurate even on scans far larger than the context window.
+                from core.ai.scan_briefing import build_scan_briefing, select_relevant_findings
+
+                briefing_target = (
+                    next((f.get("target") for f in findings if f.get("target")), None)
+                    or "the scan target"
+                )
+                context_block = build_scan_briefing(
+                    findings,
+                    issues,
+                    target=briefing_target,
+                    session_id=context_session_id,
+                    graph_dto=graph_dto,
+                ) + "\n\n"
+
+                # --- Per-finding detail (question-relevant first, then most-severe; capped) ---
+                # Drill-down: findings the user asked about (by host/port/type/id)
+                # are surfaced even if low-severity; remaining slots fill by
+                # severity. Totals in the briefing above stay complete.
+                shown = select_relevant_findings(question, findings, limit=30)
+                context_block += (
+                    f"PER-FINDING DETAIL (showing {len(shown)} of {len(findings)}, "
+                    "question-relevant + most-severe first — use the briefing totals "
+                    "above for counts):\n"
+                )
                 if context_session_id:
                     context_block += f"(session_id: {context_session_id})\n"
-                for f in findings[:30]:
+                for f in shown:
                     context_block += (
                         f"- [{f.get('severity')}] {f.get('type')}: "
                         f"{f.get('message') or f.get('value')}"
@@ -803,10 +922,11 @@ class AIEngine:
                     "When discussing scan coverage or gaps, reference the Tool Execution Summary — "
                     "failed or timed-out tools represent BLIND SPOTS where vulnerabilities may exist undetected.\n\n"
                     "COMMAND PROTOCOL:\n"
-                    "To execute a tool or install software, you MUST use this format on a new line:\n"
+                    "To execute a scan tool, you MUST use this format on a new line:\n"
                     ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n\n"
-                    "Example: >>> EXEC: {\"tool\": \"brew\", \"args\": [\"install\", \"nmap\"]}\n"
-                    "Only suggest commands supported by the system (nmap, httpx, nikto, brew, pip)."
+                    "Example: >>> EXEC: {\"tool\": \"nmap\", \"args\": [\"-sV\", \"example.com\"]}\n"
+                    "Only suggest scan tools (nmap, httpx, nikto, nuclei, etc.). "
+                    "NEVER suggest installation commands — installation is a separate user-driven flow."
                 )
             else:
                 system_prompt = (
@@ -815,11 +935,20 @@ class AIEngine:
                     "No active scan data is currently available. "
                     "Answer questions about your capabilities, security methodology, or help the user start a new scan.\n\n"
                     "COMMAND PROTOCOL:\n"
-                    "To execute a tool or install software, you MUST use this format on a new line:\n"
+                    "To execute a scan tool, you MUST use this format on a new line:\n"
                     ">>> EXEC: {\"tool\": \"<name>\", \"args\": [\"<arg1>\", \"<arg2>\"]}\n"
+                    "NEVER suggest installation commands."
                 )
 
-            user_prompt = f"{context_block}\n\nUser Question: {question}"
+            from core.ai.exec_protocol import sanitize_user_question
+            sanitized_question = sanitize_user_question(question)
+            # Conversation memory (Run #24): replay recent turns within budget so
+            # follow-ups ("the third one", "what about that port?") resolve.
+            history_block = format_conversation_history(history)
+            user_prompt = (
+                f"{context_block}\n\n{history_block}\n"
+                f"User Question: {sanitized_question}"
+            )
 
             # Stream tokens while intercepting >>> EXEC commands.
             # Tokens arrive as fragments, so we buffer lines and detect
@@ -869,40 +998,39 @@ class AIEngine:
     # ---------------------------------------------------------
     # Action Dispatcher: parse >>> EXEC from AI stream
     # ---------------------------------------------------------
+    # The raw EXEC prefix is also defined in core/ai/exec_protocol.py.
+    # We re-export it here for backwards compatibility with any caller
+    # that still imports it; new code should use exec_protocol.EXEC_PREFIX.
     _EXEC_PREFIX = ">>> EXEC:"
 
     def _try_dispatch_exec(self, line: str) -> Optional[str]:
         """Parse a single line for the EXEC protocol and dispatch if found.
 
-        Returns a human-readable status string if the line was an EXEC
-        command, or None if it was a normal text line.
+        Uses ``core.ai.exec_protocol.parse_exec_line`` for strict, fail-closed
+        parsing. Returns a human-readable status string if the line was an
+        EXEC command, or None if it was a normal text line.
         """
-        stripped = line.strip()
-        if not stripped.startswith(self._EXEC_PREFIX):
+        from core.ai.exec_protocol import EXEC_PREFIX, parse_exec_line
+
+        # Cheap pre-check before the full parser
+        if not line.strip().startswith(EXEC_PREFIX):
             return None
 
-        json_str = stripped[len(self._EXEC_PREFIX):].strip()
-        try:
-            payload = json.loads(json_str)
-        except (json.JSONDecodeError, ValueError) as exc:
-            logger.warning("[ActionDispatcher] Malformed EXEC JSON: %s — %s", json_str[:120], exc)
-            return f"⚠ Could not parse command: {json_str[:80]}"
+        config = get_config()
+        allowed_tools = set(config.scan.safe_tools) | set(config.scan.restricted_tools)
 
-        tool = str(payload.get("tool", "")).strip().lower()
-        args = [str(a) for a in payload.get("args", [])]
-        reason = str(payload.get("reason", "AI-suggested"))
-
-        if not tool:
-            return "⚠ EXEC command missing tool name"
+        cmd = parse_exec_line(line, allowed_tools=allowed_tools)
+        if cmd is None:
+            # parse_exec_line already logged the reason. Render a generic
+            # message so we don't leak parser internals into the chat reply.
+            return "⚠ Command rejected (invalid format, unknown tool, or unsafe arguments)"
 
         # Route through ActionDispatcher for safety gating
         from core.base.action_dispatcher import ActionDispatcher
         dispatcher = ActionDispatcher.instance()
-        # Derive target from args (last arg is typically the target) or from
-        # the current scan context.
-        target = args[-1] if args else "unknown"
+        target = cmd.args[-1] if cmd.args else "unknown"
         result = dispatcher.request_action(
-            {"tool": tool, "args": args, "reason": reason},
+            {"tool": cmd.tool, "args": cmd.args, "reason": cmd.reason},
             target,
         )
 
@@ -912,16 +1040,16 @@ class AIEngine:
 
         if result == "AUTO_APPROVED":
             if scan_active:
-                return f"✓ Auto-executing: {tool} {' '.join(args)}"
+                return f"✓ Auto-executing: {cmd.tool} {' '.join(cmd.args)}"
             else:
-                return f"⚠ {tool} approved but no active scan — start a scan first to execute tools"
+                return f"⚠ {cmd.tool} approved but no active scan — start a scan first to execute tools"
         elif result == "PENDING":
             if scan_active:
-                return f"⏳ Queued for approval: {tool} {' '.join(args)} (reason: {reason})"
+                return f"⏳ Queued for approval: {cmd.tool} {' '.join(cmd.args)} (reason: {cmd.reason})"
             else:
-                return f"⚠ {tool} queued for approval but no active scan — start a scan first"
+                return f"⚠ {cmd.tool} queued for approval but no active scan — start a scan first"
         else:
-            return f"✗ Rejected: {tool} — {result}"
+            return f"✗ Rejected: {cmd.tool} — {result}"
 
     async def process_tool_output(
         self,

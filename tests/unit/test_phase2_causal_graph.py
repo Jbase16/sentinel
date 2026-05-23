@@ -141,7 +141,7 @@ def test_enrich_from_issues_creates_enablement_edges_for_raw_findings():
         "type": "vulnerability",
         "severity": "HIGH",
         "target": "localhost",
-        "tool": "wafw00f",
+        "tool": "nuclei",
         "message": "Possible SSRF indicator",
         "tags": [],
         "families": [],
@@ -405,7 +405,7 @@ def test_export_dto_includes_attack_chains_and_pressure_points():
 
     assert dto["edges"], "Expected at least one edge in exported DTO"
     edge = dto["edges"][0]
-    assert edge["type"] in {"EXPOSES", "VULNERABLE_TO", "HAS_PORT", "USES_TECH"}
+    assert edge["type"] in {"EXPOSES", "VULNERABLE_TO", "HAS_PORT", "USES_TECH", "CO_LOCATED"}
     assert "relationship_raw" in edge.get("data", {})
 
 
@@ -730,3 +730,149 @@ def test_enrich_from_issues_tier3_uses_original_target_when_target_is_hostname_o
     assert enriched.data.get("confirmation_level") == "confirmed"
     assert enriched.data.get("capability_types") == ["execution"]
     assert enriched.data.get("score") == 7.1
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Calibration Run #22 — Attack Graph chain quality
+#
+# A benign about.gitlab.com scan exported 28 "attack chains": 8 were
+# length-1 (a single isolated finding — not a chain at all) and 20 were
+# pure-INFO co-location ("Discovered Subdomain -> Open Port"), every one
+# scored a flat ~1.0 — making harmless recon look as dangerous as a real
+# exploit path. Two root causes in export_dto:
+#   * get_attack_chains() (all_simple_paths over root->leaf pairs) returns
+#     [[node]] for any isolated finding, because such a finding is BOTH a
+#     root (in_degree 0) and a leaf (out_degree 0). Those single-node paths
+#     were emitted as "chains".
+#   * every chain scored ~edge_strength regardless of the severity of the
+#     findings it traversed, so a benign 2-node co-location tied a genuine
+#     escalation path.
+# The fix: drop chains with < 2 nodes, score each chain as
+# edge_strength * (max_severity / 10) (the worst finding on the path drives
+# the rank), then sort most-dangerous-first.
+#
+# These tests build the graph through the REAL inference engine (finding
+# type + shared target -> edges) so they exercise the exact path a live
+# scan does, not a hand-wired graph the production code never produces.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _run22_chain_findings():
+    """Three components mirroring a real scan:
+
+    A (a.example.com): subdomain -> open port -> SQL injection (CRITICAL)
+        a genuine 3-node escalation path (2 edges).
+    B (b.example.com): subdomain -> open port (both INFO)
+        a benign 2-node co-location path (1 edge).
+    C (c.example.com): a lone WAF finding that matches no enablement rule
+        -> isolated, so the raw walk emits a bogus length-1 "chain".
+    """
+    def F(fid, ftype, sev, target):
+        return {"id": fid, "type": ftype, "severity": sev,
+                "title": ftype, "target": target, "metadata": {}}
+    return [
+        F("subA", "Discovered Subdomain", "info", "https://a.example.com"),
+        F("portA", "Open Port", "info", "https://a.example.com"),
+        F("sqliA", "SQL Injection", "critical", "https://a.example.com"),
+        F("subB", "Discovered Subdomain", "info", "https://b.example.com"),
+        F("portB", "Open Port", "info", "https://b.example.com"),
+        F("waf", "WAF Behavior Observed", "info", "https://c.example.com"),
+    ]
+
+
+def test_export_dto_drops_length_one_chains():
+    # The isolated WAF finding is both a root and a leaf, so the raw
+    # all_simple_paths walk yields [["waf"]]. That must NOT survive into the
+    # DTO as an "attack chain".
+    builder = CausalGraphBuilder()
+    builder.build(_run22_chain_findings())
+
+    # Pre-condition: the raw walk really does emit the bogus length-1 path,
+    # otherwise this regression would pass vacuously.
+    raw = builder.get_attack_chains(max_length=10)
+    assert any(len(c) == 1 for c in raw), "expected raw walk to emit a length-1 path"
+
+    chains = builder.export_dto(session_id="run22")["attack_chains"]
+    assert chains, "expected real multi-node chains to survive the filter"
+    assert all(c["length"] >= 2 for c in chains), (
+        f"length-1 chains leaked into DTO: {[c['length'] for c in chains]}"
+    )
+    assert not any(c["node_ids"] == ["waf"] for c in chains), (
+        "isolated WAF finding leaked as a standalone chain"
+    )
+
+
+def test_export_dto_chains_sorted_most_dangerous_first():
+    builder = CausalGraphBuilder()
+    builder.build(_run22_chain_findings())
+    chains = builder.export_dto(session_id="run22")["attack_chains"]
+
+    scores = [c["score"] for c in chains]
+    assert scores == sorted(scores, reverse=True), (
+        f"chains not sorted by score descending: {scores}"
+    )
+
+
+def test_export_dto_chain_score_is_severity_aware():
+    # The core of Run #22: a path ending in a CRITICAL SQL injection must
+    # outrank a benign INFO-only "subdomain -> open port" co-location.
+    builder = CausalGraphBuilder()
+    builder.build(_run22_chain_findings())
+    chains = builder.export_dto(session_id="run22")["attack_chains"]
+
+    by_leaf = {c["leaf_node"]: c for c in chains}
+    severe = by_leaf["sqliA"]      # subdomain -> port -> SQLi (critical)
+    benign = by_leaf["portB"]      # subdomain -> port (info only)
+
+    assert severe["score"] > benign["score"], (
+        f"severity-blind scoring: critical chain {severe['score']} "
+        f"!> info chain {benign['score']}"
+    )
+    # These recon→service→vuln edges are HEURISTIC co-location (Rules 1-4), so
+    # each edge weighs CO_LOCATION_EDGE_STRENGTH (0.3), not a full 1.0 (Run #25).
+    # Benign: 1 co-location edge (0.3) * (info 1.0 / 10) = 0.03.
+    assert benign["score"] == pytest.approx(0.03, abs=0.001)
+    # Severe: 2 co-location edges (0.6) * (critical 9.5 / 10) = 0.57 — still an
+    # order of magnitude above the benign co-location noise.
+    assert severe["score"] == pytest.approx(0.57, abs=0.001)
+
+
+def test_export_dto_marks_colocation_edges_distinctly():
+    # Run #25: recon→service→vuln edges inferred purely from a SHARED TARGET are
+    # co-location, not confirmed enablement. They must be labeled distinctly and
+    # weighted low so they don't masquerade as real exploit dependencies.
+    from core.cortex.causal_graph import CO_LOCATION_EDGE_STRENGTH
+
+    builder = CausalGraphBuilder()
+    builder.build(_run22_chain_findings())
+
+    edges = list(builder.graph.edges(data=True))
+    assert edges, "expected inferred edges"
+    for src, dst, data in edges:
+        assert data.get("relationship") == "co_located", (src, dst, data)
+        assert data.get("strength") == CO_LOCATION_EDGE_STRENGTH
+        assert data.get("colocation_edge") is True
+
+    dto = builder.export_dto(session_id="run25")
+    assert dto["edges"]
+    assert all(e["type"] == "CO_LOCATED" for e in dto["edges"]), (
+        f"co-location edges should render as CO_LOCATED: "
+        f"{[e['type'] for e in dto['edges']]}"
+    )
+
+
+def test_explicit_requires_is_not_downgraded_to_colocation():
+    # A DECLARED dependency is a real edge, not heuristic co-location — it keeps
+    # the full-strength "enables" relationship.
+    builder = CausalGraphBuilder()
+    builder.build([
+        {"id": "a", "type": "Foothold", "severity": "high", "title": "a",
+         "target": "x", "metadata": {}},
+        {"id": "b", "type": "Escalation", "severity": "high", "title": "b",
+         "target": "x", "requires": ["a"], "metadata": {}},
+    ])
+    data = builder.graph.get_edge_data("a", "b")
+    assert data is not None, "explicit requires edge missing"
+    assert data.get("relationship") == "enables"
+    assert data.get("colocation_edge") is not True
+    assert ("a", "b") not in builder._colocation_pairs

@@ -10,14 +10,18 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional, Dict
 
 from core.forge.compiler import ExploitCompiler
-from core.server.routers.auth import verify_token
+from core.server.routers.auth import verify_sensitive_token
 
 logger = logging.getLogger(__name__)
 
+# Forge endpoints generate executable exploit code via the AI. They are listed
+# in get_sensitive_endpoints() in core/base/config.py and must always require
+# a token — even on loopback, even when require_auth is somehow off — because
+# any process on the box could otherwise drive exploit generation.
 router = APIRouter(
     prefix="/forge",
     tags=["Forge (Exploitation)"],
-    dependencies=[Depends(verify_token)] if "verify_token" in locals() else []
+    dependencies=[Depends(verify_sensitive_token)],
 )
 
 class CompileRequest(BaseModel):

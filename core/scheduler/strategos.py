@@ -843,7 +843,14 @@ class Strategos:
                         elif not tools_to_run:
                             # If this intent had no runnable tools, don't conclude the scan. Skipping
                             # must advance to the next intent so later phases can still execute.
-                            chosen_action = "CONTINUE_ENGAGEMENT"
+                            #
+                            # NOTE: we use a distinct outcome (SKIP_NO_TOOLS) rather than the
+                            # generic CONTINUE_ENGAGEMENT so _decide_next_step can tell apart
+                            # "tools ran and found nothing" (legitimate walk-away signal in
+                            # bug-bounty mode) from "policy blocked all tools" (must NOT trigger
+                            # walk-away — we haven't actually probed the surface yet).
+                            # See docs/CALIBRATION_RUN_002.md Bug #7.
+                            chosen_action = "SKIP_NO_TOOLS"
                             rationale = "No runnable tools for this intent; advancing to the next intent."
                             suppressed = ["CONCLUDE_PHASE"]
                         elif has_findings or has_new_surface:
@@ -2064,7 +2071,21 @@ class Strategos:
             return next_intent
 
         if current_intent == INTENT_SURFACE_ENUMERATION:
-            if mode == ScanMode.BUG_BOUNTY and self.context.surface_delta_this_intent == 0:
+            # Walk-away is the bug-bounty heuristic: "if surface enumeration ran
+            # against this target and found no new surface, the target is boring;
+            # don't burn cycles deep-scanning it."
+            #
+            # Critically, this only applies when surface enumeration *actually ran*.
+            # If every selected tool was policy-blocked (e.g. loopback target
+            # blocks nmap/naabu), `surface_delta_this_intent == 0` is the wrong
+            # signal — we never had a chance to probe surface. In that case we
+            # must continue to vuln_scan with whatever surface earlier phases
+            # discovered, not walk away. See docs/CALIBRATION_RUN_002.md Bug #7.
+            if (
+                mode == ScanMode.BUG_BOUNTY
+                and self.context.surface_delta_this_intent == 0
+                and last_assessment != "SKIP_NO_TOOLS"
+            ):
                 self._emit_log("[Strategos] Walk Away: No new surface discovered. Aborting deep scan.")
                 if self._decision_ctx:
                     self._decision_ctx.choose(
@@ -2097,27 +2118,29 @@ class Strategos:
             return next_intent
 
         if current_intent == INTENT_VULN_SCANNING:
+            # All modes traverse vuln_scan → verification. Verification hosts the
+            # wraith_* tools (persona_diff for IDOR, oob_probe for SSRF/RCE/XXE,
+            # wraith_verify for query-param mutation). These tools are
+            # precondition-gated — they auto-skip if their inputs aren't
+            # configured (personas, oob, query-param URLs), so adding this
+            # step is a no-op when those preconditions are absent and a
+            # massive signal unlock when they're present.
+            #
+            # Previously this transition only fired in BUG_BOUNTY mode, which
+            # meant standard-mode scans never reached the wraith layer even
+            # when personas/oob were configured. See docs/CALIBRATION_RUN_005.md.
+            next_intent = INTENT_VERIFICATION
             if mode == ScanMode.BUG_BOUNTY:
-                next_intent = INTENT_VERIFICATION
+                reason = "Bug Bounty mode runs targeted verification/exploitation instead of heavy artillery"
                 self._emit_log("[Strategos] Bug Bounty Mode: Entering verification layer (skipping Heavy Artillery).")
-                if self._decision_ctx:
-                    self._decision_ctx.choose(
-                        decision_type=DecisionType.INTENT_TRANSITION,
-                        chosen=next_intent,
-                        reason="Bug Bounty mode runs targeted verification/exploitation instead of heavy artillery",
-                        alternatives=[INTENT_HEAVY_ARTILLERY, None],
-                        context={"from": current_intent, "to": next_intent, "mode": mode.value},
-                        evidence={"findings_count": len(self.context.findings)},
-                    )
-                return next_intent
-
-            next_intent = INTENT_HEAVY_ARTILLERY
+            else:
+                reason = "Vulnerability scanning complete, proceeding to targeted verification"
             if self._decision_ctx:
                 self._decision_ctx.choose(
                     decision_type=DecisionType.INTENT_TRANSITION,
                     chosen=next_intent,
-                    reason="Vulnerability scanning complete, proceeding to heavy artillery",
-                    alternatives=[None],
+                    reason=reason,
+                    alternatives=[INTENT_HEAVY_ARTILLERY, None],
                     context={"from": current_intent, "to": next_intent, "mode": mode.value},
                     evidence={"findings_count": len(self.context.findings)},
                 )
