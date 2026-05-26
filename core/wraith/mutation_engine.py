@@ -55,6 +55,9 @@ class PayloadEncoding(str, enum.Enum):
     PATH_SEGMENT = "path_segment"      # /api/PAYLOAD/resource
     HEADER_VALUE = "header_value"      # X-Custom: PAYLOAD
     COOKIE_VALUE = "cookie_value"      # Cookie: param=PAYLOAD
+    NONE = "none"                      # Request is pre-built by the caller; do
+                                       # not re-inject (used by VulnVerifier,
+                                       # which injects into the URL itself).
 
 
 class EvidenceType(str, enum.Enum):
