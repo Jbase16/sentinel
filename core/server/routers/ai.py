@@ -30,6 +30,35 @@ class ChatRequest(BaseModel):
     # the client replays the thread. Bounded to keep the prompt inside budget.
     history: list[ChatTurn] | None = Field(default=None, max_length=50)
 
+
+# Phase 3 — active vulnerability verification endpoint. The map normalizes
+# the user-facing string to the canonical VulnerabilityClass enum name so we
+# can keep the request schema stable even if the enum evolves.
+_VERIFY_VULN_CLASS_MAP = {
+    "sqli": "SQLI",
+    "sql_injection": "SQLI",
+    "xss": "XSS",
+    "idor": "IDOR",
+    "ssrf": "SSRF",
+    "path_traversal": "PATH_TRAVERSAL",
+    "open_redirect": "OPEN_REDIRECT",
+    "generic": "GENERIC",
+}
+
+
+class VerifyRequest(BaseModel):
+    """Active vulnerability verification request.
+
+    Sends detection probes against `target_url` and matches responses against
+    known vulnerability signatures. Read-only by design — no data mutation,
+    no DoS, budget-bounded.
+    """
+    target_url: str = Field(..., min_length=8, max_length=2048)
+    vuln_class: str = Field(default="sqli", max_length=32)
+    headers: Dict[str, str] | None = Field(default=None)
+    cookies: Dict[str, str] | None = Field(default=None)
+    budget: int = Field(default=5, ge=1, le=20)
+
 @router.get("/status", dependencies=[Depends(verify_token)])
 async def get_ai_status():
     """Get status of the local AI engine."""
@@ -51,6 +80,67 @@ async def chat_with_ai(req: ChatRequest):
         ai.stream_chat(req.prompt, session_id=req.session_id, history=history),
         media_type="text/plain"
     )
+
+@router.post("/verify", dependencies=[Depends(verify_token), Depends(check_ai_rate_limit)])
+async def verify_vulnerability(req: VerifyRequest):
+    """Actively confirm a vulnerability on a target URL via VulnVerifier.
+
+    Sends boundary-breaking probes (and timing checks where applicable) and
+    matches responses against known DB-error / reflection / IDOR / SSRF /
+    redirect / traversal signatures. Returns confirmations (with confidence
+    and the payload that tripped detection) or an empty list if not detected.
+
+    This is the active-verification spine that the AI assistant can call
+    (via the EXEC protocol) and that the scan pipeline can call as a
+    post-recon hook (Phase 3 wiring). Read-only, budget-bounded.
+    """
+    from core.base.session import ScanSession
+    from core.wraith.mutation_engine import MutationEngine
+    from core.wraith.vuln_verifier import VulnVerifier
+    from core.web.contracts.enums import VulnerabilityClass
+
+    vc_key = (req.vuln_class or "").strip().lower()
+    canonical = _VERIFY_VULN_CLASS_MAP.get(vc_key)
+    if canonical is None or not hasattr(VulnerabilityClass, canonical):
+        raise SentinelError(
+            ErrorCode.SCAN_TARGET_INVALID,
+            f"Unsupported vuln_class {req.vuln_class!r}; "
+            f"supported: {sorted(_VERIFY_VULN_CLASS_MAP)}",
+        )
+    vc = getattr(VulnerabilityClass, canonical)
+
+    session = ScanSession(req.target_url)
+    verifier = VulnVerifier(session)
+    engine = MutationEngine()
+    try:
+        results, probes = await verifier.verify_finding(
+            engine=engine,
+            finding={},
+            url=req.target_url,
+            vuln_class=vc,
+            headers=req.headers or {},
+            cookies=req.cookies or {},
+            budget=req.budget,
+        )
+    finally:
+        # Best-effort cleanup of the engine's internal httpx client.
+        close = getattr(engine, "close", None)
+        if callable(close):
+            try:
+                await close()
+            except Exception:
+                pass
+
+    return {
+        "target_url": req.target_url,
+        "vuln_class": req.vuln_class,
+        "probes_sent": probes,
+        "confirmed": [
+            {"confidence": float(c), "evidence": d, "payload": p, "kind": k}
+            for c, d, p, k in (results or [])
+        ],
+    }
+
 
 @router.post("/generate-report", dependencies=[Depends(verify_token)])
 async def generate_report(
