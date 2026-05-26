@@ -40,6 +40,16 @@ class VulnerabilityClass(str, Enum):
     IDOR = "idor"
     SSRF = "ssrf"
     GENERAL = "general"
+    # Added Run #26 — referenced by wraith.vuln_verifier.verify_finding's
+    # if-chain (which crashed with AttributeError on any non-SQLI class
+    # because these values didn't exist). Without these, the _confirm_xss /
+    # _confirm_path_traversal / _confirm_open_redirect / _confirm_generic
+    # methods are unreachable by explicit vuln_class.
+    XSS = "xss"
+    PATH_TRAVERSAL = "path_traversal"
+    OPEN_REDIRECT = "open_redirect"
+    GENERIC = "generic"
+    COMMAND_INJECTION = "command_injection"
 
 
 class DeltaSeverity(str, Enum):

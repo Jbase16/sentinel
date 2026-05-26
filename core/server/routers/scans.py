@@ -599,7 +599,64 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     log_fn=session.log,
                     knowledge=session.knowledge,
                 )
-                
+
+                # --- Phase 3: active verification (Run #26 wiring) -----------
+                # In bug_bounty mode, after recon, probe a curated set of
+                # common parameterized endpoints on in-scope hosts using
+                # VulnVerifier (boundary payloads, error/timing detection).
+                # Confirmed verifications are added to the session as HIGH-
+                # severity findings — they appear in the Findings tab, the AI
+                # briefing, and reports, with zero extra plumbing.
+                # Scope-strict mode hard-gates probes through the same scope
+                # registry the scan uses for tools (single source of truth).
+                if req.mode in ("bug_bounty", "bounty"):
+                    try:
+                        from core.wraith.verify_phase import run_verify_phase
+                        # Build candidate target set: original + any hosts the
+                        # recon already discovered (subdomain findings etc.).
+                        target_set: set[str] = {req.target}
+                        for _f in session.findings.get_all():
+                            if not isinstance(_f, dict):
+                                continue
+                            _t = _f.get("target")
+                            if isinstance(_t, str) and _t:
+                                target_set.add(_t)
+                            _meta = _f.get("metadata")
+                            if isinstance(_meta, dict):
+                                _h = _meta.get("host")
+                                if isinstance(_h, str) and _h:
+                                    target_set.add(_h)
+                        # Scope filter: in scope_strict, only probe URLs the
+                        # session's scope registry resolves as in-scope.
+                        scope_filter = None
+                        _sc = getattr(session, "scope_context", None)
+                        if req.scope_strict and _sc is not None and getattr(_sc, "registry", None) is not None:
+                            def scope_filter(_url: str, _reg=_sc.registry) -> bool:
+                                try:
+                                    decision = _reg.resolve(_url)
+                                    return bool(getattr(decision, "in_scope", False))
+                                except Exception:
+                                    return False
+                        confirmed_findings = await run_verify_phase(
+                            session=session,
+                            targets=list(target_set),
+                            scope_filter=scope_filter,
+                        )
+                        if confirmed_findings:
+                            session.findings.bulk_add(confirmed_findings, persist=True)
+                            session.log(
+                                f"[verify_phase] added {len(confirmed_findings)} "
+                                f"confirmed-vuln finding(s) to session"
+                            )
+                    except Exception as _vp_exc:
+                        # Verification-phase failures must NEVER kill the scan
+                        # — recon results stand on their own. Log and move on.
+                        logger.error(
+                            f"[scan] verify phase failed: "
+                            f"{type(_vp_exc).__name__}: {_vp_exc}",
+                            exc_info=True,
+                        )
+
                 state.scan_state["status"] = "completed"
                 state.scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
