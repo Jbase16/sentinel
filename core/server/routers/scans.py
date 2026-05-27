@@ -637,10 +637,15 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     return bool(getattr(decision, "in_scope", False))
                                 except Exception:
                                     return False
+                        # Pass personas through so the verify phase can run
+                        # authenticated identity contexts (enables IDOR /
+                        # authenticated-SQLi confirmation). Personas were
+                        # already validated by the ScanRequest model.
                         confirmed_findings = await run_verify_phase(
                             session=session,
                             targets=list(target_set),
                             scope_filter=scope_filter,
+                            personas=req.personas,
                         )
                         if confirmed_findings:
                             session.findings.bulk_add(confirmed_findings, persist=True)

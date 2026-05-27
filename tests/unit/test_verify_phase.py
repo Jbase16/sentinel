@@ -181,3 +181,148 @@ class TestRunVerifyPhase:
         targets = [f"http://h{i}.example.com" for i in range(20)]
         _run(run_verify_phase(session=_StubSession(), targets=targets, max_hosts=2))
         assert len(seen_hosts) <= 2
+
+
+# ─────────────────────── persona-aware run_verify_phase ───────────────────
+
+class TestPersonaAwareVerifyPhase:
+    """The persona dimension makes IDOR + authenticated-SQLi reachable.
+
+    These tests pin:
+      * authenticate_persona is awaited once per persona before probing.
+      * Each candidate is probed once per identity context.
+      * Findings carry per-persona metadata + tag so the report/AI attributes.
+      * IDOR candidates are skipped for unauthenticated identities (they'd
+        just confirm 'logged-out users can't see baskets').
+      * IDOR candidates ARE probed under an authenticated identity.
+    """
+
+    def test_unauthenticated_skips_idor_probes(self, monkeypatch):
+        from core.wraith.vuln_verifier import VulnVerifier
+        from core.web.contracts.enums import VulnerabilityClass
+
+        seen_classes = []
+
+        async def fake_verify(self, *, engine, finding, url, vuln_class, headers, cookies, budget=5):
+            seen_classes.append(vuln_class)
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        _run(run_verify_phase(session=_StubSession(), targets=["http://a.example.com"]))
+        # IDOR class must NEVER be seen by the verifier when no personas are wired.
+        assert VulnerabilityClass.IDOR not in seen_classes
+
+    def test_authenticated_persona_probes_idor(self, monkeypatch):
+        from core.wraith.vuln_verifier import VulnVerifier
+        from core.web import contracts as _c  # noqa: F401
+        from core.web.contracts.enums import VulnerabilityClass
+        import core.wraith.verify_phase as vp_mod
+
+        # Stub the authenticator to return obviously-authenticated creds
+        # without touching the network.
+        async def fake_auth(persona):
+            return ({"Authorization": "Bearer FAKE"}, {})
+        monkeypatch.setattr(
+            "core.wraith.persona_auth.authenticate_persona", fake_auth
+        )
+
+        idor_urls = []
+
+        async def fake_verify(self, *, engine, finding, url, vuln_class, headers, cookies, budget=5):
+            if vuln_class == VulnerabilityClass.IDOR:
+                idor_urls.append((url, headers.get("Authorization")))
+                return ([(0.88, "id-leak: returned other user's basket", "2", "IDOR")], 1)
+            return ([], 1)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        personas = [{
+            "name": "admin",
+            "login_url": "http://a.example.com/rest/user/login",
+            "login_body": {"email": "a@b", "password": "p"},
+            "token_path": "authentication.token",
+            "auth_header": "Authorization: Bearer {token}",
+        }]
+        result = _run(run_verify_phase(
+            session=_StubSession(),
+            targets=["http://a.example.com"],
+            personas=personas,
+        ))
+
+        # IDOR probes ran with the persona's Authorization header.
+        assert idor_urls, "IDOR probes did not run for the authenticated persona"
+        for _url, auth in idor_urls:
+            assert auth == "Bearer FAKE"
+
+        # Confirmed IDOR findings carry persona metadata + tag.
+        idor_findings = [f for f in result if f["metadata"]["vuln_class"] == "IDOR"]
+        assert idor_findings, "no IDOR finding emitted under authenticated persona"
+        f = idor_findings[0]
+        assert f["metadata"]["persona"] == "admin"
+        assert f["metadata"]["authenticated"] is True
+        assert "persona:admin" in f["tags"]
+
+    def test_persona_auth_failure_falls_back_to_anonymous(self, monkeypatch):
+        """A persona whose login blows up must NOT kill the phase — the
+        identity falls back to anonymous (empty creds)."""
+        from core.wraith.vuln_verifier import VulnVerifier
+
+        async def angry_auth(persona):
+            raise RuntimeError("auth subsystem on fire")
+        monkeypatch.setattr(
+            "core.wraith.persona_auth.authenticate_persona", angry_auth
+        )
+
+        observed_headers = []
+
+        async def fake_verify(self, *, engine, finding, url, vuln_class, headers, cookies, budget=5):
+            observed_headers.append(dict(headers))
+            return ([], 1)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        result = _run(run_verify_phase(
+            session=_StubSession(),
+            targets=["http://a.example.com"],
+            personas=[{"name": "broken"}],
+        ))
+        # The phase completed; verifier was invoked at least once.
+        assert observed_headers, "verifier never ran after persona auth failure"
+        # Fallback identity sees empty headers (anonymous).
+        assert all(h == {} for h in observed_headers)
+        assert result == []
+
+    def test_multi_persona_runs_each_candidate_per_identity(self, monkeypatch):
+        """Two personas × N candidates → each candidate probed twice."""
+        from core.wraith.vuln_verifier import VulnVerifier
+
+        async def fake_auth(persona):
+            return ({"X-Identity": persona["name"]}, {})
+        monkeypatch.setattr(
+            "core.wraith.persona_auth.authenticate_persona", fake_auth
+        )
+
+        # Track (url, identity) tuples to verify cross-product.
+        seen: list = []
+
+        async def fake_verify(self, *, engine, finding, url, vuln_class, headers, cookies, budget=5):
+            seen.append((url, headers.get("X-Identity")))
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        personas = [
+            {"name": "alice", "login_url": "http://x/login"},
+            {"name": "bob",   "login_url": "http://x/login"},
+        ]
+        _run(run_verify_phase(
+            session=_StubSession(),
+            targets=["http://a.example.com"],
+            personas=personas,
+        ))
+
+        urls_for_alice = {u for u, ident in seen if ident == "alice"}
+        urls_for_bob   = {u for u, ident in seen if ident == "bob"}
+        # Both identities probed the same URL set.
+        assert urls_for_alice, "alice never probed anything"
+        assert urls_for_bob, "bob never probed anything"
+        assert urls_for_alice == urls_for_bob, (
+            "personas saw different URL sets — identity loop is asymmetric"
+        )

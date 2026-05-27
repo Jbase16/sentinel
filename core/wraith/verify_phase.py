@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 # parameterized API shapes or specifically present on calibration targets
 # (e.g. /rest/products/search for OWASP Juice Shop). The `sentinel_probe`
 # query value is a benign sentinel so logs on the target identify our probes.
+#
+# IDOR probes use path-segment numeric IDs because VulnVerifier._confirm_idor
+# enumerates the LAST numeric/UUID segment via _inject_path_segment — so the
+# bare /N at the end is what triggers it. With an authenticated persona,
+# these probes test horizontal-IDOR (can identity X see identity Y's object).
 _SEED_PROBES: List[Tuple[str, str, str]] = [
     ("/?q=sentinel_probe",                       "root-q",                 "sqli"),
     ("/?id=1",                                   "root-id",                "sqli"),
@@ -53,6 +58,13 @@ _SEED_PROBES: List[Tuple[str, str, str]] = [
     ("/redirect?url=http://evil.example.com",    "redirect-url",           "open_redirect"),
     ("/login?next=http://evil.example.com",      "login-next",             "open_redirect"),
     ("/?file=../../../etc/passwd",               "file-traversal",         "path_traversal"),
+    # IDOR path-segment shapes — only meaningful with an authenticated persona.
+    # Juice Shop /rest/basket/{N} is the canonical IDOR case (any logged-in
+    # user can access any basket by ID).
+    ("/rest/basket/1",                           "rest-basket-id",         "idor"),
+    ("/api/users/1",                             "api-users-id",           "idor"),
+    ("/api/orders/1",                            "api-orders-id",          "idor"),
+    ("/api/profile/1",                           "api-profile-id",         "idor"),
 ]
 
 
@@ -106,6 +118,7 @@ async def run_verify_phase(
     session,
     targets: Iterable[str],
     scope_filter: Optional[Callable[[str], bool]] = None,
+    personas: Optional[List[Dict[str, Any]]] = None,
     headers: Optional[Dict[str, str]] = None,
     cookies: Optional[Dict[str, str]] = None,
     per_probe_budget: int = 4,
@@ -116,6 +129,17 @@ async def run_verify_phase(
 
     The returned dicts are shaped to match what FindingsStore.bulk_add()
     consumes so the caller can persist them in one call.
+
+    Persona handling (Run #26 step 3):
+      - If `personas` is given, each is authenticated (best-effort; failures
+        fall back to anonymous probing for that persona) and used as a
+        distinct identity context. Probes for each candidate run once per
+        identity, with that identity's headers/cookies. This is what makes
+        IDOR + authenticated-SQLi reachable.
+      - Without `personas`, a single anonymous identity is used (the `headers`
+        and `cookies` args, defaulting to empty).
+      - Findings record which persona triggered confirmation
+        (`metadata.persona`) so the report/AI can attribute correctly.
     """
     from core.web.contracts.enums import VulnerabilityClass
     from core.wraith.mutation_engine import MutationEngine
@@ -136,60 +160,96 @@ async def run_verify_phase(
         "generic": VulnerabilityClass.GENERIC,
     }
 
+    # Build identity contexts. List of (name, headers, cookies) tuples.
+    identity_contexts: List[Tuple[str, Dict[str, str], Dict[str, str]]] = []
+    if personas:
+        from core.wraith.persona_auth import authenticate_persona
+        for p in personas:
+            if not isinstance(p, dict):
+                continue
+            name = str(p.get("name") or "anon")
+            try:
+                p_headers, p_cookies = await authenticate_persona(p)
+            except Exception as e:
+                logger.warning(
+                    f"[verify_phase] persona {name!r} auth failed: "
+                    f"{type(e).__name__}: {e} — falling back to anonymous for this identity"
+                )
+                p_headers, p_cookies = {}, {}
+            identity_contexts.append((name, p_headers, p_cookies))
+    if not identity_contexts:
+        identity_contexts.append(("anonymous", headers or {}, cookies or {}))
+
     verifier = VulnVerifier(session)
     engine = MutationEngine()
     confirmed: List[Dict[str, Any]] = []
     probes_total = 0
 
-    logger.info(f"[verify_phase] probing {len(candidates)} candidates")
+    logger.info(
+        f"[verify_phase] probing {len(candidates)} candidate(s) "
+        f"with {len(identity_contexts)} identity context(s)"
+    )
     try:
-        for url, label, vc_name in candidates:
-            vc = vc_map.get(vc_name, VulnerabilityClass.GENERIC)
-            try:
-                results, probes = await verifier.verify_finding(
-                    engine=engine,
-                    finding={},
-                    url=url,
-                    vuln_class=vc,
-                    headers=headers or {},
-                    cookies=cookies or {},
-                    budget=per_probe_budget,
-                )
-                probes_total += int(probes or 0)
-            except Exception as e:
-                logger.warning(
-                    f"[verify_phase] {label} probe errored on {url}: "
-                    f"{type(e).__name__}: {e}"
-                )
-                continue
-            for confidence, evidence, payload, kind in results or []:
-                evidence_str = evidence if isinstance(evidence, str) else str(evidence)
-                finding_id = f"verified-{kind.lower()}-{abs(hash((url, payload))) % 1_000_000}"
-                confirmed.append({
-                    "id": finding_id,
-                    "type": f"{kind} (active verification)",
-                    "severity": "HIGH",
-                    "tool": "vuln_verifier",
-                    "target": url,
-                    "message": (
-                        f"{kind} confirmed on {url} "
-                        f"(confidence={float(confidence):.2f}, payload={payload!r})"
-                    ),
-                    "proof": evidence_str[:500],
-                    "tags": ["verified", "active_test", label],
-                    "families": ["confirmed_vuln"],
-                    "metadata": {
-                        "vuln_class": kind,
-                        "confidence": float(confidence),
-                        "payload": payload,
-                        "probe_label": label,
-                        "probes_sent": int(probes or 0),
-                    },
-                })
-                logger.info(
-                    f"[verify_phase] CONFIRMED {kind} on {url} "
-                    f"via payload={payload!r} (conf={confidence})"
-                )
+        for identity_name, id_headers, id_cookies in identity_contexts:
+            authed = bool(id_headers) or bool(id_cookies)
+            for url, label, vc_name in candidates:
+                vc = vc_map.get(vc_name, VulnerabilityClass.GENERIC)
+                # IDOR probes only make sense authenticated — skip unauthenticated
+                # IDOR probes (would just confirm "logged-out user can't see basket").
+                if vc_name == "idor" and not authed:
+                    continue
+                try:
+                    results, probes = await verifier.verify_finding(
+                        engine=engine,
+                        finding={},
+                        url=url,
+                        vuln_class=vc,
+                        headers=id_headers,
+                        cookies=id_cookies,
+                        budget=per_probe_budget,
+                    )
+                    probes_total += int(probes or 0)
+                except Exception as e:
+                    logger.warning(
+                        f"[verify_phase] {label} probe errored on {url} "
+                        f"(persona={identity_name!r}): {type(e).__name__}: {e}"
+                    )
+                    continue
+                for confidence, evidence, payload, kind in results or []:
+                    evidence_str = evidence if isinstance(evidence, str) else str(evidence)
+                    finding_id = (
+                        f"verified-{kind.lower()}-"
+                        f"{abs(hash((url, payload, identity_name))) % 1_000_000}"
+                    )
+                    confirmed.append({
+                        "id": finding_id,
+                        "type": f"{kind} (active verification)",
+                        "severity": "HIGH",
+                        "tool": "vuln_verifier",
+                        "target": url,
+                        "message": (
+                            f"{kind} confirmed on {url} as persona={identity_name!r} "
+                            f"(confidence={float(confidence):.2f}, payload={payload!r})"
+                        ),
+                        "proof": evidence_str[:500],
+                        "tags": ["verified", "active_test", label,
+                                 f"persona:{identity_name}"],
+                        "families": ["confirmed_vuln"],
+                        "metadata": {
+                            "vuln_class": kind,
+                            "confidence": float(confidence),
+                            "payload": payload,
+                            "probe_label": label,
+                            "probes_sent": int(probes or 0),
+                            "persona": identity_name,
+                            "authenticated": authed,
+                        },
+                    })
+                    logger.info(
+                        f"[verify_phase] CONFIRMED {kind} on {url} "
+                        f"as persona={identity_name!r} "
+                        f"via payload={payload!r} (conf={confidence})"
+                    )
     finally:
         close = getattr(engine, "close", None)
         if callable(close):
@@ -200,6 +260,7 @@ async def run_verify_phase(
 
     logger.info(
         f"[verify_phase] complete: {len(confirmed)} confirmed across "
-        f"{len(candidates)} candidates ({probes_total} probes total)"
+        f"{len(candidates)} candidates × {len(identity_contexts)} identity "
+        f"context(s) ({probes_total} probes total)"
     )
     return confirmed
