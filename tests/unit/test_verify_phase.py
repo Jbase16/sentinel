@@ -101,7 +101,7 @@ class TestRunVerifyPhase:
             return ([], 0)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        result = _run(run_verify_phase(session=_StubSession(), targets=[]))
+        result = _run(run_verify_phase(session=_StubSession(), targets=[], enable_discovery=False))
         assert result == []
         assert called["n"] == 0
 
@@ -116,7 +116,7 @@ class TestRunVerifyPhase:
             return ([], 1)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        result = _run(run_verify_phase(session=_StubSession(), targets=["http://127.0.0.1:3000"]))
+        result = _run(run_verify_phase(session=_StubSession(), targets=["http://127.0.0.1:3000"], enable_discovery=False))
         assert len(result) == 1
         f = result[0]
         # Required fields for FindingsStore + the UI / AI briefing
@@ -143,7 +143,7 @@ class TestRunVerifyPhase:
             return ([], 1)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        result = _run(run_verify_phase(session=_StubSession(), targets=["http://a.example.com"]))
+        result = _run(run_verify_phase(session=_StubSession(), targets=["http://a.example.com"], enable_discovery=False))
         # Phase finished without raising AND probed multiple URLs (not stopped at the failing one)
         assert result == []
         assert len(call_log) > 5, "phase stopped after first error instead of continuing"
@@ -162,8 +162,7 @@ class TestRunVerifyPhase:
         result = _run(run_verify_phase(
             session=_StubSession(),
             targets=["http://anything.example.com"],
-            scope_filter=lambda _url: False,
-        ))
+            scope_filter=lambda _url: False, enable_discovery=False,))
         assert result == []
         assert called["n"] == 0, "scope filter must hard-gate probes"
 
@@ -179,7 +178,7 @@ class TestRunVerifyPhase:
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
         targets = [f"http://h{i}.example.com" for i in range(20)]
-        _run(run_verify_phase(session=_StubSession(), targets=targets, max_hosts=2))
+        _run(run_verify_phase(session=_StubSession(), targets=targets, max_hosts=2, enable_discovery=False))
         assert len(seen_hosts) <= 2
 
 
@@ -208,7 +207,7 @@ class TestPersonaAwareVerifyPhase:
             return ([], 0)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        _run(run_verify_phase(session=_StubSession(), targets=["http://a.example.com"]))
+        _run(run_verify_phase(session=_StubSession(), targets=["http://a.example.com"], enable_discovery=False))
         # IDOR class must NEVER be seen by the verifier when no personas are wired.
         assert VulnerabilityClass.IDOR not in seen_classes
 
@@ -245,8 +244,7 @@ class TestPersonaAwareVerifyPhase:
         result = _run(run_verify_phase(
             session=_StubSession(),
             targets=["http://a.example.com"],
-            personas=personas,
-        ))
+            personas=personas, enable_discovery=False,))
 
         # IDOR probes ran with the persona's Authorization header.
         assert idor_urls, "IDOR probes did not run for the authenticated persona"
@@ -282,8 +280,7 @@ class TestPersonaAwareVerifyPhase:
         result = _run(run_verify_phase(
             session=_StubSession(),
             targets=["http://a.example.com"],
-            personas=[{"name": "broken"}],
-        ))
+            personas=[{"name": "broken"}], enable_discovery=False,))
         # The phase completed; verifier was invoked at least once.
         assert observed_headers, "verifier never ran after persona auth failure"
         # Fallback identity sees empty headers (anonymous).
@@ -315,8 +312,7 @@ class TestPersonaAwareVerifyPhase:
         _run(run_verify_phase(
             session=_StubSession(),
             targets=["http://a.example.com"],
-            personas=personas,
-        ))
+            personas=personas, enable_discovery=False,))
 
         urls_for_alice = {u for u, ident in seen if ident == "alice"}
         urls_for_bob   = {u for u, ident in seen if ident == "bob"}
