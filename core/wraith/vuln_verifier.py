@@ -111,6 +111,32 @@ class VulnVerifier:
             body = getattr(outcome, "text", None) or ""
         return str(body)
 
+    def _get_resp_status(self, outcome) -> int:
+        # Same indirection bug as _get_resp_body had — every _confirm_* method
+        # was reading `outcome.response.status_code` and getting 0 because
+        # MutationResponse has status_code directly on it. That silently
+        # disabled IDOR, OpenRedirect, SSRF (status-code branch), and Generic
+        # confirmation paths. Live calibration against Juice Shop (Run #26):
+        # /rest/basket/2 returned HTTP 200 but `_confirm_idor` saw 0 and gave
+        # up — exact symptom that prompted this fix pass.
+        if outcome is None:
+            return 0
+        return int(getattr(outcome, "status_code", 0) or 0)
+
+    def _get_resp_headers(self, outcome) -> Dict[str, str]:
+        # As above: headers live directly on MutationResponse. Open-redirect
+        # confirmation needs the Location header; reading off the phantom
+        # `.response` attribute returned {} and the check never fired.
+        if outcome is None:
+            return {}
+        h = getattr(outcome, "headers", None)
+        if not isinstance(h, dict):
+            return {}
+        # Case-insensitive copy — httpx already lowercases, but some upstreams
+        # don't, and `.get("location")` should win whether the server sent
+        # `Location` or `location`.
+        return {str(k).lower(): str(v) for k, v in h.items()}
+
     async def _confirm_sqli(self, engine: MutationEngine, url: str, headers: Dict[str, str], cookies: Dict[str, str], budget: int) -> Tuple[List[Tuple[float, str, str, str]], int]:
         results, probes = [], 0
         params = [k for k, _ in parse_qsl(urlparse(url).query or "", keep_blank_values=True)]
@@ -193,8 +219,7 @@ class VulnVerifier:
             payload = MutationPayload(value=redirect_target, encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.OPEN_REDIRECT, description="Open redirect probe")
             outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers={**headers, "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())})
             probes += 1
-            r = getattr(outcome, "response", None)
-            loc = str((getattr(r, "headers", {}) or {}).get("location", ""))
+            loc = self._get_resp_headers(outcome).get("location", "")
             if "evil.example.com" in loc:
                 return [(0.91, f"Open redirect confirmed: Location header → {loc}", f"{redirect_target} in {param}", "Open Redirect")], probes
         return results, probes
@@ -263,8 +288,7 @@ class VulnVerifier:
                 )
                 probes += 1
                 body = self._get_resp_body(outcome)
-                resp = getattr(outcome, "response", None)
-                status = getattr(resp, "status_code", 0)
+                status = self._get_resp_status(outcome)
 
                 # High confidence: server fetched and returned cloud metadata
                 for marker in _SSRF_RESPONSE_MARKERS:
@@ -292,26 +316,113 @@ class VulnVerifier:
         return results, probes
 
     async def _confirm_idor(self, engine: MutationEngine, url: str, headers: Dict[str, str], cookies: Dict[str, str], budget: int) -> Tuple[List[Tuple[float, str, str, str]], int]:
+        """Confirm IDOR by fetching baseline vs. neighbor-ID, requiring evidence
+        that the neighbor response contains DIFFERENT data than the baseline.
+
+        Why a baseline matters: the old heuristic ("200 + body > 50") fired on
+        anything that wasn't a 4xx — homepages, generic landing pages,
+        catch-all SPA shells all qualified. Juice Shop's `/rest/basket/2`
+        does return 200 with another user's basket data — but the heuristic
+        also false-positives on `/api/users/<id>` endpoints whose UI shell
+        is the same 200-OK SPA for every ID. Comparing against baseline at
+        the original ID resolves that: identical body → not IDOR (just a
+        shell), different-but-structurally-similar body → real IDOR.
+
+        Confidence tiers:
+          0.85 — both 200, similar size (±50%), different body hashes,
+                 JSON-shaped (object/array). High-confidence IDOR shape.
+          0.60 — both 200, different body hashes, non-JSON or wildly
+                 different sizes (still suspicious but could be cache/SPA).
+        """
         results, probes = [], 0
         r = self._inject_path_segment(url, "999999")
         if not r: return results, probes
-        
+
         _, original_id = r
         try: target_id = int(original_id)
         except ValueError: return results, probes
 
-        for delta in [1, -1][:budget]:
+        # Build cookie header once — used for both baseline and neighbor probes.
+        cookie_header = "; ".join(f"{k}={v}" for k, v in cookies.items())
+        req_headers = {**headers, "Cookie": cookie_header} if cookie_header else dict(headers)
+
+        # Baseline probe at the ORIGINAL id (this is the resource the caller
+        # legitimately owns / referenced). We probe budget-1 neighbors,
+        # reserving 1 budget slot for baseline so we always compare.
+        baseline_payload = MutationPayload(
+            value=str(target_id), encoding=PayloadEncoding.NONE,
+            vuln_class=VulnerabilityClass.IDOR, description="IDOR baseline",
+        )
+        baseline_outcome, _, _ = await waf_aware_send(
+            engine, url, baseline_payload, method=HttpMethod.GET, headers=req_headers,
+        )
+        probes += 1
+        baseline_status = self._get_resp_status(baseline_outcome)
+        baseline_body = self._get_resp_body(baseline_outcome)
+        baseline_hash = getattr(baseline_outcome, "body_hash", "") or ""
+
+        # If baseline itself didn't return 200, we can't reason about IDOR
+        # (we don't even have a known-good response shape to compare against).
+        if baseline_status != 200:
+            return results, probes
+
+        remaining = max(1, budget - 1)
+        for delta in [1, -1, 2, -2][:remaining]:
             probe_id = target_id + delta
             if probe_id <= 0: continue
             probe_url, _ = self._inject_path_segment(url, str(probe_id))
-            payload = MutationPayload(value=str(probe_id), encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.IDOR, description="IDOR probe")
-            outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers={**headers, "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())})
+            payload = MutationPayload(
+                value=str(probe_id), encoding=PayloadEncoding.NONE,
+                vuln_class=VulnerabilityClass.IDOR, description="IDOR neighbor probe",
+            )
+            outcome, _, _ = await waf_aware_send(
+                engine, probe_url, payload, method=HttpMethod.GET, headers=req_headers,
+            )
             probes += 1
-            
-            resp = getattr(outcome, "response", None)
-            if getattr(resp, "status_code", 0) == 200 and len(self._get_resp_body(outcome)) > 50:
-                results.append((0.75, "IDOR probable: returning HTTP 200", f"id: {target_id}→{probe_id}", "IDOR"))
+            status = self._get_resp_status(outcome)
+            body = self._get_resp_body(outcome)
+            body_hash = getattr(outcome, "body_hash", "") or ""
+
+            # Only 200 OK is interesting. 401/403/404 means access control
+            # IS working — that's the opposite of IDOR.
+            if status != 200 or len(body) < 50:
+                continue
+
+            # If the body is byte-identical to baseline, we're looking at a
+            # generic shell (SPA, homepage), NOT a per-resource response.
+            if body_hash and body_hash == baseline_hash:
+                continue
+            if body == baseline_body:
+                continue
+
+            # Heuristic check: do both responses look like JSON? Same shape
+            # but different IDs is the canonical IDOR signature. Size proximity
+            # confirms "same template, different payload" rather than "200
+            # with a totally unrelated body".
+            both_json = (
+                baseline_body.lstrip().startswith(("{", "["))
+                and body.lstrip().startswith(("{", "["))
+            )
+            size_ratio = min(len(body), len(baseline_body)) / max(len(body), len(baseline_body), 1)
+            structurally_similar = size_ratio >= 0.5
+
+            if both_json and structurally_similar:
+                results.append((
+                    0.85,
+                    f"IDOR confirmed: id {target_id}→{probe_id} returned distinct JSON of similar shape ({len(baseline_body)}B vs {len(body)}B)",
+                    f"id: {target_id}→{probe_id}",
+                    "IDOR",
+                ))
                 break
+            # Same-status, different body, but not JSON-shaped or wildly
+            # different sizes — still suspicious but flag with lower confidence.
+            results.append((
+                0.60,
+                f"IDOR possible: id {target_id}→{probe_id} returned 200 with distinct body ({len(baseline_body)}B vs {len(body)}B, json={both_json})",
+                f"id: {target_id}→{probe_id}",
+                "IDOR",
+            ))
+            break
         return results, probes
 
     async def _confirm_generic(self, engine: MutationEngine, url: str, headers: Dict[str, str], cookies: Dict[str, str], budget: int) -> Tuple[List[Tuple[float, str, str, str]], int]:
@@ -324,7 +435,7 @@ class VulnVerifier:
             payload = MutationPayload(value=probe_val, encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.GENERIC, description="Generic error probe")
             outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers={**headers, "Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items())})
             probes += 1
-            if getattr(getattr(outcome, "response", None), "status_code", 0) in (500, 503):
+            if self._get_resp_status(outcome) in (500, 503):
                 results.append((0.55, "Generic error triggered. Possible injection.", f"{probe_val} in {params[0]}", "Generic Error"))
                 break
         return results, probes
