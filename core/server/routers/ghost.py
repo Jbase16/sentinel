@@ -476,18 +476,77 @@ class ReplayRequest(BaseModel):
 
 
 def _build_mutation(spec: ReplayMutationSpec):
-    """Resolve a mutation spec into a Mutation object. The G3 library
-    is minimal (noop + swap-auth) — G4 will expand this catalog."""
-    from core.ghost.replay import NoOpMutation, SwapAuthHeader
+    """Resolve a mutation spec into a Mutation object.
 
-    if spec.mutation == "noop":
-        return NoOpMutation()
-    if spec.mutation == "swap-auth":
-        return SwapAuthHeader(new_value=spec.params.get("new_value"))
-    raise ValueError(
-        f"Unknown mutation {spec.mutation!r}. "
-        f"Known: noop, swap-auth."
+    G3 shipped noop + swap-auth as engine-validation baselines. G4
+    extends this catalog with the full semantic library:
+      jwt-alg-none, oauth-state-strip, privilege-downgrade,
+      negative-quantity, header-inject-localhost, verb-tamper,
+      csrf-token-strip.
+    """
+    from core.ghost.replay import NoOpMutation, SwapAuthHeader
+    from core.ghost.mutations import (
+        CSRFTokenStrip,
+        HeaderInject,
+        JWTAlgNone,
+        NegativeQuantity,
+        OAuthStateStrip,
+        PrivilegeDowngrade,
+        VerbTampering,
     )
+
+    builders = {
+        # G3 engine-validation mutations
+        "noop": lambda: NoOpMutation(),
+        "swap-auth": lambda: SwapAuthHeader(new_value=spec.params.get("new_value")),
+        # G4 semantic library
+        "jwt-alg-none": lambda: JWTAlgNone(),
+        "oauth-state-strip": lambda: OAuthStateStrip(),
+        "privilege-downgrade": lambda: PrivilegeDowngrade(),
+        "negative-quantity": lambda: NegativeQuantity(),
+        "header-inject-localhost": lambda: HeaderInject(),
+        "verb-tamper": lambda: VerbTampering(),
+        "csrf-token-strip": lambda: CSRFTokenStrip(),
+    }
+    fn = builders.get(spec.mutation)
+    if fn is None:
+        raise ValueError(
+            f"Unknown mutation {spec.mutation!r}. "
+            f"Known: {', '.join(sorted(builders.keys()))}."
+        )
+    return fn()
+
+
+@router.get("/flows/{flow_id}/propose")
+async def propose_flow_mutations(
+    flow_id: str,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Phase 4-G4: inspect a captured flow and return mutation proposals.
+
+    For every captured step, the proposer asks each mutation in the
+    library 'does this hypothesis make sense here?' and emits a proposal
+    when yes. Operators (or AI) review the list and pick which to
+    actually run via POST /flows/{flow_id}/replay.
+
+    Deterministic: same flow → same proposals. Cheap to call repeatedly.
+    """
+    from core.ghost.flow import FlowMapper
+    from core.ghost.mutations import propose_mutations
+
+    fm = FlowMapper.instance()
+    flow = fm.active_flows.get(flow_id) or fm.load_persisted(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"Flow {flow_id!r} not found.")
+
+    proposals = propose_mutations(flow)
+    return {
+        "flow_id": flow_id,
+        "flow_name": flow.name,
+        "step_count": len(flow.steps),
+        "proposal_count": len(proposals),
+        "proposals": [p.to_dict() for p in proposals],
+    }
 
 
 @router.post("/flows/{flow_id}/replay")
