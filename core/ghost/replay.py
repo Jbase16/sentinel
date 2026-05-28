@@ -266,6 +266,7 @@ async def replay_flow(
     *,
     initial_cookies: Optional[Dict[str, str]] = None,
     initial_headers: Optional[Dict[str, str]] = None,
+    override_headers: Optional[Dict[str, str]] = None,
     scope_filter: Optional[Callable[[str], bool]] = None,
     stop_on_divergence: bool = False,
     per_step_timeout: float = 10.0,
@@ -279,9 +280,15 @@ async def replay_flow(
         apply IN ORDER at that step. Each Mutation's `applies_to` is
         checked; non-applicable ones are silently skipped (no error).
       initial_cookies: Pre-seed the replay's cookie jar (default: empty).
-      initial_headers: Headers applied to EVERY replay request unless
-        explicitly removed by a mutation (default: empty — only captured
-        headers are sent).
+      initial_headers: Headers applied to EVERY replay request UNLESS
+        the step's captured headers (or a mutation) override the same
+        key. Lowest precedence. Use this for ambient additions like
+        custom telemetry headers (default: empty).
+      override_headers: Headers applied to EVERY replay request with
+        the HIGHEST precedence — overrides both captured and mutation
+        headers. Used by multi-principal flow diff (G5) to inject the
+        alternate persona's auth: the captured Authorization is
+        REPLACED by the new persona's, not augmented. (default: empty)
       scope_filter: Optional callable; if any step's URL is out of
         scope, that step is skipped (the diff shows the original side
         only). Belt + suspenders — same authority verify_phase uses.
@@ -352,14 +359,25 @@ async def replay_flow(
                     )
                     continue
 
-            # Apply caller-provided ambient headers (they override
-            # nothing already set; mutations win).
+            # Header precedence (lowest → highest):
+            #   1. initial_headers      — ambient, capture wins on collision
+            #   2. captured/mutated step headers — what the flow asked for
+            #   3. override_headers     — caller-injected identity (G5)
+            #
+            # The override_headers tier is what makes multi-principal flow
+            # diff (G5) work: when replaying Alice's flow as Bob, the
+            # captured `Authorization: Bearer alice-token` is REPLACED by
+            # `Authorization: Bearer bob-token`, not augmented.
             merged_headers = {}
             if initial_headers:
                 merged_headers.update(
                     {str(k).lower(): str(v) for k, v in initial_headers.items()}
                 )
             merged_headers.update(step_to_send.headers)
+            if override_headers:
+                merged_headers.update(
+                    {str(k).lower(): str(v) for k, v in override_headers.items()}
+                )
 
             # Send the request. Errors become a diverged step, not a raise.
             step_started = time.time()

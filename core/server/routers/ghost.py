@@ -517,6 +517,86 @@ def _build_mutation(spec: ReplayMutationSpec):
     return fn()
 
 
+class FlowDiffRequest(BaseModel):
+    """POST /v1/ghost/flows/{flow_id}/diff body.
+
+    The captured flow plays as `alice_persona_name`. We replay it under
+    `bob_persona_spec` (a persona dict in the same shape Phase 3 uses)
+    and emit per-step diffs."""
+    alice_persona_name: str = "alice"
+    bob_persona_name: str = "bob"
+    bob_persona_spec: Dict[str, Any] = {}
+    bob_headers: Dict[str, str] = {}
+    bob_cookies: Dict[str, str] = {}
+    per_step_timeout: float = 10.0
+
+
+@router.post("/flows/{flow_id}/diff")
+async def diff_flow_endpoint(
+    flow_id: str,
+    req: FlowDiffRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Phase 4-G5: replay a captured flow under a different identity and
+    surface per-step cross-principal diffs.
+
+    Bob's identity is resolved by, in priority order:
+      1. If `bob_persona_spec` has a `login_url`, call
+         persona_auth.authenticate_persona() to get headers + cookies.
+      2. Otherwise fall back to `bob_headers` + `bob_cookies` (already
+         authenticated by the caller).
+
+    The captured flow plays as Alice; Bob's replay uses
+    override_headers so the captured Authorization is REPLACED, not
+    augmented. Every step's response is compared across the two
+    identities; findings carry the canonical IDOR signal taxonomy
+    (identical-json = 0.90 confidence, etc.).
+    """
+    from core.ghost.flow import FlowMapper
+    from core.ghost.flow_diff import diff_flow_across_principals
+
+    fm = FlowMapper.instance()
+    flow = fm.active_flows.get(flow_id) or fm.load_persisted(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"Flow {flow_id!r} not found.")
+
+    # Resolve Bob's identity. The persona_auth path is the canonical
+    # approach (matches Phase 3); the explicit headers/cookies path is
+    # for when the operator already has tokens (test scaffolding, CLI).
+    bob_headers: Dict[str, str] = dict(req.bob_headers)
+    bob_cookies: Dict[str, str] = dict(req.bob_cookies)
+    if req.bob_persona_spec and req.bob_persona_spec.get("login_url"):
+        from core.wraith.persona_auth import authenticate_persona
+        try:
+            h, c = await authenticate_persona(req.bob_persona_spec)
+            bob_headers.update(h)
+            bob_cookies.update(c)
+        except Exception as e:
+            logger.warning(
+                f"[Ghost] bob persona auth failed: {type(e).__name__}: {e}; "
+                f"falling back to explicit headers/cookies"
+            )
+
+    if not bob_headers and not bob_cookies:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Bob identity is empty — provide either bob_persona_spec "
+                "with login_url, or bob_headers/bob_cookies directly."
+            ),
+        )
+
+    diff = await diff_flow_across_principals(
+        flow=flow,
+        alice_persona_name=req.alice_persona_name,
+        bob_persona_name=req.bob_persona_name,
+        bob_headers=bob_headers,
+        bob_cookies=bob_cookies,
+        per_step_timeout=req.per_step_timeout,
+    )
+    return diff.to_dict()
+
+
 @router.get("/flows/{flow_id}/propose")
 async def propose_flow_mutations(
     flow_id: str,
