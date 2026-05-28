@@ -22,6 +22,7 @@ struct MainWindowView: View {
     enum SidebarItem: String, Identifiable, CaseIterable {
         case dashboard = "Dashboard"
         case scan = "Target Scan"
+        case ghost = "Ghost Protocol"
         case graph = "Attack Graph"
         case terminal = "System Console"
         case report = "Report Composer"
@@ -35,6 +36,7 @@ struct MainWindowView: View {
             switch self {
             case .dashboard: return "gauge"
             case .scan: return "dot.scope"
+            case .ghost: return "eye.fill"  // Phase 4 — passive interceptor
             case .graph: return "network"
             case .terminal: return "command.square.fill"
             case .report: return "doc.text.fill"
@@ -105,6 +107,7 @@ struct MainWindowView: View {
                         switch selection {
                         case .dashboard: DashboardView()
                         case .scan: ScanControlView()
+                        case .ghost: GhostConsoleView()
                         case .graph: NetworkGraphView()  // Metal 3D
                         case .terminal: TerminalView()
                         case .report: ReportView()
