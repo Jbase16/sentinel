@@ -100,11 +100,19 @@ class ScanSession:
     def __init__(self, target: str):
         """
         Create a new scan session for the given target.
-        
+
         Args:
             target: What we're scanning (URL, IP address, domain name, etc.)
                    Examples: "example.com", "192.168.1.1", "https://app.example.com"
         """
+        # Defensive teardown bound — anyone constructing a ScanSession (the
+        # FastAPI scan router, ad-hoc scripts, test harnesses) gets a hard
+        # ceiling on interpreter shutdown time. Idempotent; first call wins.
+        # See core/base/teardown.py for rationale. Opt out with
+        # SENTINEL_DISABLE_TEARDOWN_DEADLINE=1 when debugging actual leaks.
+        from core.base.teardown import install_shutdown_deadline
+        install_shutdown_deadline(seconds=10.0)
+
         # Generate a unique ID for this session (random UUID)
         # UUIDs are 128-bit random numbers, virtually impossible to collide
         # Example: "f47ac10b-58cc-4372-a567-0e02b2c3d479"
