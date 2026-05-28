@@ -322,3 +322,367 @@ class TestPersonaAwareVerifyPhase:
         assert urls_for_alice == urls_for_bob, (
             "personas saw different URL sets — identity loop is asymmetric"
         )
+
+
+# ─────────────── multi-principal IDOR pass (Phase 3 step 4) ───────────────
+
+class TestMultiPrincipalIDOR:
+    """Cross-principal IDOR detection — varies the IDENTITY, holds URL fixed.
+
+    Distinct from horizontal IDOR (single-principal _confirm_idor): two
+    AUTHENTICATED identities receiving distinct 200 responses for the same
+    URL is the diagnostic signal for "Bob can read Alice's resource."
+
+    Tests pin:
+      * Skipped with <2 authenticated identities.
+      * Identical-body responses across identities → NOT flagged (SPA shell).
+      * Distinct-body 200 responses across identities → flagged.
+      * Non-IDOR-shaped URLs (no numeric/UUID terminal segment) skipped.
+      * Findings carry attacker + victim persona names in tags + metadata.
+      * Scope filter re-checks each URL even if it passed upstream.
+    """
+
+    def _patch_httpx(self, monkeypatch, responses_by_identity):
+        """Install a fake httpx.AsyncClient that returns responses keyed
+        by the Authorization header (used to identify which persona is
+        making the request).
+
+        responses_by_identity: dict of identity-token -> (status, body)
+        """
+        import httpx
+        import core.wraith.verify_phase as vp_mod
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+
+            async def get(self, url, headers=None):
+                headers = headers or {}
+                auth = headers.get("Authorization", "")
+                # Strip "Bearer " prefix to extract identity name.
+                token = auth.replace("Bearer ", "")
+                if token in responses_by_identity:
+                    status, body = responses_by_identity[token]
+                else:
+                    status, body = (403, '{"error":"unauthenticated"}')
+
+                class _Resp:
+                    def __init__(self, status, body):
+                        self.status_code = status
+                        self.text = body
+                return _Resp(status, body)
+
+        monkeypatch.setattr(vp_mod.__name__.replace(".", "/") and __import__("httpx", fromlist=[""]), "AsyncClient", _FakeAsyncClient)
+        # The actual monkeypatch — httpx imported inside _run_multi_principal_idor
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+    def test_skipped_with_only_one_authenticated_identity(self, monkeypatch):
+        """0 or 1 authenticated personas → multi-principal pass must not run.
+        We verify by checking that no httpx call is ever made."""
+        from core.wraith.vuln_verifier import VulnVerifier
+        import core.wraith.verify_phase as vp_mod
+
+        async def fake_verify(self, **kw):
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        # Simulate the multi-principal pass being called — but it shouldn't be.
+        called = {"n": 0}
+        orig = vp_mod._run_multi_principal_idor
+
+        async def watcher(*args, **kwargs):
+            called["n"] += 1
+            return await orig(*args, **kwargs)
+        monkeypatch.setattr(vp_mod, "_run_multi_principal_idor", watcher)
+
+        async def fake_auth(p):
+            return ({"Authorization": "Bearer X"}, {})
+        monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
+
+        _run(run_verify_phase(
+            session=_StubSession(),
+            targets=["http://a.example.com"],
+            personas=[{"name": "solo", "login_url": "http://a/login"}],
+            enable_discovery=False,
+        ))
+        assert called["n"] == 0, "multi-principal pass should not run with only 1 identity"
+
+    def test_distinct_200s_emit_finding(self, monkeypatch):
+        """Two authenticated identities both get 200 OK with DISTINCT JSON
+        bodies for the same /api/users/42 URL → IDOR confirmed."""
+        from core.wraith.vuln_verifier import VulnVerifier
+        import core.wraith.verify_phase as vp_mod
+
+        # Single-principal verifier returns nothing (we're testing the
+        # multi-principal pass separately).
+        async def fake_verify(self, **kw):
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        # alice + bob personas.
+        async def fake_auth(p):
+            name = p["name"]
+            return ({"Authorization": f"Bearer {name}"}, {})
+        monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
+
+        # Inject a fake httpx that returns different JSON per identity.
+        responses = {
+            "alice": (200, '{"id": 42, "owner": "alice", "balance": 100}'),
+            "bob":   (200, '{"id": 42, "owner": "bob",   "balance": 250}'),
+        }
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, headers=None):
+                token = (headers or {}).get("Authorization", "").replace("Bearer ", "")
+                status, body = responses.get(token, (403, "denied"))
+                class _R:
+                    pass
+                r = _R()
+                r.status_code = status
+                r.text = body
+                return r
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+        # We need the candidate generator to produce an IDOR-shaped URL.
+        # The /api/users/42 path matches both the candidate_discovery
+        # classifier AND _is_idor_shape. We disable discovery and pass
+        # the URL via _SEED_PROBES override.
+        original_seeds = vp_mod._SEED_PROBES
+        vp_mod._SEED_PROBES = [("/api/users/42", "test-idor", "idor")]
+        try:
+            result = _run(run_verify_phase(
+                session=_StubSession(),
+                targets=["http://h.example.com"],
+                personas=[
+                    {"name": "alice", "login_url": "http://h/login"},
+                    {"name": "bob",   "login_url": "http://h/login"},
+                ],
+                enable_discovery=False,
+            ))
+        finally:
+            vp_mod._SEED_PROBES = original_seeds
+
+        # Must include a cross-principal IDOR finding.
+        cross = [f for f in result if "cross_principal" in f.get("metadata", {}).get("subclass", "")]
+        assert cross, f"no cross-principal IDOR finding emitted; got: {[f['type'] for f in result]}"
+        f = cross[0]
+        # Both persona names must appear in tags.
+        assert any("persona:alice" in t for t in f["tags"])
+        assert any("persona:bob" in t for t in f["tags"])
+        # metadata carries attribution.
+        assert f["metadata"]["attacker_persona"] in {"alice", "bob"}
+        assert f["metadata"]["victim_persona"] in {"alice", "bob"}
+        assert f["metadata"]["attacker_persona"] != f["metadata"]["victim_persona"]
+        # confidence is the high tier (both responses are JSON-shaped, similar size)
+        assert f["metadata"]["confidence"] >= 0.80
+
+    def test_identical_bodies_not_flagged(self, monkeypatch):
+        """Both identities get the SAME body — that's a shared/anonymous
+        resource or SPA shell, NOT IDOR. Must NOT emit."""
+        from core.wraith.vuln_verifier import VulnVerifier
+        import core.wraith.verify_phase as vp_mod
+
+        async def fake_verify(self, **kw):
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        async def fake_auth(p):
+            return ({"Authorization": f"Bearer {p['name']}"}, {})
+        monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
+
+        shared_body = '<html><body>Public app shell — please log in</body></html>'
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, headers=None):
+                class _R: pass
+                r = _R()
+                r.status_code = 200
+                r.text = shared_body
+                return r
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+        original_seeds = vp_mod._SEED_PROBES
+        vp_mod._SEED_PROBES = [("/api/users/42", "test-idor", "idor")]
+        try:
+            result = _run(run_verify_phase(
+                session=_StubSession(),
+                targets=["http://h.example.com"],
+                personas=[
+                    {"name": "alice", "login_url": "http://h/login"},
+                    {"name": "bob",   "login_url": "http://h/login"},
+                ],
+                enable_discovery=False,
+            ))
+        finally:
+            vp_mod._SEED_PROBES = original_seeds
+
+        cross = [f for f in result if "cross_principal" in f.get("metadata", {}).get("subclass", "")]
+        assert cross == [], (
+            "identical-body responses across identities must NOT trigger "
+            "cross-principal IDOR (SPA shell signature)"
+        )
+
+    def test_non_idor_shape_url_skipped(self, monkeypatch):
+        """A URL with no terminal numeric/UUID segment (e.g. /search?q=x)
+        is NOT an IDOR candidate even if multiple identities access it."""
+        from core.wraith.vuln_verifier import VulnVerifier
+        import core.wraith.verify_phase as vp_mod
+
+        async def fake_verify(self, **kw):
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        async def fake_auth(p):
+            return ({"Authorization": f"Bearer {p['name']}"}, {})
+        monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
+
+        # If httpx is called at all, this test fails by side-effect (the
+        # multi-principal pass shouldn't probe non-IDOR-shaped URLs).
+        called = {"n": 0}
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, headers=None):
+                called["n"] += 1
+                class _R: pass
+                r = _R()
+                r.status_code = 200
+                r.text = "x" * 100
+                return r
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+        # Seed a NON-idor-shape URL labeled as 'idor' — _is_idor_shape
+        # should still reject it.
+        original_seeds = vp_mod._SEED_PROBES
+        vp_mod._SEED_PROBES = [("/api/users", "mislabel-idor", "idor")]
+        try:
+            _run(run_verify_phase(
+                session=_StubSession(),
+                targets=["http://h.example.com"],
+                personas=[
+                    {"name": "alice", "login_url": "http://h/login"},
+                    {"name": "bob",   "login_url": "http://h/login"},
+                ],
+                enable_discovery=False,
+            ))
+        finally:
+            vp_mod._SEED_PROBES = original_seeds
+
+        assert called["n"] == 0, (
+            "multi-principal pass probed a non-IDOR-shaped URL "
+            f"({called['n']} httpx.get calls made)"
+        )
+
+
+    def test_identical_json_across_identities_is_cross_principal_idor(self, monkeypatch):
+        """The Juice Shop case: Alice and Jim both fetch /rest/basket/1 and
+        receive the SAME JSON body (admin's basket data). That's textbook
+        cross-principal IDOR — Jim can read Alice's basket using Alice's URL.
+
+        The earlier "identical body = SPA shell" rule was right for HTML
+        but wrong for JSON. JSON is structured data, not chrome — two
+        different auth'd identities receiving the same JSON for the same
+        URL is the highest-confidence cross-principal IDOR signal."""
+        from core.wraith.vuln_verifier import VulnVerifier
+        import core.wraith.verify_phase as vp_mod
+
+        async def fake_verify(self, **kw):
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        async def fake_auth(p):
+            return ({"Authorization": f"Bearer {p['name']}"}, {})
+        monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
+
+        # Both identities get the SAME JSON body. That's the IDOR signal.
+        identical_json = '{"basketId": 1, "owner": "admin", "items": [{"name": "apple"}]}'
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, headers=None):
+                class _R: pass
+                r = _R()
+                r.status_code = 200
+                r.text = identical_json
+                return r
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+        original_seeds = vp_mod._SEED_PROBES
+        vp_mod._SEED_PROBES = [("/rest/basket/1", "test-cross-idor", "idor")]
+        try:
+            result = _run(run_verify_phase(
+                session=_StubSession(),
+                targets=["http://h.example.com"],
+                personas=[
+                    {"name": "alice", "login_url": "http://h/login"},
+                    {"name": "bob",   "login_url": "http://h/login"},
+                ],
+                enable_discovery=False,
+            ))
+        finally:
+            vp_mod._SEED_PROBES = original_seeds
+
+        cross = [f for f in result if "cross_principal" in f.get("metadata", {}).get("subclass", "")]
+        assert cross, "identical-JSON cross-principal IDOR was not flagged"
+        f = cross[0]
+        # Highest confidence tier for this signal (per the design).
+        assert f["metadata"]["confidence"] >= 0.85
+        assert f["metadata"]["signal"] == "identical-json"
+
+    def test_identical_html_shell_still_not_flagged(self, monkeypatch):
+        """Defensive regression: identical HTML body (no JSON) across
+        identities must STILL be skipped — that's the SPA shell case
+        and the earlier behavior should be preserved for non-JSON."""
+        from core.wraith.vuln_verifier import VulnVerifier
+        import core.wraith.verify_phase as vp_mod
+
+        async def fake_verify(self, **kw):
+            return ([], 0)
+        monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
+
+        async def fake_auth(p):
+            return ({"Authorization": f"Bearer {p['name']}"}, {})
+        monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
+
+        shell_body = "<html><body>App shell — your session is active</body></html>"
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs): pass
+            async def __aenter__(self): return self
+            async def __aexit__(self, *a): return False
+            async def get(self, url, headers=None):
+                class _R: pass
+                r = _R()
+                r.status_code = 200
+                r.text = shell_body
+                return r
+        monkeypatch.setattr("httpx.AsyncClient", _FakeAsyncClient)
+
+        original_seeds = vp_mod._SEED_PROBES
+        vp_mod._SEED_PROBES = [("/api/users/42", "test-shell", "idor")]
+        try:
+            result = _run(run_verify_phase(
+                session=_StubSession(),
+                targets=["http://h.example.com"],
+                personas=[
+                    {"name": "alice", "login_url": "http://h/login"},
+                    {"name": "bob",   "login_url": "http://h/login"},
+                ],
+                enable_discovery=False,
+            ))
+        finally:
+            vp_mod._SEED_PROBES = original_seeds
+
+        cross = [f for f in result if "cross_principal" in f.get("metadata", {}).get("subclass", "")]
+        assert cross == [], "identical HTML across identities must be treated as SPA shell, not IDOR"

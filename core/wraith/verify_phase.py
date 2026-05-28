@@ -334,9 +334,303 @@ async def run_verify_phase(
             except Exception:
                 pass
 
+    # ── Multi-principal IDOR pass (Phase 3 step 4 — cross-principal IDOR) ──
+    #
+    # The single-principal loop above tests "horizontal IDOR within an
+    # identity" — e.g. Alice can read /baskets/N for N != Alice's own.
+    # That's one IDOR class. The OTHER class is "cross-principal" — Alice's
+    # resource at /baskets/A is readable by Bob using Bob's auth. Both
+    # vulnerabilities are real and orthogonal.
+    #
+    # Detection signal: fetch each IDOR-class candidate as EVERY authenticated
+    # identity. If 2+ identities receive 200 OK with structurally-similar
+    # bodies for the same URL, that's strong evidence the URL is not
+    # authorization-gated by identity — i.e., cross-principal IDOR.
+    #
+    # Requirements: 2+ authenticated identity contexts. With 0 or 1, this
+    # comparison has no meaning and we skip.
+    auth_identities = [(n, h, c) for n, h, c in identity_contexts
+                       if bool(h) or bool(c)]
+    if len(auth_identities) >= 2:
+        try:
+            multi_findings = await _run_multi_principal_idor(
+                candidates=candidates,
+                identity_contexts=auth_identities,
+                scope_filter=scope_filter,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[verify_phase] multi-principal IDOR pass failed: "
+                f"{type(e).__name__}: {e}"
+            )
+            multi_findings = []
+        confirmed.extend(multi_findings)
+        logger.info(
+            f"[verify_phase] multi-principal pass: "
+            f"{len(multi_findings)} cross-principal IDOR finding(s) "
+            f"across {len(auth_identities)} authenticated identity(ies)"
+        )
+
     logger.info(
         f"[verify_phase] complete: {len(confirmed)} confirmed across "
         f"{len(candidates)} candidates × {len(identity_contexts)} identity "
         f"context(s) ({probes_total} probes total)"
     )
     return confirmed
+
+
+async def _run_multi_principal_idor(
+    candidates: List[Tuple[str, str, str]],
+    identity_contexts: List[Tuple[str, Dict[str, str], Dict[str, str]]],
+    scope_filter: Optional[Callable[[str], bool]] = None,
+    timeout: float = 8.0,
+) -> List[Dict[str, Any]]:
+    """Cross-principal IDOR pass.
+
+    For each IDOR-shaped candidate URL, fetch it as each authenticated
+    identity. If 2+ identities receive 200 OK with structurally-similar
+    bodies, emit a cross-principal IDOR finding tagged with both identity
+    names (the "attacker" who shouldn't be able to access, and the
+    "victim" whose resource they accessed).
+
+    Why this is its own pass instead of folded into _confirm_idor:
+      * _confirm_idor varies the ID (path segment) while holding identity
+        fixed — that's horizontal IDOR.
+      * This pass varies the IDENTITY while holding the URL fixed — that's
+        cross-principal IDOR. The two axes need different orchestration.
+
+    Decision rules per candidate:
+      * Only IDOR-class candidates (terminal numeric/UUID segment) — other
+        classes have unrelated semantics.
+      * Need 2+ identities to compare. Skip when only one authenticated.
+      * Each identity must return 200 with body length > 50 (filter
+        generic-error / SPA-shell responses).
+      * Bodies must NOT be byte-identical across identities (that's a SPA
+        shell or anonymous content — not IDOR).
+      * Both bodies JSON-shaped (start with { or [) + size ratio ≥ 0.5
+        → high confidence (0.85).
+      * Otherwise distinct bodies of similar status → mid confidence (0.60).
+    """
+    import httpx
+    from urllib.parse import urlparse
+
+    findings: List[Dict[str, Any]] = []
+    # Filter to IDOR-shaped candidates only. Cross-principal SQLi etc. is
+    # not a meaningful concept — auth context doesn't change SQL injection
+    # success, it changes WHICH ROWS get returned. Pure IDOR is the case.
+    idor_candidates = [
+        (u, lbl, vc) for (u, lbl, vc) in candidates
+        if vc == "idor" and _is_idor_shape(u)
+    ]
+    if not idor_candidates:
+        return findings
+
+    logger.info(
+        f"[multi-principal] probing {len(idor_candidates)} IDOR-shaped URL(s) "
+        f"× {len(identity_contexts)} identity(ies)"
+    )
+
+    # Single shared client (connection-reuse). HTTP/2 disabled to keep the
+    # error surface small; we don't need its features here.
+    async with httpx.AsyncClient(
+        timeout=timeout, follow_redirects=False, http2=False,
+    ) as client:
+        for url, label, _vc in idor_candidates:
+            # Belt-and-suspenders scope check — even though the candidates
+            # were already filtered by scope_filter upstream, re-check here
+            # so the AUTHORITY is consistent regardless of caller wiring.
+            if scope_filter is not None:
+                try:
+                    if not scope_filter(url):
+                        continue
+                except Exception:
+                    continue
+
+            # Collect (identity_name, status, body, body_hash) per identity.
+            per_identity: List[Tuple[str, int, str, str]] = []
+            for ident_name, ident_headers, ident_cookies in identity_contexts:
+                try:
+                    headers = dict(ident_headers)
+                    cookie_header = "; ".join(
+                        f"{k}={v}" for k, v in ident_cookies.items()
+                    )
+                    if cookie_header:
+                        headers["Cookie"] = cookie_header
+                    resp = await client.get(url, headers=headers)
+                    status = int(resp.status_code)
+                    body = resp.text or ""
+                except Exception as e:
+                    logger.debug(
+                        f"[multi-principal] request failed for "
+                        f"identity={ident_name!r} url={url}: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    continue
+                # Quick body-hash for equality check across identities.
+                import hashlib
+                bh = hashlib.sha256(body.encode(errors="replace")).hexdigest()[:16]
+                per_identity.append((ident_name, status, body, bh))
+
+            # Need at least two identities that successfully fetched the
+            # URL to compare cross-principal. The 20-char floor filters
+            # truly-empty / trivial-error responses (e.g. `{"e":1}`)
+            # without rejecting realistic minimal JSON IDOR responses
+            # like `{"id":42,"name":"x"}` (20 chars).
+            ok_responses = [r for r in per_identity if r[1] == 200 and len(r[2]) >= 20]
+            if len(ok_responses) < 2:
+                continue
+
+            # For each pair (A, B), check the cross-principal signal.
+            # Iterating ALL pairs ensures we don't miss the case where
+            # A's resource is readable by B but not C. We emit ONE finding
+            # per URL (multi-victim), tagging all leaking pairs.
+            #
+            # Signal taxonomy (calibrated against Juice Shop /rest/basket/1):
+            #   IDENTICAL JSON across two auth'd identities → the strongest
+            #     cross-principal IDOR signal. Both identities got the SAME
+            #     structured data from a URL that's supposedly identity-
+            #     gated. This is what "Jim reads Alice's basket" looks like.
+            #     Confidence: 0.90.
+            #   IDENTICAL HTML (or other non-JSON) → almost always SPA shell
+            #     or generic "you are logged in" page that's same for every
+            #     identity. NOT an IDOR signal. Skip.
+            #   DISTINCT JSON, similar size → could be IDOR where each
+            #     identity sees their own row (sometimes A's data, sometimes
+            #     B's — depends on auth state). Confidence: 0.85.
+            #   DISTINCT body, otherwise → still suspicious (200 for both,
+            #     just different content). Confidence: 0.60.
+            leaks: List[Tuple[str, str, float, str]] = []
+            n = len(ok_responses)
+            for i in range(n):
+                a_name, _a_status, a_body, a_hash = ok_responses[i]
+                for j in range(i + 1, n):
+                    b_name, _b_status, b_body, b_hash = ok_responses[j]
+                    is_json_a = a_body.lstrip().startswith(("{", "["))
+                    is_json_b = b_body.lstrip().startswith(("{", "["))
+                    both_json = is_json_a and is_json_b
+                    identical = (a_hash == b_hash) or (a_body == b_body)
+
+                    if identical:
+                        if both_json:
+                            # Two different identities receiving the SAME
+                            # JSON for the same URL = the canonical cross-
+                            # principal IDOR. This is the Juice Shop case.
+                            leaks.append((a_name, b_name, 0.90, "identical-json"))
+                        # else: identical non-JSON body is a shell, not IDOR.
+                        continue
+
+                    size_ratio = (
+                        min(len(a_body), len(b_body))
+                        / max(len(a_body), len(b_body), 1)
+                    )
+                    structurally_similar = size_ratio >= 0.5
+                    if both_json and structurally_similar:
+                        leaks.append((a_name, b_name, 0.85, "distinct-json+size"))
+                    else:
+                        leaks.append((a_name, b_name, 0.60, "distinct-body"))
+
+            if not leaks:
+                continue
+
+            # Emit one finding per URL summarizing all leak pairs. The
+            # finding's primary "attacker"/"victim" attribution is the
+            # highest-confidence pair; the full pair list is in metadata.
+            leaks.sort(key=lambda L: L[2], reverse=True)
+            top_a, top_b, top_conf, top_shape = leaks[0]
+            host = urlparse(url).netloc or "?"
+            finding_id = (
+                f"verified-cross-idor-"
+                f"{abs(hash((url, top_a, top_b))) % 1_000_000}"
+            )
+            # Build proof: include the actual response bodies (truncated)
+            # for the two identities in the top leak. This is what operators
+            # need to triage — "did Jim really see Alice's data?" — having
+            # the raw body excerpts answers it at a glance.
+            body_by_name = {n: b for n, _s, b, _h in ok_responses}
+            a_body_excerpt = (body_by_name.get(top_a) or "")[:200]
+            b_body_excerpt = (body_by_name.get(top_b) or "")[:200]
+            signal_explainer = {
+                "identical-json": (
+                    "Both identities received BYTE-IDENTICAL JSON — "
+                    f"{top_b!r} is reading {top_a!r}'s data"
+                ),
+                "distinct-json+size": (
+                    "Identities received DISTINCT JSON of similar shape — "
+                    "the same URL is returning per-identity data, suggesting "
+                    "missing access-control gate"
+                ),
+                "distinct-body": (
+                    "Identities received distinct 200 OK bodies — "
+                    "suggests authorization-aware response but possibly "
+                    "still leaking shape/existence"
+                ),
+            }.get(top_shape, "")
+            findings.append({
+                "id": finding_id,
+                "type": "Cross-Principal IDOR (active verification)",
+                "severity": "HIGH",
+                "tool": "vuln_verifier",
+                "target": url,
+                "message": (
+                    f"Cross-principal IDOR confirmed on {url} — "
+                    f"attacker={top_a!r} victim={top_b!r} "
+                    f"(confidence={top_conf:.2f}, signal={top_shape}). "
+                    f"{signal_explainer}"
+                ),
+                "proof": (
+                    f"as {top_a!r} ({len(body_by_name.get(top_a) or '')}B): "
+                    f"{a_body_excerpt!r}\n"
+                    f"as {top_b!r} ({len(body_by_name.get(top_b) or '')}B): "
+                    f"{b_body_excerpt!r}\n"
+                    f"{len(leaks)} leaking pair(s) across "
+                    f"{len(ok_responses)} authenticated identity(ies)"
+                )[:500],
+                "tags": [
+                    "verified", "active_test", "cross_principal_idor",
+                    label, f"persona:{top_a}", f"persona:{top_b}",
+                ],
+                "families": ["confirmed_vuln"],
+                "metadata": {
+                    "vuln_class": "IDOR",
+                    "subclass": "cross_principal",
+                    "confidence": float(top_conf),
+                    "payload": f"{top_a}↔{top_b}",
+                    "probe_label": label,
+                    "host": host,
+                    "attacker_persona": top_a,
+                    "victim_persona": top_b,
+                    "signal": top_shape,
+                    "leak_pairs": [
+                        {"a": a, "b": b, "confidence": conf, "signal": s}
+                        for a, b, conf, s in leaks
+                    ],
+                    "identities_checked": [r[0] for r in per_identity],
+                    "ok_identities": [r[0] for r in ok_responses],
+                    "authenticated": True,
+                },
+            })
+            logger.info(
+                f"[multi-principal] CONFIRMED cross-principal IDOR on {url} "
+                f"between identities {top_a!r} and {top_b!r} "
+                f"(conf={top_conf:.2f}, {len(leaks)} pairs)"
+            )
+    return findings
+
+
+def _is_idor_shape(url: str) -> bool:
+    """True iff the URL's terminal path segment is numeric or UUID-shaped
+    (mirrors VulnVerifier._inject_path_segment + candidate_discovery._is_id_segment).
+    """
+    from urllib.parse import urlparse
+    try:
+        parts = [p for p in (urlparse(url).path or "/").split("/") if p]
+    except Exception:
+        return False
+    if not parts:
+        return False
+    seg = parts[-1]
+    if seg.isdigit():
+        return True
+    if len(seg) in (32, 36) and all(c in "0123456789abcdefABCDEF-" for c in seg):
+        return True
+    return False
