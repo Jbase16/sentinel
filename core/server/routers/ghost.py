@@ -1,31 +1,68 @@
 """
-Ghost Protocol Router
+core/server/routers/ghost.py
 
-Provides API endpoints for the Ghost Protocol passive interception proxy.
-Integrates with the Lazarus engine for real-time JS de-obfuscation.
+Ghost Protocol Router — Phase 4-G1 (real proxy lifecycle, no more stubs).
+
+This used to be entirely a placeholder (`_ghost_process = None`, comments
+saying "in production, this would..."). The real GhostInterceptor + addon
+existed in core/ghost/proxy.py but were never reachable from the API,
+which meant the operator could never actually USE Ghost — only the scan
+engine could, and only as an internal hook.
+
+Phase 4-G1 wires this up properly:
+
+  * POST /v1/ghost/start  → spawn real mitmproxy with GhostAddon, return
+    the ACTUAL listen port. The proxy runs in the same event loop as
+    FastAPI as a long-running asyncio task.
+  * POST /v1/ghost/stop   → master.shutdown() + cancel the task cleanly.
+  * GET  /v1/ghost/status → real state: running flag, port, flow count,
+    active recording sessions, certificate path.
+  * GET  /v1/ghost/cert   → serve the mitmproxy CA cert so the operator
+    can install it into their system trust store with one click.
+  * POST /v1/ghost/record/{flow_name} → start a flow recording (uses
+    the FlowMapper singleton; the addon already feeds it).
+  * POST /v1/ghost/record/{flow_name}/stop → stop and persist the flow.
+  * GET  /v1/ghost/flows  → list recorded flows.
+  * GET  /v1/ghost/flows/{flow_id} → details of one flow.
+
+Lifecycle: one global Ghost instance per FastAPI process (single-operator
+model). Multiple concurrent Ghost proxies on the same process don't make
+sense — mitmproxy's DumpMaster has its own loop affinity and the operator
+can only point one browser at one proxy at a time anyway.
+
+The Ghost session is its OWN ScanSession (separate from scheduler-driven
+scan sessions), because Ghost is operator-driven and persists across
+multiple captures. Findings emitted by the addon land in this dedicated
+session.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import Optional
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.server.routers.auth import verify_sensitive_token
-from core.base.config import get_config
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["ghost"])
 
 
-# Request/Response Models
+# ─────────────────────────── response models ───────────────────────────
+
+
 class GhostStartResponse(BaseModel):
     """Response when starting Ghost Protocol."""
     status: str
     port: Optional[int] = None
     message: Optional[str] = None
+    cert_path: Optional[str] = None
 
 
 class GhostStopResponse(BaseModel):
@@ -35,214 +72,374 @@ class GhostStopResponse(BaseModel):
 
 
 class GhostRecordResponse(BaseModel):
-    """Response when starting flow recording."""
+    """Response when starting or stopping flow recording."""
     status: str
     flow_name: str
+    flow_id: Optional[str] = None
+    step_count: Optional[int] = None
     message: Optional[str] = None
 
 
-# Global state for Ghost Protocol
-_ghost_process = None
-_ghost_port: Optional[int] = None
-_recording_sessions = set()
+class GhostStatusResponse(BaseModel):
+    """Current Ghost Protocol state."""
+    running: bool
+    port: Optional[int] = None
+    session_id: Optional[str] = None
+    active_recordings: List[str] = []
+    flow_count: int = 0
+    cert_available: bool = False
+    cert_path: Optional[str] = None
+    findings_so_far: int = 0
 
 
-async def start_ghost_proxy(port: int = 8080) -> dict:
+class FlowSummary(BaseModel):
+    """One-line summary of a recorded flow (for list endpoints)."""
+    flow_id: str
+    name: str
+    step_count: int
+    has_auth_tokens: bool
+
+
+# ─────────────────────── singleton process state ───────────────────────
+#
+# Globals are intentional here — one Ghost per FastAPI process. The
+# alternative (per-request state) makes no sense for a long-lived proxy.
+
+_INTERCEPTOR = None              # type: Optional["GhostInterceptor"]
+_GHOST_SESSION = None            # type: Optional[Any]  # ScanSession
+_RECORDING_FLOW_IDS: Dict[str, str] = {}  # human-name → flow_id
+
+
+def _mitmproxy_cert_path() -> Optional[Path]:
+    """Return the path to mitmproxy's CA cert, or None if not generated yet.
+
+    mitmproxy creates ~/.mitmproxy/mitmproxy-ca-cert.pem on first run.
+    Returns None if the proxy has never been started — the operator
+    would see `cert_available=False` and know to run /start first.
     """
-    Start the Ghost Protocol mitmproxy instance.
-    
-    This is a placeholder implementation. The actual implementation would:
-    1. Spawn a mitmproxy process with the Lazarus addon
-    2. Configure it to intercept traffic on the specified port
-    3. Return the actual port it's listening on
-    
-    For now, we'll simulate success and return the configured port.
-    """
-    global _ghost_process, _ghost_port
-    
-    # In production, this would:
-    # from core.ghost.proxy import GhostProxy
-    # proxy = GhostProxy()
-    # _ghost_process = await proxy.start(port=port)
-    # _ghost_port = proxy.get_port()
-    
-    _ghost_port = port
-    logger.info(f"[Ghost] Started proxy on port {port}")
-    
-    return {
-        "status": "running",
-        "port": port,
-        "message": f"Ghost Protocol started on port {port}"
-    }
+    p = Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.pem"
+    return p if p.exists() else None
 
 
-async def stop_ghost_proxy() -> dict:
-    """
-    Stop the Ghost Protocol mitmproxy instance.
-    
-    This is a placeholder implementation. The actual implementation would:
-    1. Gracefully shutdown the mitmproxy process
-    2. Clean up any temporary resources
-    
-    For now, we'll simulate success.
-    """
-    global _ghost_process, _ghost_port, _recording_sessions
-    
-    # In production, this would:
-    # if _ghost_process:
-    #     await _ghost_process.stop()
-    
-    _ghost_process = None
-    _ghost_port = None
-    _recording_sessions.clear()
-    
-    logger.info("[Ghost] Stopped proxy")
-    
-    return {
-        "status": "stopped",
-        "message": "Ghost Protocol stopped"
-    }
+def _get_or_create_ghost_session():
+    """One ScanSession per Ghost lifetime. Created lazily on first /start."""
+    global _GHOST_SESSION
+    if _GHOST_SESSION is None:
+        # Imported lazily so this router can load even if the session
+        # subsystem isn't fully initialized (test scaffolding etc.).
+        from core.base.session import ScanSession
+        _GHOST_SESSION = ScanSession(target="ghost://operator-driven")
+        _GHOST_SESSION.knowledge = getattr(_GHOST_SESSION, "knowledge", None) or {}
+        logger.info(
+            f"[Ghost] created operator session id={_GHOST_SESSION.id}"
+        )
+    return _GHOST_SESSION
 
 
-async def start_flow_recording(flow_name: str) -> dict:
-    """
-    Start recording a user flow for Logic Fuzzing.
-    
-    This is a placeholder implementation. The actual implementation would:
-    1. Create a flow mapping session
-    2. Record HTTP requests/responses
-    3. Store the flow for later fuzzing
-    
-    For now, we'll simulate success.
-    """
-    if flow_name in _recording_sessions:
-        return {
-            "status": "already_recording",
-            "flow_name": flow_name,
-            "message": f"Flow '{flow_name}' is already being recorded"
-        }
-    
-    _recording_sessions.add(flow_name)
-    logger.info(f"[Ghost] Started recording flow: {flow_name}")
-    
-    return {
-        "status": "recording",
-        "flow_name": flow_name,
-        "message": f"Recording flow '{flow_name}'"
-    }
+# ───────────────────────────── endpoints ─────────────────────────────
 
 
-# API Endpoints
 @router.post("/start", response_model=GhostStartResponse)
 async def start_ghost(
-    port: int = Query(default=8080, description="Port for the proxy to listen on"),
-    _: bool = Depends(verify_sensitive_token)
-):
+    port: int = Query(
+        default=0,
+        description="Port for the proxy to listen on. 0 = pick a free port.",
+    ),
+    _: bool = Depends(verify_sensitive_token),
+) -> GhostStartResponse:
+    """Start the Ghost Protocol passive interception proxy.
+
+    Spawns the real mitmproxy DumpMaster with the GhostAddon installed.
+    The addon:
+      * Enforces scope (drops out-of-scope requests with 403)
+      * Emits CAL Evidence for every observed request
+      * Feeds the MIMIC shadow_spec (auto-discovered API surface)
+      * Captures auth tokens via SessionBridge
+      * Async-de-obfuscates JS via Lazarus
+
+    Returns the actual listen port (may differ from the requested port
+    if 0 was passed for "find a free one"). Also returns the CA cert path
+    if mitmproxy has generated it (it does so on first run).
     """
-    Start the Ghost Protocol passive interception proxy.
-    
-    This starts a mitmproxy instance with the Lazarus addon enabled,
-    which will de-obfuscate JavaScript code in real-time as traffic
-    flows through the proxy.
-    
-    Args:
-        port: The port for the proxy to listen on (default: 8080)
-    
-    Returns:
-        GhostStartResponse with status and listening port
-    """
-    if _ghost_port is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="Ghost Protocol is already running. Stop it first or check if another instance is active."
+    global _INTERCEPTOR
+
+    if _INTERCEPTOR is not None:
+        # Already running — surface the existing state instead of 409.
+        # Operators want idempotency on /start; nobody likes "click twice
+        # → error" UX. The status endpoint can tell them more.
+        return GhostStartResponse(
+            status="already_running",
+            port=getattr(_INTERCEPTOR, "port", None),
+            message="Ghost Protocol is already running. Use /v1/ghost/status for details.",
+            cert_path=str(_mitmproxy_cert_path()) if _mitmproxy_cert_path() else None,
         )
-    
-    config = get_config()
-    
+
+    # Lazy import — mitmproxy is heavyweight and we don't want to pay
+    # the import cost just because someone hit /v1/ghost/status.
     try:
-        result = await start_ghost_proxy(port)
-        return GhostStartResponse(**result)
-    except Exception as e:
-        logger.error(f"[Ghost] Failed to start: {e}")
+        from core.ghost.proxy import GhostInterceptor
+    except ImportError as e:
+        logger.error(f"[Ghost] cannot import GhostInterceptor: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to start Ghost Protocol: {str(e)}"
+            detail=f"Ghost Protocol unavailable (missing mitmproxy?): {e}",
         )
+
+    session = _get_or_create_ghost_session()
+    # Wire the session.ghost handle so the addon can reach back.
+    session.ghost = None  # cleared until we have the interceptor
+
+    interceptor = GhostInterceptor(session=session, port=port)
+    session.ghost = interceptor  # addon's strategy proposer needs this
+
+    try:
+        await interceptor.start()
+    except Exception as e:
+        logger.error(
+            f"[Ghost] failed to start: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
+        # Roll back partial state.
+        session.ghost = None
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to start Ghost Protocol: {e}",
+        )
+
+    _INTERCEPTOR = interceptor
+    actual_port = interceptor.port
+    cert_path = _mitmproxy_cert_path()
+
+    logger.info(
+        f"[Ghost] proxy started on port {actual_port} "
+        f"(session id={session.id}, cert={'ready' if cert_path else 'pending'})"
+    )
+    return GhostStartResponse(
+        status="running",
+        port=actual_port,
+        message=(
+            f"Ghost Protocol started on 127.0.0.1:{actual_port}. "
+            f"Configure your browser/app to use this as HTTP/HTTPS proxy."
+        ),
+        cert_path=str(cert_path) if cert_path else None,
+    )
 
 
 @router.post("/stop", response_model=GhostStopResponse)
-async def stop_ghost(_: bool = Depends(verify_sensitive_token)):
-    """
-    Stop the Ghost Protocol passive interception proxy.
-    
-    This gracefully shuts down the mitmproxy instance and cleans up
-    any temporary resources.
-    
-    Returns:
-        GhostStopResponse with status
-    """
-    if _ghost_port is None:
+async def stop_ghost(_: bool = Depends(verify_sensitive_token)) -> GhostStopResponse:
+    """Stop the Ghost Protocol proxy gracefully."""
+    global _INTERCEPTOR
+
+    if _INTERCEPTOR is None:
         return GhostStopResponse(
             status="not_running",
-            message="Ghost Protocol is not currently running"
+            message="Ghost Protocol is not currently running.",
         )
-    
+
     try:
-        result = await stop_ghost_proxy()
-        return GhostStopResponse(**result)
+        _INTERCEPTOR.stop()
+        # Give the asyncio task a moment to actually finish cancellation
+        # so subsequent /start calls don't trip over a half-dead master.
+        task = getattr(_INTERCEPTOR, "_task", None)
+        if task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                # Don't care — shutdown is best-effort.
+                pass
     except Exception as e:
-        logger.error(f"[Ghost] Failed to stop: {e}")
+        logger.warning(f"[Ghost] stop encountered: {type(e).__name__}: {e}")
+
+    _INTERCEPTOR = None
+    # Keep the ghost_session around — flows remain accessible until
+    # the operator explicitly clears them.
+
+    logger.info("[Ghost] proxy stopped")
+    return GhostStopResponse(
+        status="stopped",
+        message="Ghost Protocol stopped. Recorded flows are preserved.",
+    )
+
+
+@router.get("/status", response_model=GhostStatusResponse)
+async def get_ghost_status(
+    _: bool = Depends(verify_sensitive_token),
+) -> GhostStatusResponse:
+    """Return the current Ghost state, including how many flows + findings
+    have accumulated. Safe to poll from the UI for live status indicators."""
+    # Avoid touching the FlowMapper singleton unless we actually have one.
+    from core.ghost.flow import FlowMapper
+
+    fm = FlowMapper.instance()
+    flow_count = len(fm.active_flows)
+    cert_path = _mitmproxy_cert_path()
+
+    findings_so_far = 0
+    sess = _GHOST_SESSION
+    if sess is not None:
+        try:
+            findings_so_far = len(sess.findings.get_all())
+        except Exception:
+            findings_so_far = 0
+
+    return GhostStatusResponse(
+        running=_INTERCEPTOR is not None,
+        port=getattr(_INTERCEPTOR, "port", None) if _INTERCEPTOR else None,
+        session_id=sess.id if sess else None,
+        active_recordings=list(_RECORDING_FLOW_IDS.keys()),
+        flow_count=flow_count,
+        cert_available=cert_path is not None,
+        cert_path=str(cert_path) if cert_path else None,
+        findings_so_far=findings_so_far,
+    )
+
+
+@router.get("/cert")
+async def get_ca_cert(_: bool = Depends(verify_sensitive_token)):
+    """Serve the mitmproxy CA cert so the operator can install it in the
+    system trust store. mitmproxy generates this on first proxy start;
+    if Ghost has never run, returns 404.
+
+    Security note: this cert is the operator's own MITM root — it should
+    NOT be shared. Endpoint is gated by verify_sensitive_token.
+    """
+    cert_path = _mitmproxy_cert_path()
+    if cert_path is None:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to stop Ghost Protocol: {str(e)}"
+            status_code=404,
+            detail=(
+                "MITM CA cert not found. Start Ghost Protocol at least "
+                "once with POST /v1/ghost/start — mitmproxy generates "
+                "the cert on first run."
+            ),
         )
+    return FileResponse(
+        path=str(cert_path),
+        media_type="application/x-pem-file",
+        filename="sentinel-ghost-ca.pem",
+    )
 
 
 @router.post("/record/{flow_name}", response_model=GhostRecordResponse)
 async def start_ghost_recording(
     flow_name: str,
-    _: bool = Depends(verify_sensitive_token)
-):
+    _: bool = Depends(verify_sensitive_token),
+) -> GhostRecordResponse:
+    """Start recording a named flow. The proxy must be running.
+
+    The FlowMapper is fed by GhostAddon for every request; calling this
+    endpoint just creates a flow ID the operator can later reference.
+    Multiple flows can record concurrently — each gets its own ID.
     """
-    Start recording a user flow for Logic Fuzzing.
-    
-    Records HTTP traffic to build a flow map that can be used for
-    automated Logic Fuzzing tests.
-    
-    Args:
-        flow_name: Name to identify this flow recording
-    
-    Returns:
-        GhostRecordResponse with status and flow name
-    """
-    if _ghost_port is None:
+    if _INTERCEPTOR is None:
         raise HTTPException(
             status_code=409,
-            detail="Ghost Protocol is not running. Start it first."
+            detail="Ghost Protocol is not running. POST /v1/ghost/start first.",
         )
-    
-    try:
-        result = await start_flow_recording(flow_name)
-        return GhostRecordResponse(**result)
-    except Exception as e:
-        logger.error(f"[Ghost] Failed to start recording: {e}")
+
+    if flow_name in _RECORDING_FLOW_IDS:
+        return GhostRecordResponse(
+            status="already_recording",
+            flow_name=flow_name,
+            flow_id=_RECORDING_FLOW_IDS[flow_name],
+            message=f"Flow {flow_name!r} is already recording.",
+        )
+
+    from core.ghost.flow import FlowMapper
+    fm = FlowMapper.instance()
+    flow_id = fm.start_recording(flow_name)
+    _RECORDING_FLOW_IDS[flow_name] = flow_id
+
+    logger.info(f"[Ghost] started recording flow {flow_name!r} (id={flow_id})")
+    return GhostRecordResponse(
+        status="recording",
+        flow_name=flow_name,
+        flow_id=flow_id,
+        message=(
+            f"Recording flow {flow_name!r}. Browse the target through the "
+            f"proxy on 127.0.0.1:{_INTERCEPTOR.port}; every request lands "
+            f"in this flow."
+        ),
+    )
+
+
+@router.post("/record/{flow_name}/stop", response_model=GhostRecordResponse)
+async def stop_ghost_recording(
+    flow_name: str,
+    _: bool = Depends(verify_sensitive_token),
+) -> GhostRecordResponse:
+    """Stop recording a named flow. The flow remains in FlowMapper.active_flows
+    so it can be inspected, replayed, or fuzzed afterward."""
+    if flow_name not in _RECORDING_FLOW_IDS:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to start flow recording: {str(e)}"
+            status_code=404,
+            detail=f"No active recording named {flow_name!r}.",
         )
+    flow_id = _RECORDING_FLOW_IDS.pop(flow_name)
+
+    from core.ghost.flow import FlowMapper
+    fm = FlowMapper.instance()
+    flow = fm.active_flows.get(flow_id)
+    step_count = len(flow.steps) if flow else 0
+
+    logger.info(
+        f"[Ghost] stopped recording flow {flow_name!r} "
+        f"(id={flow_id}, steps={step_count})"
+    )
+    return GhostRecordResponse(
+        status="stopped",
+        flow_name=flow_name,
+        flow_id=flow_id,
+        step_count=step_count,
+        message=f"Recording stopped. {step_count} step(s) captured.",
+    )
 
 
-@router.get("/status")
-async def get_ghost_status(_: bool = Depends(verify_sensitive_token)):
-    """
-    Get the current status of Ghost Protocol.
-    
-    Returns information about whether Ghost Protocol is running,
-    what port it's on, and any active recording sessions.
-    """
+@router.get("/flows", response_model=List[FlowSummary])
+async def list_flows(
+    _: bool = Depends(verify_sensitive_token),
+) -> List[FlowSummary]:
+    """List all recorded flows (active and stopped). Returns one-line
+    summaries; use /flows/{flow_id} for full details."""
+    from core.ghost.flow import FlowMapper
+    fm = FlowMapper.instance()
+    out: List[FlowSummary] = []
+    for fid, flow in fm.active_flows.items():
+        out.append(FlowSummary(
+            flow_id=fid,
+            name=flow.name,
+            step_count=len(flow.steps),
+            has_auth_tokens=bool(flow.auth_tokens),
+        ))
+    return out
+
+
+@router.get("/flows/{flow_id}")
+async def get_flow_detail(
+    flow_id: str,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Full details of one flow: every step's method/url/params/headers."""
+    from core.ghost.flow import FlowMapper
+    fm = FlowMapper.instance()
+    flow = fm.active_flows.get(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"Flow {flow_id!r} not found.")
     return {
-        "running": _ghost_port is not None,
-        "port": _ghost_port,
-        "recording_sessions": list(_recording_sessions),
-        "message": "Ghost Protocol is active" if _ghost_port else "Ghost Protocol is not running"
+        "flow_id": flow_id,
+        "name": flow.name,
+        "step_count": len(flow.steps),
+        "auth_tokens": dict(flow.auth_tokens),  # full token values; gated by sensitive token
+        "steps": [
+            {
+                "id": s.id,
+                "method": s.method,
+                "url": s.url,
+                "params": dict(s.params) if s.params else {},
+                "headers": dict(s.headers) if s.headers else {},
+                "timestamp": s.timestamp,
+                "response_status": s.response_status,
+            }
+            for s in flow.steps
+        ],
     }
