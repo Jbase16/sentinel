@@ -431,6 +431,9 @@ async def get_flow_detail(
     fm = FlowMapper.instance()
     flow = fm.active_flows.get(flow_id)
     if flow is None:
+        # Phase 4-G2: try disk before declaring not-found.
+        flow = fm.load_persisted(flow_id)
+    if flow is None:
         raise HTTPException(status_code=404, detail=f"Flow {flow_id!r} not found.")
     return {
         "flow_id": flow_id,
@@ -450,3 +453,80 @@ async def get_flow_detail(
             for s in flow.steps
         ],
     }
+
+
+# ──────────────────────── Phase 4-G3: replay ────────────────────────
+
+
+class ReplayMutationSpec(BaseModel):
+    """One mutation request: which built-in mutation to apply, at which
+    step index, with optional params."""
+    step_index: int
+    mutation: str  # "noop" | "swap-auth"
+    params: Dict[str, Any] = {}
+
+
+class ReplayRequest(BaseModel):
+    """POST /v1/ghost/flows/{flow_id}/replay body."""
+    mutations: List[ReplayMutationSpec] = []
+    initial_cookies: Dict[str, str] = {}
+    initial_headers: Dict[str, str] = {}
+    stop_on_divergence: bool = False
+    per_step_timeout: float = 10.0
+
+
+def _build_mutation(spec: ReplayMutationSpec):
+    """Resolve a mutation spec into a Mutation object. The G3 library
+    is minimal (noop + swap-auth) — G4 will expand this catalog."""
+    from core.ghost.replay import NoOpMutation, SwapAuthHeader
+
+    if spec.mutation == "noop":
+        return NoOpMutation()
+    if spec.mutation == "swap-auth":
+        return SwapAuthHeader(new_value=spec.params.get("new_value"))
+    raise ValueError(
+        f"Unknown mutation {spec.mutation!r}. "
+        f"Known: noop, swap-auth."
+    )
+
+
+@router.post("/flows/{flow_id}/replay")
+async def replay_flow_endpoint(
+    flow_id: str,
+    req: ReplayRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Replay a captured flow, optionally with mutations injected at any
+    step. Returns the new replay flow + per-step diffs against the
+    original capture.
+
+    The replay runs in an isolated httpx client (fresh cookie jar). Each
+    step's response is captured and compared to the original; the
+    response surfaces every divergence.
+    """
+    from core.ghost.flow import FlowMapper
+    from core.ghost.replay import replay_flow
+
+    fm = FlowMapper.instance()
+    flow = fm.active_flows.get(flow_id) or fm.load_persisted(flow_id)
+    if flow is None:
+        raise HTTPException(status_code=404, detail=f"Flow {flow_id!r} not found.")
+
+    # Build mutations_by_step_index.
+    mutations_by_step: Dict[int, List[Any]] = {}
+    for spec in req.mutations:
+        try:
+            mut = _build_mutation(spec)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        mutations_by_step.setdefault(spec.step_index, []).append(mut)
+
+    result = await replay_flow(
+        flow,
+        mutations_by_step_index=mutations_by_step,
+        initial_cookies=req.initial_cookies,
+        initial_headers=req.initial_headers,
+        stop_on_divergence=req.stop_on_divergence,
+        per_step_timeout=req.per_step_timeout,
+    )
+    return result.to_dict()
