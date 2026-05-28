@@ -382,16 +382,23 @@ async def stop_ghost_recording(
     flow = fm.active_flows.get(flow_id)
     step_count = len(flow.steps) if flow else 0
 
+    # Phase 4-G2: persist on stop so the flow survives proxy restart.
+    persist_path = fm.persist(flow_id)
+    persist_note = f" Persisted to {persist_path}." if persist_path else ""
+
     logger.info(
         f"[Ghost] stopped recording flow {flow_name!r} "
-        f"(id={flow_id}, steps={step_count})"
+        f"(id={flow_id}, steps={step_count}){persist_note}"
     )
     return GhostRecordResponse(
         status="stopped",
         flow_name=flow_name,
         flow_id=flow_id,
         step_count=step_count,
-        message=f"Recording stopped. {step_count} step(s) captured.",
+        message=(
+            f"Recording stopped. {step_count} step(s) captured."
+            f"{persist_note}"
+        ),
     )
 
 

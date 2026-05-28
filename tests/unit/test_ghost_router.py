@@ -308,7 +308,10 @@ def test_get_flow_detail_returns_step_data(patched_interceptor):
     assert len(detail["steps"]) == 2
     assert detail["steps"][0]["method"] == "GET"
     assert detail["steps"][0]["params"] == {"id": "1"}
-    assert detail["steps"][1]["headers"].get("Cookie") == "sid=abc"
+    # Phase 4-G2: header keys are normalized to lowercase for case-
+    # insensitive replay lookup. The original test asserted "Cookie";
+    # the new contract is "cookie". This is intentional.
+    assert detail["steps"][1]["headers"].get("cookie") == "sid=abc"
 
 
 def test_get_flow_detail_unknown_id_returns_404(patched_interceptor):

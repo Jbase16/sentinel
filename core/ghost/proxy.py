@@ -69,12 +69,13 @@ class GhostAddon:
         """
         Intercept requests to identify new endpoints/params.
         Emits CAL Evidence for every request.
+        Phase 4-G2: also feeds the FlowMapper for any active recordings.
         """
         try:
             url = flow.request.pretty_url
             method = flow.request.method
             host = flow.request.host
-            
+
             # ═══════════════════════════════════════════════════════════════
             # SCOPE ENFORCEMENT GUARD
             # ═══════════════════════════════════════════════════════════════
@@ -88,7 +89,7 @@ class GhostAddon:
                     from mitmproxy.http import Response
                     flow.response = Response.make(403, b"Blocked by SentinelForge ScopeGuard")
                     return
-            
+
             # 1. Log the 'Sight'
             msg = f"[Ghost] Intercepted: {method} {url}"
             self.session.log(msg)
@@ -96,10 +97,59 @@ class GhostAddon:
             # [MIMIC INTEGRATION]
             # Mine the Route
             self.shadow_spec.observe(method, url)
-            
+
             # [SESSION BRIDGE]
             # Capture outbound authentication tokens/cookies
             self.session_bridge.observe_request(flow)
+
+            # ═══════════════════════════════════════════════════════════════
+            # PHASE 4-G2: Feed the FlowMapper for any active recordings.
+            # ═══════════════════════════════════════════════════════════════
+            # The addon observes every request. Each active recording flow
+            # gets a step recorded. We stash the per-flow step_ids on the
+            # mitmproxy flow's metadata so the response hook can finalize
+            # the SAME steps when the response lands.
+            from core.ghost.flow import FlowMapper, MAX_BODY_BYTES
+            fm = FlowMapper.instance()
+            req_content_type = flow.request.headers.get("content-type", "") or None
+            # Capture request body, capped at MAX_BODY_BYTES to keep flow
+            # files reasonably sized. We always decode UTF-8 with replace
+            # so binary uploads don't blow up json.dump downstream.
+            raw_body = flow.request.content or b""
+            truncated = len(raw_body) > MAX_BODY_BYTES
+            if truncated:
+                raw_body = raw_body[:MAX_BODY_BYTES]
+            req_body_str = raw_body.decode("utf-8", errors="replace")
+            # Params: union of query and form-data (best-effort — mitmproxy
+            # parses these for us).
+            params: dict = {}
+            try:
+                params.update(dict(flow.request.query) if flow.request.query else {})
+            except Exception:
+                pass
+            try:
+                if flow.request.urlencoded_form:
+                    params.update(dict(flow.request.urlencoded_form))
+            except Exception:
+                pass
+            step_ids = fm.record_request_to_all(
+                method=method,
+                url=url,
+                params=params,
+                headers={k: v for k, v in flow.request.headers.items()},
+                request_body=req_body_str,
+                request_body_truncated=truncated,
+                request_content_type=req_content_type,
+            )
+            # Stash on the mitmproxy flow object so response() can find
+            # them. mitmproxy lets us attach arbitrary attributes to
+            # flow.metadata (a dict).
+            if step_ids:
+                flow.metadata["sentinel_step_ids"] = step_ids
+                # Record the request-start time for elapsed_ms math in
+                # response().
+                import time as _t
+                flow.metadata["sentinel_request_start"] = _t.time()
             
             # ═══════════════════════════════════════════════════════════════
             # CAL INTEGRATION: Emit Evidence for this request
@@ -165,6 +215,9 @@ class GhostAddon:
     async def response(self, flow: http.HTTPFlow):
         """
         Intercept responses to identify tech stack / leaks.
+        Phase 4-G2: also finalizes the FlowMapper steps the request hook
+        started, populating response status / headers / body / timing /
+        cookies-after-step.
         """
         # Error handling block.
         try:
@@ -179,24 +232,49 @@ class GhostAddon:
                     "metadata": {"server_header": server}
                 })
 
-            # [MIMIC INTEGRATION]
-            # Observe Response Body?
-            # Doing this carefully to avoid overhead on large binaries
-            # For now, simplistic check if JSON
-            # if "application/json" in flow.response.headers.get("Content-Type", ""):
-            #     # TODO: Decode and pass to self.shadow_spec.observe(..., response_body=json)
-            #     pass
-            
             # [SESSION BRIDGE]
             # Capture inbound Set-Cookie authentication
             self.session_bridge.observe_response(flow)
-            
+
+            # ═══════════════════════════════════════════════════════════════
+            # PHASE 4-G2: finalize FlowMapper steps with response data.
+            # ═══════════════════════════════════════════════════════════════
+            step_ids = flow.metadata.get("sentinel_step_ids") if flow.metadata else None
+            if step_ids:
+                from core.ghost.flow import FlowMapper, MAX_BODY_BYTES
+                import time as _t
+                fm = FlowMapper.instance()
+                resp_content_type = flow.response.headers.get("content-type", "") or None
+                raw_resp = flow.response.content or b""
+                truncated = len(raw_resp) > MAX_BODY_BYTES
+                if truncated:
+                    raw_resp = raw_resp[:MAX_BODY_BYTES]
+                resp_body_str = raw_resp.decode("utf-8", errors="replace")
+                started = flow.metadata.get("sentinel_request_start")
+                elapsed_ms = None
+                if started:
+                    try:
+                        elapsed_ms = (_t.time() - float(started)) * 1000.0
+                    except Exception:
+                        pass
+                resp_headers = {k: v for k, v in flow.response.headers.items()}
+                for sid in step_ids:
+                    fm.finalize_step(
+                        sid,
+                        status=int(flow.response.status_code),
+                        headers=resp_headers,
+                        body=resp_body_str,
+                        body_truncated=truncated,
+                        content_type=resp_content_type,
+                        elapsed_ms=elapsed_ms,
+                    )
+
             # Lazarus Engine: De-obfuscation (async)
             # We await this so the response is held until the AI is done rewriting it
             if self.lazarus.should_process(flow):
                 self.session.log(f"[Lazarus] De-obfuscating JS: {flow.request.pretty_url}")
                 await self._process_lazarus(flow)
-                
+
         except Exception as e:
             logger.error(f"[Ghost] Response processing error: {e}")
 
