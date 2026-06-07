@@ -459,3 +459,112 @@ async def send_exchange(
         duration_ms=elapsed_ms,
         in_scope=True,
     )
+
+
+# ──────────────────────── VC3: promote to repro ────────────────────────
+
+
+class PromoteRequest(BaseModel):
+    """POST /v1/verify/sessions/{id}/promote body.
+
+    Empty `exchange_indices` means "promote the whole transcript."
+    Most operators select a subset — the one or two requests that
+    cleanly demonstrate the bug, not every exploratory probe."""
+    exchange_indices: Optional[List[int]] = Field(
+        default=None,
+        description=(
+            "Zero-based indices into session.transcript. None or "
+            "omitted means include every captured exchange."
+        ),
+    )
+    sanitize: bool = Field(
+        default=True,
+        description=(
+            "If True, auth headers/cookies in the rendered curl are "
+            "replaced with operator-readable placeholders ($TOKEN, "
+            "$SESSION_ID, etc.). Set False ONLY for local-debug "
+            "renders — the result is NOT safe to paste into a public "
+            "report."
+        ),
+    )
+
+
+class PromoteResponse(BaseModel):
+    """Rendered repro ready to drop into BountyReport.steps_to_reproduce."""
+    finding_id: Optional[str]
+    target_url: str
+    entry_count: int
+    # The List[str] shape BountyReport expects directly.
+    steps_to_reproduce: List[str]
+    # Operator-readable expansion of every placeholder, so the report
+    # template can render "Substitute before running: $TOKEN = …".
+    placeholder_legend: Dict[str, str]
+    # Structured per-entry view for UI consumers.
+    entries: List[Dict[str, Any]]
+
+
+@router.post("/sessions/{session_id}/promote", response_model=PromoteResponse)
+async def promote_to_repro(
+    session_id: str,
+    req: PromoteRequest,
+    _: bool = Depends(verify_sensitive_token),
+) -> PromoteResponse:
+    """Render selected exchanges as BountyReport-ready repro steps.
+
+    The output's `steps_to_reproduce` field is the EXACT shape
+    BountyReport consumes. The UI / CLI can either:
+      * Push directly into a BountyReport draft.
+      * Copy to clipboard.
+      * Show for operator review before pushing.
+
+    Sanitization replaces real auth tokens with placeholders. The
+    operator's session transcript still contains the real values
+    (they need them for their own debugging); the rendered repro
+    is the public-to-program version.
+    """
+    from core.verify.console import get_session
+    from core.verify.promoter import (
+        promote_transcript_to_repro,
+        render_repro_as_strings,
+    )
+
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(
+            status_code=404, detail=f"session {session_id!r} not found"
+        )
+
+    if not sess.transcript:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Session transcript is empty — capture at least one "
+                "exchange via /exchange before promoting to repro."
+            ),
+        )
+
+    entries, legend = promote_transcript_to_repro(
+        sess,
+        exchange_indices=req.exchange_indices,
+        sanitize=req.sanitize,
+    )
+    return PromoteResponse(
+        finding_id=sess.finding_id,
+        target_url=sess.target_url,
+        entry_count=len(entries),
+        steps_to_reproduce=render_repro_as_strings(entries),
+        placeholder_legend=legend,
+        entries=[
+            {
+                "index": e.index,
+                "method": e.method,
+                "url": e.url,
+                "prose": e.prose,
+                "curl": e.curl,
+                "response_status": e.response_status,
+                "response_excerpt": e.response_excerpt,
+                "markdown": e.markdown,
+            }
+            for e in entries
+        ],
+    )

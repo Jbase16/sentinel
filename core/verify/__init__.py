@@ -29,6 +29,13 @@ from core.verify.console import (
     get_session,
     list_sessions,
 )
+from core.verify.promoter import (
+    ReproEntry,
+    promote_transcript_to_repro,
+    render_curl,
+    render_repro_as_strings,
+    sanitize_headers,
+)
 
 __all__ = [
     "VerificationSession",
@@ -36,4 +43,9 @@ __all__ = [
     "create_session_from_target",
     "get_session",
     "list_sessions",
+    "ReproEntry",
+    "promote_transcript_to_repro",
+    "render_curl",
+    "render_repro_as_strings",
+    "sanitize_headers",
 ]
