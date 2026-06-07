@@ -250,7 +250,13 @@ def _build_prose_for_step(
     index: int,
     finding_summary: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """One-sentence prose description of what step `index` does."""
+    """One-sentence prose description of what step `index` does.
+
+    Persona attribution (from step.persona_at_capture) is included
+    when present — critical for distinguishing successive requests to
+    the same URL from different identities (the cross-principal IDOR
+    case calibrated in Run #50).
+    """
     method = step.method
     # Path is the most useful URL fragment — full URLs blow up line length.
     from urllib.parse import urlparse
@@ -259,7 +265,12 @@ def _build_prose_for_step(
     except Exception:
         path = step.url
 
-    descr = f"Send `{method} {path}`"
+    # Persona attribution prefix when present.
+    persona = step.persona_at_capture
+    if persona:
+        descr = f"As user `{persona}`, send `{method} {path}`"
+    else:
+        descr = f"Send `{method} {path}`"
 
     # First-step prose can mention the finding context if we have it.
     if index == 1 and finding_summary:
@@ -340,6 +351,22 @@ def promote_transcript_to_repro(
             placeholder_legend=legend,
         ))
         combined_legend.update(legend)
+
+    # If any placeholders were used and we have at least one entry,
+    # inject the legend at the TOP of the first entry's prose so the
+    # triager sees what to substitute before they read any curl
+    # commands. Tested in Calibration Run #50 — without this, the
+    # triager sees `Bearer $TOKEN` with no idea what to swap in.
+    if entries and combined_legend and sanitize:
+        legend_lines = [
+            "_Before running, substitute these placeholders with real values:_",
+        ]
+        for ph in sorted(combined_legend.keys()):
+            legend_lines.append(f"- `{ph}` — {combined_legend[ph]}")
+        legend_block = "\n".join(legend_lines)
+        # Prepend legend to the first entry's prose.
+        first = entries[0]
+        first.prose = f"{legend_block}\n\n{first.prose}"
 
     return entries, combined_legend
 

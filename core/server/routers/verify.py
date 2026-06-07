@@ -439,6 +439,11 @@ async def send_exchange(
         request_body=req.body or "",
         request_content_type=merged_headers.get("content-type"),
     )
+    # Tag the exchange with whichever persona was bound at capture
+    # time. VC3's repro prose uses this to say "as `admin`" / "as `jim`"
+    # so successive requests to the same URL are visually distinct
+    # in the bounty report. None when no persona bound (= anonymous).
+    step.persona_at_capture = sess.persona_name
     step.set_response(
         status=status,
         headers=response_headers,

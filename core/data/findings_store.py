@@ -201,32 +201,118 @@ class FindingsStore(Observable):
 
     def add_finding(self, finding: Dict, persist: bool = True) -> None:
         """
-        Sync-compatible add path. Schedules add_finding_async() as a background
-        task if an event loop is running; otherwise falls back to a direct
-        in-memory append with legacy fire-and-forget persistence.
+        Sync-compatible add path.
 
-        Callers with an active event loop should prefer add_finding_async() directly.
+        Always appends a basic-annotated copy to the in-memory list
+        SYNCHRONOUSLY before returning, so callers can `get(finding_id)`
+        immediately after and find their finding. If an event loop is
+        running, the heavier work (dedup analysis + DB persistence) is
+        scheduled as a background task that re-annotates and re-persists
+        the same finding.
+
+        Before this fix, the async branch only scheduled
+        add_finding_async() without doing a sync append, which meant
+        every caller inside asyncio.run() raced their own subsequent
+        get() — observed for the first time in Calibration Run #50,
+        where create_session_from_finding() couldn't see a finding
+        added one line above. The no-loop branch had always done the
+        sync append; this commit makes both branches consistent.
+
+        Callers with an active event loop should still prefer
+        add_finding_async() directly when they need the fully-annotated
+        result returned to them.
         """
+        # ALWAYS do the basic sync append first. This is what makes
+        # `get(finding_id)` work for callers right after `add_finding()`.
+        with self._lock:
+            annotated = dict(finding)
+            annotated.setdefault("is_duplicate", False)
+            annotated.setdefault("duplicate_info", "NEW")
+            self._findings.append(annotated)
+
         try:
-            loop = asyncio.get_running_loop()
-            # We're inside an async context — schedule as a task
+            asyncio.get_running_loop()
+            # Inside an event loop — schedule the heavier add_finding_async
+            # to re-annotate (dedup) and persist. The async path also
+            # appends to _findings, which would create a duplicate; pass
+            # a flag so it knows to UPDATE rather than re-APPEND.
             create_safe_task(
-                self.add_finding_async(finding, persist=persist),
-                name="findings_store_add",
+                self._reannotate_async(annotated, persist=persist),
+                name="findings_store_reannotate",
             )
         except RuntimeError:
-            # No event loop — synchronous fallback (startup, tests, etc.)
-            logger.debug("[FindingsStore] Sync fallback add (no event loop)")
-            with self._lock:
-                annotated = dict(finding)
-                annotated.setdefault("is_duplicate", False)
-                annotated.setdefault("duplicate_info", "NEW")
-                self._findings.append(annotated)
-
+            # No event loop — do persistence synchronously (same as
+            # the legacy fallback behavior).
+            logger.debug("[FindingsStore] Sync fallback (no event loop)")
             if persist:
-                self.db.save_finding(finding, self.session_id, scan_sequence=0)
+                self.db.save_finding(annotated, self.session_id, scan_sequence=0)
 
-            self.findings_changed.emit()
+        self.findings_changed.emit()
+
+    async def _reannotate_async(
+        self, finding_in_list: Dict, persist: bool = True
+    ) -> None:
+        """Re-run dedup + sequence allocation + persistence on a finding
+        that's ALREADY in the in-memory list. Mutates the in-list dict
+        in place so subsequent gets() see the full annotation.
+
+        Used by add_finding() in the event-loop branch to do the heavy
+        work without blocking the sync caller."""
+        # Dedup check
+        try:
+            from core.data.dedup_store import DedupStore
+            dedup = DedupStore.instance()
+            result = await dedup.check_finding(finding_in_list)
+            with self._lock:
+                finding_in_list["fingerprint"] = result.fingerprint
+                finding_in_list["is_duplicate"] = result.is_duplicate
+                finding_in_list["duplicate_info"] = result.annotation()
+            if result.is_duplicate:
+                logger.info(
+                    "[FindingsStore] Duplicate finding detected: %s "
+                    "(first seen %s, seen %dx)",
+                    result.fingerprint[:12],
+                    result.first_seen_at or "unknown",
+                    result.seen_count,
+                )
+                await dedup.mark_seen(
+                    result.fingerprint, finding_in_list,
+                    self.session_id or "unknown",
+                )
+            else:
+                await dedup.mark_seen(
+                    result.fingerprint, finding_in_list,
+                    self.session_id or "unknown",
+                )
+        except Exception as e:
+            logger.warning(
+                "[FindingsStore] Dedup check failed, proceeding: %s", e
+            )
+
+        # Sequence allocation + persistence
+        if persist:
+            try:
+                seq = await self._next_sequence()
+                with self._lock:
+                    finding_in_list["scan_sequence"] = seq
+            except Exception as e:
+                logger.warning(
+                    "[FindingsStore] Sequence allocation failed: %s", e
+                )
+                with self._lock:
+                    finding_in_list["scan_sequence"] = 0
+
+            try:
+                seq = finding_in_list.get("scan_sequence", 0)
+                self.db.save_finding(
+                    finding_in_list, self.session_id, scan_sequence=seq
+                )
+            except Exception as e:
+                logger.warning(
+                    "[FindingsStore] Persist failed: %s", e
+                )
+
+        self.findings_changed.emit()
 
     def add(self, finding: Dict, persist: bool = True) -> None:
         """Alias for add_finding (compatibility)."""

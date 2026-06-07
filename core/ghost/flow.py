@@ -134,6 +134,14 @@ class FlowStep:
 
         self.timestamp: float = time.time()
 
+        # Optional persona attribution captured at request time. Used
+        # by Verify Console (VC3) to render per-step prose that says
+        # "as `admin`" / "as `jim`" — distinguishing successive requests
+        # to the same URL from different identities. Calibration Run
+        # #50 surfaced the need; without this, the bounty-report repro
+        # steps for cross-principal IDOR were indistinguishable text.
+        self.persona_at_capture: Optional[str] = None
+
         self.response_status: int = 0
         self.response_headers: Dict[str, str] = {}
         self.response_body: str = ""
@@ -190,6 +198,7 @@ class FlowStep:
             "request_body_truncated": self.request_body_truncated,
             "request_content_type": self.request_content_type,
             "timestamp": self.timestamp,
+            "persona_at_capture": self.persona_at_capture,
             "response_status": self.response_status,
             "response_headers": dict(self.response_headers),
             "response_body": self.response_body,
@@ -216,6 +225,8 @@ class FlowStep:
             step.id = d["id"]
         if "timestamp" in d:
             step.timestamp = float(d["timestamp"])
+        if "persona_at_capture" in d:
+            step.persona_at_capture = d["persona_at_capture"]
         # Restore the response side.
         step.response_status = int(d.get("response_status", 0) or 0)
         step.response_headers = dict(d.get("response_headers", {}) or {})
