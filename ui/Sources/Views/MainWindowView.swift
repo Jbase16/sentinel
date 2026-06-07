@@ -23,6 +23,7 @@ struct MainWindowView: View {
         case dashboard = "Dashboard"
         case scan = "Target Scan"
         case ghost = "Ghost Protocol"
+        case verify = "Verify Console"
         case graph = "Attack Graph"
         case terminal = "System Console"
         case report = "Report Composer"
@@ -36,7 +37,8 @@ struct MainWindowView: View {
             switch self {
             case .dashboard: return "gauge"
             case .scan: return "dot.scope"
-            case .ghost: return "eye.fill"  // Phase 4 — passive interceptor
+            case .ghost: return "eye.fill"             // Phase 4 — passive interceptor
+            case .verify: return "checkmark.shield.fill"  // Phase 5 — verification + repro
             case .graph: return "network"
             case .terminal: return "command.square.fill"
             case .report: return "doc.text.fill"
@@ -108,6 +110,7 @@ struct MainWindowView: View {
                         case .dashboard: DashboardView()
                         case .scan: ScanControlView()
                         case .ghost: GhostConsoleView()
+                        case .verify: VerifyConsoleView()
                         case .graph: NetworkGraphView()  // Metal 3D
                         case .terminal: TerminalView()
                         case .report: ReportView()
