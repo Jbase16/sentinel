@@ -42,6 +42,18 @@ from core.foundry.vault import (
     RateLimitExceeded,
     ResearchPersona,
 )
+from core.foundry.replay import (
+    Challenge,
+    ChallengeResolution,
+    Driver,
+    RecipeReplayer,
+    ReplayOutcome,
+    ReplayState,
+)
+from core.foundry.challenges import (
+    ChallengeBus,
+    get_challenge_bus,
+)
 
 __all__ = [
     # recipe
@@ -56,4 +68,14 @@ __all__ = [
     "PersonaVault",
     "RateLimitExceeded",
     "ResearchPersona",
+    # replay
+    "Challenge",
+    "ChallengeResolution",
+    "Driver",
+    "RecipeReplayer",
+    "ReplayOutcome",
+    "ReplayState",
+    # challenge bus
+    "ChallengeBus",
+    "get_challenge_bus",
 ]
