@@ -260,9 +260,15 @@ class TestPromoteTranscript:
         assert len(entries) == 1
         assert entries[0].url == "https://h.example/a"
 
-    def test_finding_context_in_first_step_prose(self):
-        """When session is bound to a finding, the first step's prose
-        should mention the finding's vuln_class + payload."""
+    def test_first_step_prose_does_not_leak_internal_labels(self):
+        """Phase 6-PT2 regression: the first step's prose used to
+        include 'to reproduce the IDOR confirmation (payload: id:1→2)'
+        which leaked Sentinel-internal scoring labels into the
+        rendered repro. The operator-facing narrative belongs in
+        PT2's SubmissionRender summary/impact sections; the steps
+        themselves stay action-only ('send GET ...', 'response is
+        HTTP 200, body shows ...'). The vuln class + payload move
+        out of the steps."""
         finding = {
             "id": "f-1",
             "target": "https://h.example/api/users/1",
@@ -285,10 +291,14 @@ class TestPromoteTranscript:
 
         entries, _ = promote_transcript_to_repro(sess)
         first = entries[0]
-        # Prose references the finding's vuln_class.
-        assert "IDOR" in first.prose
-        # And the payload.
-        assert "id: 1→2" in first.prose
+        # The internal payload notation must NOT leak into the prose.
+        assert "id: 1→2" not in first.prose, (
+            "Sentinel-internal payload label leaked into repro prose"
+        )
+        # The "to reproduce the IDOR confirmation" boilerplate is also out.
+        assert "to reproduce the IDOR confirmation" not in first.prose
+        # The actual request action is still narrated.
+        assert "GET" in first.prose or "GET" in first.curl
 
     def test_response_excerpt_truncated(self):
         long_body = "x" * 2000

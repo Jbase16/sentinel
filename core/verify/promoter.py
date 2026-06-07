@@ -272,14 +272,13 @@ def _build_prose_for_step(
     else:
         descr = f"Send `{method} {path}`"
 
-    # First-step prose can mention the finding context if we have it.
-    if index == 1 and finding_summary:
-        vc = finding_summary.get("vuln_class") or ""
-        payload = finding_summary.get("payload")
-        if vc and payload:
-            descr += f" to reproduce the {vc} confirmation (payload: `{payload}`)"
-        elif vc:
-            descr += f" to reproduce the {vc} confirmation"
+    # First-step prose used to reference internal Sentinel labels
+    # ("to reproduce the IDOR confirmation (payload: admin↔jim)") —
+    # that voice leaks into PT2's submission output. The operator
+    # narrates the bug in the impact/summary sections of the
+    # SubmissionRender (PT2); the steps themselves stay action-only.
+    # Keeping this stub here so we remember the intentional removal.
+    _ = (index, finding_summary)
 
     # Note the response status as part of the prose.
     if step.response_status > 0:
