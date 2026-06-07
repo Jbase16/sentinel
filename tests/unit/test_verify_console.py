@@ -445,3 +445,267 @@ class TestListAndGetSessions:
         with pytest.raises(HTTPException) as ei:
             _run(get_verify_session("nope", _=True))
         assert ei.value.status_code == 404
+
+
+# ─────────────────────── VC2: structured exchange endpoint ───────────────────────
+
+
+class TestExchangeEndpoint:
+    """The critical correctness property: scope check happens BEFORE
+    any network I/O. Out-of-scope URLs raise structurally — they
+    cannot leave the harness."""
+
+    def _patch_httpx(self, monkeypatch, handler):
+        """Replace httpx.AsyncClient with one that uses a MockTransport
+        for the actual sends. Tests that DON'T set this up should never
+        succeed in 'sending' anything — if the scope gate is broken
+        and a request slips through, httpx will try to hit the wire
+        and that'll be a noisy failure in CI."""
+        import httpx
+        # We can't easily monkey-patch AsyncClient's __init__ because
+        # the handler creates one via `async with`. Instead, patch the
+        # transport kwarg on the AsyncClient class default via a
+        # subclass. Easier: monkey-patch the module-level AsyncClient.
+        original = httpx.AsyncClient
+
+        class _MockedAsyncClient(original):
+            def __init__(self, *args, **kwargs):
+                # Inject the test's mock transport.
+                kwargs["transport"] = httpx.MockTransport(handler)
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(httpx, "AsyncClient", _MockedAsyncClient)
+
+    def test_in_scope_request_captures_step(self, monkeypatch):
+        import httpx
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from core.verify.console import create_session_from_target, get_session
+
+        observed = {"path": None, "auth": None, "body": None}
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            observed["path"] = req.url.path
+            observed["auth"] = req.headers.get("authorization")
+            observed["body"] = req.content.decode("utf-8") if req.content else ""
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                content=b'{"ok": true, "owner": "alice"}',
+            )
+
+        self._patch_httpx(monkeypatch, handler)
+
+        sess = create_session_from_target("https://target.example/")
+        sess.persona_name = "alice"
+        sess.persona_headers = {"authorization": "Bearer ALICE-TOK"}
+
+        resp = _run(send_exchange(
+            sess.session_id,
+            ExchangeRequest(
+                method="POST",
+                url="https://target.example/api/users/1",
+                headers={"x-custom": "y"},
+                body='{"hello": "world"}',
+            ),
+            _=True,
+        ))
+
+        # Captured step shape.
+        assert resp.in_scope is True
+        assert resp.transcript_length_after == 1
+        step = resp.captured_step
+        assert step["method"] == "POST"
+        assert step["url"] == "https://target.example/api/users/1"
+        assert step["request_body"] == '{"hello": "world"}'
+        # Persona auth was applied to the outgoing request.
+        assert observed["auth"] == "Bearer ALICE-TOK"
+        # Per-request header was also sent (operator override semantics).
+        assert step["headers"]["x-custom"] == "y"
+        # Response captured.
+        assert step["response_status"] == 200
+        assert "owner" in step["response_body"]
+        # And the session's transcript persists.
+        s = get_session(sess.session_id)
+        assert len(s.transcript) == 1
+
+    def test_out_of_scope_url_raises_403_BEFORE_network_io(self, monkeypatch):
+        """The most critical test. Even if httpx is wired to a panicking
+        handler, an out-of-scope request must be rejected without ever
+        invoking that handler. We use a handler that asserts False to
+        make sure no network call sneaks through."""
+        import httpx
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from core.verify.console import create_session_from_target
+
+        def explosive_handler(req):
+            raise AssertionError(
+                "SCOPE GATE BROKEN: an out-of-scope request reached the "
+                f"transport. URL was {req.url}. This is a critical bug."
+            )
+
+        self._patch_httpx(monkeypatch, explosive_handler)
+
+        sess = create_session_from_target("https://target.example/")
+
+        # Try to send to a DIFFERENT host. Must be rejected before any
+        # network I/O — explosive_handler should NEVER fire.
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as ei:
+            _run(send_exchange(
+                sess.session_id,
+                ExchangeRequest(
+                    method="GET",
+                    url="https://other.example/api/x",
+                ),
+                _=True,
+            ))
+        # 403 (forbidden by policy), NOT 400 (malformed input).
+        assert ei.value.status_code == 403
+        # Detail surfaces the rejection + the allowlist so the UI can
+        # offer "add to scope?".
+        assert ei.value.detail["code"] == "out_of_scope"
+        assert ei.value.detail["rejected_url"] == "https://other.example/api/x"
+        assert "https://target.example" in ei.value.detail["allowed_origins"]
+
+    def test_per_request_header_overrides_persona_auth(self, monkeypatch):
+        """Operator override: when they want to test with a DIFFERENT
+        auth than the session's persona (e.g. testing 'what if I send
+        the wrong token'), the per-request header wins."""
+        import httpx
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from core.verify.console import create_session_from_target
+
+        observed_auth = []
+
+        def handler(req):
+            observed_auth.append(req.headers.get("authorization"))
+            return httpx.Response(200, content=b"")
+
+        self._patch_httpx(monkeypatch, handler)
+
+        sess = create_session_from_target("https://target.example/")
+        sess.persona_headers = {"authorization": "Bearer ALICE-TOK"}
+
+        _run(send_exchange(
+            sess.session_id,
+            ExchangeRequest(
+                method="GET",
+                url="https://target.example/api/x",
+                # Operator explicitly overrides.
+                headers={"Authorization": "Bearer DIFFERENT-TOK"},
+            ),
+            _=True,
+        ))
+        # Per-request header won.
+        assert observed_auth == ["Bearer DIFFERENT-TOK"]
+
+    def test_persona_cookies_become_cookie_header(self, monkeypatch):
+        import httpx
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from core.verify.console import create_session_from_target
+
+        observed_cookie = []
+
+        def handler(req):
+            observed_cookie.append(req.headers.get("cookie"))
+            return httpx.Response(200, content=b"")
+
+        self._patch_httpx(monkeypatch, handler)
+
+        sess = create_session_from_target("https://target.example/")
+        sess.persona_cookies = {"sid": "abc123", "csrf": "xyz"}
+
+        _run(send_exchange(
+            sess.session_id,
+            ExchangeRequest(
+                method="GET",
+                url="https://target.example/api/x",
+            ),
+            _=True,
+        ))
+        # Both cookies appear in the encoded header.
+        cookie = observed_cookie[0] or ""
+        assert "sid=abc123" in cookie
+        assert "csrf=xyz" in cookie
+
+    def test_unknown_session_returns_404(self, monkeypatch):
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as ei:
+            _run(send_exchange(
+                "no-such-session",
+                ExchangeRequest(method="GET", url="https://h.example/"),
+                _=True,
+            ))
+        assert ei.value.status_code == 404
+
+    def test_network_error_captured_as_status_zero_step(self, monkeypatch):
+        """A connection error is captured as a step (status=0) and
+        appended to the transcript — same convention as the Phase 4
+        replay engine. The operator wants to see what they sent even
+        if it failed; the request still happened (briefly)."""
+        import httpx
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from core.verify.console import create_session_from_target
+
+        def boom(req):
+            raise httpx.ConnectError("simulated network failure")
+
+        self._patch_httpx(monkeypatch, boom)
+
+        sess = create_session_from_target("https://target.example/")
+        resp = _run(send_exchange(
+            sess.session_id,
+            ExchangeRequest(
+                method="GET",
+                url="https://target.example/down",
+            ),
+            _=True,
+        ))
+        step = resp.captured_step
+        assert step["response_status"] == 0
+        assert "verify-error" in step["response_body"]
+        # Still appended to transcript.
+        assert resp.transcript_length_after == 1
+
+    def test_multiple_exchanges_accumulate_in_transcript(self, monkeypatch):
+        import httpx
+        from core.server.routers.verify import (
+            ExchangeRequest, send_exchange,
+        )
+        from core.verify.console import create_session_from_target, get_session
+
+        def handler(req):
+            return httpx.Response(
+                200, content=f"resp for {req.url.path}".encode()
+            )
+
+        self._patch_httpx(monkeypatch, handler)
+
+        sess = create_session_from_target("https://target.example/")
+        for i in range(3):
+            _run(send_exchange(
+                sess.session_id,
+                ExchangeRequest(
+                    method="GET",
+                    url=f"https://target.example/step{i}",
+                ),
+                _=True,
+            ))
+        s = get_session(sess.session_id)
+        assert len(s.transcript) == 3
+        # And they're in order.
+        assert s.transcript[0].url.endswith("/step0")
+        assert s.transcript[2].url.endswith("/step2")

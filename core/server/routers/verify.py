@@ -246,3 +246,216 @@ async def bind_persona(
         has_headers=bool(resolved_headers),
         has_cookies=bool(resolved_cookies),
     )
+
+
+# ──────────────────────── VC2: structured request console ────────────────────────
+
+
+class ExchangeRequest(BaseModel):
+    """POST /v1/verify/sessions/{id}/exchange body.
+
+    The structured equivalent of "type curl into a shell." The handler
+    routes this through the session's scope gate before any network I/O.
+    Out-of-scope URLs raise structurally — they CANNOT be sent. That's
+    the constraint-inversion: the scanner makes scope violations
+    physically unreachable.
+    """
+    method: str = Field(
+        ...,
+        description="HTTP method (GET, POST, PUT, PATCH, DELETE, …).",
+    )
+    url: str = Field(..., description="Full target URL.")
+    headers: Dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Per-request headers. Merged ON TOP of the session's bound "
+            "persona headers — request-level headers win on collision "
+            "so the operator can override Authorization etc. when they "
+            "explicitly want to."
+        ),
+    )
+    body: Optional[str] = Field(
+        default=None,
+        description="Request body (raw string). Empty/None for GET/HEAD.",
+    )
+    timeout_s: float = Field(
+        default=10.0, ge=0.5, le=60.0,
+        description="Per-request timeout. Capped at 60s.",
+    )
+    follow_redirects: bool = Field(
+        default=False,
+        description=(
+            "If True, httpx will follow redirects. The CAPTURED step "
+            "records the final URL, not the intermediate hops — for "
+            "fine-grained capture leave this off."
+        ),
+    )
+
+
+class ExchangeResponse(BaseModel):
+    """Result of one verify exchange.
+
+    The captured exchange (as a FlowStep dict) is included so the
+    UI can render the full request + response without a follow-up
+    /sessions/{id} fetch."""
+    captured_step: Dict[str, Any]
+    transcript_length_after: int
+    duration_ms: float
+    in_scope: bool  # always True for a captured exchange — out-of-scope
+                    # paths raise 403 before reaching here. Surfaced for
+                    # UI symmetry.
+
+
+class ScopeViolationError(HTTPException):
+    """Operator tried to send a request to an URL not in the session's
+    scope allowlist. Surfaced as HTTP 403 — different from 404 (session
+    not found) and 400 (malformed input) to disambiguate UI handling.
+
+    The body INCLUDES the rejected URL + the current allowlist so the
+    operator can decide whether to (a) fix their request or (b)
+    explicitly expand scope via /scope.
+    """
+    def __init__(self, url: str, allowed_origins: List[str]):
+        super().__init__(
+            status_code=403,
+            detail={
+                "code": "out_of_scope",
+                "message": (
+                    f"URL {url!r} is not in this session's scope. "
+                    f"Add the origin via POST /sessions/{{id}}/scope "
+                    f"if you intend to verify there."
+                ),
+                "rejected_url": url,
+                "allowed_origins": allowed_origins,
+            },
+        )
+
+
+@router.post("/sessions/{session_id}/exchange", response_model=ExchangeResponse)
+async def send_exchange(
+    session_id: str,
+    req: ExchangeRequest,
+    _: bool = Depends(verify_sensitive_token),
+) -> ExchangeResponse:
+    """Send one structured HTTP request through the session's scope gate.
+
+    Order of operations (critical):
+      1. Session must exist           → 404 if not
+      2. URL must be in session scope → 403 with rejection details
+      3. Persona auth + per-request headers merged
+      4. THEN AND ONLY THEN network I/O happens
+      5. Response captured as FlowStep, appended to transcript
+
+    Out-of-scope requests never reach the wire. That's the property
+    that makes Verify Console safe to use during manual bounty
+    verification.
+    """
+    import time as _t
+    import httpx
+    from core.ghost.flow import FlowStep, MAX_BODY_BYTES
+    from core.verify.console import get_session
+
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(
+            status_code=404, detail=f"session {session_id!r} not found"
+        )
+
+    # ── Step 2 — STRUCTURAL scope gate. Out-of-scope = cannot send. ──
+    if not sess.is_in_scope(req.url):
+        logger.warning(
+            f"[verify] BLOCKED out-of-scope request "
+            f"{req.method} {req.url} in session {session_id[:8]}"
+        )
+        raise ScopeViolationError(
+            url=req.url, allowed_origins=sorted(sess.allowed_origins)
+        )
+
+    # ── Step 3 — merge headers. Session persona is the base; per-
+    # request headers (from req.headers) override on collision.
+    merged_headers: Dict[str, str] = {}
+    # Persona headers go first (they're already lowercased).
+    for k, v in (sess.persona_headers or {}).items():
+        merged_headers[str(k).lower()] = str(v)
+    # Cookie jar from persona — encoded as Cookie header. If the
+    # operator's per-request headers already specify a Cookie, that
+    # wins (typical case: they're testing a custom session token).
+    if sess.persona_cookies and "cookie" not in {k.lower() for k in req.headers}:
+        merged_headers["cookie"] = "; ".join(
+            f"{k}={v}" for k, v in sess.persona_cookies.items()
+        )
+    for k, v in req.headers.items():
+        merged_headers[str(k).lower()] = str(v)
+
+    # ── Step 4 — network I/O.
+    started = _t.time()
+    try:
+        async with httpx.AsyncClient(
+            timeout=req.timeout_s,
+            follow_redirects=req.follow_redirects,
+        ) as client:
+            httpx_req = client.build_request(
+                method=req.method,
+                url=req.url,
+                headers=merged_headers,
+                content=(req.body.encode("utf-8") if req.body else None),
+            )
+            resp = await client.send(httpx_req)
+        status = int(resp.status_code)
+        body_bytes = resp.content or b""
+        truncated = len(body_bytes) > MAX_BODY_BYTES
+        if truncated:
+            body_bytes = body_bytes[:MAX_BODY_BYTES]
+        body_str = body_bytes.decode("utf-8", errors="replace")
+        response_headers = {k: v for k, v in resp.headers.items()}
+        # The URL the response actually came from (post-redirect if any).
+        final_url = str(resp.url)
+        content_type = response_headers.get("content-type")
+    except httpx.TimeoutException as e:
+        # Capture the timeout as a step with status=0 (matches the
+        # Phase 4 replay-engine convention for failed exchanges).
+        status = 0
+        body_str = f"<verify-error: timeout after {req.timeout_s}s: {e}>"
+        response_headers = {}
+        final_url = req.url
+        content_type = None
+        truncated = False
+    except Exception as e:
+        status = 0
+        body_str = f"<verify-error: {type(e).__name__}: {e}>"
+        response_headers = {}
+        final_url = req.url
+        content_type = None
+        truncated = False
+
+    elapsed_ms = (_t.time() - started) * 1000.0
+
+    # ── Step 5 — capture as FlowStep, append to transcript.
+    step = FlowStep(
+        method=req.method,
+        url=final_url,
+        params={},  # we record headers + body; query params encoded in URL
+        headers=merged_headers,
+        request_body=req.body or "",
+        request_content_type=merged_headers.get("content-type"),
+    )
+    step.set_response(
+        status=status,
+        headers=response_headers,
+        body=body_str,
+        body_truncated=truncated,
+        content_type=content_type,
+        elapsed_ms=elapsed_ms,
+        cookies_after_step={},  # verify console doesn't carry jar
+                                # across exchanges by design (each
+                                # exchange is hermetic; persona is the
+                                # source of identity)
+    )
+    sess.append_exchange(step)
+
+    return ExchangeResponse(
+        captured_step=step.to_dict(),
+        transcript_length_after=len(sess.transcript),
+        duration_ms=elapsed_ms,
+        in_scope=True,
+    )
