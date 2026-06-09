@@ -77,6 +77,11 @@ class ResolveChallengeRequest(BaseModel):
     note: str = ""
 
 
+class StartSignupRequest(BaseModel):
+    recipe_id: str
+    persona_id: str
+
+
 # ─────────────────────────── plan ───────────────────────────
 
 
@@ -272,3 +277,56 @@ async def resolve_challenge_endpoint(
                    f"(already settled).",
         )
     return {"challenge_id": challenge_id, "resolved": req.resolved}
+
+
+# ─────────────────────── signup orchestration ───────────────────────
+
+
+@router.post("/signup")
+async def start_signup_endpoint(
+    req: StartSignupRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Kick off a signup: launch a browser, replay the recipe with the
+    persona, hand off anti-bot walls to the human via the challenge bus.
+
+    Returns immediately with a job id (the replay runs in the
+    background — a signup can take minutes while a human solves a
+    CAPTCHA). Poll /signup/{job_id} for progress; the pending
+    challenges surface via GET /challenges and resolve via
+    /challenges/{id}/resolve.
+    """
+    from core.foundry.signup import get_orchestrator
+
+    orch = get_orchestrator()
+    try:
+        job = await orch.start(req.recipe_id, req.persona_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return job.to_dict()
+
+
+@router.get("/signup")
+async def list_signup_jobs_endpoint(_: bool = Depends(verify_sensitive_token)):
+    """List signup jobs (extracted secrets redacted)."""
+    from core.foundry.signup import get_orchestrator
+
+    orch = get_orchestrator()
+    return [j.to_dict() for j in orch.list_jobs()]
+
+
+@router.get("/signup/{job_id}")
+async def get_signup_job_endpoint(
+    job_id: str,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """One signup job's status. Extracted secrets redacted to
+    length-only — the operator reads the actual token from the vault /
+    a dedicated secure path, never the status listing."""
+    from core.foundry.signup import get_orchestrator
+
+    orch = get_orchestrator()
+    job = orch.get_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"signup job {job_id!r} not found")
+    return job.to_dict()
