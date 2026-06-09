@@ -24,6 +24,7 @@ struct MainWindowView: View {
         case scan = "Target Scan"
         case ghost = "Ghost Protocol"
         case verify = "Verify Console"
+        case foundry = "Persona Foundry"
         case graph = "Attack Graph"
         case terminal = "System Console"
         case report = "Report Composer"
@@ -39,6 +40,7 @@ struct MainWindowView: View {
             case .scan: return "dot.scope"
             case .ghost: return "eye.fill"             // Phase 4 — passive interceptor
             case .verify: return "checkmark.shield.fill"  // Phase 5 — verification + repro
+            case .foundry: return "person.badge.key.fill"  // Phase 7 — account creation
             case .graph: return "network"
             case .terminal: return "command.square.fill"
             case .report: return "doc.text.fill"
@@ -111,6 +113,7 @@ struct MainWindowView: View {
                         case .scan: ScanControlView()
                         case .ghost: GhostConsoleView()
                         case .verify: VerifyConsoleView()
+                        case .foundry: FoundryConsoleView()
                         case .graph: NetworkGraphView()  // Metal 3D
                         case .terminal: TerminalView()
                         case .report: ReportView()
