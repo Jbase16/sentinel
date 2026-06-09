@@ -419,10 +419,25 @@ class RecipeReplayer:
                 return None
             return resolution.extracted_value or ""
         # Synchronous binding (literal/persona/generated/extracted).
-        return resolve_binding(
+        value = resolve_binding(
             binding, persona=binding_dict, extracted=extracted,
             generator=generator,
         )
+        # Stash generated values so a later step can reference the SAME
+        # value — e.g. a confirm-password field bound to
+        # `extracted:generated_password` must match the first password
+        # field's `generated:password`. Each generated: resolve produces
+        # a fresh value, so without this stash a confirm field would
+        # never match. We stash on the FIRST occurrence only (don't
+        # overwrite, so confirm reuses the original).
+        if binding.startswith("generated:"):
+            kind = binding.split(":", 1)[1]
+            key = f"generated_{kind}"
+            extracted.setdefault(key, value)
+            # If a prior generated value of this kind exists, reuse it so
+            # repeated generated:password fills are identical within a run.
+            value = extracted[key]
+        return value
 
     async def _emit_challenge(
         self, *, kind: ChallengeKind, prompt: str, recipe: SignupRecipe,

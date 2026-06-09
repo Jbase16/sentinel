@@ -60,6 +60,11 @@ from core.foundry.planner import (
     AccountRole,
     plan_accounts,
 )
+from core.foundry.recorder import (
+    RecordedAction,
+    infer_binding,
+    record_to_recipe,
+)
 
 __all__ = [
     # recipe
@@ -89,4 +94,8 @@ __all__ = [
     "AccountRequirement",
     "AccountRole",
     "plan_accounts",
+    # recorder
+    "RecordedAction",
+    "infer_binding",
+    "record_to_recipe",
 ]
