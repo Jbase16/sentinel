@@ -52,6 +52,10 @@ class SignupJob:
     service_handle: str
     state: SignupJobState = SignupJobState.PENDING
     error: Optional[str] = None
+    # The authorization envelope this job ran under (PF11). Every job is
+    # tied to the researcher's up-front judgment; the audit trail shows
+    # which envelope authorized the execution.
+    envelope_id: Optional[str] = None
     # Filled when the replay finishes. The raw extracted dict (may hold
     # secrets) lives here; the public to_dict() redacts it.
     _outcome: Optional[Any] = None  # ReplayOutcome
@@ -66,6 +70,7 @@ class SignupJob:
             "service_handle": self.service_handle,
             "state": self.state.value,
             "error": self.error,
+            "envelope_id": self.envelope_id,
             "created_at": self.created_at,
             "finished_at": self.finished_at,
         }
@@ -124,19 +129,50 @@ class SignupOrchestrator:
         from core.foundry.challenges import get_challenge_bus
         return get_challenge_bus()
 
-    async def start(self, recipe_id: str, persona_id: str) -> SignupJob:
-        """Load recipe + persona, create a job, launch the background
-        replay. Returns the job immediately (state PENDING/RUNNING).
+    async def start(
+        self, recipe_id: str, persona_id: str, *, envelope_id: str,
+    ) -> SignupJob:
+        """Load recipe + persona, ENFORCE the authorization envelope,
+        create a job, launch the background replay. Returns the job
+        immediately (state PENDING/RUNNING).
 
-        Raises ValueError if the recipe or persona doesn't exist, or the
-        persona is missing a field the recipe needs (fail fast before
-        spinning up a browser)."""
+        The envelope is the precondition that makes "automates execution,
+        not judgment" real: the researcher's up-front authorization
+        (PF11) is checked BEFORE any browser launch. An action against a
+        target the envelope doesn't authorize, or a workflow it doesn't
+        permit, is refused here — execution never reaches the wire.
+
+        Raises:
+          ValueError  — recipe/persona missing, or persona lacks a field
+                        the recipe needs (fail fast).
+          AuthorizationDenied — the envelope doesn't authorize this
+                        action (no envelope, expired, off-scope, or
+                        workflow not permitted).
+        """
+        from core.foundry.authorization import (
+            AuthorizationDenied, get_envelope,
+        )
         from core.foundry.recipe_store import load_recipe
         from core.foundry.vault import PersonaVault
 
         recipe = load_recipe(recipe_id)
         if recipe is None:
             raise ValueError(f"recipe {recipe_id!r} not found")
+
+        # ── Authorization gate (PF11) — judgment is a precondition. ──
+        envelope = get_envelope(envelope_id)
+        if envelope is None:
+            raise AuthorizationDenied(
+                f"no authorization envelope {envelope_id!r} — the Foundry "
+                f"refuses to create accounts without the researcher's "
+                f"up-front authorization. Create one with create_envelope()."
+            )
+        # The workflow is the recipe's service handle; the target is the
+        # recipe's origin. Both must be inside the envelope.
+        envelope.authorize_action(
+            target_origin=recipe.origin,
+            workflow=recipe.service_handle,
+        )
 
         vault = self._vault or PersonaVault()
         persona = vault.get_persona(persona_id)
@@ -157,6 +193,7 @@ class SignupOrchestrator:
             persona_id=persona_id,
             service_handle=recipe.service_handle,
             state=SignupJobState.PENDING,
+            envelope_id=envelope_id,
         )
         self._jobs[job.job_id] = job
 

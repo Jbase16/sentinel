@@ -37,9 +37,24 @@ def _run(coro):
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("SENTINELFORGE_PERSONA_VAULT", str(tmp_path / "personas"))
     monkeypatch.setenv("SENTINELFORGE_RECIPE_STORE", str(tmp_path / "recipes"))
+    monkeypatch.setenv("SENTINELFORGE_AUTHZ_STORE", str(tmp_path / "authz"))
     _reset_bus_for_tests()
     yield
     _reset_bus_for_tests()
+
+
+def _make_envelope():
+    """An APPROVED envelope authorizing airtable signup on staging."""
+    from core.foundry.authorization import create_envelope
+
+    return create_envelope(
+        researcher_identity="phishnchips16",
+        target_handle="airtable",
+        authorized_origins=["https://staging.airtable.com"],
+        authorization_basis="hackerone:airtable public bug bounty — staging signup in scope",
+        allowed_workflows=["airtable"],
+        disclosure_attestation=True,
+    )
 
 
 def _make_recipe(with_challenge=False, with_extract=False):
@@ -94,20 +109,24 @@ class TestStartFailFast:
     def test_unknown_recipe_raises(self):
         vault = PersonaVault()
         persona = _make_persona(vault)
+        env = _make_envelope()
         orch = _reset_orchestrator_for_tests(
             driver_factory=_mock_driver_factory(), vault=vault,
         )
         with pytest.raises(ValueError, match="recipe.*not found"):
-            _run(orch.start("no-such-recipe", persona.persona_id))
+            _run(orch.start("no-such-recipe", persona.persona_id,
+                            envelope_id=env.envelope_id))
 
     def test_unknown_persona_raises(self):
         recipe = _make_recipe()
+        env = _make_envelope()
         vault = PersonaVault()
         orch = _reset_orchestrator_for_tests(
             driver_factory=_mock_driver_factory(), vault=vault,
         )
         with pytest.raises(ValueError, match="persona.*not found"):
-            _run(orch.start(recipe.recipe_id, "no-such-persona"))
+            _run(orch.start(recipe.recipe_id, "no-such-persona",
+                            envelope_id=env.envelope_id))
 
     def test_persona_missing_field_raises(self):
         # Recipe needs persona:phone; persona has none.
@@ -123,13 +142,68 @@ class TestStartFailFast:
             ],
         )
         save_recipe(recipe)
+        env = _make_envelope()
         vault = PersonaVault()
         persona = _make_persona(vault)  # no phone
         orch = _reset_orchestrator_for_tests(
             driver_factory=_mock_driver_factory(), vault=vault,
         )
         with pytest.raises(ValueError, match="missing fields"):
-            _run(orch.start(recipe.recipe_id, persona.persona_id))
+            _run(orch.start(recipe.recipe_id, persona.persona_id,
+                            envelope_id=env.envelope_id))
+
+    def test_no_envelope_refused(self):
+        from core.foundry.authorization import AuthorizationDenied
+        recipe = _make_recipe()
+        vault = PersonaVault()
+        persona = _make_persona(vault)
+        orch = _reset_orchestrator_for_tests(
+            driver_factory=_mock_driver_factory(), vault=vault,
+        )
+        with pytest.raises(AuthorizationDenied, match="no authorization envelope"):
+            _run(orch.start(recipe.recipe_id, persona.persona_id,
+                            envelope_id="nonexistent-envelope"))
+
+    def test_unapproved_envelope_refused(self):
+        # An envelope WITHOUT disclosure attestation is UNAPPROVED →
+        # account creation refused (the unapproved-context rule).
+        from core.foundry.authorization import AuthorizationDenied, create_envelope
+        recipe = _make_recipe()
+        vault = PersonaVault()
+        persona = _make_persona(vault)
+        env = create_envelope(
+            researcher_identity="x", target_handle="airtable",
+            authorized_origins=["https://staging.airtable.com"],
+            authorization_basis="basis",
+            allowed_workflows=["airtable"],
+            disclosure_attestation=False,  # NOT attested → unapproved
+        )
+        orch = _reset_orchestrator_for_tests(
+            driver_factory=_mock_driver_factory(), vault=vault,
+        )
+        with pytest.raises(AuthorizationDenied, match="not in an APPROVED"):
+            _run(orch.start(recipe.recipe_id, persona.persona_id,
+                            envelope_id=env.envelope_id))
+
+    def test_off_scope_workflow_refused(self):
+        # An envelope that authorizes a DIFFERENT service refuses this one.
+        from core.foundry.authorization import AuthorizationDenied, create_envelope
+        recipe = _make_recipe()  # service_handle = airtable
+        vault = PersonaVault()
+        persona = _make_persona(vault)
+        env = create_envelope(
+            researcher_identity="x", target_handle="affirm",
+            authorized_origins=["https://staging.airtable.com"],
+            authorization_basis="basis",
+            allowed_workflows=["affirm"],  # NOT airtable
+            disclosure_attestation=True,
+        )
+        orch = _reset_orchestrator_for_tests(
+            driver_factory=_mock_driver_factory(), vault=vault,
+        )
+        with pytest.raises(AuthorizationDenied, match="does not permit workflow"):
+            _run(orch.start(recipe.recipe_id, persona.persona_id,
+                            envelope_id=env.envelope_id))
 
 
 # ───────────────────────── background run ─────────────────────────
@@ -146,8 +220,11 @@ class TestBackgroundRun:
             vault=vault,
         )
 
+        env = _make_envelope()
+
         async def scenario():
-            job = await orch.start(recipe.recipe_id, persona.persona_id)
+            job = await orch.start(recipe.recipe_id, persona.persona_id,
+                                   envelope_id=env.envelope_id)
             # Wait for the background task to finish.
             for _ in range(200):
                 if orch.get_job(job.job_id).state in (
@@ -179,8 +256,11 @@ class TestBackgroundRun:
             driver_factory=_mock_driver_factory(), bus=bus, vault=vault,
         )
 
+        env = _make_envelope()
+
         async def scenario():
-            job = await orch.start(recipe.recipe_id, persona.persona_id)
+            job = await orch.start(recipe.recipe_id, persona.persona_id,
+                                   envelope_id=env.envelope_id)
 
             # The "human": poll for the challenge, resolve it.
             async def human():
@@ -215,8 +295,11 @@ class TestBackgroundRun:
             driver_factory=_mock_driver_factory(), bus=bus, vault=vault,
         )
 
+        env = _make_envelope()
+
         async def scenario():
-            job = await orch.start(recipe.recipe_id, persona.persona_id)
+            job = await orch.start(recipe.recipe_id, persona.persona_id,
+                                   envelope_id=env.envelope_id)
 
             async def human():
                 for _ in range(200):
@@ -252,12 +335,16 @@ class TestSignupEndpoints:
 
         vault = PersonaVault()
         persona = _make_persona(vault)
+        env = _make_envelope()
         _reset_orchestrator_for_tests(
             driver_factory=_mock_driver_factory(), vault=vault,
         )
         with pytest.raises(HTTPException) as ei:
             _run(start_signup_endpoint(
-                StartSignupRequest(recipe_id="nope", persona_id=persona.persona_id),
+                StartSignupRequest(
+                    recipe_id="nope", persona_id=persona.persona_id,
+                    envelope_id=env.envelope_id,
+                ),
                 _=True,
             ))
         assert ei.value.status_code == 400

@@ -80,6 +80,34 @@ class ResolveChallengeRequest(BaseModel):
 class StartSignupRequest(BaseModel):
     recipe_id: str
     persona_id: str
+    envelope_id: str = Field(
+        ...,
+        description="The authorization envelope this signup runs under. "
+                    "Required — the Foundry refuses account creation "
+                    "without the researcher's up-front authorization.",
+    )
+
+
+class CreateEnvelopeRequest(BaseModel):
+    """The researcher's up-front judgment, declared explicitly."""
+    researcher_identity: str = Field(..., min_length=1)
+    target_handle: str = Field(..., min_length=1)
+    authorized_origins: List[str] = Field(..., min_length=1)
+    authorization_basis: str = Field(
+        ..., min_length=1,
+        description="WHY this is authorized — the disclosed authorization "
+                    "reference (program policy, scope statement).",
+    )
+    allowed_workflows: List[str] = Field(..., min_length=1)
+    disclosure_attestation: bool = Field(
+        default=False,
+        description="The researcher attests they operate under disclosed, "
+                    "legitimate authorization. Must be true for the "
+                    "envelope to reach an APPROVED context.",
+    )
+    max_accounts_per_service: int = 3
+    legal_posture: str = ""
+    ttl_days: int = 30
 
 
 # ─────────────────────────── plan ───────────────────────────
@@ -282,25 +310,99 @@ async def resolve_challenge_endpoint(
 # ─────────────────────── signup orchestration ───────────────────────
 
 
+@router.post("/envelopes")
+async def create_envelope_endpoint(
+    req: CreateEnvelopeRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Declare an authorization envelope — the researcher's up-front
+    judgment (identity, target, scope, basis, allowed workflows, legal
+    posture). Account creation runs strictly within it. The Foundry
+    automates execution; the human makes THIS decision."""
+    from core.foundry.authorization import create_envelope
+
+    env = create_envelope(
+        researcher_identity=req.researcher_identity,
+        target_handle=req.target_handle,
+        authorized_origins=req.authorized_origins,
+        authorization_basis=req.authorization_basis,
+        allowed_workflows=req.allowed_workflows,
+        disclosure_attestation=req.disclosure_attestation,
+        max_accounts_per_service=req.max_accounts_per_service,
+        legal_posture=req.legal_posture,
+        ttl_days=req.ttl_days,
+    )
+    return env.to_dict()
+
+
+@router.get("/envelopes")
+async def list_envelopes_endpoint(
+    target_handle: Optional[str] = None,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """List authorization envelopes (with their approved/unapproved
+    context), optionally filtered by target."""
+    from core.foundry.authorization import list_envelopes
+
+    return [e.to_dict() for e in list_envelopes(target_handle)]
+
+
+@router.get("/envelopes/{envelope_id}/proof")
+async def envelope_proof_endpoint(
+    envelope_id: str,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Emit the authorization proof for an APPROVED envelope — the
+    disclosed-authorization + auditability + enforceable-controls
+    artifact that SHOULD replace CAPTCHA for an authorized researcher-
+    agent. 409 if the envelope is in an UNAPPROVED context (no proof to
+    offer; the human checkpoint stands)."""
+    from core.foundry.authorization import get_envelope
+
+    env = get_envelope(envelope_id)
+    if env is None:
+        raise HTTPException(status_code=404, detail=f"envelope {envelope_id!r} not found")
+    proof = env.authorization_proof(audit_reference=f"envelope:{envelope_id}")
+    if proof is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "envelope is in an UNAPPROVED context — no authorization "
+                "proof. Attest disclosure + ensure scope/basis/expiry are "
+                "set to reach an APPROVED context."
+            ),
+        )
+    return proof
+
+
 @router.post("/signup")
 async def start_signup_endpoint(
     req: StartSignupRequest,
     _: bool = Depends(verify_sensitive_token),
 ):
-    """Kick off a signup: launch a browser, replay the recipe with the
-    persona, hand off anti-bot walls to the human via the challenge bus.
+    """Kick off a signup WITHIN an authorization envelope: launch a
+    browser, replay the recipe with the persona, hand off anti-bot
+    walls to the human via the challenge bus.
+
+    The envelope is the precondition. If it doesn't authorize this
+    target + workflow (or is missing / expired / unapproved), the
+    request is refused (403) before any browser launches — judgment
+    before execution.
 
     Returns immediately with a job id (the replay runs in the
-    background — a signup can take minutes while a human solves a
-    CAPTCHA). Poll /signup/{job_id} for progress; the pending
-    challenges surface via GET /challenges and resolve via
-    /challenges/{id}/resolve.
+    background). Poll /signup/{job_id}; challenges surface via
+    GET /challenges and resolve via /challenges/{id}/resolve.
     """
+    from core.foundry.authorization import AuthorizationDenied
     from core.foundry.signup import get_orchestrator
 
     orch = get_orchestrator()
     try:
-        job = await orch.start(req.recipe_id, req.persona_id)
+        job = await orch.start(
+            req.recipe_id, req.persona_id, envelope_id=req.envelope_id,
+        )
+    except AuthorizationDenied as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return job.to_dict()

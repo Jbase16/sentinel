@@ -46,6 +46,56 @@ a human.** Not as a "go do all of this manually" dump, but as a
 That reframe — *automate the boring, hand off the rare, keep the human
 the agent of every consequential action* — is the Persona Foundry.
 
+## Automates execution, not judgment
+
+The sharpest way to state the legitimacy principle: **the Foundry
+automates execution, not judgment.** The researcher makes the
+meaningful decisions up front — identity, target, scope, rate limits,
+legal posture, and which workflows are allowed. The agent performs the
+mechanical work strictly within that policy envelope. Judgment is a
+*precondition*, checked in code, before any execution happens.
+
+This is not a slogan in a docstring — it is enforced. The
+**Authorization Envelope** (PF11, `core/foundry/authorization.py`) is
+the first-class artifact that captures the researcher's up-front
+decisions:
+
+- **who** is accountable (the platform identity every action ties to),
+- **what** target/program, and which **origins** are in scope,
+- the **authorization basis** — the disclosed reason it's authorized,
+- a **disclosure attestation** the researcher must set,
+- the **allowed workflows** (deny-by-default),
+- the **constraints** (rate limit, account caps), and an **expiry**.
+
+The signup orchestrator *requires* an envelope and calls
+`envelope.authorize_action(target, workflow)` before launching a
+browser. An action against an out-of-scope origin, an unpermitted
+workflow, or an unapproved/expired envelope is refused — execution
+never reaches the wire. No envelope, no account creation.
+
+### The CAPTCHA stance, encoded
+
+The Foundry does **not** argue that agents should be admitted because
+they can beat human-verification puzzles. It never solves a CAPTCHA.
+The argument it makes is different: advanced agents make those puzzles
+*obsolete in approved contexts*, because the envelope produces
+something strictly stronger than a puzzle —
+
+> disclosed authorization + auditability + enforceable controls.
+
+- In an **approved context** (a valid, attested, in-scope envelope),
+  the envelope emits an `authorization_proof`: a signed, time-bounded,
+  scoped, audit-linked attestation. That proof is the artifact that
+  *should* replace CAPTCHA for an authorized researcher-agent. Until a
+  program accepts it, the anti-bot wall still routes to the human — but
+  the handoff is annotated with the authorization basis, so the audit
+  trail shows the action occurred under disclosed authorization, not as
+  an anonymous bot.
+- In an **unapproved context** (no valid envelope), CAPTCHA remains a
+  hard human checkpoint, and account-creation workflows are refused
+  entirely. The puzzle keeps doing its job against unauthorized
+  automation — exactly as intended.
+
 ## The principle that keeps it legitimate
 
 The researcher remains the agent of every action that matters:

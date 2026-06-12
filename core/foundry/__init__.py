@@ -65,6 +65,15 @@ from core.foundry.recorder import (
     infer_binding,
     record_to_recipe,
 )
+from core.foundry.authorization import (
+    AuthorizationContext,
+    AuthorizationDenied,
+    AuthorizationEnvelope,
+    create_envelope,
+    get_envelope,
+    list_envelopes,
+    save_envelope,
+)
 
 __all__ = [
     # recipe
@@ -98,4 +107,12 @@ __all__ = [
     "RecordedAction",
     "infer_binding",
     "record_to_recipe",
+    # authorization
+    "AuthorizationContext",
+    "AuthorizationDenied",
+    "AuthorizationEnvelope",
+    "create_envelope",
+    "get_envelope",
+    "list_envelopes",
+    "save_envelope",
 ]
