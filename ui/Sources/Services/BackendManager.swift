@@ -344,6 +344,24 @@ class BackendManager: ObservableObject {
             print("[BackendManager] Normalized SENTINEL_OLLAMA_URL to localhost (Docker legacy)")
         }
 
+        // Bug-bounty deconfliction header. HackerOne (and most programs)
+        // require an identifying header on ALL test traffic. If the operator
+        // has dropped their handle in ~/.sentinelforge/bb_handle, pass it to
+        // the backend so the Ghost proxy stamps every outbound request with
+        // it. The GUI is launched from Finder/Xcode and doesn't inherit the
+        // shell env, so we read the file explicitly. Empty/missing → header
+        // stays off (backend default).
+        let bbHandleURL = home
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("bb_handle")
+        if let handle = try? String(contentsOf: bbHandleURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !handle.isEmpty
+        {
+            env["SENTINEL_GHOST_BB_VALUE"] = handle
+            print("[BackendManager] Deconfliction header enabled for handle: \(handle)")
+        }
+
         // Provide a boot manifest path for deterministic readiness diagnostics.
         let manifestDir =
             home
@@ -450,11 +468,19 @@ class BackendManager: ObservableObject {
             // Check health endpoint and parse readiness status
             let (reachable, status) = await checkBackendHealth(timeoutInterval: requestTimeout)
             if reachable, status == "ready" {
-                // TOKEN FRESHNESS CHECK:
-                // Ensure the token file has been updated SINCE we launched the process.
-                // This prevents race conditions where we connect using an old stale token
-                // before the new backend has overwritten it.
-                if isTokenFileFresh(since: launchTime) {
+                // TOKEN READINESS CHECK:
+                // The backend ADOPTS the existing on-disk token (precedence:
+                // env -> existing file -> generate) and only REWRITES the file
+                // when the token VALUE changes. So a fresh mtime proves "a new
+                // token was just written", but a stale mtime alongside an
+                // existing, valid token file is the normal steady state — the
+                // on-disk token is still exactly the one the backend is using.
+                //
+                // Gating on mtime alone made every launch after the first time
+                // out: _write_token_file() is idempotent, so the file is never
+                // rewritten and isTokenFileFresh() can never become true. Treat
+                // freshness as a positive signal, but accept any usable token.
+                if isTokenFileFresh(since: launchTime) || tokenFileIsUsable() {
                     await MainActor.run {
                         self.backendState = .ready
                         self.status = "Core Online"
@@ -465,7 +491,7 @@ class BackendManager: ObservableObject {
                     startHealthMonitor()
                     return
                 } else {
-                    print("[BackendManager] Health OK but Token Stale. Waiting for token write...")
+                    print("[BackendManager] Health OK but no usable token file yet. Waiting for token write...")
                 }
             } else if reachable, status == "starting" {
                 // Backend is reachable but still initializing - keep waiting
@@ -870,5 +896,19 @@ class BackendManager: ObservableObject {
         // Allow a small buffer (0.5s) for file system clock skews, but generally
         // the file modification must be AFTER the launch time.
         return modDate >= launchTime.addingTimeInterval(-0.5)
+    }
+
+    /// Whether a usable API token exists on disk. The backend adopts an
+    /// existing token file rather than overwriting it, so a valid (>=32 char,
+    /// url-safe) token here is the one the backend authenticates with —
+    /// regardless of whether the file was rewritten this launch. Mirrors the
+    /// backend's own sanity check in SentinelConfig.from_env().
+    private func tokenFileIsUsable() -> Bool {
+        let tokenPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge")
+            .appendingPathComponent("api_token")
+        guard let raw = try? String(contentsOf: tokenPath, encoding: .utf8) else { return false }
+        let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.count >= 32 && token.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
     }
 }

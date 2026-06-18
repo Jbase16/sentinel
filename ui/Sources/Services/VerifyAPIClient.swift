@@ -173,13 +173,17 @@ public struct VerifyPromoteEntry: Codable, Identifiable, Equatable {
     }
 }
 
-public struct VerifyPromoteResult: Codable {
+public struct VerifyPromoteResult: Codable, Identifiable {
     public let findingId: String?
     public let targetUrl: String
     public let entryCount: Int
     public let stepsToReproduce: [String]
     public let placeholderLegend: [String: String]
     public let entries: [VerifyPromoteEntry]
+
+    // Identifiable conformance for `.sheet(item:)`. Computed (not stored) so it
+    // stays out of CodingKeys and doesn't affect decoding of the API response.
+    public var id: String { findingId ?? targetUrl }
 
     enum CodingKeys: String, CodingKey {
         case findingId = "finding_id"

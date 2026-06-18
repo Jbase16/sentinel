@@ -158,6 +158,65 @@ public struct GhostReplayResult: Codable {
     }
 }
 
+// MARK: - Cross-principal diff (G5)
+
+/// One step of a cross-principal replay: Alice's captured response vs Bob's.
+/// Mirror of a step entry in core/ghost/flow_diff.py FlowDiff.to_dict().
+public struct GhostCrossPrincipalStep: Codable, Identifiable, Equatable {
+    public let stepIndex: Int
+    public let method: String
+    public let url: String
+    public let aliceStatus: Int
+    public let bobStatus: Int
+    public let aliceBodySize: Int
+    public let bobBodySize: Int
+    public let signal: String
+    public let confidence: Double
+    public let rationale: String
+    public let isIdorSignal: Bool
+    public let aliceExcerpt: String?
+    public let bobExcerpt: String?
+
+    public var id: String { "\(stepIndex)-\(url)" }
+
+    enum CodingKeys: String, CodingKey {
+        case stepIndex = "step_index"
+        case method, url
+        case aliceStatus = "alice_status"
+        case bobStatus = "bob_status"
+        case aliceBodySize = "alice_body_size"
+        case bobBodySize = "bob_body_size"
+        case signal, confidence, rationale
+        case isIdorSignal = "is_idor_signal"
+        case aliceExcerpt = "alice_excerpt"
+        case bobExcerpt = "bob_excerpt"
+    }
+}
+
+/// Result of replaying a captured flow under a second identity (Bob).
+/// `idorStepCount` > 0 means Bob reached resources captured as Alice.
+public struct GhostCrossPrincipalDiff: Codable {
+    public let sourceFlowId: String
+    public let sourceFlowName: String
+    public let alicePersona: String
+    public let bobPersona: String
+    public let totalElapsedMs: Double
+    public let idorStepCount: Int
+    public let deniedStepCount: Int
+    public let stepFindings: [GhostCrossPrincipalStep]
+
+    enum CodingKeys: String, CodingKey {
+        case sourceFlowId = "source_flow_id"
+        case sourceFlowName = "source_flow_name"
+        case alicePersona = "alice_persona"
+        case bobPersona = "bob_persona"
+        case totalElapsedMs = "total_elapsed_ms"
+        case idorStepCount = "idor_step_count"
+        case deniedStepCount = "denied_step_count"
+        case stepFindings = "step_findings"
+    }
+}
+
 public struct GhostMutationSpec: Codable {
     public let stepIndex: Int
     public let mutation: String
@@ -175,32 +234,10 @@ public struct GhostMutationSpec: Codable {
     }
 }
 
-/// Minimal AnyCodable for opaque mutation params.
-public struct AnyCodable: Codable {
-    public let value: Any
-
-    public init(_ value: Any) { self.value = value }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.singleValueContainer()
-        if let v = try? c.decode(Bool.self) { self.value = v; return }
-        if let v = try? c.decode(Int.self) { self.value = v; return }
-        if let v = try? c.decode(Double.self) { self.value = v; return }
-        if let v = try? c.decode(String.self) { self.value = v; return }
-        self.value = NSNull()
-    }
-
-    public func encode(to encoder: Encoder) throws {
-        var c = encoder.singleValueContainer()
-        switch value {
-        case let v as Bool: try c.encode(v)
-        case let v as Int: try c.encode(v)
-        case let v as Double: try c.encode(v)
-        case let v as String: try c.encode(v)
-        default: try c.encodeNil()
-        }
-    }
-}
+// NOTE: AnyCodable is defined once in Sources/Models/AnyCodable.swift
+// (type-erased Codable wrapper with nested array/dict support). The local
+// duplicate that used to live here collided with it as soon as this file
+// was added to the build target — removed in favor of the shared type.
 
 
 // MARK: - Errors
@@ -375,5 +412,30 @@ public final class GhostAPIClient {
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         return try await send(req, as: GhostReplayResult.self)
+    }
+
+    // MARK: cross-principal diff (G5)
+
+    /// Replay a captured flow (recorded as Alice) under a second identity
+    /// (Bob) and surface per-step cross-principal diffs. Bob is supplied as
+    /// raw headers/cookies — e.g. an `Authorization: Bearer …` token or a
+    /// session cookie — which REPLACE the captured credentials on replay.
+    public func crossPrincipalDiff(
+        flowId: String,
+        bobHeaders: [String: String] = [:],
+        bobCookies: [String: String] = [:]
+    ) async throws -> GhostCrossPrincipalDiff {
+        var req = authedRequest(
+            path: "/v1/ghost/flows/\(flowId)/diff", method: "POST"
+        )
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "alice_persona_name": "alice",
+            "bob_persona_name": "bob",
+            "bob_headers": bobHeaders,
+            "bob_cookies": bobCookies,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return try await send(req, as: GhostCrossPrincipalDiff.self)
     }
 }

@@ -106,92 +106,72 @@ class LazarusEngine:
     
     async def _process_async(self, flow: http.HTTPFlow):
         """
-        Process JS de-obfuscation asynchronously.
-        Uses asyncio.to_thread to avoid blocking the event loop.
-        
-        TRINITY OF HARDENING - Chapter 18: Lazarus Spectral Reconstructor
-        ───────────────────────────────────────────────────────────────────
-        1. De-obfuscate JS to reveal hidden API routes
-        2. Emit FINDING_DISCOVERED events for each discovered route
-        3. Generate Shadow API Client for pre-flight attack simulation
+        PASSIVELY analyze JavaScript for referenced API routes.
+
+        ⚠️  INVARIANT: Ghost is a *passive* interception proxy. This method
+        MUST NOT modify ``flow.response`` in any way. The browser must receive
+        the site's bytes exactly as the server sent them.
+
+        A previous version replaced the entire JS body with a truncated,
+        LLM-"de-obfuscated" rewrite (and, due to an async bug, often with the
+        string repr of an un-awaited coroutine). That corrupted every in-bounds
+        script: pages rendered and scrolled but all click handlers were dead.
+        We now read the response read-only, mine route strings with static
+        regexes over the FULL original code, and emit findings off to the side.
+        De-obfuscation for human analysis, if ever wanted, must happen on a
+        copy in a dedicated viewer — never on the live flow.
         """
         from core.cortex.events import get_event_bus, GraphEvent, GraphEventType
-        
+
         try:
             original_code = flow.response.text
             if not original_code:
                 return
-            
+
             code_hash = hashlib.sha256(original_code.encode()).hexdigest()
             url = flow.request.pretty_url
-            
-            # Check cache first (fast path)
+
+            # Dedup: only mine each distinct script once per run.
             if code_hash in self.cache:
-                flow.response.text = self.cache[code_hash]
-                flow.response.headers["X-Lazarus-Cache"] = "HIT"
-                logger.debug(f"[Lazarus] Cache hit for {code_hash[:8]}")
                 return
-            
-            # Mark as processing to prevent duplicates
-            self._processing.add(code_hash)
-            
-            try:
-                # Run AI in thread pool to avoid blocking
-                clean_code = await asyncio.to_thread(
-                    self.ai.deobfuscate_code,
-                    original_code[:self.max_context_chars]
+            self.cache[code_hash] = code_hash  # marker only; we never serve this
+
+            # Static extraction over the ORIGINAL, full code — no LLM call, no
+            # truncation, no write-back. Route strings (fetch/axios/xhr) survive
+            # minification, so regexes are sufficient and side-effect free.
+            routes = self._extract_api_routes(original_code)
+            if not routes:
+                return
+
+            event_bus = get_event_bus()
+            for route in routes:
+                event_bus.emit(GraphEvent(
+                    type=GraphEventType.FINDING_CREATED,
+                    payload={
+                        "finding_id": hashlib.sha256(
+                            f"{url}:{route['method']}:{route['path']}".encode()
+                        ).hexdigest()[:32],
+                        "tool": "lazarus",
+                        # INFO, not MEDIUM: an API route referenced in a JS
+                        # bundle is an observation, not a vulnerability. The
+                        # old MEDIUM severity flooded the findings store and
+                        # polluted AI summaries.
+                        "severity": "INFO",
+                        "title": f"API route referenced in JS: {route['method']} {route['path']}",
+                        "target": url,
+                    }
+                ))
+                logger.debug(f"[Lazarus] route (passive): {route['method']} {route['path']}")
+
+            shadow_client = self._generate_shadow_client(routes, url)
+            if shadow_client:
+                self._shadow_clients[code_hash] = shadow_client
+                logger.info(
+                    f"[Lazarus] mined {len(routes)} route(s) from {url} (response untouched)"
                 )
-                
-                # Fallback if AI fails
-                if not clean_code:
-                    logger.warning(f"[Lazarus] AI returned empty for {code_hash[:8]}")
-                    clean_code = original_code
-                else:
-                    # Add watermark
-                    clean_code = f"// [Lazarus] De-obfuscated by Sentinel\n{clean_code}"
-                    
-                    # ═════════════════════════════════════════════════════════
-                    # SPECTRAL ANALYSIS: Extract hidden API routes
-                    # ═════════════════════════════════════════════════════════
-                    routes = self._extract_api_routes(clean_code)
-                    event_bus = get_event_bus()
-                    
-                    for route in routes:
-                        # Emit FINDING_CREATED for each hidden route
-                        event_bus.emit(GraphEvent(
-                            type=GraphEventType.FINDING_CREATED,
-                            payload={
-                                "finding_id": hashlib.sha256(f"{url}:{route['method']}:{route['path']}".encode()).hexdigest()[:32],
-                                "tool": "lazarus",
-                                "severity": "MEDIUM",
-                                "title": f"Hidden API route discovered: {route['method']} {route['path']}",
-                                "target": url
-                            }
-                        ))
-                        logger.info(f"[Lazarus] Discovered hidden route: {route['method']} {route['path']}")
-                    
-                    # Generate Shadow API Client if routes found
-                    if routes:
-                        shadow_client = self._generate_shadow_client(routes, url)
-                        if shadow_client:
-                            # Store shadow client for Strategos
-                            self._shadow_clients[code_hash] = shadow_client
-                            logger.info(f"[Lazarus] Generated Shadow Client with {len(routes)} routes")
-                
-                # Cache the result
-                self.cache[code_hash] = clean_code
-                flow.response.text = clean_code
-                flow.response.headers["X-Lazarus-Processed"] = "TRUE"
-                flow.response.headers["X-Lazarus-Routes"] = str(len(routes)) if 'routes' in dir() and routes else "0"
-                
-                logger.info(f"[Lazarus] De-obfuscated {code_hash[:8]} ({len(original_code)} -> {len(clean_code)} chars)")
-                
-            finally:
-                # Remove from processing set
-                self._processing.discard(code_hash)
-                
+
         except Exception as e:
-            logger.error(f"[Lazarus] Failed to process: {e}")
+            logger.error(f"[Lazarus] Passive analysis failed: {e}")
     
     def _extract_api_routes(self, code: str) -> list:
         """

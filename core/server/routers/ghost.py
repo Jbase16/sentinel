@@ -237,16 +237,11 @@ async def stop_ghost(_: bool = Depends(verify_sensitive_token)) -> GhostStopResp
         )
 
     try:
-        _INTERCEPTOR.stop()
-        # Give the asyncio task a moment to actually finish cancellation
-        # so subsequent /start calls don't trip over a half-dead master.
-        task = getattr(_INTERCEPTOR, "_task", None)
-        if task is not None:
-            try:
-                await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                # Don't care — shutdown is best-effort.
-                pass
+        # stop() is now async and graceful: it signals shutdown and waits for
+        # the run task to finish so the listener socket is fully closed and the
+        # port released before we drop the reference. (Previously stop() cancelled
+        # the task mid-shutdown, leaking a zombie listener on the port.)
+        await _INTERCEPTOR.stop()
     except Exception as e:
         logger.warning(f"[Ghost] stop encountered: {type(e).__name__}: {e}")
 
