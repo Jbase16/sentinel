@@ -14,6 +14,7 @@
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 /// Enum ToolSelectionMode.
 enum ToolSelectionMode: String, CaseIterable, Identifiable {
@@ -23,7 +24,6 @@ enum ToolSelectionMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var displayName: String {
-        // Switch over value.
         switch self {
         case .scheduler: return "Strategos"
         case .custom: return "Custom"
@@ -73,6 +73,7 @@ struct ScanControlView: View {
             if let p0 = appState.activeP0Alert {
                 P0AlertBanner(alert: p0) { appState.activeP0Alert = nil }
             }
+
             if let waf = appState.wafStatus {
                 WAFStatusBanner(waf: waf) { appState.wafStatus = nil }
             }
@@ -118,23 +119,18 @@ struct ScanControlView: View {
                 .frame(width: 180)
                 .disabled(isScanning)
                 .onChange(of: toolSelectionMode) { _, newMode in
-                    // Guard condition.
                     guard newMode == .custom else { return }
-                    // Guard condition.
                     guard selectedTools.isEmpty, !installedTools.isEmpty else { return }
                     selectedTools = Set(installedTools)
                 }
                 .onChange(of: installedTools) { _, newInstalled in
-                    // Guard condition.
                     guard toolSelectionMode == .custom else { return }
-                    // Guard condition.
                     guard selectedTools.isEmpty, !newInstalled.isEmpty else { return }
                     selectedTools = Set(newInstalled)
                 }
 
-                // Conditional branch.
+                // Tool Configuration
                 if toolSelectionMode == .custom {
-                    // Tool Configuration
                     Button(action: { showToolConfig.toggle() }) {
                         Image(systemName: "gearshape")
                             .foregroundColor(selectedTools.isEmpty ? .secondary : .blue)
@@ -161,7 +157,6 @@ struct ScanControlView: View {
                 }
                 .disabled(isScanning)
 
-                // Conditional branch.
                 if isScanning {
                     Button(action: { appState.cancelScan() }) {
                         HStack(spacing: 4) {
@@ -196,14 +191,12 @@ struct ScanControlView: View {
             Divider()
 
             // Two-pane layout: Findings List | Logs
-            GeometryReader { geo in
-                HSplitView {
-                    FindingsListView()
-                        .frame(minWidth: 300)
+            HSplitView {
+                FindingsListView()
+                    .frame(minWidth: 300)
 
-                    LogConsoleView()
-                        .frame(minWidth: 300)
-                }
+                LogConsoleView()
+                    .frame(minWidth: 300)
             }
         }
     }
@@ -225,87 +218,97 @@ struct ScanControlView: View {
             return
         }
 
-        // Conditional branch.
-        if !scanTarget.isEmpty && backend.isRunning {
-            print("[ScanControlView] Guard passed, proceeding to start scan")
-            // Conditional branch.
-            if toolSelectionMode == .custom && selectedTools.isEmpty {
-                showToolConfig = true
-                return
-            }
-            let modules: [String]
-            // Switch over value.
-            switch toolSelectionMode {
-            case .scheduler:
-                modules = []
-            case .custom:
-                modules = Array(selectedTools)
-            }
-            print(
-                "[ScanControlView] Calling appState.startScan(target=\(scanTarget), modules=\(modules), mode=\(selectedMode.rawValue))"
-            )
-
-            let personasTrimmed = personasJSON.trimmingCharacters(in: .whitespacesAndNewlines)
-            let parsedPersonas = parseJSONArray(personasJSON)
-            if !personasTrimmed.isEmpty && parsedPersonas == nil {
-                print("[ScanControlView] Aborting startScan: invalid Personas JSON")
-                return
-            }
-
-            let oobTrimmed = oobJSON.trimmingCharacters(in: .whitespacesAndNewlines)
-            let parsedOob = parseJSONDict(oobJSON)
-            if !oobTrimmed.isEmpty && parsedOob == nil {
-                print("[ScanControlView] Aborting startScan: invalid OOB JSON")
-                return
-            }
-
-            // Collect non-blank scope rules from appState
-            let scopeLines = appState.scopeRules
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty && !$0.hasPrefix("#") }
-
-            let bountyHandle = appState.bountyHandle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let bountyJSONTrimmed = appState.bountyJSONConfig.trimmingCharacters(
-                in: .whitespacesAndNewlines)
-            let parsedBountyJSON: [String: Any]?
-            if bountyJSONTrimmed.isEmpty {
-                parsedBountyJSON = nil
-            } else {
-                parsedBountyJSON = parseJSONDict(appState.bountyJSONConfig)
-                if parsedBountyJSON == nil {
-                    print("[ScanControlView] Aborting startScan: invalid HackerOne JSON")
-                    return
-                }
-            }
-
-            appState.startScan(
-                target: scanTarget,
-                modules: modules,
-                mode: selectedMode,
-                personas: parsedPersonas,
-                oob: parsedOob,
-                scope: scopeLines.isEmpty ? nil : scopeLines,
-                scopeStrict: appState.scopeStrict,
-                bountyHandle: bountyHandle.isEmpty ? nil : bountyHandle,
-                bountyJSON: parsedBountyJSON
-            )
-        } else {
+        guard !scanTarget.isEmpty && backend.isRunning else {
             print(
                 "[ScanControlView] Guard failed - scanTarget.isEmpty: \(scanTarget.isEmpty), backend.isRunning: \(backend.isRunning)"
             )
+            return
         }
+
+        print("[ScanControlView] Guard passed, proceeding to start scan")
+
+        if toolSelectionMode == .custom && selectedTools.isEmpty {
+            showToolConfig = true
+            return
+        }
+
+        let modules: [String]
+        switch toolSelectionMode {
+        case .scheduler:
+            modules = []
+        case .custom:
+            modules = Array(selectedTools)
+        }
+
+        print(
+            "[ScanControlView] Calling appState.startScan(target=\(scanTarget), modules=\(modules), mode=\(selectedMode.rawValue))"
+        )
+
+        let personasTrimmed = personasJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsedPersonas = parseJSONArray(personasJSON)
+
+        if !personasTrimmed.isEmpty && parsedPersonas == nil {
+            print("[ScanControlView] Aborting startScan: invalid Personas JSON")
+            return
+        }
+
+        let oobTrimmed = oobJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parsedOob = parseJSONDict(oobJSON)
+
+        if !oobTrimmed.isEmpty && parsedOob == nil {
+            print("[ScanControlView] Aborting startScan: invalid OOB JSON")
+            return
+        }
+
+        // Collect non-blank scope rules from appState
+        let scopeLines = appState.scopeRules
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+
+        let bountyHandle = appState.bountyHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bountyJSONTrimmed = appState.bountyJSONConfig.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+
+        let parsedBountyJSON: [String: Any]?
+
+        if bountyJSONTrimmed.isEmpty {
+            parsedBountyJSON = nil
+        } else {
+            parsedBountyJSON = parseJSONDict(appState.bountyJSONConfig)
+
+            if parsedBountyJSON == nil {
+                print("[ScanControlView] Aborting startScan: invalid HackerOne JSON")
+                return
+            }
+        }
+
+        appState.startScan(
+            target: scanTarget,
+            modules: modules,
+            mode: selectedMode,
+            personas: parsedPersonas,
+            oob: parsedOob,
+            scope: scopeLines.isEmpty ? nil : scopeLines,
+            scopeStrict: appState.scopeStrict,
+            bountyHandle: bountyHandle.isEmpty ? nil : bountyHandle,
+            bountyJSON: parsedBountyJSON
+        )
     }
 
     private func parseJSONArray(_ text: String) -> [[String: Any]]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard let data = trimmed.data(using: .utf8) else { return nil }
+
         do {
             let obj = try JSONSerialization.jsonObject(with: data)
+
             guard let arr = obj as? [[String: Any]] else {
                 print("[ScanControlView] personasJSON must be a JSON array of objects")
                 return nil
             }
+
             return arr
         } catch {
             print("[ScanControlView] personasJSON parse error: \(error)")
@@ -317,12 +320,15 @@ struct ScanControlView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard let data = trimmed.data(using: .utf8) else { return nil }
+
         do {
             let obj = try JSONSerialization.jsonObject(with: data)
+
             guard let dict = obj as? [String: Any] else {
                 print("[ScanControlView] oobJSON must be a JSON object")
                 return nil
             }
+
             return dict
         } catch {
             print("[ScanControlView] oobJSON parse error: \(error)")
@@ -338,6 +344,7 @@ private struct AdvancedScanConfigView: View {
 
     /// Which tab is visible inside the popover
     @State private var tab: Int = 0
+
     /// Ephemeral text for the new-rule input field
     @State private var newRuleText: String = ""
 
@@ -374,7 +381,9 @@ private struct AdvancedScanConfigView: View {
             HStack {
                 Text("Advanced Scan Config")
                     .font(.headline)
+
                 Spacer()
+
                 Picker("", selection: $tab) {
                     Text("Scope").tag(0)
                     Text("HackerOne").tag(1)
@@ -383,6 +392,7 @@ private struct AdvancedScanConfigView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 250)
+
                 Button("Clear All") {
                     appState.scopeRules = []
                     appState.scopeStrict = false
@@ -399,7 +409,6 @@ private struct AdvancedScanConfigView: View {
 
             Divider()
 
-            // Tab content
             Group {
                 if tab == 0 {
                     scopeTab
@@ -419,19 +428,17 @@ private struct AdvancedScanConfigView: View {
 
     private var scopeTab: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Legend
             VStack(alignment: .leading, spacing: 2) {
                 Text("Scope Rules")
-                    .font(.subheadline).bold()
-                Text(
-                    "One rule per line. Prefix with ! to exclude. Supports wildcards, CIDR, and /regex/."
-                )
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                    .font(.subheadline)
+                    .bold()
+
+                Text("One rule per line. Prefix with ! to exclude. Supports wildcards, CIDR, and /regex/.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Rule list
             if appState.scopeRules.isEmpty {
                 Text("No scope rules — all targets allowed (permissive mode).")
                     .font(.caption)
@@ -441,10 +448,8 @@ private struct AdvancedScanConfigView: View {
             } else {
                 ScrollView {
                     VStack(spacing: 4) {
-                        ForEach(Array(appState.scopeRules.enumerated()), id: \.offset) {
-                            idx, rule in
+                        ForEach(Array(appState.scopeRules.enumerated()), id: \.offset) { idx, rule in
                             HStack(spacing: 6) {
-                                // Kind badge
                                 ScopeRuleBadge(rule: rule)
 
                                 Text(rule)
@@ -473,7 +478,6 @@ private struct AdvancedScanConfigView: View {
                 .frame(maxHeight: 140)
             }
 
-            // Add rule row
             HStack(spacing: 6) {
                 TextField(
                     "e.g. *.example.com  or  !staging.example.com  or  10.0.0.0/24",
@@ -487,16 +491,15 @@ private struct AdvancedScanConfigView: View {
                     .disabled(newRuleText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
 
-            // Strict mode toggle
             Toggle(isOn: $appState.scopeStrict) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Strict mode")
-                        .font(.caption).bold()
-                    Text(
-                        "Block requests to any target not explicitly in-scope (even with no inclusion rules)."
-                    )
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+                        .font(.caption)
+                        .bold()
+
+                    Text("Block requests to any target not explicitly in-scope (even with no inclusion rules).")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
             }
             .toggleStyle(.switch)
@@ -510,6 +513,7 @@ private struct AdvancedScanConfigView: View {
     private func addRule() {
         let rule = newRuleText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rule.isEmpty else { return }
+
         appState.scopeRules.append(rule)
         newRuleText = ""
     }
@@ -519,18 +523,19 @@ private struct AdvancedScanConfigView: View {
     private var hackerOneTab: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("HackerOne Integration")
-                .font(.subheadline).bold()
-            Text(
-                "Provide a program handle (if authenticated via SENTINEL_H1_TOKEN) or paste the JSON payload from the HackerOne API."
-            )
-            .font(.caption2)
-            .foregroundColor(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+                .font(.subheadline)
+                .bold()
+
+            Text("Provide a program handle (if authenticated via SENTINEL_H1_TOKEN) or paste the JSON payload from the HackerOne API.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack {
                 Text("Handle:")
                     .font(.caption)
                     .frame(width: 60, alignment: .trailing)
+
                 TextField("e.g. security-program", text: $appState.bountyHandle)
                     .textFieldStyle(.roundedBorder)
             }
@@ -546,8 +551,7 @@ private struct AdvancedScanConfigView: View {
                     .frame(minHeight: 140)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25)))
 
-                if appState.bountyJSONConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                {
+                if appState.bountyJSONConfig.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(
                         "{\n  \"handle\": \"example\",\n  \"in_scope\": [...],\n  \"out_of_scope\": [...]\n}"
                     )
@@ -570,11 +574,13 @@ private struct AdvancedScanConfigView: View {
             Text("Personas (optional) – enables wraith_persona_diff when provided.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $personasJSON)
                     .font(.system(size: 11, design: .monospaced))
                     .frame(minHeight: 200)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25)))
+
                 if personasJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(personasPlaceholder)
                         .font(.system(size: 11, design: .monospaced))
@@ -583,6 +589,7 @@ private struct AdvancedScanConfigView: View {
                         .allowsHitTesting(false)
                 }
             }
+
             Spacer()
         }
         .padding()
@@ -595,11 +602,13 @@ private struct AdvancedScanConfigView: View {
             Text("OOB (optional) – enables wraith_oob_probe when provided.")
                 .font(.caption)
                 .foregroundColor(.secondary)
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $oobJSON)
                     .font(.system(size: 11, design: .monospaced))
                     .frame(minHeight: 200)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.25)))
+
                 if oobJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Text(oobPlaceholder)
                         .font(.system(size: 11, design: .monospaced))
@@ -608,6 +617,7 @@ private struct AdvancedScanConfigView: View {
                         .allowsHitTesting(false)
                 }
             }
+
             Spacer()
         }
         .padding()
@@ -665,6 +675,7 @@ struct ToolSelectionView: View {
                 Button("Select All") {
                     selection = Set(installed)
                 }
+
                 Button("Clear") {
                     selection.removeAll()
                 }
@@ -678,15 +689,17 @@ struct ToolSelectionView: View {
                 ForEach(installed, id: \.self) { tool in
                     HStack {
                         Image(systemName: selection.contains(tool) ? "checkmark.square" : "square")
+
                         Text(tool)
+
                         if let meta = appState.toolMetadata[tool] {
                             TierBadgeView(tierShort: meta.tierShort, tierValue: meta.tierValue)
                         }
+
                         Spacer()
                     }
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        // Conditional branch.
                         if selection.contains(tool) {
                             selection.remove(tool)
                         } else {
@@ -706,6 +719,7 @@ struct ToolSelectionView: View {
 }
 
 // MARK: - Scan Progress Header
+
 /// Struct ScanProgressHeader.
 struct ScanProgressHeader: View {
     let logCount: Int
@@ -713,6 +727,7 @@ struct ScanProgressHeader: View {
     let edgeCount: Int
     let startedAt: Date?
     let capabilityGate: CapabilityGateSnapshot?
+
     @State private var currentTime = Date()
     @State private var timer: Timer?
 
@@ -721,9 +736,12 @@ struct ScanProgressHeader: View {
             HStack {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .foregroundColor(.blue)
+
                 Text("Scan In Progress")
                     .font(.headline)
+
                 Spacer()
+
                 Text(formattedTime)
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -737,19 +755,24 @@ struct ScanProgressHeader: View {
                     Text("Execution: \(gate.executionMode.uppercased())")
                         .font(.caption2)
                         .foregroundColor(.secondary)
+
                     if let ceiling = gate.tierCeiling {
                         Text("Tier Ceiling: \(shortTierLabel(ceiling))")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
+
                     Spacer()
+
                     if let budget = gate.budget {
                         Text("Tokens: \(budget.tokensRemaining)/\(budget.tokensMax)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
+
                         Text("•")
                             .font(.caption2)
                             .foregroundColor(.secondary)
+
                         Text("Time: \(formatSeconds(budget.timeRemainingS))")
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -763,12 +786,15 @@ struct ScanProgressHeader: View {
                         Text("Budget (Tokens)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
+
                         Spacer()
+
                         Text("\(budget.tokensUsed)/\(budget.tokensMax) used")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                             .monospacedDigit()
                     }
+
                     ProgressView(value: budget.tokensProgress)
                         .progressViewStyle(.linear)
 
@@ -776,7 +802,9 @@ struct ScanProgressHeader: View {
                         Text("Budget (Time)")
                             .font(.caption2)
                             .foregroundColor(.secondary)
+
                         Spacer()
+
                         Text(
                             "\(formatSeconds(budget.timeUsedS))/\(formatSeconds(budget.timeMaxS)) used"
                         )
@@ -784,6 +812,7 @@ struct ScanProgressHeader: View {
                         .foregroundColor(.secondary)
                         .monospacedDigit()
                     }
+
                     ProgressView(value: budget.timeProgress)
                         .progressViewStyle(.linear)
                 }
@@ -793,19 +822,25 @@ struct ScanProgressHeader: View {
                 Text("\(logCount) logs")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
                 Text("•")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
                 Text("\(nodeCount) nodes")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
                 Text("•")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
                 Text("\(edgeCount) edges")
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
                 Spacer()
+
                 ProgressView()
                     .scaleEffect(0.6)
             }
@@ -826,9 +861,11 @@ struct ScanProgressHeader: View {
         guard let startedAt = startedAt else {
             return "00:00"
         }
+
         let elapsed = Int(currentTime.timeIntervalSince(startedAt))
         let mins = elapsed / 60
         let secs = elapsed % 60
+
         return String(format: "%02d:%02d", mins, secs)
     }
 
@@ -836,11 +873,13 @@ struct ScanProgressHeader: View {
         let s = max(0, Int(seconds.rounded()))
         let mins = s / 60
         let secs = s % 60
+
         if mins >= 60 {
             let hrs = mins / 60
             let rem = mins % 60
             return String(format: "%dh%02dm", hrs, rem)
         }
+
         return String(format: "%dm%02ds", mins, secs)
     }
 
@@ -851,6 +890,7 @@ struct ScanProgressHeader: View {
         if tierCeiling.contains("T2b") { return "T2b" }
         if tierCeiling.contains("T3") { return "T3" }
         if tierCeiling.contains("T4") { return "T4" }
+
         return tierCeiling
     }
 }
@@ -865,20 +905,22 @@ struct FindingsListView: View {
 
     private var filteredFindings: [FindingDTO] {
         guard let all = appState.apiResults?.findings else { return [] }
-        return all.filter { f in
-            // Dupe filter
-            if hideDuplicates, f.duplicateInfo?.isDuplicate == true { return false }
-            // Severity filter
-            if severityFilter != "ALL" {
-                return f.severity.uppercased() == severityFilter
+
+        return all.filter { finding in
+            if hideDuplicates, finding.duplicateInfo?.isDuplicate == true {
+                return false
             }
+
+            if severityFilter != "ALL" {
+                return finding.severity.uppercased() == severityFilter
+            }
+
             return true
         }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Filter bar
             HStack(spacing: 8) {
                 Toggle("Hide dupes", isOn: $hideDuplicates)
                     .toggleStyle(.checkbox)
@@ -888,8 +930,9 @@ struct FindingsListView: View {
 
                 Picker("Severity", selection: $severityFilter) {
                     Text("All").tag("ALL")
-                    ForEach(severityOrder, id: \.self) { sev in
-                        Text(sev.capitalized).tag(sev)
+
+                    ForEach(severityOrder, id: \.self) { severity in
+                        Text(severity.capitalized).tag(severity)
                     }
                 }
                 .pickerStyle(.menu)
@@ -898,6 +941,7 @@ struct FindingsListView: View {
 
                 let total = appState.apiResults?.findings?.count ?? 0
                 let showing = filteredFindings.count
+
                 Text("\(showing)/\(total)")
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -935,7 +979,6 @@ struct FindingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                // Severity badge
                 SeverityBadge(severity: finding.severity)
 
                 Text(finding.type)
@@ -944,7 +987,6 @@ struct FindingRow: View {
 
                 Spacer()
 
-                // Duplicate badge (only shown when bounty-report data is attached)
                 if let dupe = finding.duplicateInfo {
                     DupeBadge(info: dupe)
                 }
@@ -1004,19 +1046,36 @@ private struct DupeBadge: View {
     }
 }
 
+/// Helper model for NSTableView rows.
+private struct SelectableLogLine: Identifiable, Hashable {
+    let id: String
+    let text: String
+}
+
 /// Struct LogConsoleView.
 struct LogConsoleView: View {
     @EnvironmentObject var appState: HelixAppState
     @State private var showingExporter = false
     @State private var logContentForExport: String = ""
 
+    private var selectableLines: [SelectableLogLine] {
+        appState.apiLogItems.map { item in
+            SelectableLogLine(
+                id: String(describing: item.id),
+                text: item.text
+            )
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("Live Logs")
                     .font(.caption)
                     .bold()
+
                 Spacer()
+
                 Button("Clear") {
                     appState.clearLogs()
                 }
@@ -1024,9 +1083,10 @@ struct LogConsoleView: View {
                 .font(.caption)
 
                 Button("Export") {
-                    // Extract text from log items
-                    logContentForExport = appState.apiLogItems.map { $0.text }.joined(
-                        separator: "\n")
+                    logContentForExport = appState.apiLogItems
+                        .map { $0.text }
+                        .joined(separator: "\n")
+
                     showingExporter = true
                 }
                 .buttonStyle(.plain)
@@ -1036,29 +1096,8 @@ struct LogConsoleView: View {
             .padding(8)
             .background(Color(NSColor.controlBackgroundColor))
 
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(appState.apiLogItems) { item in
-                            Text(item.text)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.green)
-                                .textSelection(.enabled)
-                        }
-                    }
-                    .padding(8)
-                }
-                .onChange(of: appState.apiLogItems.count) { _, _ in
-                    // Conditional branch.
-                    if let last = appState.apiLogItems.last {
-                        // Keep the newest scan activity visible. Avoid per-line animations to
-                        // prevent stutter under high-volume logs.
-                        DispatchQueue.main.async {
-                            proxy.scrollTo(last.id, anchor: .bottom)
-                        }
-                    }
-                }
-            }
+            SelectableLogTableView(lines: selectableLines)
+                .background(Color.black)
         }
         .background(Color.black)
         .fileExporter(
@@ -1066,16 +1105,213 @@ struct LogConsoleView: View {
             document: PlainTextDocument(content: logContentForExport),
             contentType: .plainText,
             defaultFilename: "sentinel_logs.txt"
-        ) { result in
-            // Handle result (optional)
+        ) { _ in
+            // Handle result if needed.
         }
     }
 }
 
-// Minimal FileDocument implementation
-/// Struct PlainTextDocument.
+// AppKit-backed selectable table view to enable Finder-style row selection.
+private struct SelectableLogTableView: NSViewRepresentable {
+    let lines: [SelectableLogLine]
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = false
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .black
+
+        let tableView = CopyableLogTableView()
+        tableView.delegate = context.coordinator
+        tableView.dataSource = context.coordinator
+        tableView.headerView = nil
+        tableView.backgroundColor = .black
+        tableView.gridStyleMask = []
+        tableView.rowHeight = 18
+        tableView.allowsMultipleSelection = true
+        tableView.allowsEmptySelection = true
+        tableView.allowsColumnSelection = false
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.selectionHighlightStyle = .regular
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+
+        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("logLine"))
+        column.title = "Log"
+        column.resizingMask = [.autoresizingMask, .userResizingMask]
+        column.minWidth = 300
+        tableView.addTableColumn(column)
+
+        scrollView.documentView = tableView
+
+        context.coordinator.tableView = tableView
+        context.coordinator.scrollView = scrollView
+        context.coordinator.lines = lines
+
+        tableView.reloadData()
+        context.coordinator.scrollToBottom()
+
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        let oldCount = context.coordinator.lines.count
+        let newCount = lines.count
+
+        guard let tableView = context.coordinator.tableView else { return }
+
+        let wasNearBottom = context.coordinator.isNearBottom()
+
+        context.coordinator.lines = lines
+        tableView.reloadData()
+        context.coordinator.syncSelectedLogLines()
+
+        if newCount > oldCount && wasNearBottom {
+            DispatchQueue.main.async {
+                context.coordinator.scrollToBottom()
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+        var lines: [SelectableLogLine] = []
+        weak var tableView: CopyableLogTableView?
+        weak var scrollView: NSScrollView?
+
+        func numberOfRows(in tableView: NSTableView) -> Int {
+            lines.count
+        }
+
+        func tableView(
+            _ tableView: NSTableView,
+            viewFor tableColumn: NSTableColumn?,
+            row: Int
+        ) -> NSView? {
+            guard row >= 0, row < lines.count else { return nil }
+
+            let identifier = NSUserInterfaceItemIdentifier("logCell")
+            let cell: NSTableCellView
+
+            if let reused = tableView.makeView(withIdentifier: identifier, owner: self) as? NSTableCellView {
+                cell = reused
+            } else {
+                cell = NSTableCellView()
+                cell.identifier = identifier
+
+                let textField = NSTextField(labelWithString: "")
+                textField.translatesAutoresizingMaskIntoConstraints = false
+                textField.isSelectable = false
+                textField.isEditable = false
+                textField.drawsBackground = false
+                textField.backgroundColor = .clear
+                textField.textColor = .systemGreen
+                textField.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+                textField.lineBreakMode = .byClipping
+                textField.maximumNumberOfLines = 1
+
+                cell.textField = textField
+                cell.addSubview(textField)
+
+                NSLayoutConstraint.activate([
+                    textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+                    textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+                    textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
+                ])
+            }
+
+            cell.textField?.stringValue = lines[row].text
+            cell.textField?.textColor = .systemGreen
+
+            return cell
+        }
+
+        func tableViewSelectionDidChange(_ notification: Notification) {
+            syncSelectedLogLines()
+        }
+
+        func syncSelectedLogLines() {
+            guard let tableView else { return }
+
+            tableView.selectedLogLines = tableView.selectedRowIndexes.compactMap { index in
+                guard index >= 0, index < lines.count else { return nil }
+                return lines[index].text
+            }
+        }
+
+        func isNearBottom() -> Bool {
+            guard let scrollView else { return true }
+
+            let visibleRect = scrollView.contentView.bounds
+            let documentHeight = scrollView.documentView?.bounds.height ?? 0
+            let visibleMaxY = visibleRect.maxY
+
+            return documentHeight - visibleMaxY < 40
+        }
+
+        func scrollToBottom() {
+            guard let tableView else { return }
+
+            let lastRow = lines.count - 1
+            guard lastRow >= 0 else { return }
+
+            tableView.scrollRowToVisible(lastRow)
+        }
+    }
+}
+
+// NSTableView subclass to support Command-C copying of selected rows.
+private final class CopyableLogTableView: NSTableView {
+    var selectedLogLines: [String] = []
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    @objc func copy(_ sender: Any?) {
+        copySelectedRowsToPasteboard()
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(copy(_:)) {
+            return !selectedLogLines.isEmpty
+        }
+
+        return super.validateUserInterfaceItem(item)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        let isCommandC =
+            event.modifierFlags.contains(.command)
+            && event.charactersIgnoringModifiers?.lowercased() == "c"
+
+        if isCommandC {
+            copySelectedRowsToPasteboard()
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+
+    private func copySelectedRowsToPasteboard() {
+        guard !selectedLogLines.isEmpty else { return }
+
+        let text = selectedLogLines.joined(separator: "\n")
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+// Minimal FileDocument implementation.
 struct PlainTextDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.plainText] }
+
     var content: String
 
     init(content: String) {
@@ -1083,12 +1319,16 @@ struct PlainTextDocument: FileDocument {
     }
 
     init(configuration: ReadConfiguration) throws {
-        // We only export, not import in this view
+        // We only export, not import in this view.
         content = ""
     }
 
-    /// Function fileWrapper.
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        return FileWrapper(regularFileWithContents: content.data(using: .utf8)!)
+        guard let data = content.data(using: .utf8) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+
+        return FileWrapper(regularFileWithContents: data)
     }
 }
+
