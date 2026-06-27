@@ -327,10 +327,25 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             parse_to_registry(dto, registry)
 
         # 3. Create Context
-        try:
-            emode = ExecutionMode(req.mode)
-        except ValueError:
-            emode = ExecutionMode.RESEARCH
+        # Map the validated scan-mode vocabulary (standard/bug_bounty/stealth/
+        # passive) onto the two execution tiers (research/bounty). bug_bounty is
+        # the ONLY mode that engages bounty-grade strict scope + the active
+        # verification phase.
+        #
+        # BUG THIS FIXES: the old `ExecutionMode(req.mode)` silently fell back to
+        # RESEARCH for *every* value except the literal "bounty" — and the
+        # request validator never emits "bounty" (it emits "bug_bounty"). So
+        # selecting bug_bounty produced ExecutionMode.RESEARCH, the
+        # conservative-deny scope gate (is_bounty) never engaged, and
+        # out-of-scope hosts (e.g. scanme.nmap.org) leaked into the scan.
+        _MODE_TO_EXEC = {
+            "bug_bounty": ExecutionMode.BOUNTY,
+            "bounty": ExecutionMode.BOUNTY,
+            "standard": ExecutionMode.RESEARCH,
+            "stealth": ExecutionMode.RESEARCH,
+            "passive": ExecutionMode.RESEARCH,
+        }
+        emode = _MODE_TO_EXEC.get(str(req.mode).strip().lower(), ExecutionMode.RESEARCH)
 
         # Phase 2H: Apply program-policy enforcement BEFORE constructing the
         # ScopeContext so banned_tools / rate limit / scope_strict are baked
