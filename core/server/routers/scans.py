@@ -677,6 +677,65 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             exc_info=True,
                         )
 
+                # ── Finding verification gate ───────────────────────────────
+                # Before results are surfaced, re-test passive issues against
+                # the live target and dedup. An issue the target itself
+                # disproves (header actually present, verb blocked, cookie
+                # secure, admin behind auth) is hidden rather than presented as
+                # fact; dedup duplicates collapse to one. This is what stops
+                # Sentinel emitting generic-scanner noise (a real run collapsed
+                # 629 HIGH/MED issues to 1).
+                #
+                # /results reads from the DB, and an issue's primary key is a
+                # content hash, so we can't mutate rows in place — instead we
+                # compute which rows SURVIVE the gate (keep_ids) and flip the
+                # non-destructive `suppressed` flag on every other row for this
+                # session. Suppressed rows are preserved (recoverable), just
+                # hidden. Active modes only (the gate issues live requests); a
+                # gate failure never kills a scan and never suppresses anything.
+                if req.mode in ("standard", "bug_bounty", "bounty"):
+                    try:
+                        from core.toolkit.finding_verifier import (
+                            gate as _verify_gate,
+                            finding_id as _finding_id,
+                        )
+                        # `db` is assigned later in _runner(), making it function-
+                        # local; fetch the singleton here to avoid UnboundLocalError.
+                        db = Database.instance()
+                        _issues_before = session.issues.get_all()
+                        if _issues_before:
+                            _rep = await _verify_gate(_issues_before, drop_refuted=True)
+                            _keep = _rep["keep_ids"]
+                            # Suppress every original row whose id didn't survive
+                            # (refuted findings + dedup-collapsed duplicates).
+                            _suppress_ids = [
+                                _id for _id in map(_finding_id, _issues_before)
+                                if _id not in _keep
+                            ]
+                            _n = await db.suppress_issues(
+                                session.id, _suppress_ids,
+                                reason="verification-gate refuted/deduped",
+                            )
+                            # Keep the in-memory store consistent with what the
+                            # operator now sees. persist=False: the DB is already
+                            # authoritative here, and re-saving annotated dicts
+                            # would mint new content-hash rows.
+                            session.issues.replace_all(_rep["kept"], persist=False)
+                            _c = _rep["counts"]
+                            session.log(
+                                f"[verify_gate] issues {_rep['input_count']} -> "
+                                f"{_rep['kept_count']} surfaced; suppressed {_n} "
+                                f"(deduped {_c.get('deduped')}, refuted {_c.get('refuted')}, "
+                                f"confirmed {_c.get('confirmed')}, "
+                                f"unverifiable {_c.get('unverifiable')})"
+                            )
+                    except Exception as _vg_exc:
+                        logger.error(
+                            f"[scan] verify gate failed (issues left unchanged): "
+                            f"{type(_vg_exc).__name__}: {_vg_exc}",
+                            exc_info=True,
+                        )
+
                 state.scan_state["status"] = "completed"
                 state.scan_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 

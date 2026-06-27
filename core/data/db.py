@@ -528,6 +528,45 @@ class Database:
             ),
         )
 
+    async def suppress_issues(
+        self, session_id: str, ids: List[str], reason: Optional[str] = None
+    ) -> int:
+        """Non-destructively hide issue rows from operator-facing results.
+
+        Used by the finding-verification gate to drop refuted false-positives
+        (and dedup duplicates) WITHOUT deleting them: only the `suppressed` flag
+        is set, by primary-key id, so the row and its evidence are preserved and
+        recoverable (UPDATE issues SET suppressed = 0 ... brings it back).
+
+        Returns the number of ids submitted (chunked to respect SQLite's bound
+        variable limit). Never raises on a stale/pre-migration schema — a missing
+        `suppressed` column is logged and treated as a no-op.
+        """
+        ids = [i for i in (ids or []) if i]
+        if not ids:
+            return 0
+        CHUNK = 400  # stay well under SQLite's default 999 variable limit
+        submitted = 0
+        for start in range(0, len(ids), CHUNK):
+            batch = ids[start:start + CHUNK]
+            placeholders = ",".join("?" * len(batch))
+            try:
+                await self._execute_internal(
+                    f"UPDATE issues SET suppressed = 1 "
+                    f"WHERE session_id = ? AND id IN ({placeholders})",
+                    (session_id, *batch),
+                )
+            except Exception as e:
+                # e.g. column absent on a schema predating migration 005.
+                logger.warning("[Database] suppress_issues skipped (%s)", e)
+                return submitted
+            submitted += len(batch)
+        logger.info(
+            "[Database] suppressed %d issue row(s) for session %s%s",
+            submitted, session_id, f" ({reason})" if reason else "",
+        )
+        return submitted
+
     # ----------------------------
     # Evidence (legacy non-txn)
     # ----------------------------
@@ -703,13 +742,32 @@ class Database:
     async def get_all_findings(self) -> List[Dict]:
         return await self.get_findings(None)
 
-    async def get_issues(self, session_id: Optional[str] = None) -> List[Dict]:
-        query = "SELECT data FROM issues WHERE session_id = ? ORDER BY timestamp DESC"
-        params: Tuple[Any, ...] = (session_id,)
-        if session_id is None:
-            query = "SELECT data FROM issues ORDER BY timestamp DESC"
-            params = ()
-        rows = await self.fetch_all(query, params)
+    async def get_issues(
+        self, session_id: Optional[str] = None, include_suppressed: bool = False
+    ) -> List[Dict]:
+        """Return issues for a session. Suppressed rows (refuted by the
+        verification gate) are hidden by default so they never reach the
+        operator; pass include_suppressed=True for audit/recovery."""
+        conds: List[str] = []
+        params: List[Any] = []
+        if session_id is not None:
+            conds.append("session_id = ?")
+            params.append(session_id)
+        if not include_suppressed:
+            # COALESCE so rows predating migration 005 (NULL) read as visible.
+            conds.append("COALESCE(suppressed, 0) = 0")
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        query = f"SELECT data FROM issues{where} ORDER BY timestamp DESC"
+        try:
+            rows = await self.fetch_all(query, tuple(params))
+        except Exception as e:
+            # `suppressed` column may not exist on a pre-migration schema.
+            logger.warning("[Database] get_issues suppression filter skipped (%s)", e)
+            fb_where = " WHERE session_id = ?" if session_id is not None else ""
+            fb_params: Tuple[Any, ...] = (session_id,) if session_id is not None else ()
+            rows = await self.fetch_all(
+                f"SELECT data FROM issues{fb_where} ORDER BY timestamp DESC", fb_params
+            )
         return [json.loads(row[0]) for row in rows]
 
     async def get_all_issues(self) -> List[Dict]:

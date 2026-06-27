@@ -29,6 +29,7 @@ A finding never reaches the operator as fact unless it survived this gate.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -40,6 +41,20 @@ logger = logging.getLogger(__name__)
 CONFIRMED = "confirmed"
 REFUTED = "refuted"
 UNVERIFIABLE = "unverifiable"
+
+
+def finding_id(finding: Dict[str, Any]) -> str:
+    """The DB primary-key id for a finding/issue: sha256 of its canonical JSON.
+
+    This MUST stay byte-for-byte identical to the id derivation in
+    core.data.db (save_issue / save_issue_txn use
+    ``sha256(json.dumps(issue, sort_keys=True))``). The suppression gate
+    recomputes ids here to target rows via ``UPDATE ... WHERE id = ?``; if the
+    two formulas ever drift, suppression silently matches nothing.
+    """
+    return hashlib.sha256(
+        json.dumps(finding, sort_keys=True).encode()
+    ).hexdigest()
 
 # Verbs a scanner calls "dangerous". Only TRACE/TRACK (XST) and write verbs that
 # actually return 2xx are real; everything else returning >=400 is a non-issue.
@@ -235,6 +250,11 @@ async def gate(
 
     unique, deduped_count = dedup(findings)
     kept: List[Dict[str, Any]] = []
+    # DB ids of the ORIGINAL dicts that survive the gate. The caller suppresses
+    # every row whose id is NOT in here — which correctly hides BOTH refuted
+    # findings AND the dedup-collapsed duplicates (only the survivor's id is
+    # kept, so its N-1 duplicate rows fall outside the set and get suppressed).
+    keep_ids: set = set()
     counts = {CONFIRMED: 0, REFUTED: 0, UNVERIFIABLE: 0, "deduped": deduped_count}
 
     # The verifier hits the live target, so its traffic must carry the same
@@ -253,6 +273,9 @@ async def gate(
             if verdict == REFUTED and drop_refuted:
                 logger.info("[verifier] DROPPED refuted: %s — %s", _title(f), evidence)
                 continue
+            # Record the original's DB id BEFORE annotating (annotation changes
+            # the hash; the DB row was stored from the un-annotated dict).
+            keep_ids.add(finding_id(f))
             annotated = dict(f)
             annotated["verification"] = {"verdict": verdict, "evidence": evidence}
             # Demote unverifiable passive findings out of "confirmed fact".
@@ -265,4 +288,5 @@ async def gate(
         "kept_count": len(kept),
         "input_count": len(findings),
         "counts": counts,
+        "keep_ids": keep_ids,
     }
