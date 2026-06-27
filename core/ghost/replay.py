@@ -374,6 +374,23 @@ async def replay_flow(
                     {str(k).lower(): str(v) for k, v in initial_headers.items()}
                 )
             merged_headers.update(step_to_send.headers)
+
+            # Cross-principal replay (G5): when the caller injects a DIFFERENT
+            # identity (override_headers and/or initial_cookies), the captured
+            # request's own credentials must NOT leak into the replay. Strip the
+            # captured Cookie and Authorization so the request authenticates
+            # ONLY as the injected principal (Bob's seeded cookie jar + override
+            # headers). Without this, cookie-auth targets (e.g. GitLab's
+            # _gitlab_session) would still answer as the ORIGINAL principal —
+            # a FALSE IDOR. (Header/JWT-auth targets like Juice Shop were fine
+            # because override_headers already replaced Authorization.)
+            if override_headers or initial_cookies:
+                for _h in [
+                    k for k in list(merged_headers)
+                    if k.lower() in ("cookie", "authorization")
+                ]:
+                    merged_headers.pop(_h, None)
+
             if override_headers:
                 merged_headers.update(
                     {str(k).lower(): str(v) for k, v in override_headers.items()}
@@ -408,15 +425,24 @@ async def replay_flow(
 
             # Build the replay step + finalize.
             replay_step = step_to_send  # already a clone
+            # Snapshot cookies via the underlying cookielib jar, NOT
+            # client.cookies.items(): the latter raises httpx.CookieConflict
+            # when the jar holds same-named cookies from different domains
+            # (e.g. Cloudflare's _cfuvid on gitlab.com AND a CDN/telemetry
+            # host). Real multi-domain flows hit this immediately; single-
+            # domain ones (Juice Shop) never did. Defensive: a cookie snapshot
+            # must never 500 the whole cross-principal diff.
+            try:
+                _cookies_after = {c.name: c.value for c in client.cookies.jar}
+            except Exception:
+                _cookies_after = {}
             replay_step.set_response(
                 status=status,
                 headers=response_headers,
                 body=body,
                 content_type=response_headers.get("content-type"),
                 elapsed_ms=elapsed_ms,
-                cookies_after_step={
-                    cn: cv for cn, cv in client.cookies.items()
-                },
+                cookies_after_step=_cookies_after,
             )
             replay_flow_obj.add_step(replay_step)
 
