@@ -246,6 +246,133 @@ class _ScopeOnlyPolicy:
         return (resp.status_code, {k: v for k, v in resp.headers.items()}, resp.content)
 
 
+# ──────────────────────── SPA / JS endpoint mining ─────────────────────────
+#
+# An HTML crawler is blind to single-page apps: the homepage is `<app-root>`
+# plus a JS bundle, so there are no `<a href>` links to follow and zero URLs
+# come back (proven live: Juice Shop → 0 URLs → 0 candidates). The endpoints a
+# SPA actually calls live in its JS as string literals (`rest/products/search`,
+# `api/Users`, …). We fetch the bundles and mine those routes so the verify
+# phase has a real attack surface. Same technique as LinkFinder/xnLinkFinder.
+
+import re as _re
+
+# API-shaped routes anywhere in the JS. NOT quote-anchored: SPAs build routes
+# inside template literals with interpolation, e.g. `${base}/rest/products/
+# search?q=${q}` — so the route is never a clean standalone string. The API
+# prefix + leading `/` requirement keeps noise low without needing quotes.
+_JS_ROUTE_RE = _re.compile(
+    r'/((?:rest|api|graphql|v\d+)/[A-Za-z0-9_\-/]{1,80})',
+    _re.IGNORECASE,
+)
+# Quoted absolute paths that ALREADY carry a query — those are real
+# parameterized endpoints worth probing as-is (low noise).
+_JS_PATH_RE = _re.compile(r'["\'`](/[A-Za-z0-9_][A-Za-z0-9_\-./]{2,80}\?[A-Za-z0-9_\-=&%]+)["\'`]')
+_STATIC_ASSET_RE = _re.compile(r'\.(?:js|css|png|jpe?g|gif|svg|webp|woff2?|ttf|eot|ico|map|html?|json|txt|xml)(?:[?#]|$)', _re.IGNORECASE)
+_SCRIPT_SRC_RE = _re.compile(r'<script[^>]+src=["\']([^"\']+)["\']', _re.IGNORECASE)
+# Last-segment words that imply an injectable query parameter.
+_QUERYABLE = ("search", "query", "find", "filter", "lookup")
+# Last-segment words that imply a collection of id-addressable objects → IDOR.
+_COLLECTIONS = ("products", "users", "orders", "baskets", "basket", "cards",
+                "addresss", "addresses", "feedbacks", "complaints", "memories")
+
+
+def _mine_js_endpoints(
+    target: str,
+    scope_filter: Optional[Callable[[str], bool]] = None,
+    *,
+    timeout: float = 10.0,
+    max_js: int = 8,
+    max_routes: int = 80,
+) -> List[str]:
+    """Fetch the target's JS bundles and extract API routes as probe URLs.
+
+    Sync (runs inside the same executor thread as the crawl). Best-effort —
+    never raises. Returns full URLs on the target origin; routes without a
+    query get a synthetic `?q=test` (so classify_url emits a SQLi candidate)
+    or an `/1` id segment for collection routes (→ IDOR candidate)."""
+    import httpx
+
+    parsed = urlparse(target if "://" in target else "http://" + target)
+    if not parsed.netloc:
+        return []
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    def _get(url: str) -> str:
+        if scope_filter is not None:
+            try:
+                if not scope_filter(url):
+                    return ""
+            except Exception:
+                return ""
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=True,
+                              headers={"User-Agent": "SentinelForge/discovery"}) as c:
+                r = c.get(url)
+                return r.text if r.status_code < 400 else ""
+        except Exception:
+            return ""
+
+    html = _get(origin + "/")
+    if not html:
+        return []
+    # Script srcs from the homepage, plus the usual SPA bundle names as fallback.
+    srcs = _SCRIPT_SRC_RE.findall(html)
+    srcs += ["main.js", "runtime.js", "polyfills.js", "vendor.js"]
+    js_urls, seen_js = [], set()
+    for s in srcs:
+        ju = s if "://" in s else f"{origin}/{s.lstrip('/')}"
+        if ju not in seen_js and _STATIC_ASSET_RE.search(ju):  # only .js et al.
+            if ju.lower().endswith(".js"):
+                seen_js.add(ju)
+                js_urls.append(ju)
+        if len(js_urls) >= max_js:
+            break
+
+    routes: set[str] = set()
+    for ju in js_urls:
+        text = _get(ju)
+        if not text:
+            continue
+        for m in _JS_ROUTE_RE.findall(text):
+            routes.add(m.strip("/"))
+        for m in _JS_PATH_RE.findall(text):
+            if not _STATIC_ASSET_RE.search(m):
+                routes.add(m.strip("/"))
+
+    # Build SQLi candidates (every API route, with its query or a synthetic
+    # ?q=test) and IDOR candidates (collection routes only). Queryable routes
+    # (search/find/…) go first so they survive the cap. SQLi outranks IDOR
+    # because it confirms unauthenticated; IDOR usually needs a persona.
+    sqli_urls, idor_urls = [], []
+    for route in sorted(routes, key=lambda r: (not any(w in r.lower() for w in _QUERYABLE), r)):
+        path, _, query = route.partition("?")
+        path = "/" + path.strip("/")
+        if not path or path == "/":
+            continue
+        last = path.rstrip("/").split("/")[-1].lower()
+        sqli_urls.append(f"{origin}{path}?{query}" if query else f"{origin}{path}?q=test")
+        if last in _COLLECTIONS:
+            idor_urls.append(f"{origin}{path.rstrip('/')}/1")
+
+    out, seen = [], set()
+    for u in sqli_urls + idor_urls[:25]:
+        if u in seen:
+            continue
+        if scope_filter is not None:
+            try:
+                if not scope_filter(u):
+                    continue
+            except Exception:
+                continue
+        seen.add(u)
+        out.append(u)
+        if len(out) >= max_routes:
+            break
+    logger.info("[discovery] JS mining → %d endpoint URL(s) from %d bundle(s)", len(out), len(js_urls))
+    return out
+
+
 def _build_mission(target_url: str, *, max_depth: int, max_pages: int):
     """Build the WebMission the HttpCrawler needs from a bare target URL.
 
@@ -348,6 +475,13 @@ async def discover_candidates(
                 all_urls.append(str(e.url))
             except Exception:
                 continue
+        # SPA fallback: HTML crawling is blind to single-page apps, so mine the
+        # JS bundles for API routes. This is what turns a 0-URL SPA crawl into a
+        # real attack surface (e.g. Juice Shop's /rest/products/search).
+        try:
+            all_urls.extend(_mine_js_endpoints(target, scope_filter, timeout=timeout))
+        except Exception as e:
+            logger.warning("[discovery] JS mining failed: %s: %s", type(e).__name__, e)
         # Dedup while preserving order (stable across runs).
         seen = set()
         out = []

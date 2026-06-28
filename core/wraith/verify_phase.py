@@ -259,6 +259,10 @@ async def run_verify_phase(
     verifier = VulnVerifier(session)
     engine = MutationEngine()
     confirmed: List[Dict[str, Any]] = []
+    # Endpoints where a vuln confirmed with NO credentials → emit a companion
+    # missing-auth primitive once each (it's the chain entry point that lets
+    # omega build, e.g., missing_auth → sqli → data_exfiltration).
+    _unauth_seen: set = set()
     probes_total = 0
 
     logger.info(
@@ -326,6 +330,33 @@ async def run_verify_phase(
                         f"as persona={identity_name!r} "
                         f"via payload={payload!r} (conf={confidence})"
                     )
+
+                    # A vuln confirmed WITHOUT credentials means the endpoint is
+                    # exploitable unauthenticated — i.e. missing access control.
+                    # Emit it as a missing_auth primitive (once per endpoint) so
+                    # the chain engine has an entry point to build a killchain.
+                    if not authed and url not in _unauth_seen:
+                        _unauth_seen.add(url)
+                        confirmed.append({
+                            "id": f"missing-auth-{abs(hash(url)) % 1_000_000}",
+                            "type": "Missing Authentication (active verification)",
+                            "severity": "MEDIUM",
+                            "tool": "vuln_verifier",
+                            "target": url,
+                            "message": (
+                                f"unauthenticated exploitation confirmed on {url} "
+                                f"({kind} with no credentials) — endpoint is missing "
+                                f"access control"
+                            ),
+                            "tags": ["verified", "missing_auth", "no_auth", label],
+                            "families": ["confirmed_vuln"],
+                            "metadata": {
+                                "vuln_class": "missing_auth",
+                                "enabled_via": kind,
+                                "authenticated": False,
+                                "probe_label": label,
+                            },
+                        })
     finally:
         close = getattr(engine, "close", None)
         if callable(close):

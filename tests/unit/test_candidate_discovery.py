@@ -273,3 +273,56 @@ class TestDiscoverCandidatesAsync:
         # Out-of-scope URL must not appear.
         assert all("out.example" not in u for u, _, _ in out)
         assert any("in.example" in u for u, _, _ in out)
+
+
+class TestJsRouteMining:
+    """SPA fallback: routes live in JS template literals, not <a href> links."""
+
+    def test_route_regex_extracts_from_template_literal(self):
+        # Real Juice Shop shape: `${baseUrl}/rest/products/search?q=${q}`.
+        from core.wraith.candidate_discovery import _JS_ROUTE_RE
+        js = "fetch(`${this.basePath}/rest/products/search?q=${encodeURIComponent(e)}`)"
+        routes = _JS_ROUTE_RE.findall(js)
+        assert any("rest/products/search" in r for r in routes), routes
+
+    def test_mined_search_route_classifies_as_sqli(self):
+        # The miner appends ?q=test to queryable routes; classify must emit SQLi.
+        from core.wraith.candidate_discovery import classify_url
+        cands = classify_url("http://h.example/rest/products/search?q=test")
+        assert any(vc == "sqli" for _, _, vc in cands)
+
+    def test_js_mining_finds_endpoints_on_a_spa(self, monkeypatch):
+        # SPA homepage = app-root + a JS bundle; the bundle holds the routes.
+        import core.wraith.candidate_discovery as cd
+
+        def fake_get(self, url, headers=None):
+            if url.rstrip("/").endswith("3000") or url.endswith("/"):
+                return (200, {}, b'<html><body><app-root></app-root>'
+                               b'<script src="main.js"></script></body></html>')
+            if "main.js" in url:
+                return (200, {}, b'x(`${b}/rest/products/search?q=${q}`);'
+                               b'y("/api/Users");')
+            return (404, {}, b"")
+
+        monkeypatch.setattr(cd._ScopeOnlyPolicy, "http_get", fake_get, raising=False)
+        # _mine_js_endpoints uses httpx directly, not the policy — patch httpx.
+        import httpx
+
+        class _Resp:
+            def __init__(self, text, code=200):
+                self.text, self.status_code = text, code
+
+        class _Client:
+            def __init__(self, *a, **k): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def get(self, url, headers=None):
+                if "main.js" in url:
+                    return _Resp("x(`${b}/rest/products/search?q=${q}`);y('/api/Users');")
+                if url.endswith("/") or url.endswith("3000"):
+                    return _Resp('<script src="main.js"></script>')
+                return _Resp("", 404)
+
+        monkeypatch.setattr(httpx, "Client", _Client)
+        urls = cd._mine_js_endpoints("http://h.example", None)
+        assert any("rest/products/search" in u and "q=" in u for u in urls), urls

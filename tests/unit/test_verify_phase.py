@@ -117,8 +117,12 @@ class TestRunVerifyPhase:
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
         result = _run(run_verify_phase(session=_StubSession(), targets=["http://127.0.0.1:3000"], enable_discovery=False))
-        assert len(result) == 1
-        f = result[0]
+        # An UNAUTHENTICATED confirmation also emits a missing_auth companion
+        # (the chain entry point), so we expect the SQLi finding + its companion.
+        assert len(result) == 2
+        sqli = [r for r in result if r["metadata"].get("vuln_class") == "SQLi"]
+        assert len(sqli) == 1
+        f = sqli[0]
         # Required fields for FindingsStore + the UI / AI briefing
         for key in ("id", "type", "severity", "tool", "target", "message", "proof", "tags", "families", "metadata"):
             assert key in f, f"missing field {key!r}"
@@ -129,6 +133,11 @@ class TestRunVerifyPhase:
         assert f["metadata"]["confidence"] == pytest.approx(0.92)
         assert f["metadata"]["vuln_class"] == "SQLi"
         assert "verified" in f["tags"]
+        # The missing_auth companion: same endpoint, feeds the chain engine.
+        ma = [r for r in result if r["metadata"].get("vuln_class") == "missing_auth"]
+        assert len(ma) == 1
+        assert "rest/products/search" in ma[0]["target"]
+        assert ma[0]["metadata"]["enabled_via"] == "SQLi"
 
     def test_verifier_exception_on_one_probe_does_not_kill_phase(self, monkeypatch):
         # The phase must isolate failures: one bad probe → continue probing.
