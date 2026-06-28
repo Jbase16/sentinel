@@ -668,6 +668,119 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 f"[verify_phase] added {len(confirmed_findings)} "
                                 f"confirmed-vuln finding(s) to session"
                             )
+
+                        # --- Phase 2: close the loop — verify omega chains ------
+                        # Synthesize hypothesized exploit chains (omega/NEXUS) over
+                        # this scan's findings, then live-test each chain's steps
+                        # with the SAME VulnVerifier + scope discipline as the probe
+                        # phase above. A chain whose steps confirm is PROMOTED to a
+                        # verified, evidenced killchain and persisted as a HIGH
+                        # issue; unconfirmed chains are never asserted. Best-effort,
+                        # scope+host gated, budget-bounded — never kills the scan.
+                        try:
+                            from core.cortex.chain_arbiter import OmegaChainProposer, ChainContext
+                            from core.cortex.chain_verifier import ChainVerifier
+                            from core.web.contracts.enums import VulnerabilityClass
+                            from core.wraith.mutation_engine import MutationEngine
+                            from core.wraith.vuln_verifier import VulnVerifier
+                            from urllib.parse import urlparse as _urlparse
+
+                            _omega_chains = await OmegaChainProposer().propose(
+                                ChainContext(
+                                    target=req.target,
+                                    findings=session.findings.get_all(),
+                                    issues=session.issues.get_all(),
+                                )
+                            )
+                            if _omega_chains:
+                                _name_to_vc = {
+                                    "idor": VulnerabilityClass.IDOR,
+                                    "ssrf": VulnerabilityClass.SSRF,
+                                    "open redirect": VulnerabilityClass.OPEN_REDIRECT,
+                                    "reflected xss": VulnerabilityClass.XSS,
+                                    "sqli": VulnerabilityClass.SQLI,
+                                    "path traversal": VulnerabilityClass.PATH_TRAVERSAL,
+                                }
+                                # Hosts the scan actually discovered in-scope — chain
+                                # steps may only be probed against these.
+                                _inscope_hosts = set()
+                                for _t in target_set:
+                                    _u = _t if "://" in _t else f"https://{_t}"
+                                    _net = _urlparse(_u).netloc
+                                    if _net:
+                                        _inscope_hosts.add(_net.lower())
+                                # First persona enables authenticated IDOR; else anon.
+                                _id_headers: Dict[str, str] = {}
+                                _id_cookies: Dict[str, str] = {}
+                                if req.personas:
+                                    try:
+                                        from core.wraith.persona_auth import authenticate_persona
+                                        _id_headers, _id_cookies = await authenticate_persona(req.personas[0])
+                                    except Exception:
+                                        _id_headers, _id_cookies = {}, {}
+                                _authed = bool(_id_headers or _id_cookies)
+                                _cv_verifier = VulnVerifier(session)
+                                _cv_engine = MutationEngine()
+                                _cv_probes = {"n": 0}
+                                _CV_CAP = 20  # hard cap on chain-verification probes
+
+                                async def _verify_step(vclass_name: str, url: str):
+                                    if _cv_probes["n"] >= _CV_CAP:
+                                        return None, "probe budget exhausted"
+                                    if (_urlparse(url).netloc or "").lower() not in _inscope_hosts:
+                                        return None, "host not in discovered scope"
+                                    if scope_filter is not None and not scope_filter(url):
+                                        return None, "out of scope"
+                                    if vclass_name == "idor" and not _authed:
+                                        return None, "idor needs an authenticated identity"
+                                    vc = _name_to_vc.get(vclass_name, VulnerabilityClass.GENERIC)
+                                    _cv_probes["n"] += 1
+                                    results, _ = await _cv_verifier.verify_finding(
+                                        engine=_cv_engine, finding={}, url=url, vuln_class=vc,
+                                        headers=_id_headers, cookies=_id_cookies, budget=3,
+                                    )
+                                    if results:
+                                        return True, f"confirmed (confidence={float(results[0][0]):.2f})"
+                                    return None, "no signal"  # inconclusive — never a refutation
+
+                                try:
+                                    _cv_report = await ChainVerifier().verify(_omega_chains, _verify_step)
+                                finally:
+                                    _close = getattr(_cv_engine, "close", None)
+                                    if callable(_close):
+                                        try:
+                                            _maybe = _close()
+                                            if hasattr(_maybe, "__await__"):
+                                                await _maybe
+                                        except Exception:
+                                            pass
+
+                                for _vc_res in _cv_report["verified"]:
+                                    _chain = _vc_res.proposal
+                                    session.issues.add_issue({
+                                        "title": f"Verified Exploit Chain → {_chain.goal}",
+                                        "severity": "HIGH",
+                                        "target": req.target,
+                                        "data": {
+                                            "goal": _chain.goal,
+                                            "steps": _chain.steps,
+                                            "epistemic": "verified",
+                                            "method": "omega-nexus synthesis + live step verification",
+                                            "verification": _vc_res.to_dict().get("verification", {}),
+                                        },
+                                    }, persist=True)
+                                _cc = _cv_report["counts"]
+                                session.log(
+                                    f"[chain_verify] omega chains {_cc['input']} -> "
+                                    f"verified {_cc['verified']} (refuted {_cc['refuted']}, "
+                                    f"untested {_cc['untested']}); probes={_cv_probes['n']}"
+                                )
+                        except Exception as _cv_exc:
+                            logger.error(
+                                f"[scan] chain verification failed (nothing promoted): "
+                                f"{type(_cv_exc).__name__}: {_cv_exc}",
+                                exc_info=True,
+                            )
                     except Exception as _vp_exc:
                         # Verification-phase failures must NEVER kill the scan
                         # — recon results stand on their own. Log and move on.

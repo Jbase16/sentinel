@@ -153,6 +153,24 @@ class OmegaChainProposer:
             logger.warning("[ChainArbiter] omega proposer failed: %s", e)
             return []
 
+        # omega normalizes a primitive's target to its bare HOST, dropping the
+        # path/params the verifier needs. We still hold the originating findings,
+        # so rebuild (primitive_type, host) -> concrete URL and re-attach it to
+        # each step. Without this, chain steps are not live-verifiable (phase 2).
+        from urllib.parse import urlparse as _urlparse
+        url_index: Dict[Tuple[str, str], str] = {}
+        try:
+            from core.aegis.nexus.primitives import PrimitiveCollector
+            for f in list(ctx.findings) + list(ctx.issues):
+                tgt = str(f.get("target") or "")
+                if "://" not in tgt:
+                    continue
+                host = (_urlparse(tgt).netloc or "").lower()
+                for pt in PrimitiveCollector._infer_primitive_types(f):
+                    url_index.setdefault((pt.value, host), tgt)
+        except Exception as e:
+            logger.debug("[ChainArbiter] url index build failed: %s", e)
+
         out: List[ChainProposal] = []
         for chain in getattr(result, "top_chains", []) or []:
             try:
@@ -161,6 +179,17 @@ class OmegaChainProposer:
                     for s in chain.steps
                 ]
                 goal = chain.goal.value if hasattr(chain.goal, "value") else str(chain.goal)
+                raw = chain.to_dict() if hasattr(chain, "to_dict") else {}
+                # Re-attach concrete URLs so chain_verifier can re-test each step.
+                for st in raw.get("steps", []) or []:
+                    if not isinstance(st, dict):
+                        continue
+                    full = url_index.get((
+                        str(st.get("primitive_type") or ""),
+                        str(st.get("target") or "").lower(),
+                    ))
+                    if full:
+                        st["url"] = full
                 out.append(ChainProposal(
                     source=self.name,
                     method="semantic-synthesis",
@@ -170,7 +199,7 @@ class OmegaChainProposer:
                     score=float(chain.total_score),
                     confidence=float(chain.confidence_score),
                     goal=goal,
-                    raw=chain.to_dict() if hasattr(chain, "to_dict") else {},
+                    raw=raw,
                 ))
             except Exception as e:
                 logger.debug("[ChainArbiter] omega chain adapt failed: %s", e)

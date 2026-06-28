@@ -51,10 +51,17 @@ ChainContext(findings, issues, graph_dto, target, session_id)
 
 ## Phasing
 
-1. **(this change) Ensemble read-path.** Proposer interface + both proposers + arbiter; surface `arbitrated_chains` additively. Non-breaking — `graph_attack_paths` unchanged.
-2. **Closed loop.** Hypothesized omega chains → verifier (`wraith`/Ghost cross-principal) → promote survivors to `observed` and fold into `graph_attack_paths`. This is the autonomous-hunt step.
-3. **Self-direction.** A mission driver runs omega's goal states as objectives, feeding verified chains back as new hypotheses (revive/fold `Orchestrator._mission_loop`).
-4. **Consolidation.** Once omega is a first-class proposer and the loop is closed, retire the orphaned `aegis` entry-point duplication; `aegis` chain *execution* (PoC) becomes the loop's verification arm.
+1. **✅ Ensemble read-path.** Proposer interface + both proposers + arbiter; surface `arbitrated_chains` additively. Non-breaking — `graph_attack_paths` unchanged. (`core/cortex/chain_arbiter.py`)
+2. **✅ Closed loop.** Hypothesized omega chains → `ChainVerifier` re-tests each step's primitive with wraith's `VulnVerifier` (scope+host gated, budget-capped, bug_bounty mode only) → a chain whose steps confirm is **promoted to `verified`** and persisted as a HIGH issue ("Verified Exploit Chain → {goal}"); unconfirmed chains stay `hypothesized`, refuted ones drop. Absence of a confirmation is never a refutation. (`core/cortex/chain_verifier.py`; wired in `scans.py` Phase-2 block)
+3. **Self-direction (next).** A mission driver runs omega's goal states as objectives, feeding verified chains back as new hypotheses (revive/fold `Orchestrator._mission_loop`), so the hunt re-plans from what it just proved instead of stopping at one pass.
+4. **Consolidation.** Once the loop self-directs, retire the orphaned `aegis` entry-point duplication; `aegis` chain *execution* (PoC) becomes the loop's evidence-capture arm.
+
+### A note on URL recovery
+
+omega normalizes a primitive's target to its bare host, dropping the path/params
+the verifier needs. `OmegaChainProposer` rebuilds `(primitive_type, host) → concrete URL`
+from the originating findings and re-attaches it to each step (`step["url"]`), so chain
+steps are actually live-verifiable. Without this, every chain stays untestable.
 
 ## Non-goals (for phase 1)
 
