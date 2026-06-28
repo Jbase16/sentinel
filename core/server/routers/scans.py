@@ -693,14 +693,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             # chains. confirmed_findings is the guaranteed set.
                             _chain_findings = list(confirmed_findings or [])
                             _chain_findings.extend(session.findings.get_all())
-                            _omega_chains = await OmegaChainProposer().propose(
-                                ChainContext(
-                                    target=req.target,
-                                    findings=_chain_findings,
-                                    issues=session.issues.get_all(),
-                                )
-                            )
-                            if _omega_chains:
+                            from core.cortex.chain_hunter import ChainHunter
+                            if _chain_findings:
                                 _name_to_vc = {
                                     "idor": VulnerabilityClass.IDOR,
                                     "ssrf": VulnerabilityClass.SSRF,
@@ -730,7 +724,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 _cv_verifier = VulnVerifier(session)
                                 _cv_engine = MutationEngine()
                                 _cv_probes = {"n": 0}
-                                _CV_CAP = 20  # hard cap on chain-verification probes
+                                _CV_CAP = 30  # hard cap on chain + escalation probes
 
                                 async def _verify_step(vclass_name: str, url: str):
                                     if _cv_probes["n"] >= _CV_CAP:
@@ -751,8 +745,75 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         return True, f"confirmed (confidence={float(results[0][0]):.2f})"
                                     return None, "no signal"  # inconclusive — never a refutation
 
+                                # ── Self-directing hunt (phase 3) ──────────────
+                                # synthesize → verify → expand, iterated. A proven
+                                # chain's terminal primitive unlocks follow-on vuln
+                                # classes (omega enablement); we discover+verify
+                                # THOSE specifically, fold confirmations back in,
+                                # and re-synthesize — deepening toward higher goals
+                                # until it converges. All within one probe budget.
+                                async def _synthesize(_findings):
+                                    return await OmegaChainProposer().propose(ChainContext(
+                                        target=req.target, findings=_findings,
+                                        issues=session.issues.get_all(),
+                                    ))
+
+                                async def _verify_chains(_chains):
+                                    return (await ChainVerifier().verify(_chains, _verify_step))["verified"]
+
+                                async def _expand(_fresh, _findings):
+                                    from core.omega.nexus_phase import PRIMITIVE_ENABLEMENT
+                                    from core.aegis.nexus.primitives import PrimitiveType
+                                    from core.cortex.chain_verifier import PRIMITIVE_TO_VULN_CLASS
+                                    from core.wraith.candidate_discovery import discover_candidates
+                                    _want = set()
+                                    for _v in _fresh:
+                                        _raw = getattr(_v.proposal, "raw", {}) or {}
+                                        _steps = _raw.get("steps", []) if isinstance(_raw, dict) else []
+                                        if not _steps:
+                                            continue
+                                        try:
+                                            _term = PrimitiveType(str(_steps[-1].get("primitive_type")))
+                                        except Exception:
+                                            continue
+                                        for _nxt in PRIMITIVE_ENABLEMENT.get(_term, []):
+                                            _vc = PRIMITIVE_TO_VULN_CLASS.get(_nxt.value)
+                                            if _vc:
+                                                _want.add(_vc)
+                                    if not _want or _cv_probes["n"] >= _CV_CAP:
+                                        return []
+                                    _out: List[Dict[str, Any]] = []
+                                    for _url, _label, _vc_name in await discover_candidates(
+                                        req.target, scope_filter, max_candidates=60
+                                    ):
+                                        if _vc_name not in _want or _cv_probes["n"] >= _CV_CAP:
+                                            continue
+                                        _verdict, _ev = await _verify_step(_vc_name, _url)
+                                        if _verdict is True:
+                                            _out.append({
+                                                "type": f"{_vc_name} (active verification)",
+                                                "severity": "HIGH", "tool": "vuln_verifier", "target": _url,
+                                                "message": f"{_vc_name} confirmed during chain escalation",
+                                                "tags": ["verified", "escalation", _vc_name],
+                                                "families": ["confirmed_vuln"],
+                                                "metadata": {"vuln_class": _vc_name, "authenticated": _authed},
+                                            })
+                                            if not _authed:
+                                                _out.append({
+                                                    "type": "Missing Authentication (active verification)",
+                                                    "severity": "MEDIUM", "tool": "vuln_verifier", "target": _url,
+                                                    "message": f"unauthenticated {_vc_name} during escalation",
+                                                    "tags": ["verified", "missing_auth", "escalation"],
+                                                    "families": ["confirmed_vuln"],
+                                                    "metadata": {"vuln_class": "missing_auth", "enabled_via": _vc_name},
+                                                })
+                                    return _out
+
                                 try:
-                                    _cv_report = await ChainVerifier().verify(_omega_chains, _verify_step)
+                                    _hunt = await ChainHunter(max_iterations=2).hunt(
+                                        _chain_findings, synthesize=_synthesize,
+                                        verify_chains=_verify_chains, expand=_expand,
+                                    )
                                 finally:
                                     _close = getattr(_cv_engine, "close", None)
                                     if callable(_close):
@@ -763,7 +824,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         except Exception:
                                             pass
 
-                                for _vc_res in _cv_report["verified"]:
+                                for _vc_res in _hunt.verified:
                                     _chain = _vc_res.proposal
                                     session.issues.add_issue({
                                         "title": f"Verified Exploit Chain → {_chain.goal}",
@@ -773,15 +834,15 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                             "goal": _chain.goal,
                                             "steps": _chain.steps,
                                             "epistemic": "verified",
-                                            "method": "omega-nexus synthesis + live step verification",
+                                            "method": "omega-nexus synthesis + live step verification (self-directed)",
                                             "verification": _vc_res.to_dict().get("verification", {}),
                                         },
                                     }, persist=True)
-                                _cc = _cv_report["counts"]
                                 session.log(
-                                    f"[chain_verify] omega chains {_cc['input']} -> "
-                                    f"verified {_cc['verified']} (refuted {_cc['refuted']}, "
-                                    f"untested {_cc['untested']}); probes={_cv_probes['n']}"
+                                    f"[chain_hunt] iterations={_hunt.iterations} "
+                                    f"verified={len(_hunt.verified)} "
+                                    f"escalation_unlocked={len(_hunt.findings_added)} "
+                                    f"top_goal={_hunt.top_goal!r}; probes={_cv_probes['n']}"
                                 )
                         except Exception as _cv_exc:
                             logger.error(
