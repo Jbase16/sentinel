@@ -142,15 +142,23 @@ class VulnVerifier:
         params = [k for k, _ in parse_qsl(urlparse(url).query or "", keep_blank_values=True)]
         if not params: return results, probes
 
-        # Error-based: a bare "'" often returns empty rather than erroring
-        # (e.g. Juice Shop's search needs "'))"), so escalate through common SQL
-        # boundary contexts until one trips a DB syntax error (Run #26).
+        # Error-based: the boundary must break the EXISTING query context, so we
+        # APPEND it to the parameter's real value instead of replacing the value
+        # with a bare boundary. Live-proven on Juice Shop (Run #27): `q='` returns
+        # 200/empty (the bare quote never breaks the surrounding `LIKE '%...%'`),
+        # but `q=<value>'` trips `SQLITE_ERROR: ... syntax error`. Replacing the
+        # value was why the verifier missed a textbook SQLi sitting on its own
+        # seed endpoint (/rest/products/search).
         cookie_hdr = "; ".join(f"{k}={v}" for k, v in cookies.items())
         send_headers = {**headers, **({"Cookie": cookie_hdr} if cookie_hdr else {})}
+        param_values = dict(parse_qsl(urlparse(url).query or "", keep_blank_values=True))
         for param in params[:2]:
-            for probe in ("'", "'))", "\")", "' OR '1'='1", "1)) OR ((1=1"):
+            # Non-empty base so the appended boundary actually breaks the context.
+            base = param_values.get(param) or "a"
+            for boundary in ("'", "'))", "\")", "')) OR (('1'='1", "' OR '1'='1'-- -"):
                 if probes >= budget:
                     break
+                probe = f"{base}{boundary}"
                 probe_url = self._inject_query_param(url, param, probe)
                 payload = MutationPayload(value=probe, encoding=PayloadEncoding.NONE, vuln_class=VulnerabilityClass.SQLI, description=f"SQLi error probe {probe!r}")
                 outcome, _, _ = await waf_aware_send(engine, probe_url, payload, method=HttpMethod.GET, headers=send_headers)

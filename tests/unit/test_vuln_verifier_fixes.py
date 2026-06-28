@@ -220,3 +220,41 @@ def test_idor_skipped_when_no_numeric_path_segment(monkeypatch):
     )
     assert results == []
     assert probes == 0, "verifier must not probe when no ID segment is present"
+
+
+# ────────────────────────── SQLi boundary placement ─────────────────────
+
+
+def test_sqli_appends_boundary_to_base_value(monkeypatch):
+    """Regression: the boundary must be APPENDED to the parameter's value
+    (`q=<value>'`), not REPLACE it (`q='`). Live-proven on Juice Shop: `q='`
+    returns 200/empty (no error) while `q=<value>'` trips SQLITE_ERROR. The old
+    code replaced the value with a bare boundary and so missed a textbook SQLi
+    sitting on its own seed endpoint."""
+    import asyncio
+    from urllib.parse import urlparse, parse_qs
+    import core.wraith.vuln_verifier as vv
+
+    seen = []
+
+    async def fake_send(engine, url, payload, *, method, headers):
+        q = parse_qs(urlparse(url).query).get("q", [""])[0]
+        seen.append(q)
+        # Mimic Juice Shop: only a quote AFTER real content breaks the LIKE
+        # context and errors; a bare/leading boundary returns empty 200.
+        errors = ("'" in q) and not q.lstrip().startswith(("'", '"'))
+        if errors:
+            return (_FakeMR(status_code=500,
+                            body='SQLITE_ERROR: near "\'%\'": syntax error'), None, False)
+        return (_FakeMR(status_code=200, body='{"status":"success","data":[]}'), None, False)
+
+    monkeypatch.setattr(vv, "waf_aware_send", fake_send)
+    v = VulnVerifier.__new__(VulnVerifier)
+    results, probes = asyncio.run(
+        v._confirm_sqli(engine=None, url="http://h/search?q=apple",
+                        headers={}, cookies={}, budget=5)
+    )
+    assert results, "SQLi must confirm when the boundary is appended to the base value"
+    assert results[0][3] == "SQLi"
+    # Every probe preserved the base value (never sent a bare boundary).
+    assert seen and all(v.startswith("apple") for v in seen), seen
