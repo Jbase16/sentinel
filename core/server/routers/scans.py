@@ -685,10 +685,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             from core.wraith.vuln_verifier import VulnVerifier
                             from urllib.parse import urlparse as _urlparse
 
+                            # Use the just-confirmed findings DIRECTLY (not only
+                            # session.findings.get_all(), whose in-memory view can
+                            # lag the bulk_add above). Without this, the chain
+                            # synthesis raced the persist and saw the SQLi but not
+                            # its missing_auth companion → no enabling pair → 0
+                            # chains. confirmed_findings is the guaranteed set.
+                            _chain_findings = list(confirmed_findings or [])
+                            _chain_findings.extend(session.findings.get_all())
                             _omega_chains = await OmegaChainProposer().propose(
                                 ChainContext(
                                     target=req.target,
-                                    findings=session.findings.get_all(),
+                                    findings=_chain_findings,
                                     issues=session.issues.get_all(),
                                 )
                             )
