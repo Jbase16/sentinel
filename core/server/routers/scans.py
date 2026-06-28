@@ -1074,6 +1074,31 @@ async def get_scan_results():
         graph_dto=graph_dto,
     )
 
+    # Multi-proposer chain ensemble (docs/CHAIN_ARBITER.md): cortex (observed)
+    # + omega/NEXUS (hypothesized goal-synthesis), merged + ranked into one
+    # canonical set. Additive and best-effort — any failure leaves the existing
+    # cortex attack paths completely untouched. omega chains are labelled
+    # `hypothesized` and never counted as confirmed; the closed loop promotes
+    # them only after verification.
+    arbitrated_chains: List[Dict[str, Any]] = []
+    try:
+        from core.cortex.chain_arbiter import ChainArbiter, ChainContext
+        _chain_ctx = ChainContext(
+            target=scan_state.get("target") or "",
+            findings=findings,
+            issues=issues,
+            graph_dto=graph_dto,
+            session_id=session_id,
+        )
+        arbitrated_chains = [
+            c.to_dict() for c in await ChainArbiter.default().arbitrate(_chain_ctx)
+        ]
+    except Exception as _ca_exc:
+        logger.warning(
+            f"[Results] chain arbiter skipped (cortex paths unchanged): "
+            f"{type(_ca_exc).__name__}: {_ca_exc}"
+        )
+
     result = {
         "scan": {
             "target": scan_state.get("target"),
@@ -1103,6 +1128,9 @@ async def get_scan_results():
             "graph_attack_paths": graph_attack_paths,
             # Backward-compat alias (deprecated): use graph_attack_paths.
             "attack_paths": graph_attack_paths,
+            # Multi-proposer ensemble: each entry carries source/method/epistemic
+            # so observed (cortex) and hypothesized (omega) chains stay distinct.
+            "arbitrated_chains": arbitrated_chains,
             "degraded_paths": [],
             "recommended_phases": [],
             "attack_path_contract": attack_path_contract,
