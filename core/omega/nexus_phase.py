@@ -49,7 +49,13 @@ PRIMITIVE_ENABLEMENT = {
     PrimitiveType.MISSING_AUTH: [
         PrimitiveType.IDOR_PATTERN,
         PrimitiveType.SSRF_PATTERN,
+        PrimitiveType.SQLI_PATTERN,
         PrimitiveType.FILE_UPLOAD,
+    ],
+    PrimitiveType.SQLI_PATTERN: [
+        # SQLi dumps object IDs / credentials, enabling IDOR and info leak.
+        PrimitiveType.IDOR_PATTERN,
+        PrimitiveType.LEAKED_HEADER,
     ],
     PrimitiveType.IDOR_PATTERN: [
         PrimitiveType.LEAKED_HEADER,
@@ -76,6 +82,7 @@ PRIMITIVE_ENABLEMENT = {
 # Goal states reachable from primitives
 PRIMITIVE_GOALS = {
     PrimitiveType.MISSING_AUTH: [GoalState.AUTHENTICATION_BYPASS, GoalState.DATA_EXFILTRATION],
+    PrimitiveType.SQLI_PATTERN: [GoalState.DATA_EXFILTRATION, GoalState.ACCOUNT_TAKEOVER],
     PrimitiveType.IDOR_PATTERN: [GoalState.DATA_EXFILTRATION, GoalState.ACCOUNT_TAKEOVER],
     PrimitiveType.TEMPLATE_INJECTION: [GoalState.RCE, GoalState.DATA_EXFILTRATION],
     PrimitiveType.DESERIALIZATION: [GoalState.RCE],

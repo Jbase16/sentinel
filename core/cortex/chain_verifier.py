@@ -45,10 +45,9 @@ _RANK = {HYPOTHESIZED: 0, OBSERVED: 1, VERIFIED: 2, REFUTED: -1}
 PRIMITIVE_TO_VULN_CLASS: Dict[str, str] = {
     "idor_pattern": "idor",
     "ssrf_pattern": "ssrf",
+    "sqli_pattern": "sqli",
     "open_redirect": "open redirect",
     "reflected_param": "reflected xss",
-    "sqli": "sqli",
-    "path_traversal": "path traversal",
 }
 
 # (vuln_class_name, url) -> (outcome, evidence). Async; the live wiring hits the

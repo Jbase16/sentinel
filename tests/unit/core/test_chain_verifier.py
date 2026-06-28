@@ -108,6 +108,17 @@ async def test_step_error_is_not_a_refutation():
 
 
 @pytest.mark.asyncio
+async def test_sqli_pattern_step_is_live_testable():
+    # SQLI_PATTERN was added to omega's vocabulary; it must map to the SQLi
+    # verifier class so a confirmed SQLi promotes its chain to a killchain.
+    chain = _omega_chain([("sqli_pattern", "https://x.test/search?q=a")],
+                         goal="data_exfiltration")
+    res = await cv.ChainVerifier().verify_chain(chain, _mock({"https://x.test/search?q=a": True}))
+    assert res.verdict == cv.VERIFIED
+    assert res.confirmed == 1
+
+
+@pytest.mark.asyncio
 async def test_verify_partitions_the_set():
     good = _omega_chain([("idor_pattern", "https://x.test/u/1")], goal="account_takeover")
     bad = _omega_chain([("ssrf_pattern", "https://x.test/fetch")], goal="data_exfiltration")

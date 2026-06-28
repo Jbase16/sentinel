@@ -63,6 +63,7 @@ class PrimitiveType(str, Enum):
     OPEN_REDIRECT = "open_redirect"             # Redirect via user input
     LEAKED_HEADER = "leaked_header"             # Information disclosure
     SSRF_PATTERN = "ssrf_pattern"               # URL fetching pattern
+    SQLI_PATTERN = "sqli_pattern"               # SQL injection on a parameter
     IDOR_PATTERN = "idor_pattern"               # Direct object reference
     MISSING_AUTH = "missing_auth"               # No auth on endpoint
     WEAK_CORS = "weak_cors"                     # Overly permissive CORS
@@ -616,6 +617,8 @@ class PrimitiveCollector:
             primitive_types.append(PrimitiveType.LEAKED_HEADER)
         if _match(("ssrf", "server-side request forgery", "metadata service")):
             primitive_types.append(PrimitiveType.SSRF_PATTERN)
+        if _match(("sqli", "sql injection", "sql-injection", "sqlite_error", "sql syntax")):
+            primitive_types.append(PrimitiveType.SQLI_PATTERN)
         if _match(("idor", "insecure direct object", "object reference")):
             primitive_types.append(PrimitiveType.IDOR_PATTERN)
         if _match(("missing auth", "no auth", "unauthenticated", "auth bypass")):
