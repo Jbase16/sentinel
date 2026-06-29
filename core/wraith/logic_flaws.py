@@ -89,13 +89,15 @@ def infer_probes(body: Dict[str, Any]) -> List[InvariantProbe]:
     for k, v in body.items():
         kl = str(k).lower()
         is_num = isinstance(v, (int, float)) and not isinstance(v, bool)
+        # Each field gets ONE class, most-specific first: a numeric "deluxePrice"
+        # is money, not a privilege flag, even though it contains "deluxe".
         if is_num and any(n in kl for n in _QUANTITY_NAMES):
             probes.append(InvariantProbe(k, -999, f"'{k}' must be a positive quantity", "quantity"))
             probes.append(InvariantProbe(k, 0, f"'{k}' must be >= 1", "quantity"))
-        if is_num and any(n in kl for n in _MONEY_NAMES):
+        elif is_num and any(n in kl for n in _MONEY_NAMES):
             probes.append(InvariantProbe(k, -1, f"'{k}' (money) must not be negative / client-set", "money"))
             probes.append(InvariantProbe(k, 0.01, f"'{k}' (money) should be server-derived, not client-set", "money"))
-        if any(n in kl for n in _FLAG_NAMES):
+        elif any(n in kl for n in _FLAG_NAMES):
             val = "admin" if ("role" in kl or "privilege" in kl) else True
             probes.append(InvariantProbe(k, val, f"'{k}' is a privileged flag the client must not set", "privilege"))
     return probes
