@@ -733,7 +733,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         return None, "host not in discovered scope"
                                     if scope_filter is not None and not scope_filter(url):
                                         return None, "out of scope"
-                                    if vclass_name == "idor" and not _authed:
+                                    if vclass_name == "idor" and not (_id_headers or _id_cookies):
                                         return None, "idor needs an authenticated identity"
                                     vc = _name_to_vc.get(vclass_name, VulnerabilityClass.GENERIC)
                                     _cv_probes["n"] += 1
@@ -783,6 +783,31 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     if not _want or _cv_probes["n"] >= _CV_CAP:
                                         return []
                                     _out: List[Dict[str, Any]] = []
+                                    # Capability escalation (phase 4): if a follow-on
+                                    # needs auth and we don't have it, PERFORM a login
+                                    # SQLi to acquire a session, then probe
+                                    # authenticated. This is what lets the hunt
+                                    # breach the auth wall instead of converging.
+                                    if ("idor" in _want) and not (_id_headers or _id_cookies):
+                                        try:
+                                            from core.wraith.capability import acquire_auth_via_login_sqli
+                                            _cap = await acquire_auth_via_login_sqli(req.target, scope_filter)
+                                        except Exception as _cap_exc:
+                                            logger.warning("[scan] capability acquire failed: %s", _cap_exc)
+                                            _cap = None
+                                        if _cap:
+                                            _id_headers.update(_cap.get("headers") or {})
+                                            _id_cookies.update(_cap.get("cookies") or {})
+                                            session.log(f"[capability] session acquired — {_cap.get('provenance')}")
+                                            _out.append({
+                                                "type": "Authentication Bypass (active verification)",
+                                                "severity": "HIGH", "tool": "capability", "target": req.target,
+                                                "message": f"session acquired via {_cap.get('provenance')}",
+                                                "tags": ["verified", "auth_bypass", "capability"],
+                                                "families": ["confirmed_vuln"],
+                                                "metadata": {"vuln_class": "missing_auth",
+                                                             "provenance": _cap.get("provenance")},
+                                            })
                                     for _url, _label, _vc_name in await discover_candidates(
                                         req.target, scope_filter, max_candidates=60
                                     ):
@@ -790,15 +815,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                             continue
                                         _verdict, _ev = await _verify_step(_vc_name, _url)
                                         if _verdict is True:
+                                            # Dynamic — a capability acquired above
+                                            # may have authenticated us mid-expand.
+                                            _now_authed = bool(_id_headers or _id_cookies)
                                             _out.append({
                                                 "type": f"{_vc_name} (active verification)",
                                                 "severity": "HIGH", "tool": "vuln_verifier", "target": _url,
                                                 "message": f"{_vc_name} confirmed during chain escalation",
                                                 "tags": ["verified", "escalation", _vc_name],
                                                 "families": ["confirmed_vuln"],
-                                                "metadata": {"vuln_class": _vc_name, "authenticated": _authed},
+                                                "metadata": {"vuln_class": _vc_name, "authenticated": _now_authed},
                                             })
-                                            if not _authed:
+                                            if not _now_authed:
                                                 _out.append({
                                                     "type": "Missing Authentication (active verification)",
                                                     "severity": "MEDIUM", "tool": "vuln_verifier", "target": _url,
@@ -838,6 +866,11 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                             "verification": _vc_res.to_dict().get("verification", {}),
                                         },
                                     }, persist=True)
+                                # Surface the escalation evidence (auth bypass / IDOR
+                                # confirmed mid-hunt) as findings, not just internal
+                                # hunt state — they're real verified vulns.
+                                if _hunt.findings_added:
+                                    session.findings.bulk_add(_hunt.findings_added, persist=True)
                                 session.log(
                                     f"[chain_hunt] iterations={_hunt.iterations} "
                                     f"verified={len(_hunt.verified)} "
