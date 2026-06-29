@@ -790,23 +790,28 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     # breach the auth wall instead of converging.
                                     if ("idor" in _want) and not (_id_headers or _id_cookies):
                                         try:
-                                            from core.wraith.capability import acquire_auth_via_login_sqli
-                                            _cap = await acquire_auth_via_login_sqli(req.target, scope_filter)
+                                            from core.wraith.capability import acquire_capability
+                                            # The full library tries login-SQLi, then
+                                            # default credentials. Forge-elevation
+                                            # (alg:none / weak HMAC) fires only when a
+                                            # token is already held + verifiable.
+                                            _cap = await acquire_capability(req.target, scope_filter)
                                         except Exception as _cap_exc:
                                             logger.warning("[scan] capability acquire failed: %s", _cap_exc)
                                             _cap = None
                                         if _cap:
-                                            _id_headers.update(_cap.get("headers") or {})
-                                            _id_cookies.update(_cap.get("cookies") or {})
-                                            session.log(f"[capability] session acquired — {_cap.get('provenance')}")
+                                            _id_headers.update(_cap.headers or {})
+                                            _id_cookies.update(_cap.cookies or {})
+                                            session.log(f"[capability] session acquired ({_cap.acquirer}) — {_cap.provenance}")
                                             _out.append({
                                                 "type": "Authentication Bypass (active verification)",
                                                 "severity": "HIGH", "tool": "capability", "target": req.target,
-                                                "message": f"session acquired via {_cap.get('provenance')}",
-                                                "tags": ["verified", "auth_bypass", "capability"],
+                                                "message": f"session acquired via {_cap.provenance}",
+                                                "tags": ["verified", "auth_bypass", "capability", _cap.acquirer],
                                                 "families": ["confirmed_vuln"],
                                                 "metadata": {"vuln_class": "missing_auth",
-                                                             "provenance": _cap.get("provenance")},
+                                                             "acquirer": _cap.acquirer,
+                                                             "provenance": _cap.provenance},
                                             })
                                     for _url, _label, _vc_name in await discover_candidates(
                                         req.target, scope_filter, max_candidates=60
