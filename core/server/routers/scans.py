@@ -929,6 +929,71 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 f"{type(_cv_exc).__name__}: {_cv_exc}",
                                 exc_info=True,
                             )
+
+                        # ── Business-logic probe (the UNDEFENDED class) ──────
+                        # WAFs/signatures/token-allowlists key off payloads;
+                        # business-logic flaws have none — a well-formed authed
+                        # request that violates an invariant the server should
+                        # enforce but instead trusts from the client. Register a
+                        # LOW-priv account (so BFLA findings are real, not "admin
+                        # can"), learn write-collection schemas, create throwaway
+                        # objects we own, confirm invariant violations, clean up.
+                        # Best-effort; never kills the scan.
+                        try:
+                            import httpx as _bl_httpx
+                            import os as _bl_os
+                            from core.wraith.logic_probe import (
+                                acquire_low_priv_session, probe_business_logic,
+                            )
+                            from core.wraith.candidate_discovery import _mine_js_endpoints
+                            _bl_p = _urlparse(req.target if "://" in req.target else "https://" + req.target)
+                            _bl_origin = f"{_bl_p.scheme}://{_bl_p.netloc}"
+                            _bl_hdrs = {"User-Agent": "SentinelForge-Logic"}
+                            _bl_bb = _bl_os.getenv("SENTINEL_GHOST_BB_VALUE", "").strip()
+                            if _bl_bb:
+                                _bl_hdrs[_bl_os.getenv("SENTINEL_GHOST_BB_HEADER", "X-Bug-Bounty").strip()] = _bl_bb
+
+                            async def _bl_send(method, url, body=None, _auth=None):
+                                if scope_filter is not None and not scope_filter(url):
+                                    return 599, {}
+                                _h = dict(_bl_hdrs)
+                                if _auth:
+                                    _h["Authorization"] = f"Bearer {_auth}"
+                                async with _bl_httpx.AsyncClient(timeout=10.0, follow_redirects=True) as _c:
+                                    _r = await _c.request(method, url, json=body, headers=_h)
+                                    try:
+                                        _j = _r.json()
+                                    except Exception:
+                                        _j = {}
+                                    return _r.status_code, _j
+
+                            _bl_sess = await acquire_low_priv_session(_bl_origin, _bl_send)
+                            if _bl_sess:
+                                _bl_token, _bl_ctx = _bl_sess
+
+                                async def _bl_authed(method, url, body=None):
+                                    return await _bl_send(method, url, body, _auth=_bl_token)
+
+                                _bl_colls = sorted({
+                                    "/api/" + u.split("/api/", 1)[1].split("/")[0].split("?")[0]
+                                    for u in _mine_js_endpoints(req.target, scope_filter) if "/api/" in u
+                                })
+                                _bl_findings = await probe_business_logic(
+                                    req.target, _bl_authed, _bl_colls, context=_bl_ctx,
+                                )
+                                if _bl_findings:
+                                    session.findings.bulk_add(_bl_findings, persist=True)
+                                session.log(
+                                    f"[logic] low-priv session acquired; "
+                                    f"{len(_bl_findings)} business-logic flaw(s) across "
+                                    f"{len(_bl_colls)} collection(s)"
+                                )
+                        except Exception as _bl_exc:
+                            logger.error(
+                                f"[scan] business-logic probe failed: "
+                                f"{type(_bl_exc).__name__}: {_bl_exc}",
+                                exc_info=True,
+                            )
                     except Exception as _vp_exc:
                         # Verification-phase failures must NEVER kill the scan
                         # — recon results stand on their own. Log and move on.

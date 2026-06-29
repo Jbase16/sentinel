@@ -29,6 +29,78 @@ from core.wraith.logic_flaws import test_invariants
 
 logger = logging.getLogger(__name__)
 
+# Business-logic / BFLA testing needs a LOW-privilege principal — using an admin
+# session would make "a user can edit products" a false positive (admin can).
+_REGISTER_ENDPOINTS = [
+    ("/api/Users", lambda e, p: {"email": e, "password": p, "passwordRepeat": p,
+                                 "securityQuestion": {"id": 1}, "securityAnswer": "sf"}),
+    ("/api/register", lambda e, p: {"email": e, "password": p}),
+    ("/api/auth/register", lambda e, p: {"email": e, "password": p}),
+    ("/register", lambda e, p: {"username": e, "email": e, "password": p}),
+    ("/signup", lambda e, p: {"email": e, "password": p}),
+]
+_LOGIN_ENDPOINTS = [
+    ("/rest/user/login", lambda e, p: {"email": e, "password": p}),
+    ("/api/login", lambda e, p: {"email": e, "password": p}),
+    ("/login", lambda e, p: {"username": e, "password": p}),
+]
+
+
+def _find_token(obj: Any) -> Optional[str]:
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if str(k).lower() in ("token", "accesstoken", "access_token", "jwt") and isinstance(v, str) and len(v) >= 20:
+                return v
+            t = _find_token(v)
+            if t:
+                return t
+    elif isinstance(obj, list):
+        for x in obj:
+            t = _find_token(x)
+            if t:
+                return t
+    return None
+
+
+async def acquire_low_priv_session(
+    origin: str, post: Request,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Register a fresh account and log in → (bearer token, context).
+
+    `post(method, url, body)` must be UNAUTHENTICATED. Returns (token, context)
+    where context seeds known ids (e.g. basket id) for reference resolution.
+    Best-effort; None if no register/login pair works.
+    """
+    import os as _os
+    email = f"sf_probe_{_os.urandom(4).hex()}@example.test"
+    password = "Sf!Probe_9183"
+    registered = False
+    for path, mk in _REGISTER_ENDPOINTS:
+        try:
+            st, _ = await post("POST", origin + path, mk(email, password))
+        except Exception:
+            continue
+        if 200 <= st < 300:
+            registered = True
+            break
+    if not registered:
+        return None
+    for path, mk in _LOGIN_ENDPOINTS:
+        try:
+            st, resp = await post("POST", origin + path, mk(email, password))
+        except Exception:
+            continue
+        if 200 <= st < 300:
+            token = _find_token(resp)
+            if token:
+                # Capture any session-scoped ids (basket id, user id) for refs.
+                ctx: Dict[str, Any] = {}
+                auth = resp.get("authentication") if isinstance(resp, dict) else None
+                if isinstance(auth, dict) and auth.get("bid") is not None:
+                    ctx["BasketId"] = auth["bid"]
+                return token, ctx
+    return None
+
 # request(method, path_or_url, json_body|None) -> (status, parsed_json)
 Request = Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[Tuple[int, Any]]]
 
@@ -164,5 +236,12 @@ async def probe_business_logic(
         for f in flaws:
             findings.append(f.to_finding())
             logger.info("[logic_probe] business-logic flaw on %s: %s", path, f.field)
+
+        # Clean up the throwaway probe object — leave no footprint on the target
+        # (we only ever create + mutate objects WE made, never existing ones).
+        try:
+            await request("DELETE", f"{origin}{path}/{oid}", None)
+        except Exception:
+            pass
 
     return findings
