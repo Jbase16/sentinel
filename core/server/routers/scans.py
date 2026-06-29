@@ -876,6 +876,47 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 # hunt state — they're real verified vulns.
                                 if _hunt.findings_added:
                                     session.findings.bulk_add(_hunt.findings_added, persist=True)
+
+                                # DEMONSTRATE data_exfiltration: a chain that *reaches*
+                                # the goal proves the steps; here we actually PERFORM the
+                                # exfil (bounded UNION dump on the chain's SQLi step) and
+                                # attach the dumped rows as proof. Reaching → demonstrated.
+                                _exfil_done: set = set()
+                                for _vc_res in _hunt.verified:
+                                    _chain = _vc_res.proposal
+                                    if "exfil" not in str(_chain.goal or "").lower():
+                                        continue
+                                    _raw = getattr(_chain, "raw", {}) or {}
+                                    _sqli_url = next(
+                                        (s.get("url") for s in (_raw.get("steps", []) if isinstance(_raw, dict) else [])
+                                         if isinstance(s, dict) and str(s.get("primitive_type")) == "sqli_pattern" and s.get("url")),
+                                        None,
+                                    )
+                                    if not _sqli_url or _sqli_url in _exfil_done:
+                                        continue
+                                    _exfil_done.add(_sqli_url)
+                                    if (scope_filter is not None and not scope_filter(_sqli_url)) or _cv_probes["n"] >= _CV_CAP:
+                                        continue
+                                    try:
+                                        from core.wraith.exfiltration import exfiltrate_credentials, default_fetch
+                                        from urllib.parse import parse_qsl as _parse_qsl
+                                        _ex_param = next((k for k, _ in _parse_qsl(_urlparse(_sqli_url).query)), "q")
+                                        _exfil = await exfiltrate_credentials(_sqli_url, _ex_param, default_fetch(), max_attempts=40)
+                                    except Exception as _ex_exc:
+                                        logger.warning("[scan] exfiltration failed: %s", _ex_exc)
+                                        _exfil = None
+                                    if _exfil:
+                                        session.log(f"[exfil] dumped {_exfil.row_count} credential row(s) from {_exfil.table}")
+                                        session.findings.bulk_add([{
+                                            "type": "Data Exfiltration (active verification)",
+                                            "severity": "CRITICAL", "tool": "exfiltration", "target": _sqli_url,
+                                            "message": (f"Extracted {_exfil.row_count} credential rows from "
+                                                        f"{_exfil.table} via UNION-based SQL injection"),
+                                            "tags": ["verified", "data_exfiltration", "sqli", "critical"],
+                                            "families": ["confirmed_vuln"],
+                                            "metadata": {"vuln_class": "data_exfiltration",
+                                                         "proof": _exfil.to_proof()},
+                                        }], persist=True)
                                 session.log(
                                     f"[chain_hunt] iterations={_hunt.iterations} "
                                     f"verified={len(_hunt.verified)} "
