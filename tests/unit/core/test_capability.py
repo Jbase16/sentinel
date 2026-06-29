@@ -205,6 +205,44 @@ async def test_jwt_forge_refuses_when_server_rejects():
 
 
 @pytest.mark.asyncio
+async def test_jwt_forge_with_leaked_rs256_key(monkeypatch):
+    # Real apps ship private keys (Juice Shop). Model it: the "leaked" key is in
+    # the list; the server validates with the matching public key.
+    pyjwt = pytest.importorskip("jwt")
+    pytest.importorskip("cryptography")
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv_pem = priv.private_bytes(serialization.Encoding.PEM,
+                                  serialization.PrivateFormat.TraditionalOpenSSL,
+                                  serialization.NoEncryption()).decode()
+    pub_pem = priv.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo).decode()
+    monkeypatch.setattr(cap, "_KNOWN_LEAKED_KEYS", [("test-leaked", priv_pem)])
+
+    # A low-priv session token validly signed with that leaked key.
+    low = pyjwt.encode({"data": {"email": "bob@x.test", "role": "customer"}}, priv_pem, algorithm="RS256")
+
+    async def verify(headers):  # server accepts only valid RS256 sigs (rejects alg:none)
+        tok = headers["Authorization"].split(" ")[-1]
+        try:
+            pyjwt.decode(tok, pub_pem, algorithms=["RS256"])
+            return True
+        except Exception:
+            return False
+
+    capobj = await cap.acquire_capability(
+        "http://h.example", None, prior_token=low, verify=verify,
+        acquirers=[cap.JwtForgeAcquirer()],
+    )
+    assert capobj is not None
+    assert "leaked RS256 key" in capobj.provenance
+    dec = pyjwt.decode(capobj.token, pub_pem, algorithms=["RS256"])
+    assert dec["data"]["role"] == "admin"   # escalated customer → admin
+
+
+@pytest.mark.asyncio
 async def test_jwt_forge_skipped_without_prior_token():
     # No token to elevate → forge no-ops, registry falls through.
     capobj = await cap.acquire_capability(

