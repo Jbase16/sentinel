@@ -950,7 +950,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 acquire_low_priv_session, probe_business_logic,
                                 probe_registration_mass_assignment,
                             )
-                            from core.wraith.bola_probe import probe_bola
+                            from core.wraith.bola_probe import probe_bola, probe_bola_scale
                             from core.cortex.kill_chain import compose_privilege_chain
                             from core.wraith.candidate_discovery import _mine_js_endpoints
                             _bl_p = _urlparse(req.target if "://" in req.target else "https://" + req.target)
@@ -1023,6 +1023,17 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 if _bl_bola:
                                     session.findings.bulk_add(_bl_bola, persist=True)
 
+                                # Object-graph BOLA at scale: one low-priv principal
+                                # walks object id spaces and reads the whole
+                                # population's private data — confirmed by a distinct-
+                                # owner differential (systemic, not a single read).
+                                _bl_bscale = await probe_bola_scale(
+                                    req.target, register_post=_bl_send,
+                                    authed_send=_bl_authed_for, js_collections=_bl_colls,
+                                )
+                                if _bl_bscale:
+                                    session.findings.bulk_add(_bl_bscale, persist=True)
+
                                 # Kill-chain composer: if mass assignment yielded a
                                 # privilege primitive, ACTIVELY verify it composes into
                                 # a real escalation chain — each hop executed (normal
@@ -1050,6 +1061,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     f"{len(_bl_colls)} collection(s); "
                                     f"{len(_bl_ma)} mass-assignment flaw(s); "
                                     f"{len(_bl_bola)} BOLA flaw(s); "
+                                    f"{len(_bl_bscale)} systemic-BOLA flaw(s); "
                                     f"{'1 VERIFIED kill chain' if _bl_chain else 'no kill chain'}"
                                 )
                         except Exception as _bl_exc:

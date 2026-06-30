@@ -31,6 +31,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from core.wraith.bola import BolaFinding, OwnedObject, _contains, _stringify, test_bola
+from core.wraith.bola_scale import sweep_object_ids
 from core.wraith.logic_probe import _obj_id, acquire_low_priv_session
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,13 @@ logger = logging.getLogger(__name__)
 Send = Callable[[str, str, Optional[Dict[str, Any]]], Awaitable[Tuple[int, Any]]]
 
 _PARAM_RE = re.compile(r"\{([^}]+)\}")
+# Common user-owned, numeric-id collections to sweep for systemic horizontal BOLA.
+# The distinct-owner gate keeps a generous list false-positive-free.
+_BUILTIN_BYID = [
+    "/rest/basket/{id}", "/api/Baskets/{id}", "/api/Feedbacks/{id}",
+    "/api/Addresss/{id}", "/api/Cards/{id}", "/api/Orders/{id}",
+    "/api/Wallets/{id}", "/api/Complaints/{id}", "/api/Quantitys/{id}",
+]
 _OPENAPI_PATHS = ("/openapi.json", "/swagger.json", "/v3/api-docs",
                   "/api/openapi.json", "/api-docs", "/openapi.yaml")
 # Session-scoped object references to try (id substituted in). The id (which B
@@ -222,3 +230,89 @@ async def probe_bola(
     for f in findings:
         logger.info("[bola_probe] confirmed cross-principal access: %s", f.object_ref)
     return [f.to_finding() for f in findings]
+
+
+async def _capture_identity(origin: str, send: Send, ctx: Dict[str, Any]) -> set:
+    """Best-effort set of strings identifying the attacker (so its own objects are
+    excluded from a sweep): its basket id + user id, and anything a whoami exposes."""
+    own: set = set()
+    bid = ctx.get("BasketId")
+    if bid is not None:
+        own.add(str(bid))
+        for tmpl in ("/rest/basket/{bid}", "/api/Baskets/{bid}"):
+            try:
+                st, mine = await send("GET", origin + tmpl.replace("{bid}", str(bid)), None)
+            except Exception:
+                continue
+            if 200 <= int(st) < 300:
+                uid = _deep_get(mine, "UserId")
+                if uid is not None:
+                    own.add(str(uid))
+                break
+    for p in ("/me", "/rest/user/whoami", "/api/users/me", "/api/me"):
+        try:
+            st, who = await send("GET", origin + p, None)
+        except Exception:
+            continue
+        if 200 <= int(st) < 300:
+            for k in ("id", "userId", "user_id", "email", "username"):
+                v = _deep_get(who, k)
+                if v is not None:
+                    own.add(str(v))
+    return own
+
+
+async def probe_bola_scale(
+    target: str,
+    *,
+    register_post: Send,
+    authed_send: Callable[[str], Send],
+    js_collections: Optional[List[str]] = None,
+    max_endpoints: int = 9,
+    max_per_endpoint: int = 16,
+) -> List[Dict[str, Any]]:
+    """Autonomously detect SYSTEMIC horizontal BOLA: one low-priv principal walks
+    object id spaces and reads a whole population's private objects. Returns finding
+    dicts. Best-effort; never raises."""
+    parsed = urlparse(target if "://" in target else "http://" + target)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    sess = await acquire_low_priv_session(origin, register_post)
+    if not sess:
+        return []
+    tok, ctx = sess
+    send = authed_send(tok)
+
+    own_identity = await _capture_identity(origin, send, ctx)
+
+    # Discover by-id templates: built-ins + OpenAPI by-id paths + JS collections.
+    templates: List[str] = list(_BUILTIN_BYID)
+    try:
+        for spec in await _mine_openapi(origin, send):
+            byid = spec["byid"]
+            for param in _PARAM_RE.findall(byid):
+                byid = byid.replace("{" + param + "}", "{id}")
+            templates.append(byid)
+    except Exception:
+        pass
+    for col in (js_collections or []):
+        templates.append(col.rstrip("/") + "/{id}")
+
+    seen: set = set()
+    findings: List[Dict[str, Any]] = []
+    ids = list(range(1, max_per_endpoint + 1))
+    for tmpl in templates:
+        if tmpl in seen or "{id}" not in tmpl:
+            continue
+        seen.add(tmpl)
+        if len(seen) > max_endpoints:
+            break
+        try:
+            f = await sweep_object_ids("GET", origin + tmpl, send,
+                                       own_identity=own_identity, ids=ids,
+                                       max_requests=max_per_endpoint)
+        except Exception:
+            continue
+        if f:
+            findings.append(f.to_finding())
+    return findings
