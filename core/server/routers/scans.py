@@ -950,6 +950,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 acquire_low_priv_session, probe_business_logic,
                                 probe_registration_mass_assignment,
                             )
+                            from core.wraith.bola_probe import probe_bola
                             from core.wraith.candidate_discovery import _mine_js_endpoints
                             _bl_p = _urlparse(req.target if "://" in req.target else "https://" + req.target)
                             _bl_origin = f"{_bl_p.scheme}://{_bl_p.netloc}"
@@ -1003,11 +1004,29 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     )
                                     if _bl_ma:
                                         session.findings.bulk_add(_bl_ma, persist=True)
+
+                                # Cross-principal BOLA / IDOR (OWASP API #1). Acquires
+                                # its OWN two distinct principals; confirmed only when
+                                # attacker B reads victim A's private data (a marker B
+                                # could not have supplied). The undefended frontier and
+                                # the single largest real-world API bounty class.
+                                def _bl_authed_for(_tok):
+                                    async def _s(method, url, body=None):
+                                        return await _bl_send(method, url, body, _auth=_tok)
+                                    return _s
+
+                                _bl_bola = await probe_bola(
+                                    req.target, register_post=_bl_send,
+                                    authed_send=_bl_authed_for,
+                                )
+                                if _bl_bola:
+                                    session.findings.bulk_add(_bl_bola, persist=True)
                                 session.log(
                                     f"[logic] low-priv session acquired; "
                                     f"{len(_bl_findings)} business-logic flaw(s) across "
                                     f"{len(_bl_colls)} collection(s); "
-                                    f"{len(_bl_ma)} mass-assignment flaw(s)"
+                                    f"{len(_bl_ma)} mass-assignment flaw(s); "
+                                    f"{len(_bl_bola)} BOLA flaw(s)"
                                 )
                         except Exception as _bl_exc:
                             logger.error(
