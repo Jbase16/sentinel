@@ -1038,21 +1038,28 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 # primitives compose into real exploit chains —
                                 # privilege escalation (mass assignment → admin-only op,
                                 # each hop executed: normal denied, escalated allowed)
-                                # and mass data exposure (a fresh anonymous account →
-                                # systemic BOLA, re-verified end-to-end). Emits VERIFIED
-                                # exploit chains, not isolated findings.
+                                # mass data exposure (a fresh anonymous account →
+                                # systemic BOLA, re-verified end-to-end); and
+                                # escalation-amplified BOLA (low-priv denied an object,
+                                # self-escalates via profile mass assignment, then reads
+                                # it). Emits VERIFIED exploit chains, not isolated findings.
                                 _bl_priv = next(
                                     (f for f in _bl_ma
                                      if (f.get("metadata") or {}).get("klass") == "privilege"),
                                     None,
                                 )
+                                # Object URLs the scan surfaced — the amplification engine
+                                # filters these to the ones the baseline is denied.
+                                _bl_amp_refs = [f["target"] for f in (_bl_bola or [])
+                                                if isinstance(f, dict) and f.get("target")]
                                 _bl_chains = []
-                                if _bl_reg and _bl_ctx.get("_login") and (_bl_priv or _bl_bscale):
+                                if _bl_reg and _bl_ctx.get("_login") and (_bl_priv or _bl_bscale or _bl_amp_refs):
                                     _bl_kc = await compose_chains(
                                         req.target,
                                         register=_bl_reg, login=_bl_ctx["_login"],
                                         post=_bl_send, authed_send=_bl_authed_for,
                                         mass_assign_finding=_bl_priv, scale_findings=_bl_bscale,
+                                        baseline_send=_bl_authed, candidate_refs=_bl_amp_refs,
                                     )
                                     _bl_chains = [c.to_finding() for c in _bl_kc]
                                     if _bl_chains:

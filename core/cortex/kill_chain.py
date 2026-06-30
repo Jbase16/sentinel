@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 from core.cortex.chain_arbiter import ChainProposal
 from core.cortex.chain_verifier import VERIFIED
+from core.cortex.escalation_amplification import verify_escalation_amplifies_bola
 from core.wraith.bola_scale import sweep_object_ids
 from core.wraith.logic_probe import register_and_login
 
@@ -73,10 +74,12 @@ class ChainHop:
 _CHAIN_TYPE = {
     "privilege_escalation": "Verified Exploit Chain (privilege escalation)",
     "data_exposure": "Verified Exploit Chain (mass data exposure)",
+    "amplified_bola": "Verified Exploit Chain (escalation-amplified BOLA)",
 }
 _CHAIN_TAGS = {
     "privilege_escalation": ["privilege_escalation", "bfla"],
     "data_exposure": ["mass_data_exposure", "bola", "idor"],
+    "amplified_bola": ["privilege_escalation", "bola", "idor", "amplified"],
 }
 
 
@@ -261,6 +264,38 @@ async def compose_data_exposure_chain(
     return KillChain(origin=origin, goal=goal, hops=hops, severity="CRITICAL", kind="data_exposure")
 
 
+async def compose_amplified_bola_chain(
+    target: str,
+    *,
+    baseline_send: Send,
+    candidate_refs: List[str],
+) -> Optional[KillChain]:
+    """Compose the escalation-amplified-BOLA chain: a low-priv principal is denied a
+    set of objects, escalates its own role via profile mass assignment, and then
+    reads those previously-denied objects. The hop is confirmed by the denied→allowed
+    differential across the boundary the attacker crossed. Best-effort."""
+    parsed = urlparse(target if "://" in target else "http://" + target)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    res = await verify_escalation_amplifies_bola(origin, baseline_send, candidate_refs=candidate_refs)
+    if res is None:
+        return None
+    sample = ", ".join(u.rsplit("/", 1)[-1] for u, _ in res.amplified[:5])
+    hops = [
+        ChainHop(f"Low-priv principal (role={res.role_before!r}) is denied "
+                 f"{res.baseline_denied} object(s)", True,
+                 "baseline returns 401/403 on those objects"),
+        ChainHop(f"Privilege escalation via {res.vector}: role "
+                 f"{res.role_before!r} → {res.role_after!r}", True,
+                 "profile-update mass assignment, confirmed by re-reading the profile"),
+        ChainHop(f"The escalated principal now reads {res.count} previously-denied "
+                 f"object(s) ({sample})", True,
+                 f"denied→allowed across the privilege boundary; e.g. {res.amplified[0][1]}"),
+    ]
+    goal = (f"Escalation-amplified BOLA — {res.role_before!r}→{res.role_after!r} "
+            f"expands object access to {res.count} previously-forbidden object(s)")
+    return KillChain(origin=origin, goal=goal, hops=hops, severity="CRITICAL", kind="amplified_bola")
+
+
 async def compose_chains(
     target: str,
     *,
@@ -270,10 +305,13 @@ async def compose_chains(
     authed_send: Callable[[str], Send],
     mass_assign_finding: Optional[Dict[str, Any]] = None,
     scale_findings: Optional[List[Dict[str, Any]]] = None,
+    baseline_send: Optional[Send] = None,
+    candidate_refs: Optional[List[str]] = None,
 ) -> List[KillChain]:
-    """Assemble every verified kill chain the confirmed primitives support: the
-    privilege-escalation chain (mass assignment -> admin-only op) and the
-    data-exposure chain (anonymous registration -> systemic BOLA). Best-effort."""
+    """Assemble every verified kill chain the confirmed primitives support:
+    privilege escalation (mass assignment -> admin-only op), data exposure
+    (anonymous registration -> systemic BOLA), and escalation-amplified BOLA
+    (low-priv denied -> self-escalate -> read previously-denied). Best-effort."""
     chains: List[KillChain] = []
     if mass_assign_finding:
         m = mass_assign_finding.get("metadata") or {}
@@ -298,4 +336,12 @@ async def compose_chains(
                 chains.append(c)
         except Exception as e:
             logger.debug("[kill_chain] data-exposure chain failed: %s", e)
+    if baseline_send is not None and candidate_refs:
+        try:
+            c = await compose_amplified_bola_chain(
+                target, baseline_send=baseline_send, candidate_refs=candidate_refs)
+            if c:
+                chains.append(c)
+        except Exception as e:
+            logger.debug("[kill_chain] amplified-BOLA chain failed: %s", e)
     return chains
