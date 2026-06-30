@@ -951,6 +951,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 probe_registration_mass_assignment,
                             )
                             from core.wraith.bola_probe import probe_bola
+                            from core.cortex.kill_chain import compose_privilege_chain
                             from core.wraith.candidate_discovery import _mine_js_endpoints
                             _bl_p = _urlparse(req.target if "://" in req.target else "https://" + req.target)
                             _bl_origin = f"{_bl_p.scheme}://{_bl_p.netloc}"
@@ -1021,12 +1022,35 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 )
                                 if _bl_bola:
                                     session.findings.bulk_add(_bl_bola, persist=True)
+
+                                # Kill-chain composer: if mass assignment yielded a
+                                # privilege primitive, ACTIVELY verify it composes into
+                                # a real escalation chain — each hop executed (normal
+                                # principal denied, escalated principal allowed). Emits
+                                # one VERIFIED exploit chain, not isolated findings.
+                                _bl_chain = None
+                                _bl_priv = next(
+                                    (f for f in _bl_ma
+                                     if (f.get("metadata") or {}).get("klass") == "privilege"),
+                                    None,
+                                )
+                                if _bl_priv and _bl_reg and _bl_ctx.get("_login"):
+                                    _m = _bl_priv["metadata"]
+                                    _bl_chain = await compose_privilege_chain(
+                                        req.target,
+                                        register=_bl_reg, login=_bl_ctx["_login"],
+                                        privilege_field=_m["field"], privilege_value=_m["injected"],
+                                        post=_bl_send, authed_send=_bl_authed_for,
+                                    )
+                                    if _bl_chain:
+                                        session.findings.bulk_add([_bl_chain.to_finding()], persist=True)
                                 session.log(
                                     f"[logic] low-priv session acquired; "
                                     f"{len(_bl_findings)} business-logic flaw(s) across "
                                     f"{len(_bl_colls)} collection(s); "
                                     f"{len(_bl_ma)} mass-assignment flaw(s); "
-                                    f"{len(_bl_bola)} BOLA flaw(s)"
+                                    f"{len(_bl_bola)} BOLA flaw(s); "
+                                    f"{'1 VERIFIED kill chain' if _bl_chain else 'no kill chain'}"
                                 )
                         except Exception as _bl_exc:
                             logger.error(

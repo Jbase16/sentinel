@@ -112,14 +112,54 @@ async def acquire_low_priv_session(
         if 200 <= st < 300:
             token = _find_token(resp)
             if token:
-                # Capture session-scoped ids (basket id) for ref resolution, and
-                # the working register shape so mass-assignment can reuse it.
-                ctx: Dict[str, Any] = {"_register": register}
+                # Capture session-scoped ids (basket id) for ref resolution, plus the
+                # working register AND login shapes so mass-assignment and the kill-
+                # chain composer can mint further principals (e.g. an escalated one).
+                ctx: Dict[str, Any] = {"_register": register, "_login": (path, mk)}
                 auth = resp.get("authentication") if isinstance(resp, dict) else None
                 if isinstance(auth, dict) and auth.get("bid") is not None:
                     ctx["BasketId"] = auth["bid"]
                 return token, ctx
     return None
+
+
+async def register_and_login(
+    origin: str,
+    post: Request,
+    register: Tuple[str, Any],
+    login: Tuple[str, Any],
+    *,
+    extra_fields: Optional[Dict[str, Any]] = None,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Mint one principal with a KNOWN register/login shape, optionally injecting
+    extra registration fields (e.g. {"role": "admin"} to forge an escalated account
+    via a confirmed mass-assignment vector). Returns (token, identity) where identity
+    carries the email/username used (so a caller can reference the new account, e.g.
+    as a deletion victim). Best-effort; None on any failure."""
+    import os as _os
+    rpath, rmk = register
+    lpath, lmk = login
+    email = f"sf_kc_{_os.urandom(5).hex()}@example.test"
+    password = "Sf!Probe_9183"
+    body = dict(rmk(email, password))
+    if extra_fields:
+        body.update(extra_fields)
+    try:
+        st, _ = await post("POST", origin + rpath, body)
+    except Exception:
+        return None
+    if not (200 <= int(st) < 300):
+        return None
+    try:
+        st, resp = await post("POST", origin + lpath, lmk(email, password))
+    except Exception:
+        return None
+    if not (200 <= int(st) < 300):
+        return None
+    token = _find_token(resp)
+    if not token:
+        return None
+    return token, {"email": email, "username": _u(email), "password": password}
 
 
 def _records(resp: Any) -> List[Dict[str, Any]]:
