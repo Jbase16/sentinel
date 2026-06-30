@@ -406,9 +406,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         check_decision = scope_context.registry.resolve(req.target)
         is_bounty = scope_context.mode == ExecutionMode.BOUNTY
         if check_decision.verdict == ScopeDecision.DENY or (check_decision.verdict == ScopeDecision.UNKNOWN and (is_bounty or scope_strict_effective)):
+            # reason_code may be a plain str or an enum depending on the resolver
+            # path — don't assume `.value` (an unguarded access here turned a clean
+            # "out of scope" 400 into an unhandled 500).
+            _rc = getattr(check_decision.reason_code, "value", check_decision.reason_code)
             raise SentinelError(
                 ErrorCode.SCAN_TARGET_INVALID,
-                f"Target is outside the declared scope: {check_decision.reason_code.value}",
+                f"Target is outside the declared scope: {_rc}",
                 details={"target": req.target, "verdict": check_decision.verdict.value},
             )
 
