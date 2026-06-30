@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 from core.cortex.chain_arbiter import ChainProposal
 from core.cortex.chain_verifier import VERIFIED
+from core.wraith.bola_scale import sweep_object_ids
 from core.wraith.logic_probe import register_and_login
 
 logger = logging.getLogger(__name__)
@@ -69,27 +70,39 @@ class ChainHop:
     evidence: str
 
 
+_CHAIN_TYPE = {
+    "privilege_escalation": "Verified Exploit Chain (privilege escalation)",
+    "data_exposure": "Verified Exploit Chain (mass data exposure)",
+}
+_CHAIN_TAGS = {
+    "privilege_escalation": ["privilege_escalation", "bfla"],
+    "data_exposure": ["mass_data_exposure", "bola", "idor"],
+}
+
+
 @dataclass
 class KillChain:
     origin: str
     goal: str
     hops: List[ChainHop]
     severity: str = "CRITICAL"
+    kind: str = "privilege_escalation"   # privilege_escalation | data_exposure
 
     def steps(self) -> List[str]:
         return [h.label for h in self.hops]
 
     def to_finding(self) -> Dict[str, Any]:
         return {
-            "type": "Verified Exploit Chain (privilege escalation)",
+            "type": _CHAIN_TYPE.get(self.kind, "Verified Exploit Chain"),
             "severity": self.severity,
             "tool": "kill_chain",
             "target": self.origin,
             "message": "Verified kill chain → " + self.goal + ". " + "  →  ".join(self.steps()),
-            "tags": ["verified", "exploit_chain", "privilege_escalation", "bfla", "broken_access_control"],
+            "tags": ["verified", "exploit_chain", "broken_access_control"] + _CHAIN_TAGS.get(self.kind, []),
             "families": ["confirmed_vuln"],
             "metadata": {
                 "vuln_class": "exploit_chain",
+                "kind": self.kind,
                 "epistemic": VERIFIED,
                 "goal": self.goal,
                 "hops": [{"label": h.label, "verified": h.verified, "evidence": h.evidence}
@@ -187,3 +200,102 @@ async def compose_privilege_chain(
 
     goal = "Full administrative compromise — " + "; ".join(op.kind for op, _, _ in verified)
     return KillChain(origin=origin, goal=goal, hops=hops)
+
+
+async def compose_data_exposure_chain(
+    target: str,
+    scale_findings: List[Dict[str, Any]],
+    *,
+    register: Tuple[str, Any],
+    login: Tuple[str, Any],
+    post: Send,
+    authed_send: Callable[[str], Send],
+    min_owners: int = 3,
+    max_ids: int = 12,
+) -> Optional[KillChain]:
+    """Compose the data-exposure chain: a brand-new anonymous registration that
+    immediately reads the whole population's private objects. Unlike a cosmetic
+    merge of findings, this RE-RUNS the enumeration from a fresh principal, proving
+    `register -> mass data exposure` executes end-to-end from zero. Best-effort.
+    """
+    parsed = urlparse(target if "://" in target else "http://" + target)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    principal = await register_and_login(origin, post, register, login)
+    if not principal:
+        return None
+    tok, ident = principal
+    send = authed_send(tok)
+    own = {str(ident.get("email")), str(ident.get("username"))}
+
+    confirmed = []
+    seen: set = set()
+    for f in scale_findings or []:
+        ep = (f.get("metadata") or {}).get("endpoint")
+        if not ep or "{id}" not in ep or ep in seen:
+            continue
+        seen.add(ep)
+        url_tmpl = ep if ep.startswith("http") else origin + ep
+        try:
+            r = await sweep_object_ids("GET", url_tmpl, send, own_identity=own,
+                                       ids=range(1, max_ids + 1), min_owners=min_owners,
+                                       max_requests=max_ids)
+        except Exception:
+            r = None
+        if r:
+            confirmed.append(r)
+    if not confirmed:
+        return None
+
+    hops = [ChainHop("Anonymous self-registration is accepted", True,
+                     f"POST {register[0]} succeeds for an unauthenticated client")]
+    for r in confirmed:
+        hops.append(ChainHop(
+            f"That brand-new account reads {r.accessed} other users' private objects "
+            f"across {r.distinct_owners} distinct owners via {r.method} {r.endpoint}", True,
+            f"re-verified end-to-end from a fresh registration "
+            f"(owner field '{r.owner_field}', ids {r.id_range})"))
+    worst = max(r.distinct_owners for r in confirmed)
+    goal = ("Full population data exposure — any anonymous user can self-register and "
+            f"read the entire user base's private records ({worst}+ distinct owners)")
+    return KillChain(origin=origin, goal=goal, hops=hops, severity="CRITICAL", kind="data_exposure")
+
+
+async def compose_chains(
+    target: str,
+    *,
+    register: Tuple[str, Any],
+    login: Tuple[str, Any],
+    post: Send,
+    authed_send: Callable[[str], Send],
+    mass_assign_finding: Optional[Dict[str, Any]] = None,
+    scale_findings: Optional[List[Dict[str, Any]]] = None,
+) -> List[KillChain]:
+    """Assemble every verified kill chain the confirmed primitives support: the
+    privilege-escalation chain (mass assignment -> admin-only op) and the
+    data-exposure chain (anonymous registration -> systemic BOLA). Best-effort."""
+    chains: List[KillChain] = []
+    if mass_assign_finding:
+        m = mass_assign_finding.get("metadata") or {}
+        if m.get("field") is not None:
+            try:
+                c = await compose_privilege_chain(
+                    target, register=register, login=login,
+                    privilege_field=m["field"], privilege_value=m.get("injected"),
+                    post=post, authed_send=authed_send,
+                )
+                if c:
+                    chains.append(c)
+            except Exception as e:
+                logger.debug("[kill_chain] privilege chain failed: %s", e)
+    if scale_findings:
+        try:
+            c = await compose_data_exposure_chain(
+                target, scale_findings, register=register, login=login,
+                post=post, authed_send=authed_send,
+            )
+            if c:
+                chains.append(c)
+        except Exception as e:
+            logger.debug("[kill_chain] data-exposure chain failed: %s", e)
+    return chains

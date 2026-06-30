@@ -92,3 +92,59 @@ async def test_finding_and_proposal_shape():
     assert f["severity"] == "CRITICAL"
     p = chain.to_proposal()
     assert p.epistemic == "verified" and p.source == "composer" and p.length == 3
+
+
+# --------------------------------------------------- data-exposure chain
+
+def _pop_app():
+    """register/login + a fully-enumerable basket population (every basket
+    readable, owner = its own id)."""
+    def make_send(token):
+        async def send(method, url, body=None):
+            path = urlparse(url).path
+            if method == "POST" and path == "/users/v1/register":
+                return 200, {"status": "success"}
+            if method == "POST" and path == "/users/v1/login":
+                return 200, {"auth_token": "tok_" + "z" * 32}
+            if method == "GET" and path.startswith("/rest/basket/"):
+                i = int(path.rsplit("/", 1)[1])
+                return 200, {"data": {"id": i, "UserId": i}}
+            return 404, {}
+        return send
+    return make_send
+
+
+@pytest.mark.asyncio
+async def test_data_exposure_chain_reverifies_from_fresh_account():
+    make_send = _pop_app()
+    scale = [{"metadata": {"endpoint": "http://h.test/rest/basket/{id}"}}]
+    chain = await kc.compose_data_exposure_chain(
+        "http://h.test", scale, register=_REGISTER, login=_LOGIN,
+        post=make_send(None), authed_send=make_send,
+    )
+    assert chain is not None and chain.kind == "data_exposure" and chain.severity == "CRITICAL"
+    f = chain.to_finding()
+    assert "mass data exposure" in f["type"].lower()
+    assert "mass_data_exposure" in f["tags"] and "privilege_escalation" not in f["tags"]
+    assert len(chain.hops) == 2          # anonymous registration + the enumeration hop
+
+
+@pytest.mark.asyncio
+async def test_compose_chains_assembles_data_exposure():
+    make_send = _pop_app()
+    scale = [{"metadata": {"endpoint": "http://h.test/rest/basket/{id}"}}]
+    chains = await kc.compose_chains(
+        "http://h.test", register=_REGISTER, login=_LOGIN,
+        post=make_send(None), authed_send=make_send, scale_findings=scale,
+    )
+    assert len(chains) == 1 and chains[0].kind == "data_exposure"
+
+
+@pytest.mark.asyncio
+async def test_compose_chains_empty_when_no_primitives():
+    make_send = _pop_app()
+    chains = await kc.compose_chains(
+        "http://h.test", register=_REGISTER, login=_LOGIN,
+        post=make_send(None), authed_send=make_send,
+    )
+    assert chains == []
