@@ -944,6 +944,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             import os as _bl_os
                             from core.wraith.logic_probe import (
                                 acquire_low_priv_session, probe_business_logic,
+                                probe_registration_mass_assignment,
                             )
                             from core.wraith.candidate_discovery import _mine_js_endpoints
                             _bl_p = _urlparse(req.target if "://" in req.target else "https://" + req.target)
@@ -983,10 +984,26 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 )
                                 if _bl_findings:
                                     session.findings.bulk_add(_bl_findings, persist=True)
+
+                                # Mass assignment on registration — privilege fields
+                                # (admin/role/isVerified/…) the client must not set.
+                                # Reuses the proven register shape; confirmed
+                                # differentially via a directory read-back. The most
+                                # universal undefended class — travels across targets
+                                # where Juice-Shop-specific invariants do not.
+                                _bl_reg = _bl_ctx.get("_register")
+                                _bl_ma = []
+                                if _bl_reg:
+                                    _bl_ma = await probe_registration_mass_assignment(
+                                        _bl_origin, _bl_send, _bl_reg, max_fields=10,
+                                    )
+                                    if _bl_ma:
+                                        session.findings.bulk_add(_bl_ma, persist=True)
                                 session.log(
                                     f"[logic] low-priv session acquired; "
                                     f"{len(_bl_findings)} business-logic flaw(s) across "
-                                    f"{len(_bl_colls)} collection(s)"
+                                    f"{len(_bl_colls)} collection(s); "
+                                    f"{len(_bl_ma)} mass-assignment flaw(s)"
                                 )
                         except Exception as _bl_exc:
                             logger.error(
