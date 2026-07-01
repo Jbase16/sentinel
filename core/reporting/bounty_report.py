@@ -321,8 +321,15 @@ def build_report(
     asset_short = _truncate(asset, 80)
     title = _build_title(sev, vuln_type, asset_short)
 
+    # --- Reconstruct a real write-up from structured metadata for the confirmed
+    #     undefended-class findings (chains, BOLA, mass assignment, business logic).
+    #     Falls back to the generic builders for everything else.
+    from core.reporting.repro import reproduction_for
+    repro = reproduction_for(finding)
+
     # --- Summary
-    summary = _build_summary(finding, vuln_type, sev, cvss)
+    summary = _build_summary(finding, vuln_type, sev, cvss,
+                             confirmed=bool(repro and repro.confirmed))
 
     # --- Enumerate grouped instances so none are silently dropped.
     distinct = [lbl for lbl in (group_labels or []) if lbl]
@@ -334,16 +341,17 @@ def build_report(
         )
 
     # --- Steps to reproduce
-    steps = _build_steps(finding, evidence_items)
+    steps = repro.steps if (repro and repro.steps) else _build_steps(finding, evidence_items)
 
     # --- Impact
     impact = _build_impact(finding, vuln_type, sev)
 
     # --- Remediation
-    remediation = _build_remediation(vuln_type)
+    remediation = repro.remediation if (repro and repro.remediation) else _build_remediation(vuln_type)
 
     # --- Evidence snippets (sanitized)
-    evidence_snippets = _collect_evidence_snippets(finding, evidence_items)
+    evidence_snippets = (repro.evidence if (repro and repro.evidence)
+                         else _collect_evidence_snippets(finding, evidence_items))
 
     return BountyReport(
         finding_id=finding_id,
@@ -429,10 +437,21 @@ def _build_summary(
     vuln_type: str,
     sev: str,
     cvss: CVSSResult,
+    confirmed: bool = False,
 ) -> str:
     risk_desc, _ = _IMPACT_PHRASES.get(sev, _IMPACT_PHRASES["MEDIUM"])
     target = finding.get("target") or finding.get("host") or "the target"
     description = finding.get("description") or finding.get("message") or ""
+
+    # Actively-verified findings (each step reproduced) assert plainly, regardless
+    # of the CVSS auto-scorer's confidence — we executed the exploit.
+    if confirmed:
+        if description and len(description) > 30:
+            return (f"A {risk_desc} vulnerability was CONFIRMED in `{target}` by active "
+                    f"verification (each step was reproduced against the live target). {description}")
+        return (f"A {risk_desc} {vuln_type} was CONFIRMED in `{target}` by active verification. "
+                f"CVSS 3.1 base score {cvss.base_score} ({cvss.severity_label}).")
+
     # Grammatical hedge: LOW-confidence findings get "may be present" /
     # "potential" framing instead of asserting the vuln exists. The old code
     # inserted " appears to" mid-clause, producing "appears to was identified".
