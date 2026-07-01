@@ -13,7 +13,10 @@ from urllib.parse import urlparse
 import pytest
 
 from core.cortex import kill_chain as kc
-from core.cortex.escalation_amplification import verify_escalation_amplifies_bola
+from core.cortex.escalation_amplification import (
+    discover_candidate_refs, verify_escalation_amplifies_bola,
+    _id_prefixes, _numeric_neighbors, _harvest_ids,
+)
 
 
 def _app(*, escalation_works=True, role_grants=None):
@@ -92,6 +95,54 @@ async def test_compose_amplified_bola_chain_shape():
     assert "escalation-amplified" in f["type"].lower()
     assert "amplified" in f["tags"] and "privilege_escalation" in f["tags"]
     assert len(chain.hops) == 3 and all(h.verified for h in chain.hops)
+
+
+# --------------------------------------------------- candidate-ref discovery
+
+def test_id_prefixes_and_neighbors():
+    assert "note" in _id_prefixes("internal-notes")
+    assert "key" in _id_prefixes("api-keys")
+    assert "file" in _id_prefixes("files")
+    assert _numeric_neighbors("file_500", span=2) == ["file_498", "file_499", "file_501", "file_502"]
+    assert _harvest_ids({"id": "note_901", "n": 3, "ref": "file_500"}) == {"note_901", "file_500"}
+
+
+def _api(readable, forbidden):
+    """OpenAPI + by-id objects. `readable` ids return 200 (with their id), `forbidden`
+    return 403 (exist but denied), everything else 404."""
+    async def send(method, url, body=None):
+        path = urlparse(url).path
+        if path == "/openapi.json":
+            return 200, {"paths": {"/api/files/{object_id}": {"get": {}},
+                                   "/api/internal-notes/{object_id}": {"get": {}}}}
+        if method == "GET" and "/api/" in path:
+            oid = path.rsplit("/", 1)[1]
+            if oid in readable:
+                return 200, {"id": oid, "tenant_id": "t"}
+            if oid in forbidden:
+                return 403, {"error": "forbidden"}
+            return 404, {}
+        return 404, {}
+    return send
+
+
+@pytest.mark.asyncio
+async def test_discover_keeps_forbidden_and_extrapolates_readable():
+    # note_900 is directly probed (900 is a common id, 'note' a derived prefix) and
+    # kept as a 403 candidate; file_501 is reached by extrapolating from readable file_500.
+    send = _api(readable={"file_500"}, forbidden={"note_900", "file_501"})
+    refs = await discover_candidate_refs("http://h", send)
+    assert "http://h/api/internal-notes/note_900" in refs
+    assert "http://h/api/files/file_501" in refs
+    # a purely-absent id must not be surfaced
+    assert "http://h/api/files/file_999" not in refs
+
+
+@pytest.mark.asyncio
+async def test_discover_passes_through_seed_refs():
+    send = _api(readable=set(), forbidden=set())
+    refs = await discover_candidate_refs("http://h", send, seed_refs=["http://h/api/x/y_1"])
+    assert "http://h/api/x/y_1" in refs
 
 
 @pytest.mark.asyncio

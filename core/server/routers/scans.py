@@ -1073,6 +1073,51 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     f"{len(_bl_bscale)} systemic-BOLA flaw(s); "
                                     f"{len(_bl_chains)} VERIFIED kill chain(s)"
                                 )
+
+                            # Persona-based escalation-amplified BOLA — reaches
+                            # login-only / opaque-id targets that self-registration
+                            # can't. Authenticate a supplied low-priv persona,
+                            # autonomously enumerate object refs, then verify that
+                            # self-escalation expands object access (denied→allowed).
+                            if req.personas:
+                                try:
+                                    from core.wraith.persona_auth import authenticate_persona
+                                    from core.cortex.escalation_amplification import discover_candidate_refs
+                                    from core.cortex.kill_chain import compose_amplified_bola_chain
+                                    _amp_h, _amp_c = await authenticate_persona(req.personas[0])
+                                    if _amp_h or _amp_c:
+                                        async def _amp_send(method, url, body=None):
+                                            if scope_filter is not None and not scope_filter(url):
+                                                return 599, {}
+                                            _h = dict(_bl_hdrs)
+                                            _h.update(_amp_h)
+                                            async with _bl_httpx.AsyncClient(
+                                                timeout=10.0, follow_redirects=True,
+                                                cookies=_amp_c or None,
+                                            ) as _c:
+                                                _r = await _c.request(method, url, json=body, headers=_h)
+                                                try:
+                                                    _j = _r.json()
+                                                except Exception:
+                                                    _j = {}
+                                                return _r.status_code, _j
+
+                                        _amp_refs = await discover_candidate_refs(_bl_origin, _amp_send)
+                                        _amp_chain = await compose_amplified_bola_chain(
+                                            req.target, baseline_send=_amp_send, candidate_refs=_amp_refs,
+                                        )
+                                        if _amp_chain:
+                                            session.findings.bulk_add([_amp_chain.to_finding()], persist=True)
+                                            session.log(
+                                                f"[logic] escalation-amplified BOLA verified "
+                                                f"({len(_amp_refs)} refs enumerated): {_amp_chain.goal}"
+                                            )
+                                except Exception as _amp_exc:
+                                    logger.error(
+                                        f"[scan] amplification probe failed: "
+                                        f"{type(_amp_exc).__name__}: {_amp_exc}",
+                                        exc_info=True,
+                                    )
                         except Exception as _bl_exc:
                             logger.error(
                                 f"[scan] business-logic probe failed: "
