@@ -1154,6 +1154,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     try:
                                         from core.wraith.persona_auth import authenticate_persona
                                         from core.wraith.owned_proof import prove_owned_cross_read, with_restraint
+                                        from core.wraith.self_escalation import prove_self_escalation
 
                                         def _mk_persona_executor(_ph, _pc):
                                             async def _raw(method, url, body=None):
@@ -1183,7 +1184,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         # the tail of the scan; shield proof+persist so a
                                         # walk-away/teardown can't cancel it mid-read and
                                         # lose the finding.
-                                        async def _run_owned_proof():
+                                        async def _relogin_A():
+                                            _h2, _c2 = await authenticate_persona(req.personas[0])
+                                            return (_mk_persona_executor(_h2, _c2).send
+                                                    if (_h2 or _c2) else None)
+
+                                        async def _run_bounty_proofs():
+                                            # 1. Owned two-persona BOLA (one object, one read).
                                             _owned = await prove_owned_cross_read(
                                                 req.target, owner_send=_exB.send, accessor_send=_exA.send,
                                                 owner_persona=(req.personas[1].get("name") or "B"),
@@ -1198,8 +1205,22 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                     f"{_owned.read_endpoint} "
                                                     f"(restraint={_of['metadata']['restraint']})"
                                                 )
+                                            # 2. Least-spicy self-escalation on persona A's OWN
+                                            #    account — confirm the privilege field sticks by
+                                            #    reflection (never wield it); report confidence.
+                                            _se = await prove_self_escalation(
+                                                req.target, send=_exA.send, relogin=_relogin_A)
+                                            if _se:
+                                                _sef = with_restraint(_se.to_finding(),
+                                                                      executors=[_exA, _exB])
+                                                session.findings.bulk_add([_sef], persist=True)
+                                                session.log(
+                                                    f"[bounty] self-escalation confirmed "
+                                                    f"({_se.confidence}): {_se.baseline_value}"
+                                                    f"→{_se.escalated_value}"
+                                                )
 
-                                        await asyncio.shield(_run_owned_proof())
+                                        await asyncio.shield(_run_bounty_proofs())
                                     except Exception as _op_exc:
                                         logger.error(
                                             f"[scan] owned-proof failed: "

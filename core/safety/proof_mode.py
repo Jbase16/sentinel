@@ -51,8 +51,12 @@ def rules_for(mode: str) -> Tuple[Optional[Set[str]], ProofBudget]:
     classes allowed" (LAB); the budget is effectively unlimited there."""
     mode = ProofMode.normalize(mode)
     if mode == ProofMode.BOUNTY_SAFE:
+        # per-endpoint=5 accommodates a legit multi-step proof on ONE endpoint (the
+        # self-escalation confidence ladder hits /me up to 4×); it is NOT an
+        # enumeration budget — the id-collapsed endpoint_key means a by-id sweep
+        # still shares one bucket and stops fast.
         return _BOUNTY_ALLOWED, ProofBudget(
-            max_total_requests=400, max_requests_per_endpoint=3,
+            max_total_requests=400, max_requests_per_endpoint=5,
             max_cross_object_reads=1, max_privilege_mutations=2, max_creates=4,
             allow_delete=False, allow_real_user_data_access=False,
         )

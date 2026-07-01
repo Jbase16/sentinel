@@ -87,15 +87,16 @@ def test_bounty_caps_cross_object_reads_at_one():
 
 
 def test_bounty_caps_per_endpoint_enumeration():
-    p = _policy("bounty_safe")   # max_requests_per_endpoint = 3
+    p = _policy("bounty_safe")
+    cap = p.budget.max_requests_per_endpoint
     allowed = 0
-    for i in range(10):
-        url = f"http://h/api/files/file_{500 + i}"     # same endpoint template
+    for i in range(cap + 8):
+        url = f"http://h/api/files/file_{500 + i}"     # same endpoint template (id-collapsed)
         d = p.evaluate("GET", url)
         if d.allowed:
             allowed += 1
             p.record(d.action_class, url)
-    assert allowed == 3          # enumeration stops at the per-endpoint cap
+    assert allowed == cap        # enumeration stops at the per-endpoint cap
 
 
 def test_bounty_refuses_out_of_scope():
