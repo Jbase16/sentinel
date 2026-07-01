@@ -992,7 +992,12 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             _bl_policy = ExecutionPolicy(_bl_mode, scope_filter=scope_filter)
                             _bl_send = PolicyExecutor(_bl_send_raw, _bl_policy).send
 
-                            _bl_sess = await acquire_low_priv_session(_bl_origin, _bl_send)
+                            # Blunt routing: bounty-safe uses the owned two-persona
+                            # proof ONLY (no self-registration, no enumeration); lab/
+                            # passive keep the enumeration + amplification path. One
+                            # algorithm per mode — don't build a knife that dispenses bees.
+                            _bl_sess = (None if _bl_mode == ProofMode.BOUNTY_SAFE
+                                        else await acquire_low_priv_session(_bl_origin, _bl_send))
                             if _bl_sess:
                                 _bl_token, _bl_ctx = _bl_sess
 
@@ -1092,12 +1097,12 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     f"{len(_bl_chains)} VERIFIED kill chain(s)"
                                 )
 
-                            # Persona-based escalation-amplified BOLA — reaches
-                            # login-only / opaque-id targets that self-registration
-                            # can't. Authenticate a supplied low-priv persona,
-                            # autonomously enumerate object refs, then verify that
-                            # self-escalation expands object access (denied→allowed).
-                            if req.personas:
+                            # Persona-based escalation-amplified BOLA (ENUMERATION —
+                            # lab/passive only). Reaches login-only / opaque-id targets;
+                            # autonomously enumerates object refs then verifies escalation
+                            # expands access. Skipped in bounty-safe mode (enumeration is
+                            # exactly what the envelope forbids there).
+                            if req.personas and _bl_mode != ProofMode.BOUNTY_SAFE:
                                 try:
                                     from core.wraith.persona_auth import authenticate_persona
                                     from core.cortex.escalation_amplification import discover_candidate_refs
@@ -1138,6 +1143,72 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         f"{type(_amp_exc).__name__}: {_amp_exc}",
                                         exc_info=True,
                                     )
+
+                            # ── Bounty-safe path: owned two-persona BOLA proof ──
+                            # Confirm a cross-object read with TWO researcher-owned test
+                            # personas and ONE object — no enumeration, no self-signup
+                            # (real programs gate it with email verify / CAPTCHA / anti-
+                            # abuse). Requires two personas supplied.
+                            if _bl_mode == ProofMode.BOUNTY_SAFE:
+                                if len(req.personas or []) >= 2:
+                                    try:
+                                        from core.wraith.persona_auth import authenticate_persona
+                                        from core.wraith.owned_proof import prove_owned_cross_read, with_restraint
+
+                                        def _mk_persona_executor(_ph, _pc):
+                                            async def _raw(method, url, body=None):
+                                                if scope_filter is not None and not scope_filter(url):
+                                                    return 599, {}
+                                                _hh = dict(_bl_hdrs)
+                                                _hh.update(_ph)
+                                                async with _bl_httpx.AsyncClient(
+                                                    timeout=10.0, follow_redirects=_bl_follow,
+                                                    cookies=_pc or None,
+                                                ) as _cl:
+                                                    _r = await _cl.request(method, url, json=body, headers=_hh)
+                                                    try:
+                                                        _j = _r.json()
+                                                    except Exception:
+                                                        _j = {}
+                                                    return _r.status_code, _j
+                                            # Share the ONE policy/budget across both personas.
+                                            return PolicyExecutor(_raw, _bl_policy)
+
+                                        _pa_h, _pa_c = await authenticate_persona(req.personas[0])   # accessor A
+                                        _pb_h, _pb_c = await authenticate_persona(req.personas[1])   # owner B
+                                        _exA = _mk_persona_executor(_pa_h, _pa_c)
+                                        _exB = _mk_persona_executor(_pb_h, _pb_c)
+
+                                        # The proof is a handful of requests but runs at
+                                        # the tail of the scan; shield proof+persist so a
+                                        # walk-away/teardown can't cancel it mid-read and
+                                        # lose the finding.
+                                        async def _run_owned_proof():
+                                            _owned = await prove_owned_cross_read(
+                                                req.target, owner_send=_exB.send, accessor_send=_exA.send,
+                                                owner_persona=(req.personas[1].get("name") or "B"),
+                                                accessor_persona=(req.personas[0].get("name") or "A"),
+                                            )
+                                            if _owned:
+                                                _of = with_restraint(_owned.to_finding(),
+                                                                     executors=[_exA, _exB])
+                                                session.findings.bulk_add([_of], persist=True)
+                                                session.log(
+                                                    f"[bounty] owned two-persona BOLA confirmed: "
+                                                    f"{_owned.read_endpoint} "
+                                                    f"(restraint={_of['metadata']['restraint']})"
+                                                )
+
+                                        await asyncio.shield(_run_owned_proof())
+                                    except Exception as _op_exc:
+                                        logger.error(
+                                            f"[scan] owned-proof failed: "
+                                            f"{type(_op_exc).__name__}: {_op_exc}",
+                                            exc_info=True,
+                                        )
+                                else:
+                                    session.log("[bounty] owned proof skipped: "
+                                                "requires_two_researcher_owned_personas")
 
                             # Restraint record — what the proof budget spent and what
                             # the policy refused (surfaces in logs; feeds report later).

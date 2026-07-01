@@ -74,6 +74,23 @@ class OwnedObjectProof:
         }
 
 
+def with_restraint(finding: Dict[str, Any], *, executors: List[Any],
+                   proof_mode: str = "bounty_safe") -> Dict[str, Any]:
+    """Attach the restraint block a triager needs to trust a live finding: the
+    proof mode, that only owned test accounts were used, the counts, and that we
+    stopped after the first proof. `policy_denials` is summed across every executor
+    that shared the budget, so a two-persona proof reports both personas' refusals.
+    """
+    execs = [e for e in executors if e is not None]
+    base = execs[0].restraint_summary() if execs else {}
+    base["policy_denials"] = sum(len(getattr(e, "skipped", [])) for e in execs)
+    base["stopped_after_first_proof"] = True
+    meta = finding.setdefault("metadata", {})
+    meta["proof_mode"] = proof_mode
+    meta["restraint"] = base
+    return finding
+
+
 def _noun(collection: str) -> str:
     """The meaningful object noun, skipping version/prefix segments (v1, api, rest)."""
     segs = [s for s in collection.strip("/").lower().split("/")

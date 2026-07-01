@@ -86,3 +86,24 @@ def test_noun_skips_version_segments():
     assert op._noun("/api/documents") == "documents"
     assert op._is_safe("/books/v1") and not op._is_safe("/api/invoices")
     assert not op._is_safe("/api/api-keys")
+
+
+def test_with_restraint_attaches_block_and_sums_denials():
+    from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
+
+    async def _raw(m, u, b=None, **kw):
+        return 200, {}
+
+    pol = ExecutionPolicy("bounty_safe")          # ONE shared policy/budget
+    exA = PolicyExecutor(_raw, pol)
+    exB = PolicyExecutor(_raw, pol)
+    exA.skipped.append({"class": "DESTRUCTIVE", "reason": "destructive_action_denied"})
+    exB.skipped.append({"class": "FINANCIAL", "reason": "class_FINANCIAL_denied_in_bounty_safe"})
+
+    finding = {"type": "BOLA", "metadata": {"vuln_class": "bola"}}
+    out = op.with_restraint(finding, executors=[exA, exB])
+    r = out["metadata"]["restraint"]
+    assert out["metadata"]["proof_mode"] == "bounty_safe"
+    assert r["policy_denials"] == 2                # summed across BOTH personas
+    assert r["stopped_after_first_proof"] is True
+    assert r["owned_test_accounts_only"] is True

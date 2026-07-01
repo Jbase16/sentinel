@@ -145,12 +145,17 @@ class PolicyExecutor:
                    hint: Optional[str] = None, actor: Optional[str] = None,
                    target_owner: Optional[str] = None,
                    target_is_researcher_owned: Optional[bool] = None,
-                   expected_side_effect: Optional[str] = None, **kw: Any) -> Tuple[int, Any]:
+                   expected_side_effect: Optional[str] = None,
+                   proof_goal: Optional[str] = None, **kw: Any) -> Tuple[int, Any]:
+        # NB: every CandidateAction field is named here so it lands on the action,
+        # not in **kw — **kw is reserved for genuine transport kwargs (e.g. _auth)
+        # and is forwarded to the raw send. Leaking an intent field (proof_goal) into
+        # a raw send that doesn't accept it raises TypeError and silently kills the probe.
         return await self.send_action(CandidateAction(
             method, url, body, hint=hint, actor_persona_id=actor,
             target_owner_persona_id=target_owner,
             target_is_researcher_owned=target_is_researcher_owned,
-            expected_side_effect=expected_side_effect), **kw)
+            expected_side_effect=expected_side_effect, proof_goal=proof_goal), **kw)
 
     def restraint_summary(self) -> Dict[str, Any]:
         """What was done and what was refused — for the report's restraint section."""

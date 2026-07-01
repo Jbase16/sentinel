@@ -138,6 +138,24 @@ async def test_executor_denies_without_sending_and_records_skips():
 
 
 @pytest.mark.asyncio
+async def test_intent_kwargs_do_not_leak_to_raw_transport():
+    # A raw send that only accepts (method, url, body) must not receive intent
+    # kwargs (proof_goal/actor/…) — those belong on the CandidateAction, not the
+    # wire. Leaking one raises TypeError and silently kills the probe.
+    seen = {}
+
+    async def raw(method, url, body=None):        # deliberately NO **kw
+        seen["called"] = True
+        return 200, {}
+
+    ex = make_executor(raw, mode="bounty_safe")
+    st, _ = await ex.send("GET", "http://h/x", hint=ac.CROSS_OBJECT_READ,
+                          target_is_researcher_owned=True, actor="A", target_owner="B",
+                          proof_goal="single_cross_owned_object_read")
+    assert st == 200 and seen.get("called")
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_auth_kwarg_through():
     seen = {}
 
