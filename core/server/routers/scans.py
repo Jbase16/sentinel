@@ -955,24 +955,42 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             from core.wraith.candidate_discovery import _mine_js_endpoints
                             _bl_p = _urlparse(req.target if "://" in req.target else "https://" + req.target)
                             _bl_origin = f"{_bl_p.scheme}://{_bl_p.netloc}"
+                            # Bounty-safe execution policy: gate EVERY active request
+                            # for this phase behind ONE shared policy + proof budget.
+                            # In lab mode (default) the executor is a transparent
+                            # pass-through, so existing behavior/tests are unchanged.
+                            from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
+                            from core.safety.proof_mode import ProofMode
+                            _bl_mode = ProofMode.normalize(_bl_os.getenv("SENTINEL_PROOF_MODE", "lab"))
+                            _bl_follow = _bl_mode == ProofMode.LAB   # else don't auto-follow off-scope
+
                             _bl_hdrs = {"User-Agent": "SentinelForge-Logic"}
                             _bl_bb = _bl_os.getenv("SENTINEL_GHOST_BB_VALUE", "").strip()
                             if _bl_bb:
                                 _bl_hdrs[_bl_os.getenv("SENTINEL_GHOST_BB_HEADER", "X-Bug-Bounty").strip()] = _bl_bb
+                            if _bl_mode != ProofMode.LAB:
+                                # Canary identity — make the traffic obviously researcher-created.
+                                _bl_hdrs["User-Agent"] = (
+                                    f"SentinelForge (authorized security test; "
+                                    f"researcher={_bl_os.getenv('SENTINEL_RESEARCHER_HANDLE') or 'n/a'}; "
+                                    f"program={_bl_os.getenv('SENTINEL_PROGRAM') or 'n/a'})")
 
-                            async def _bl_send(method, url, body=None, _auth=None):
+                            async def _bl_send_raw(method, url, body=None, _auth=None):
                                 if scope_filter is not None and not scope_filter(url):
                                     return 599, {}
                                 _h = dict(_bl_hdrs)
                                 if _auth:
                                     _h["Authorization"] = f"Bearer {_auth}"
-                                async with _bl_httpx.AsyncClient(timeout=10.0, follow_redirects=True) as _c:
+                                async with _bl_httpx.AsyncClient(timeout=10.0, follow_redirects=_bl_follow) as _c:
                                     _r = await _c.request(method, url, json=body, headers=_h)
                                     try:
                                         _j = _r.json()
                                     except Exception:
                                         _j = {}
                                     return _r.status_code, _j
+
+                            _bl_policy = ExecutionPolicy(_bl_mode, scope_filter=scope_filter)
+                            _bl_send = PolicyExecutor(_bl_send_raw, _bl_policy).send
 
                             _bl_sess = await acquire_low_priv_session(_bl_origin, _bl_send)
                             if _bl_sess:
@@ -1086,13 +1104,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     from core.cortex.kill_chain import compose_amplified_bola_chain
                                     _amp_h, _amp_c = await authenticate_persona(req.personas[0])
                                     if _amp_h or _amp_c:
-                                        async def _amp_send(method, url, body=None):
+                                        async def _amp_send_raw(method, url, body=None):
                                             if scope_filter is not None and not scope_filter(url):
                                                 return 599, {}
                                             _h = dict(_bl_hdrs)
                                             _h.update(_amp_h)
                                             async with _bl_httpx.AsyncClient(
-                                                timeout=10.0, follow_redirects=True,
+                                                timeout=10.0, follow_redirects=_bl_follow,
                                                 cookies=_amp_c or None,
                                             ) as _c:
                                                 _r = await _c.request(method, url, json=body, headers=_h)
@@ -1102,6 +1120,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                     _j = {}
                                                 return _r.status_code, _j
 
+                                        # Gate through the SAME shared policy/budget.
+                                        _amp_send = PolicyExecutor(_amp_send_raw, _bl_policy).send
                                         _amp_refs = await discover_candidate_refs(_bl_origin, _amp_send)
                                         _amp_chain = await compose_amplified_bola_chain(
                                             req.target, baseline_send=_amp_send, candidate_refs=_amp_refs,
@@ -1118,6 +1138,14 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         f"{type(_amp_exc).__name__}: {_amp_exc}",
                                         exc_info=True,
                                     )
+
+                            # Restraint record — what the proof budget spent and what
+                            # the policy refused (surfaces in logs; feeds report later).
+                            if _bl_mode != ProofMode.LAB:
+                                session.log(
+                                    f"[policy] proof_mode={_bl_mode}; "
+                                    f"spent={_bl_policy.budget.snapshot()}"
+                                )
                         except Exception as _bl_exc:
                             logger.error(
                                 f"[scan] business-logic probe failed: "
