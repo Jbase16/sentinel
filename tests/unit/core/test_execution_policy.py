@@ -65,12 +65,24 @@ def test_bounty_allows_self_reflective_mass_assignment():
     assert d.allowed and d.action_class == ac.PRIVILEGE_MUTATION
 
 
+def test_bounty_cross_read_requires_researcher_owned_target():
+    # This is what makes allow_real_user_data_access real, not decorative: a
+    # cross-object read against an UNOWNED/unknown target is refused; only a
+    # researcher-owned second-persona object is permitted.
+    p = _policy("bounty_safe")
+    assert not p.evaluate("GET", "http://h/api/x/1", hint=ac.CROSS_OBJECT_READ).allowed
+    assert p.evaluate("GET", "http://h/api/x/1", hint=ac.CROSS_OBJECT_READ,
+                      target_is_researcher_owned=True).allowed
+
+
 def test_bounty_caps_cross_object_reads_at_one():
     p = _policy("bounty_safe")
-    d1 = p.evaluate("GET", "http://h/api/x/1", hint=ac.CROSS_OBJECT_READ)
+    d1 = p.evaluate("GET", "http://h/api/x/1", hint=ac.CROSS_OBJECT_READ,
+                    target_is_researcher_owned=True)
     assert d1.allowed
     p.record(d1.action_class, "http://h/api/x/1")
-    d2 = p.evaluate("GET", "http://h/api/y/2", hint=ac.CROSS_OBJECT_READ)
+    d2 = p.evaluate("GET", "http://h/api/y/2", hint=ac.CROSS_OBJECT_READ,
+                    target_is_researcher_owned=True)
     assert not d2.allowed and "cross_object_read" in d2.reason
 
 

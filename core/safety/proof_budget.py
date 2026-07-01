@@ -31,17 +31,14 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.IGNORECASE)
 def endpoint_key(url: str) -> str:
     """Collapse id-like path segments to `*` so a by-id endpoint is one bucket."""
     try:
-        p = urlparse(url)
-        path = p.path if p.path else url
+        p = urlparse(url or "")
     except Exception:
-        path = str(url)
-    out = []
-    for seg in path.split("/"):
-        if seg and (_NUM_RE.match(seg) or _IDT_RE.match(seg) or _UUID_RE.match(seg)):
-            out.append("*")
-        else:
-            out.append(seg)
-    host = getattr(urlparse(url), "netloc", "") if "://" in (url or "") else ""
+        p = None
+    path = (p.path if (p and p.path) else (url or ""))
+    host = p.netloc if p else ""
+    out = ["*" if (seg and (_NUM_RE.match(seg) or _IDT_RE.match(seg) or _UUID_RE.match(seg)))
+           else seg
+           for seg in path.split("/")]
     return f"{host}{'/'.join(out)}"
 
 

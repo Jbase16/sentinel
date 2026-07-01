@@ -43,7 +43,7 @@ _FINANCIAL_KW = ("payment", "/pay", "refund", "charge", "checkout", "purchase",
                  "transfer", "withdraw", "deposit", "payout", "billing", "subscribe",
                  "subscription", "order/", "orders", "wallet/", "topup", "invoice/pay")
 _MESSAGING_KW = ("email", "/mail", "sms", "invite", "notify", "notification",
-                 "message", "/send", "contact", "push", "sms")
+                 "message", "/send", "contact", "push")
 _EXTERNAL_KW = ("webhook", "callback", "integration", "connect/")
 _PROFILE_KW = ("/me", "/users/me", "/profile", "/account", "/user/me", "/whoami", "/self")
 _PRIV_FIELDS = {"role", "roles", "admin", "isadmin", "is_admin", "privilege",
