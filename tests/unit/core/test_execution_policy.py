@@ -175,6 +175,44 @@ async def test_denied_cross_read_does_not_consume_budget():
 
 
 @pytest.mark.asyncio
+async def test_allowed_action_emits_a_provenance_block():
+    from core.safety.provenance import ProvenanceSink
+
+    async def raw(method, url, body=None, **kw):
+        return 200, {"id": 1, "marker": "sf_secret"}
+
+    sink = ProvenanceSink()
+    ex = PolicyExecutor(raw, ExecutionPolicy("bounty_safe"), provenance=sink)
+    await ex.send("GET", "http://h/api/x/1", hint=ac.CROSS_OBJECT_READ,
+                  target_is_researcher_owned=True, actor="A", target_owner="B")
+    blk = sink.action_blocks[0].payload
+    assert blk["allowed"] is True and blk["action_class"] == ac.CROSS_OBJECT_READ
+    assert blk["actor_persona_id"] == "A" and blk["status"] == 200
+    assert blk["response_body_hash"].startswith("sha256:")     # hashed, not raw
+    assert "sf_secret" not in str(blk)                          # the raw body never lands here
+    assert sink.root() is not None
+
+
+@pytest.mark.asyncio
+async def test_denied_action_emits_a_denial_block_and_is_not_sent():
+    from core.safety.provenance import ProvenanceSink
+    sent = []
+
+    async def raw(method, url, body=None, **kw):
+        sent.append((method, url))
+        return 200, {}
+
+    sink = ProvenanceSink()
+    ex = PolicyExecutor(raw, ExecutionPolicy("bounty_safe"), provenance=sink)
+    st, _ = await ex.send("DELETE", "http://h/api/users/7")
+    assert st == DENIED_STATUS and sent == []                   # refused before transport
+    blk = sink.action_blocks[0].payload
+    assert blk["allowed"] is False and blk["action_class"] == ac.DESTRUCTIVE
+    assert "DESTRUCTIVE" in blk["denial_reason"]                # class-gated in bounty mode
+    assert sink.summary()["destructive_actions_denied"] == 1
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_auth_kwarg_through():
     seen = {}
 

@@ -34,6 +34,9 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from core.safety.action_classifier import CROSS_OBJECT_READ, DESTRUCTIVE, classify
 from core.safety.proof_budget import ProofBudget, endpoint_key
 from core.safety.proof_mode import ProofMode, rules_for
+from core.safety.provenance import (
+    ProvenanceEvent, ProvenanceSink, _url_path, body_hash, response_shape,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -120,13 +123,28 @@ class ExecutionPolicy:
     def record(self, action_class: str, url: str, status: Optional[int] = None) -> None:
         self.budget.record(action_class, endpoint_key(url), status)
 
+    def digest(self) -> str:
+        """A short, stable fingerprint of the safety envelope this policy enforces, so
+        a conduct trail can commit to 'these actions ran under THIS policy'."""
+        b = self.budget
+        return body_hash({
+            "mode": self.mode,
+            "allowed_classes": sorted(self.allowed) if self.allowed else None,
+            "max_cross_object_reads": b.max_cross_object_reads,
+            "max_privilege_mutations": b.max_privilege_mutations,
+            "max_creates": b.max_creates, "allow_delete": b.allow_delete,
+            "allow_real_user_data_access": b.allow_real_user_data_access,
+        }) or ""
+
 
 class PolicyExecutor:
     """The only `send` a module ever receives. Enforces the policy at the seam."""
 
-    def __init__(self, raw_send: RawSend, policy: ExecutionPolicy):
+    def __init__(self, raw_send: RawSend, policy: ExecutionPolicy,
+                 provenance: Optional[ProvenanceSink] = None):
         self.raw_send = raw_send
         self.policy = policy
+        self.provenance = provenance          # optional conduct trail (Merkle chain)
         self.skipped: List[Dict[str, Any]] = []
 
     async def send_action(self, action: CandidateAction, **kw: Any) -> Tuple[int, Any]:
@@ -136,10 +154,35 @@ class PolicyExecutor:
                                  "class": decision.action_class, "reason": decision.reason})
             logger.info("[execution_policy] DENIED %s %s — %s (%s)",
                         action.method, action.url, decision.reason, decision.action_class)
+            # A denial is EVIDENCE — record that the safety layer refused, un-sent.
+            self._emit_provenance(action, decision, allowed=False, status=None, resp=None)
             return DENIED_STATUS, {"_policy_denied": decision.reason}
         status, resp = await self.raw_send(action.method, action.url, action.body, **kw)
         self.policy.record(decision.action_class, action.url, status)
+        self._emit_provenance(action, decision, allowed=True, status=status, resp=resp)
         return status, resp
+
+    def _emit_provenance(self, action: CandidateAction, decision: Decision, *,
+                         allowed: bool, status: Optional[int], resp: Any) -> None:
+        """Record one conduct block for this action. Best-effort: a provenance fault
+        must never break the proof path (the request has already happened)."""
+        if self.provenance is None:
+            return
+        try:
+            self.provenance.record_policy_action(ProvenanceEvent(
+                method=action.method, url_path=_url_path(action.url),
+                action_class=decision.action_class, policy_mode=self.policy.mode,
+                allowed=allowed, actor_persona_id=action.actor_persona_id,
+                denial_reason=(None if allowed else decision.reason),
+                target_owner_persona_id=action.target_owner_persona_id,
+                target_is_researcher_owned=action.target_is_researcher_owned,
+                status=status, request_body_hash=body_hash(action.body),
+                response_body_hash=(body_hash(resp) if allowed else None),
+                response_summary=(response_shape(resp) if allowed else {}),
+                budget_snapshot_after=self.policy.budget.snapshot()))
+        except Exception as exc:
+            logger.warning("[execution_policy] provenance emit failed: %s: %s",
+                           type(exc).__name__, exc)
 
     async def send(self, method: str, url: str, body: Any = None, *,
                    hint: Optional[str] = None, actor: Optional[str] = None,
@@ -174,5 +217,7 @@ class PolicyExecutor:
 
 
 def make_executor(raw_send: RawSend, *, mode: str,
-                  scope_filter: Optional[ScopeFilter] = None) -> PolicyExecutor:
-    return PolicyExecutor(raw_send, ExecutionPolicy(mode, scope_filter=scope_filter))
+                  scope_filter: Optional[ScopeFilter] = None,
+                  provenance: Optional[ProvenanceSink] = None) -> PolicyExecutor:
+    return PolicyExecutor(raw_send, ExecutionPolicy(mode, scope_filter=scope_filter),
+                          provenance=provenance)
