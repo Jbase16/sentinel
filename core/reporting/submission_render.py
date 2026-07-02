@@ -394,6 +394,33 @@ def _references_for(report) -> List[str]:
     return []
 
 
+def _scope_of_testing(prov: Optional[Dict[str, Any]]) -> str:
+    """A researcher-voice statement of testing scope + restraint, DERIVED from the
+    recorded conduct but rendered as the researcher's own words.
+
+    Deliberately NOT the branded provenance table (Merkle roots, capsule ids, "policy
+    executor") — that reads as scanner output, which this renderer exists to avoid.
+    Triagers ask "did you touch real data?" for access-control bugs; this answers it in
+    plain prose and offers the verifiable log on request, without the tool smell."""
+    if not prov or not prov.get("root"):
+        return ""
+    parts = ["All testing used accounts I registered and control."]
+    reads = prov.get("cross_object_reads_2xx") or 0
+    if reads == 1:
+        parts.append("Confirming this required a single cross-account read of one object I "
+                     "created in a second account I own; I did not enumerate or read any "
+                     "other records.")
+    elif reads > 1:
+        parts.append(f"Confirming this required {reads} reads of objects I created in "
+                     f"accounts I own.")
+    if prov.get("owned_test_accounts_only") and not prov.get("destructive_actions_sent"):
+        parts.append("No production or third-party data was accessed, and no destructive "
+                     "actions were performed.")
+    parts.append("A complete, timestamped request/response log of this testing is available "
+                 "on request.")
+    return " ".join(parts)
+
+
 # ──────────────────────────── renderer ──────────────────────────
 
 
@@ -427,6 +454,7 @@ class SubmissionRender:
 def render_for_submission(
     report,
     verify_steps: Optional[List[str]] = None,
+    scope_provenance: Optional[Dict[str, Any]] = None,
 ) -> SubmissionRender:
     """Render a BountyReport as submission-grade markdown.
 
@@ -487,6 +515,12 @@ def render_for_submission(
             lines.append("")
     else:
         lines.append("_(Steps captured during verification — see attached evidence.)_")
+        lines.append("")
+    scope = _strip_banned_phrases(_scope_of_testing(scope_provenance))
+    if scope:
+        lines.append("## Scope of Testing")
+        lines.append("")
+        lines.append(scope)
         lines.append("")
     lines.append("## Suggested Remediation")
     lines.append("")

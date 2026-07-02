@@ -281,3 +281,42 @@ class TestRenderShape:
         assert "markdown" in d
         assert "tldr" in d
         assert "title" in d
+
+
+# ───────────────────────── Scope of Testing (restraint) ────────────────────
+
+class TestScopeOfTesting:
+    def _prov(self, **kw):
+        base = {"root": "ec384e6a", "cross_object_reads_2xx": 1,
+                "destructive_actions_sent": 0, "owned_test_accounts_only": True}
+        base.update(kw)
+        return base
+
+    def test_scope_section_rendered_from_provenance(self):
+        r = _FakeReport(title="IDOR", type="IDOR", target="https://x.com")
+        md = render_for_submission(r, scope_provenance=self._prov()).markdown
+        assert "## Scope of Testing" in md
+        assert "accounts I registered and control" in md
+        assert "single cross-account read" in md
+        assert "no destructive actions were performed" in md.lower()
+        assert "available on request" in md
+
+    def test_scope_section_stays_in_researcher_voice_no_branding(self):
+        # The whole point: substance without the scanner-output smell.
+        r = _FakeReport(title="IDOR", type="IDOR")
+        md = render_for_submission(r, scope_provenance=self._prov()).markdown.lower()
+        for smell in ("sentinel", "merkle", "capsule", "provenance root", "policy executor",
+                      "scan_capsule", "sha256"):
+            assert smell not in md
+
+    def test_no_scope_section_without_provenance(self):
+        r = _FakeReport(title="IDOR", type="IDOR")
+        assert "Scope of Testing" not in render_for_submission(r).markdown
+        assert "Scope of Testing" not in render_for_submission(r, scope_provenance={"events": 0}).markdown
+
+    def test_restraint_claim_omitted_if_conduct_does_not_support_it(self):
+        # Don't claim "no production data" unless owned-only AND nothing destructive.
+        r = _FakeReport(title="IDOR", type="IDOR")
+        md = render_for_submission(r, scope_provenance=self._prov(owned_test_accounts_only=False)).markdown
+        assert "## Scope of Testing" in md
+        assert "no production or third-party data was accessed" not in md.lower()
