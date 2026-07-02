@@ -1482,8 +1482,35 @@ async def get_session_bounty_report(
     session_data = await db.get_session(session_id)
     target = (session_data or {}).get("target", session_id)
 
+    # ── Adversarial triage gate ──────────────────────────────────────────
+    # The submission queue is SURFACE only. HOLD (needs strengthening) and
+    # SUPPRESS (valid-but-unpayable) are reported SEPARATELY so neither pollutes
+    # the submission candidates. A bounty report targets a program the researcher
+    # has chosen, so scope/rules are treated as loaded; the substantive axes
+    # (impact, safety, dedup, artifact, invariant) do the filtering. Findings are
+    # judged on deep copies — the raw findings stay in the DB for diagnostics.
+    from core.cortex.triage_adversary import route_findings, BOUNTY, SURFACE, HOLD, SUPPRESS
+    _loaded = object()
+    _buckets = route_findings(all_findings, route=BOUNTY, scope=_loaded, program_rules=_loaded)
+    surfaced = _buckets[SURFACE]
+
+    def _triage_digest(f: Dict[str, Any]) -> Dict[str, Any]:
+        t = (f.get("metadata") or {}).get("adversarial_triage") or {}
+        return {"type": f.get("type"), "target": f.get("target"),
+                "top_rejection_risks": t.get("top_rejection_risks"),
+                "predicted_rejections": t.get("predicted_rejections"),
+                "evidence_needed": t.get("evidence_needed"),
+                "next_action": t.get("next_action")}
+
+    triage_summary = {
+        "route": BOUNTY,
+        "surface": len(surfaced), "hold": len(_buckets[HOLD]), "suppress": len(_buckets[SUPPRESS]),
+        "held_for_review": [_triage_digest(f) for f in _buckets[HOLD]],
+        "suppressed": [_triage_digest(f) for f in _buckets[SUPPRESS]],
+    }
+
     reports = build_reports(
-        all_findings,
+        surfaced,
         scan_id=session_id,
         evidence_items=evidence,
         min_severity=min_severity.upper(),
@@ -1496,7 +1523,7 @@ async def get_session_bounty_report(
     try:
         await dedup_store.init()
         dedup_map: Dict[str, Any] = {}
-        for finding in all_findings:
+        for finding in surfaced:
             fp = dedup_store.fingerprint(finding)
             result = await dedup_store.check_finding(finding)
             dedup_map[fp] = result
@@ -1509,7 +1536,7 @@ async def get_session_bounty_report(
     for rep in reports:
         d = rep.to_dict()
         # Find the corresponding finding to get its fingerprint
-        for finding in all_findings:
+        for finding in surfaced:
             ftype = finding.get("type") or finding.get("title") or ""
             fasset = finding.get("asset") or finding.get("target") or ""
             if ftype.lower() in rep.title.lower() or fasset in rep.asset:
@@ -1532,16 +1559,24 @@ async def get_session_bounty_report(
             "target": target,
             "count": len(reports),
             "reports": report_dicts,
+            "triage": triage_summary,
         }
 
-    # Default: Markdown summary document
+    # Default: Markdown summary document (SURFACE candidates only).
     md = render_summary_report(reports, target=target, scan_id=session_id)
+    if not reports:
+        md = (f"# Submission candidates: none\n\n"
+              f"The adversarial triage gate surfaced 0 of {len(all_findings)} findings as "
+              f"submission-ready ({triage_summary['hold']} held for strengthening, "
+              f"{triage_summary['suppress']} suppressed). See `triage` for the predicted "
+              f"reviewer objections and the safe evidence that would change the decision.")
     return {
         "session_id": session_id,
         "target": target,
         "count": len(reports),
         "markdown": md,
         "reports": report_dicts,
+        "triage": triage_summary,
     }
 
 

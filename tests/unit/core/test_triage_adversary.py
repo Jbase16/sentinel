@@ -10,7 +10,8 @@ not label-based.
 
 from core.cortex.evidence_bundle import EvidenceBundle
 from core.cortex.triage_adversary import (
-    annotate, triage, TriageContext, BOUNTY, ENGINEERING, SURFACE, HOLD, SUPPRESS,
+    annotate, route_findings, triage, TriageContext, BOUNTY, ENGINEERING,
+    SURFACE, HOLD, SUPPRESS,
 )
 
 
@@ -155,6 +156,21 @@ def test_annotate_attaches_block_and_returns_decision():
     blk = f["metadata"]["adversarial_triage"]
     assert blk["decision"] == SURFACE and blk["route"] == BOUNTY
     assert blk["payable_likelihood"] >= 0.9
+
+
+def test_route_findings_separates_queues_without_mutating_stored():
+    stored = [
+        _ideal(),                                                    # SURFACE
+        _f(vuln_class="bola"),                                       # SUPPRESS
+        _ideal(target="http://127.0.0.1/x"),                        # SUPPRESS (local)
+    ]
+    stored[0]["metadata"].pop("_none", None)                        # keep a stable snapshot
+    b = route_findings(stored, route=BOUNTY, scope=object(), program_rules=object())
+    assert len(b[SURFACE]) == 1 and len(b[SUPPRESS]) == 2
+    # HOLD must be its own queue, never merged into SURFACE
+    assert b[SURFACE][0] is not stored[0]                            # worked on a copy
+    assert "adversarial_triage" not in (stored[0].get("metadata") or {})   # stored untouched
+    assert b[SURFACE][0]["metadata"]["adversarial_triage"]["decision"] == SURFACE
 
 
 def test_adversary_reduces_volume_over_mixed_findings():

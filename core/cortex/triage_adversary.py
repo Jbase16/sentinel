@@ -295,6 +295,22 @@ def triage(bundle: EvidenceBundle, context: Optional[TriageContext] = None) -> A
         safety_likelihood=safety_likelihood, next_action=next_action, challenges=challenges)
 
 
+def route_findings(findings: List[Dict[str, Any]], *, route: str = BOUNTY,
+                   scope: Any = None, program_rules: Any = None) -> Dict[str, List[Dict[str, Any]]]:
+    """Deterministic post-verification gate: judge every finding and partition into
+    the three queues, keeping them SEPARATE so HOLD never pollutes the submission
+    queue. Works on DEEP COPIES (the stored findings are never mutated — the decision
+    is a pure function of the finding, recomputable anywhere), so this is safe to run
+    at any surface point despite findings having a content-hash primary key."""
+    import copy
+    buckets: Dict[str, List[Dict[str, Any]]] = {SURFACE: [], HOLD: [], SUPPRESS: []}
+    for f in findings:
+        g = copy.deepcopy(f)
+        decision = annotate(g, route=route, scope=scope, program_rules=program_rules)
+        buckets.setdefault(decision, []).append(g)
+    return buckets
+
+
 def annotate(finding: Dict[str, Any], *, route: str = BOUNTY,
              scope: Any = None, program_rules: Any = None) -> str:
     """Post-verification gate primitive: triage IN PLACE (attach the
