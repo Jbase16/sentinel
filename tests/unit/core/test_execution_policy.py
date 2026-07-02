@@ -157,6 +157,24 @@ async def test_intent_kwargs_do_not_leak_to_raw_transport():
 
 
 @pytest.mark.asyncio
+async def test_denied_cross_read_does_not_consume_budget():
+    # A 403 cross-read read NOTHING, so it must not consume the one-read budget —
+    # otherwise the golden-path "confirm forbidden" probe eats the real read.
+    statuses = iter([403, 200])
+
+    async def raw(method, url, body=None, **kw):
+        return next(statuses), {}
+
+    ex = make_executor(raw, mode="bounty_safe")
+    st, _ = await ex.send("GET", "http://h/a/1", hint=ac.CROSS_OBJECT_READ, target_is_researcher_owned=True)
+    assert st == 403                                   # denied by the target → not counted
+    st, _ = await ex.send("GET", "http://h/a/2", hint=ac.CROSS_OBJECT_READ, target_is_researcher_owned=True)
+    assert st == 200                                   # the ONE real read → counted
+    st, _ = await ex.send("GET", "http://h/a/3", hint=ac.CROSS_OBJECT_READ, target_is_researcher_owned=True)
+    assert st == DENIED_STATUS                         # budget now exhausted
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_auth_kwarg_through():
     seen = {}
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 from core.safety.action_classifier import (
@@ -71,11 +71,17 @@ class ProofBudget:
             return False, "create_budget_exhausted"
         return True, "ok"
 
-    def record(self, action_class: str, ep_key: str) -> None:
+    def record(self, action_class: str, ep_key: str, status: Optional[int] = None) -> None:
         self._total += 1
         self._per_endpoint[ep_key] = self._per_endpoint.get(ep_key, 0) + 1
+        # A denied cross-object read (403/404) read NOTHING, so it doesn't consume
+        # the "how much of others' data did you actually read" budget — only a
+        # successful (2xx) cross-read does. Matches how a triager counts them, and
+        # lets the golden path do its "confirm forbidden" probe before the one real read.
+        succeeded = status is None or (200 <= int(status) < 300)
         if action_class == CROSS_OBJECT_READ:
-            self._cross += 1
+            if succeeded:
+                self._cross += 1
         elif action_class == PRIVILEGE_MUTATION:
             self._priv += 1
         elif action_class == OWNED_CREATE:

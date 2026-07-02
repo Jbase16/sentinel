@@ -117,8 +117,8 @@ class ExecutionPolicy:
             method, url, body, hint=hint,
             target_is_researcher_owned=target_is_researcher_owned))
 
-    def record(self, action_class: str, url: str) -> None:
-        self.budget.record(action_class, endpoint_key(url))
+    def record(self, action_class: str, url: str, status: Optional[int] = None) -> None:
+        self.budget.record(action_class, endpoint_key(url), status)
 
 
 class PolicyExecutor:
@@ -138,7 +138,7 @@ class PolicyExecutor:
                         action.method, action.url, decision.reason, decision.action_class)
             return DENIED_STATUS, {"_policy_denied": decision.reason}
         status, resp = await self.raw_send(action.method, action.url, action.body, **kw)
-        self.policy.record(decision.action_class, action.url)
+        self.policy.record(decision.action_class, action.url, status)
         return status, resp
 
     async def send(self, method: str, url: str, body: Any = None, *,
