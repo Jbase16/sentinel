@@ -1155,6 +1155,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         from core.wraith.persona_auth import authenticate_persona
                                         from core.wraith.owned_proof import prove_owned_cross_read, with_restraint
                                         from core.wraith.self_escalation import prove_self_escalation
+                                        from core.cortex.minimal_amplification import (
+                                            prove_minimal_escalation_amplified_bola)
 
                                         def _mk_persona_executor(_ph, _pc):
                                             async def _raw(method, url, body=None):
@@ -1189,7 +1191,36 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                             return (_mk_persona_executor(_h2, _c2).send
                                                     if (_h2 or _c2) else None)
 
+                                        # Optional per-scan tuning for the composed proof
+                                        # (which sensitive object types are safe to create
+                                        # as owned test objects, and which roles to try).
+                                        _amp_objects = session.knowledge.get("bounty_object_types")
+                                        _amp_roles = session.knowledge.get("bounty_escalation_roles")
+
                                         async def _run_bounty_proofs():
+                                            # 0. PREFERRED: the composed, submission-grade proof —
+                                            #    an authorization state-transition (the SAME object
+                                            #    denied before a self-role change, allowed after).
+                                            #    If it lands it supersedes the two fragment proofs
+                                            #    (and has spent the single cross-read budget), so stop.
+                                            _amp = await prove_minimal_escalation_amplified_bola(
+                                                req.target, owner_send=_exB.send, accessor_send=_exA.send,
+                                                owner_persona=(req.personas[1].get("name") or "B"),
+                                                accessor_persona=(req.personas[0].get("name") or "A"),
+                                                object_types=_amp_objects, escalation_values=_amp_roles,
+                                            )
+                                            if _amp:
+                                                _ampf = with_restraint(_amp.to_finding(),
+                                                                       executors=[_exA, _exB])
+                                                session.findings.bulk_add([_ampf], persist=True)
+                                                _d = _ampf["metadata"]["authorization_matrix_delta"]
+                                                session.log(
+                                                    f"[bounty] escalation-amplified BOLA (composed) "
+                                                    f"confirmed: {_amp.object_ref} "
+                                                    f"delta={_d['principal_before']}→{_d['principal_after']} "
+                                                    f"{_d['resource']}/{_d['scope']} {_d['expected']}→{_d['actual']}"
+                                                )
+                                                return
                                             # 1. Owned two-persona BOLA (one object, one read).
                                             _owned = await prove_owned_cross_read(
                                                 req.target, owner_send=_exB.send, accessor_send=_exA.send,
