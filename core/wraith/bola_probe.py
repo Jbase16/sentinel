@@ -75,6 +75,22 @@ def _deep_get(obj: Any, key: str) -> Any:
     return None
 
 
+def _resolve_ref(schema: Any, spec: Dict[str, Any], _depth: int = 0) -> Dict[str, Any]:
+    """Follow a JSON-pointer `$ref` into the document (FastAPI/OpenAPI put request
+    bodies behind `#/components/schemas/<Model>` rather than inlining properties)."""
+    while isinstance(schema, dict) and "$ref" in schema and _depth < 6:
+        ref = schema["$ref"]
+        if not isinstance(ref, str) or not ref.startswith("#/"):
+            return {}
+        node: Any = spec
+        for part in ref[2:].split("/"):
+            node = node.get(part) if isinstance(node, dict) else None
+            if node is None:
+                return {}
+        schema, _depth = node, _depth + 1
+    return schema if isinstance(schema, dict) else {}
+
+
 async def _mine_openapi(origin: str, get: Send) -> List[Dict[str, Any]]:
     """Mine an OpenAPI/Swagger spec for POST collections that have a by-id GET
     sibling (so a created object can then be fetched by reference)."""
@@ -98,8 +114,10 @@ async def _mine_openapi(origin: str, get: Send) -> List[Dict[str, Any]]:
                          and q.startswith(base + "/{") and q.endswith("}")), None)
             if not byid:
                 continue
-            props = ((((item.get("post") or {}).get("requestBody") or {}).get("content") or {})
-                     .get("application/json", {}).get("schema", {}).get("properties")) or {}
+            schema = ((((item.get("post") or {}).get("requestBody") or {}).get("content") or {})
+                      .get("application/json", {}).get("schema")) or {}
+            schema = _resolve_ref(schema, spec)
+            props = schema.get("properties") or {}
             out.append({"collection": p, "byid": byid, "props": props})
         if out:
             return out
