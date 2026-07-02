@@ -1,0 +1,307 @@
+{
+  "Audit/AuditFeedView.swift": {
+    "mtime": 1767753653.4234872,
+    "ast_hash": "4e82fd03b566a20c2b924a3b98f148b0",
+    "semantic_hash": "4e82fd03b566a20c2b924a3b98f148b0"
+  },
+  "BackendState.swift": {
+    "mtime": 1768183769.343476,
+    "ast_hash": "f0beb8ccf7eb35e1d5e320e94e1e5e12",
+    "semantic_hash": "f0beb8ccf7eb35e1d5e320e94e1e5e12"
+  },
+  "ErrorClassifier.swift": {
+    "mtime": 1768183890.817271,
+    "ast_hash": "df72a4a694f8b8d995c8356ebfe56a01",
+    "semantic_hash": "df72a4a694f8b8d995c8356ebfe56a01"
+  },
+  "RetryBackoff.swift": {
+    "mtime": 1768184279.0025873,
+    "ast_hash": "8037a19bacc151719022ea842c4ef2ad",
+    "semantic_hash": "8037a19bacc151719022ea842c4ef2ad"
+  },
+  "Sources/Core/AppReducer.swift": {
+    "mtime": 1766153487.9990666,
+    "ast_hash": "a2fc9d4bbdf715a53cec39331ac27526",
+    "semantic_hash": "a2fc9d4bbdf715a53cec39331ac27526"
+  },
+  "Sources/Core/BackendState.swift": {
+    "mtime": 1768183769.343476,
+    "ast_hash": "f0beb8ccf7eb35e1d5e320e94e1e5e12",
+    "semantic_hash": "f0beb8ccf7eb35e1d5e320e94e1e5e12"
+  },
+  "Sources/Core/ErrorClassifier.swift": {
+    "mtime": 1768183890.817271,
+    "ast_hash": "df72a4a694f8b8d995c8356ebfe56a01",
+    "semantic_hash": "df72a4a694f8b8d995c8356ebfe56a01"
+  },
+  "Sources/Core/HelixError.swift": {
+    "mtime": 1765984328.8289473,
+    "ast_hash": "21272fedeca3b3795c97a6ea2548a82d",
+    "semantic_hash": "21272fedeca3b3795c97a6ea2548a82d"
+  },
+  "Sources/Core/RetryBackoff.swift": {
+    "mtime": 1768184279.0025873,
+    "ast_hash": "8037a19bacc151719022ea842c4ef2ad",
+    "semantic_hash": "8037a19bacc151719022ea842c4ef2ad"
+  },
+  "Sources/Core/ScanProjection.swift": {
+    "mtime": 1766388685.8544142,
+    "ast_hash": "597bf96f512c10aba64c919db6620537",
+    "semantic_hash": "597bf96f512c10aba64c919db6620537"
+  },
+  "Sources/Graph/GraphRenderer.swift": {
+    "mtime": 1770678788.4232736,
+    "ast_hash": "ba49eb8b71de1ebbc2f0155497b11eb0",
+    "semantic_hash": "ba49eb8b71de1ebbc2f0155497b11eb0"
+  },
+  "Sources/Graph/NeuralGraphView.swift": {
+    "mtime": 1770686415.0669172,
+    "ast_hash": "ee7fdc4df7d7244d1ca13890500d0ab5",
+    "semantic_hash": "ee7fdc4df7d7244d1ca13890500d0ab5"
+  },
+  "Sources/Graph/Pressure/PressureShader.metal": {
+    "mtime": 1767921511.4501524,
+    "ast_hash": "4c1dd7994e79349d7f441dbf09ee8fd6",
+    "semantic_hash": "4c1dd7994e79349d7f441dbf09ee8fd6"
+  },
+  "Sources/Graph/Shaders.metal": {
+    "mtime": 1767923777.7881172,
+    "ast_hash": "ecf1a7d9717a7c61074ac5c7eb78be8b",
+    "semantic_hash": "ecf1a7d9717a7c61074ac5c7eb78be8b"
+  },
+  "Sources/Models/AnyCodable.swift": {
+    "mtime": 1767929604.3163285,
+    "ast_hash": "822e82195de9c6b639c6087b32903131",
+    "semantic_hash": "822e82195de9c6b639c6087b32903131"
+  },
+  "Sources/Models/FindingModels.swift": {
+    "mtime": 1771387713.2379048,
+    "ast_hash": "7445316ac2cc8b2e1d68bba4b32433af",
+    "semantic_hash": "7445316ac2cc8b2e1d68bba4b32433af"
+  },
+  "Sources/Models/HelixAppState.swift": {
+    "mtime": 1779500788.9413326,
+    "ast_hash": "ed03c358159d1e00f44e9b53dee7fb4a",
+    "semantic_hash": "ed03c358159d1e00f44e9b53dee7fb4a"
+  },
+  "Sources/Models/OperationalStateModels.swift": {
+    "mtime": 1771118454.6777644,
+    "ast_hash": "cf09395adda888e15147af43745b6a00",
+    "semantic_hash": "cf09395adda888e15147af43745b6a00"
+  },
+  "Sources/Models/PressureGraphModels.swift": {
+    "mtime": 1770696273.7024703,
+    "ast_hash": "bb54bb4e1ebb843add1e06cde172d44a",
+    "semantic_hash": "bb54bb4e1ebb843add1e06cde172d44a"
+  },
+  "Sources/Models/SharedModels.swift": {
+    "mtime": 1769933633.1253214,
+    "ast_hash": "bceeb1e52795f64800a1e129a884ec96",
+    "semantic_hash": "bceeb1e52795f64800a1e129a884ec96"
+  },
+  "Sources/Models/ToolMetadataModels.swift": {
+    "mtime": 1771118462.9867566,
+    "ast_hash": "9696a28ccb135eab67174bf16034de64",
+    "semantic_hash": "9696a28ccb135eab67174bf16034de64"
+  },
+  "Sources/SentinelForgeApp.swift": {
+    "mtime": 1767566709.34683,
+    "ast_hash": "dc0b591bfadc1453e5f5cc29c4cbad2e",
+    "semantic_hash": "dc0b591bfadc1453e5f5cc29c4cbad2e"
+  },
+  "Sources/Services/BackendManager.swift": {
+    "mtime": 1782538780.4611244,
+    "ast_hash": "645a3a4da33d43426569153c508e9cf4",
+    "semantic_hash": "645a3a4da33d43426569153c508e9cf4"
+  },
+  "Sources/Services/CortexStream.swift": {
+    "mtime": 1771204935.234914,
+    "ast_hash": "b4bceb785603af50e8f7b4dec1386d4d",
+    "semantic_hash": "b4bceb785603af50e8f7b4dec1386d4d"
+  },
+  "Sources/Services/EventStreamClient.swift": {
+    "mtime": 1771122820.6814818,
+    "ast_hash": "761aabb061b6bd5fb0b0db3bad6f8f22",
+    "semantic_hash": "761aabb061b6bd5fb0b0db3bad6f8f22"
+  },
+  "Sources/Services/FoundryAPIClient.swift": {
+    "mtime": 1780996827.6580782,
+    "ast_hash": "ecbef98241ccf98df64ffee2ea698fbc",
+    "semantic_hash": "ecbef98241ccf98df64ffee2ea698fbc"
+  },
+  "Sources/Services/GenerateModels.swift": {
+    "mtime": 1765983966.1591496,
+    "ast_hash": "8acbb2deff2fef79049733d0c6c1f09e",
+    "semantic_hash": "8acbb2deff2fef79049733d0c6c1f09e"
+  },
+  "Sources/Services/GhostAPIClient.swift": {
+    "mtime": 1782538780.4613965,
+    "ast_hash": "c515d07fc1e3bc68f347b3ba73a29f24",
+    "semantic_hash": "c515d07fc1e3bc68f347b3ba73a29f24"
+  },
+  "Sources/Services/GhostCaptureBrowser.swift": {
+    "mtime": 1782538780.4615989,
+    "ast_hash": "044d36093e4c4651ab1b4c35f9106ef5",
+    "semantic_hash": "044d36093e4c4651ab1b4c35f9106ef5"
+  },
+  "Sources/Services/LLMService.swift": {
+    "mtime": 1779500788.9420404,
+    "ast_hash": "7abce7f8393e840c10766ce579c2b5ff",
+    "semantic_hash": "7abce7f8393e840c10766ce579c2b5ff"
+  },
+  "Sources/Services/LedgerStreamClient.swift": {
+    "mtime": 1768975973.7784774,
+    "ast_hash": "c5835855ac2acf5b4db7259c29acb420",
+    "semantic_hash": "c5835855ac2acf5b4db7259c29acb420"
+  },
+  "Sources/Services/ModelRouter.swift": {
+    "mtime": 1765984328.8353488,
+    "ast_hash": "528cb5ba3fe970f09d72028913eaa54b",
+    "semantic_hash": "528cb5ba3fe970f09d72028913eaa54b"
+  },
+  "Sources/Services/PTYClient.swift": {
+    "mtime": 1767983922.3109987,
+    "ast_hash": "925d825adc997e2afe4e20a1d93d6acc",
+    "semantic_hash": "925d825adc997e2afe4e20a1d93d6acc"
+  },
+  "Sources/Services/SentinelAPIClient.swift": {
+    "mtime": 1779500788.9424882,
+    "ast_hash": "84f9ac31c39fcad02bedea37ab255eed",
+    "semantic_hash": "84f9ac31c39fcad02bedea37ab255eed"
+  },
+  "Sources/Services/VerifyAPIClient.swift": {
+    "mtime": 1782538780.4617524,
+    "ast_hash": "9badad4326f4948c7fab4f7a65d84793",
+    "semantic_hash": "9badad4326f4948c7fab4f7a65d84793"
+  },
+  "Sources/Views/Audit/AuditFeedView.swift": {
+    "mtime": 1771202579.3846726,
+    "ast_hash": "fefe3fe10c68f6a6519b4a49af817a4c",
+    "semantic_hash": "fefe3fe10c68f6a6519b4a49af817a4c"
+  },
+  "Sources/Views/ChatBubbleView.swift": {
+    "mtime": 1765984328.832068,
+    "ast_hash": "cae9bb561402aab4bfaef890bb36718f",
+    "semantic_hash": "cae9bb561402aab4bfaef890bb36718f"
+  },
+  "Sources/Views/Components/IdentityStatusView.swift": {
+    "mtime": 1767508995.9277637,
+    "ast_hash": "39e37c96bf740b3f12b6e773bfd57e2e",
+    "semantic_hash": "39e37c96bf740b3f12b6e773bfd57e2e"
+  },
+  "Sources/Views/Components/OperationalAlertBanners.swift": {
+    "mtime": 1771118697.875047,
+    "ast_hash": "b39dc393e0f01913a2a511c356ce606f",
+    "semantic_hash": "b39dc393e0f01913a2a511c356ce606f"
+  },
+  "Sources/Views/Components/StatusComponents.swift": {
+    "mtime": 1767404616.370461,
+    "ast_hash": "d0e83cc6e71218a8177b4ebf94df12fc",
+    "semantic_hash": "d0e83cc6e71218a8177b4ebf94df12fc"
+  },
+  "Sources/Views/Components/TierBadgeView.swift": {
+    "mtime": 1771118661.1690013,
+    "ast_hash": "4d39760f06747ea38a6a762cf13aa220",
+    "semantic_hash": "4d39760f06747ea38a6a762cf13aa220"
+  },
+  "Sources/Views/Dashboard/DashboardView.swift": {
+    "mtime": 1771118721.6861007,
+    "ast_hash": "2a05ab131d46ee51157650d9be536451",
+    "semantic_hash": "2a05ab131d46ee51157650d9be536451"
+  },
+  "Sources/Views/Dashboard/DecisionStreamView.swift": {
+    "mtime": 1771118649.3806102,
+    "ast_hash": "540e015d6fed528aa47582ec4968799f",
+    "semantic_hash": "540e015d6fed528aa47582ec4968799f"
+  },
+  "Sources/Views/Foundry/FoundryConsoleView.swift": {
+    "mtime": 1780996899.4683034,
+    "ast_hash": "f867d85caf652d577ddeb32cfa2fca88",
+    "semantic_hash": "f867d85caf652d577ddeb32cfa2fca88"
+  },
+  "Sources/Views/Ghost/GhostConsoleView.swift": {
+    "mtime": 1782538780.4620626,
+    "ast_hash": "f5b4b686a850b69e5c043623dce3f9f6",
+    "semantic_hash": "f5b4b686a850b69e5c043623dce3f9f6"
+  },
+  "Sources/Views/Graph/GraphModels.swift": {
+    "mtime": 1765984328.83251,
+    "ast_hash": "23f1cdc56f472ebe9c057a7f1c1c296f",
+    "semantic_hash": "23f1cdc56f472ebe9c057a7f1c1c296f"
+  },
+  "Sources/Views/Graph/NetworkGraphView.swift": {
+    "mtime": 1771904474.673373,
+    "ast_hash": "d6abc780b791e29e029d5e962d89d9f7",
+    "semantic_hash": "d6abc780b791e29e029d5e962d89d9f7"
+  },
+  "Sources/Views/MainWindowView.swift": {
+    "mtime": 1780996924.242034,
+    "ast_hash": "29e8eea3e3f8cc7fb22bd210afb7105d",
+    "semantic_hash": "29e8eea3e3f8cc7fb22bd210afb7105d"
+  },
+  "Sources/Views/Navigation/ChatView.swift": {
+    "mtime": 1765984328.8332644,
+    "ast_hash": "1f14fa1401b624806d5a15710a08f420",
+    "semantic_hash": "1f14fa1401b624806d5a15710a08f420"
+  },
+  "Sources/Views/Navigation/TerminalView.swift": {
+    "mtime": 1767982899.99849,
+    "ast_hash": "9f0c700be2ca42f4e577fe2ba4562233",
+    "semantic_hash": "9f0c700be2ca42f4e577fe2ba4562233"
+  },
+  "Sources/Views/Report/ReportComposerView.swift": {
+    "mtime": 1769332271.2093158,
+    "ast_hash": "bfca9b473133af7c759a304c6474f52b",
+    "semantic_hash": "bfca9b473133af7c759a304c6474f52b"
+  },
+  "Sources/Views/Reporting/BountyReportView.swift": {
+    "mtime": 1771385769.8091643,
+    "ast_hash": "1a37d8ee2f0357cbeae0c949e13186da",
+    "semantic_hash": "1a37d8ee2f0357cbeae0c949e13186da"
+  },
+  "Sources/Views/Reporting/ReportView.swift": {
+    "mtime": 1779500788.9428847,
+    "ast_hash": "6ffa3753ef4fdd1a6546faa15f9822c8",
+    "semantic_hash": "6ffa3753ef4fdd1a6546faa15f9822c8"
+  },
+  "Sources/Views/Scan/ActionRequestView.swift": {
+    "mtime": 1765984328.8340006,
+    "ast_hash": "66c53ea4c040a6a51345560785f3997f",
+    "semantic_hash": "66c53ea4c040a6a51345560785f3997f"
+  },
+  "Sources/Views/Scan/ScanControlView.swift": {
+    "mtime": 1782538623.9059424,
+    "ast_hash": "5db6c2109b2867c87d09c95202965df5",
+    "semantic_hash": "5db6c2109b2867c87d09c95202965df5"
+  },
+  "Sources/Views/Settings/BackendSettingsView.swift": {
+    "mtime": 1768015189.5289905,
+    "ast_hash": "7ddd972a10c5cfc5fef515f10ccc6a37",
+    "semantic_hash": "7ddd972a10c5cfc5fef515f10ccc6a37"
+  },
+  "Sources/Views/ToolsBankView.swift": {
+    "mtime": 1771118672.267933,
+    "ast_hash": "2f945cd9e7ac343e3de43f16e08a2e12",
+    "semantic_hash": "2f945cd9e7ac343e3de43f16e08a2e12"
+  },
+  "Sources/Views/Verify/VerifyConsoleView.swift": {
+    "mtime": 1780808388.3720145,
+    "ast_hash": "0b86326e44b09a739456beff7aed0bf4",
+    "semantic_hash": "0b86326e44b09a739456beff7aed0bf4"
+  },
+  "Tests/Package.swift": {
+    "mtime": 1765983966.1550488,
+    "ast_hash": "057d3a92dfafbc1dd54f5b9981685013",
+    "semantic_hash": "057d3a92dfafbc1dd54f5b9981685013"
+  },
+  "Tests/Sources/TestRunner/CriticalPathTests.swift": {
+    "mtime": 1768974641.8150513,
+    "ast_hash": "6d13ff874a61b8ba3ef20e9abde22527",
+    "semantic_hash": "6d13ff874a61b8ba3ef20e9abde22527"
+  },
+  "Tests/Sources/TestRunner/main.swift": {
+    "mtime": 1768974630.478487,
+    "ast_hash": "2f076aa132ede065651735d11a84bb5f",
+    "semantic_hash": "2f076aa132ede065651735d11a84bb5f"
+  }
+}

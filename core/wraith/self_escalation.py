@@ -79,7 +79,13 @@ class SelfEscalationProof:
             "metadata": {"vuln_class": "mass_assignment", "subtype": "self_escalation",
                          "field": self.field, "baseline": self.baseline_value,
                          "escalated": self.escalated_value, "confidence": self.confidence,
-                         "evidence": self.evidence},
+                         "evidence": self.evidence,
+                         "intended_invariant": (f"A low-privilege user must not change their own "
+                                                f"'{self.field}' to a higher-privileged value."),
+                         "observed_violation": (
+                             f"a self-service {self.field} change {self.baseline_value!r}→"
+                             f"{self.escalated_value!r} was " + ("server-authoritative (survived a "
+                             "fresh login)" if self.confidence == HIGH else "reflected by the server"))},
         }
 
 

@@ -65,7 +65,10 @@ class ScaleBolaFinding:
                          "endpoint": self.endpoint, "accessed": self.accessed,
                          "distinct_owners": self.distinct_owners,
                          "sample_owners": self.sample_owners, "owner_field": self.owner_field,
-                         "id_range": self.id_range},
+                         "id_range": self.id_range,
+                         "intended_invariant": "A user may read only their own objects at this endpoint.",
+                         "observed_violation": (f"one low-privilege account read {self.accessed} objects "
+                                                f"across {self.distinct_owners} distinct owners")},
         }
 
 

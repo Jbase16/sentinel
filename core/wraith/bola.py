@@ -71,7 +71,11 @@ class BolaFinding:
             "families": ["confirmed_vuln"],
             "metadata": {"vuln_class": "bola", "object_ref": self.object_ref,
                          "method": self.method, "leaked_markers": self.leaked,
-                         "victim": self.victim, "evidence": self.evidence},
+                         "victim": self.victim, "evidence": self.evidence,
+                         "intended_invariant": "A user may access only objects they own.",
+                         "observed_violation": (f"a second account retrieved another user's object "
+                                                f"and the response carried the owner's private data "
+                                                f"({', '.join(self.leaked)})")},
         }
 
 

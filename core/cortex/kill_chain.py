@@ -81,6 +81,12 @@ _CHAIN_TAGS = {
     "data_exposure": ["mass_data_exposure", "bola", "idor"],
     "amplified_bola": ["privilege_escalation", "bola", "idor", "amplified"],
 }
+_CHAIN_INVARIANT = {
+    "privilege_escalation": "Privileged operations must require a server-authorized privilege.",
+    "data_exposure": "A user may read only their own records.",
+    "amplified_bola": ("A role's object access must stay within its intended account/tenant "
+                       "boundary and must not expand via self-service escalation."),
+}
 
 
 @dataclass
@@ -108,6 +114,8 @@ class KillChain:
                 "kind": self.kind,
                 "epistemic": VERIFIED,
                 "goal": self.goal,
+                "intended_invariant": _CHAIN_INVARIANT.get(self.kind, "Server-side authorization must hold."),
+                "observed_violation": self.goal,
                 "hops": [{"label": h.label, "verified": h.verified, "evidence": h.evidence}
                          for h in self.hops],
             },

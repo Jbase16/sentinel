@@ -79,7 +79,11 @@ class MassAssignmentFlaw:
             "families": ["confirmed_vuln"],
             "metadata": {"vuln_class": "mass_assignment", "field": self.field,
                          "klass": self.klass, "injected": self.injected,
-                         "baseline": self.baseline, "evidence": self.evidence},
+                         "baseline": self.baseline, "evidence": self.evidence,
+                         "intended_invariant": (f"The server must control the '{self.field}' field; "
+                                                f"a client must not set it."),
+                         "observed_violation": (f"the client set {self.field}={self.injected!r} and the "
+                                                f"server persisted it (baseline {self.baseline!r})")},
         }
 
 

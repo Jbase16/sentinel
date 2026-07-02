@@ -70,7 +70,10 @@ class OwnedObjectProof:
                          "owner_persona": self.owner_persona, "accessor_persona": self.accessor_persona,
                          "object_type": self.object_type, "object_ref": self.object_ref,
                          "create_endpoint": self.create_endpoint,
-                         "ownership_markers": self.ownership_markers},
+                         "ownership_markers": self.ownership_markers,
+                         "intended_invariant": "A user may access only objects they own.",
+                         "observed_violation": (f"persona {self.accessor_persona!r} read persona "
+                                                f"{self.owner_persona!r}'s {self.object_type} object")},
         }
 
 

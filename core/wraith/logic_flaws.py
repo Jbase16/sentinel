@@ -77,7 +77,10 @@ class LogicFlaw:
             "families": ["confirmed_vuln"],
             "metadata": {"vuln_class": "business_logic", "field": self.field,
                          "invariant": self.invariant, "violation": self.violation,
-                         "evidence": self.evidence},
+                         "evidence": self.evidence,
+                         "intended_invariant": f"The server must enforce: {self.invariant}.",
+                         "observed_violation": (f"the server accepted and persisted "
+                                                f"{self.field}={self.violation!r}")},
         }
 
 
