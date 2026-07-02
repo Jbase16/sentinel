@@ -960,6 +960,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             # In lab mode (default) the executor is a transparent
                             # pass-through, so existing behavior/tests are unchanged.
                             from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
+                            from core.safety.ownership_registry import OwnershipRegistry
                             from core.safety.proof_mode import ProofMode
                             _bl_mode = ProofMode.normalize(_bl_os.getenv("SENTINEL_PROOF_MODE", "lab"))
                             _bl_follow = _bl_mode == ProofMode.LAB   # else don't auto-follow off-scope
@@ -989,7 +990,12 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         _j = {}
                                     return _r.status_code, _j
 
-                            _bl_policy = ExecutionPolicy(_bl_mode, scope_filter=scope_filter)
+                            # Proof-backed ownership: a CROSS_OBJECT_READ in bounty_safe is
+                            # only allowed against an object a researcher persona provably
+                            # CREATED this session (populated at the seam from OWNED_CREATE
+                            # responses). Harmless in lab (the ownership guard is skipped there).
+                            _bl_policy = ExecutionPolicy(_bl_mode, scope_filter=scope_filter,
+                                                         ownership_registry=OwnershipRegistry())
                             _bl_send = PolicyExecutor(_bl_send_raw, _bl_policy).send
 
                             # Blunt routing: bounty-safe uses the owned two-persona

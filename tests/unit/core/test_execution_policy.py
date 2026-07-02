@@ -213,6 +213,39 @@ async def test_denied_action_emits_a_denial_block_and_is_not_sent():
 
 
 @pytest.mark.asyncio
+async def test_registry_gates_cross_read_until_the_object_is_created():
+    # The "trust me bro" hole, closed: a cross-read with target_is_researcher_owned=True
+    # is DENIED until the object is provably created this session; the create registers
+    # it (at the seam), and only then is the same read allowed.
+    from core.safety.ownership_registry import OwnershipRegistry
+    reg = OwnershipRegistry()
+    pol = ExecutionPolicy("bounty_safe", ownership_registry=reg)
+
+    async def raw(method, url, body=None, **kw):
+        return (201, {"id": "n1"}) if method == "POST" else (200, {"id": "n1", "marker": "m"})
+
+    ex = PolicyExecutor(raw, pol)
+    read = "http://h/api/notes/n1"
+    st, resp = await ex.send("GET", read, hint=ac.CROSS_OBJECT_READ, target_is_researcher_owned=True)
+    assert st == DENIED_STATUS and "not_proven_researcher_created" in resp["_policy_denied"]
+
+    st, _ = await ex.send("POST", "http://h/api/notes", {"title": "x"}, actor="B")   # registers n1
+    assert st == 201 and len(reg) == 1 and reg.owner_of(read) == "B"
+
+    st, _ = await ex.send("GET", read, hint=ac.CROSS_OBJECT_READ, target_is_researcher_owned=True)
+    assert st == 200                                                     # now proven → allowed
+
+
+def test_registry_absent_keeps_flag_only_gate():
+    # Backward compatibility: with no registry wired, the caller-declared flag still
+    # governs (LAB pass-through and existing bounty tests are unchanged).
+    p = _policy("bounty_safe")
+    assert p.ownership_registry is None
+    assert p.evaluate("GET", "http://h/api/x/1", hint=ac.CROSS_OBJECT_READ,
+                      target_is_researcher_owned=True).allowed
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_auth_kwarg_through():
     seen = {}
 

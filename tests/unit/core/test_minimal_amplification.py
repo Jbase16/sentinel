@@ -94,7 +94,10 @@ class FakeWorkspaceApp:
 
 
 def _run(app, *, mode="bounty_safe", objects=None, roles=None):
-    pol = ExecutionPolicy(mode)
+    from core.safety.ownership_registry import OwnershipRegistry
+    # Wire the registry so every composer test runs the ENFORCED gate: the read is
+    # allowed only because the create legitimately registered the object first.
+    pol = ExecutionPolicy(mode, ownership_registry=OwnershipRegistry())
     exA, exB = PolicyExecutor(app.sender("A"), pol), PolicyExecutor(app.sender("B"), pol)
     coro = prove_minimal_escalation_amplified_bola(
         "http://t", owner_send=exB.send, accessor_send=exA.send,

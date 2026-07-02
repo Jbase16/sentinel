@@ -31,7 +31,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from core.safety.action_classifier import CROSS_OBJECT_READ, DESTRUCTIVE, classify
+from core.safety.action_classifier import CROSS_OBJECT_READ, DESTRUCTIVE, OWNED_CREATE, classify
+from core.safety.ownership_registry import OwnershipRegistry
 from core.safety.proof_budget import ProofBudget, endpoint_key
 from core.safety.proof_mode import ProofMode, rules_for
 from core.safety.provenance import (
@@ -70,12 +71,16 @@ class Decision:
 
 class ExecutionPolicy:
     def __init__(self, mode: str, *, scope_filter: Optional[ScopeFilter] = None,
-                 budget: Optional[ProofBudget] = None):
+                 budget: Optional[ProofBudget] = None,
+                 ownership_registry: Optional[OwnershipRegistry] = None):
         self.mode = ProofMode.normalize(mode)
         allowed, default_budget = rules_for(self.mode)
         self.allowed = allowed                 # None → all allowed (LAB)
         self.budget = budget or default_budget
         self.scope_filter = scope_filter
+        # When wired, a CROSS_OBJECT_READ must target an object PROVEN researcher-created
+        # in this session — not merely one the caller labelled researcher-owned.
+        self.ownership_registry = ownership_registry
 
     def evaluate_action(self, a: CandidateAction) -> Decision:
         # 1. Scope — never touch anything outside the declared scope.
@@ -98,12 +103,17 @@ class ExecutionPolicy:
             return Decision(False, "destructive_action_denied", ac)
 
         # 4. Ownership guard — a cross-object read must be against a researcher-owned
-        #    object unless real-data access is permitted (LAB). This is what stops
-        #    "prove BOLA" from meaning "read a real user's data".
-        if (ac == CROSS_OBJECT_READ
-                and not self.budget.allow_real_user_data_access
-                and a.target_is_researcher_owned is not True):
-            return Decision(False, "cross_object_read_requires_researcher_owned_target", ac)
+        #    object unless real-data access is permitted (LAB). Two layers:
+        #      (a) the caller must DECLARE intent (target_is_researcher_owned), and
+        #      (b) if an ownership registry is wired, that claim must be PROVEN — the
+        #          target must have been researcher-CREATED in this session (observed
+        #          conduct), closing the "a module can just assert ownership" hole.
+        if ac == CROSS_OBJECT_READ and not self.budget.allow_real_user_data_access:
+            if a.target_is_researcher_owned is not True:
+                return Decision(False, "cross_object_read_requires_researcher_owned_target", ac)
+            if (self.ownership_registry is not None
+                    and not self.ownership_registry.is_owned(a.url)):
+                return Decision(False, "cross_object_read_target_not_proven_researcher_created", ac)
 
         # 5. Budget.
         ok, reason = self.budget.allows(ac, endpoint_key(a.url))
@@ -159,8 +169,23 @@ class PolicyExecutor:
             return DENIED_STATUS, {"_policy_denied": decision.reason}
         status, resp = await self.raw_send(action.method, action.url, action.body, **kw)
         self.policy.record(decision.action_class, action.url, status)
+        self._register_ownership(action, decision, status, resp)
         self._emit_provenance(action, decision, allowed=True, status=status, resp=resp)
         return status, resp
+
+    def _register_ownership(self, action: CandidateAction, decision: Decision,
+                            status: Optional[int], resp: Any) -> None:
+        """After a successful OWNED_CREATE, record the created object so a later
+        CROSS_OBJECT_READ of it can be PROVEN researcher-owned rather than asserted."""
+        reg = self.policy.ownership_registry
+        if reg is None or decision.action_class != OWNED_CREATE:
+            return
+        try:
+            if 200 <= int(status) < 300:
+                reg.register_created(action.url, resp, actor_persona=action.actor_persona_id)
+        except Exception as exc:
+            logger.warning("[execution_policy] ownership register failed: %s: %s",
+                           type(exc).__name__, exc)
 
     def _emit_provenance(self, action: CandidateAction, decision: Decision, *,
                          allowed: bool, status: Optional[int], resp: Any) -> None:
