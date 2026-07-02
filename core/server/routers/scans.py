@@ -1168,6 +1168,12 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         _prov.record_context(target=req.target, proof_mode=str(_bl_mode),
                                                              policy_digest=_bl_policy.digest())
 
+                                        import hashlib as _hashlib
+                                        import os as _os
+                                        from pathlib import Path as _Path
+                                        _cap_dir = _Path(_os.getenv("SENTINEL_DATA_DIR",
+                                                         str(_Path.home() / ".sentinelforge"))) / "capsules"
+
                                         def _mk_persona_executor(_ph, _pc):
                                             async def _raw(method, url, body=None):
                                                 if scope_filter is not None and not scope_filter(url):
@@ -1213,10 +1219,33 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                             # sentinel_provenance_root is DISTINCT from any
                                             # target-observed ledger_root a submitter later stamps.
                                             _md = _finding.setdefault("metadata", {})
+                                            _root = _prov.root()
                                             _md["provenance_kind"] = "sentinel_scan_capsule"
-                                            _md["sentinel_provenance_root"] = _prov.root()
+                                            _md["sentinel_provenance_root"] = _root
                                             _md["provenance_event_range"] = _prov.event_range()
-                                            _md["sentinel_provenance"] = _prov.summary()
+                                            _summary = _prov.summary()
+                                            # Persist the full conduct trail as a downloadable .capsule
+                                            # artifact (named by root, so file ⇄ finding stay consistent).
+                                            # The report references it by id/sha — it never inlines it.
+                                            if _root:
+                                                try:
+                                                    _cap_id = f"scan_{session.id}_{_root[:12]}"
+                                                    _cap_path = _cap_dir / f"{_cap_id}.capsule"
+                                                    _prov.export_capsule(
+                                                        _cap_path, capsule_id=_cap_id,
+                                                        config={"target": req.target, "proof_mode": str(_bl_mode)},
+                                                        policy_digest=_bl_policy.digest())
+                                                    _cap_sha = "sha256:" + _hashlib.sha256(
+                                                        _cap_path.read_bytes()).hexdigest()
+                                                    _summary.update({"capsule_id": _cap_id, "capsule_sha256": _cap_sha,
+                                                                     "capsule_path": str(_cap_path)})
+                                                    _md["capsule_id"] = _cap_id
+                                                    _md["capsule_sha256"] = _cap_sha
+                                                except Exception as _cap_exc:
+                                                    logger.warning("[bounty] capsule export failed: %s: %s",
+                                                                   type(_cap_exc).__name__, _cap_exc)
+                                                    _summary["capsule_export_available"] = False
+                                            _md["sentinel_provenance"] = _summary
                                             return _finding
 
                                         async def _run_bounty_proofs():

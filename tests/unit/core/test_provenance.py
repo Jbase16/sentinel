@@ -118,6 +118,24 @@ def test_empty_sink_has_no_root():
     assert ProvenanceSink().root() is None
 
 
+def test_export_capsule_roundtrips_and_head_equals_root(tmp_path):
+    # A triager downloads the .capsule, verifies every block, and confirms the head
+    # equals the finding's sentinel_provenance_root — the full verification chain.
+    from core.replay.merkle import MerkleEngine
+    from core.replay.persistence import CapsuleLoader
+    s = _sink_with([_ev(status=200),
+                    _ev(method="PATCH", url_path="/api/me/profile",
+                        action_class="PRIVILEGE_MUTATION", status=200)])
+    path = tmp_path / "cap_test.capsule"
+    s.export_capsule(path, capsule_id="cap_test", policy_digest="pd1",
+                     config={"target": "http://h"})
+    assert path.exists()
+    manifest = CapsuleLoader.load(path)
+    assert manifest.policy_digest == "pd1"
+    assert all(MerkleEngine.verify_block(b) for b in manifest.blocks)   # tamper-evident
+    assert manifest.blocks[-1].id == s.root()                          # head ⇄ cited root
+
+
 def test_report_lifts_richest_provenance_from_surfaced_findings():
     # The bounty report reconstructs the conduct summary from the DB-backed finding
     # (the scan-scoped sink is long gone), preferring the richest trail.
