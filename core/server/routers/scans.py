@@ -1670,7 +1670,8 @@ async def get_session_bounty_report(
         }
 
     # Default: Markdown summary document (SURFACE candidates only).
-    md = render_summary_report(reports, target=target, scan_id=session_id)
+    md = render_summary_report(reports, target=target, scan_id=session_id,
+                               sentinel_provenance=sentinel_provenance)
     if not reports:
         md = (f"# Submission candidates: none\n\n"
               f"The adversarial triage gate surfaced 0 of {len(all_findings)} findings as "

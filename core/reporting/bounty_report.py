@@ -196,17 +196,66 @@ def _render_markdown(r: BountyReport) -> str:
 # Summary report renderer (multi-finding digest)
 # ---------------------------------------------------------------------------
 
+def _render_conduct_provenance(prov: Optional[Dict[str, Any]]) -> str:
+    """Render Sentinel's own tamper-evident conduct trail (the Merkle root over the
+    policy executor) as a report section. Empty string when nothing was recorded."""
+    if not prov or not prov.get("root"):
+        return ""
+
+    def _yn(v: Any) -> str:
+        return "yes" if v else "no"
+
+    rows = [
+        ("Policy mode", f"`{prov.get('policy_mode', 'n/a')}`"),
+        ("Actions recorded", prov.get("events", 0)),
+        ("Actions sent", prov.get("actions_sent", 0)),
+        ("Actions denied by policy", prov.get("actions_denied_by_policy", 0)),
+        ("Destructive actions sent", prov.get("destructive_actions_sent", 0)),
+        ("Destructive actions denied", prov.get("destructive_actions_denied", 0)),
+        ("Cross-object reads (2xx)", prov.get("cross_object_reads_2xx", 0)),
+        ("Owned test accounts only", _yn(prov.get("owned_test_accounts_only"))),
+    ]
+    table = "\n".join(f"| {k} | {v} |" for k, v in rows)
+    capsule = ""
+    if prov.get("capsule_export_available") and prov.get("capsule_id"):
+        sha = f" (`{prov['capsule_sha256']}`)" if prov.get("capsule_sha256") else ""
+        capsule = f"\n**Capsule artifact:** `{prov['capsule_id']}`{sha}"
+    return f"""
+
+---
+
+## Conduct Provenance
+
+Every request in this assessment passed through Sentinel's policy executor, which
+recorded an immutable, content-addressed Merkle chain of exactly what was sent — and
+what was refused. This is the tamper-evident conduct trail behind the findings above:
+the scanner proves its own restraint rather than asking you to take it on faith.
+
+| Metric | Value |
+|--------|-------|
+{table}
+
+**Provenance root:** `{prov['root']}`{capsule}
+
+*Verify:* load the capsule, confirm every block hashes to its own id, and that the
+head block id equals the provenance root above.
+"""
+
+
 def render_summary_report(
     reports: List[BountyReport],
     target: str,
     scan_id: str,
     scope_label: str = "",
+    sentinel_provenance: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Render a multi-finding summary Markdown document.
 
     This is the top-level document you'd attach to a program report or
     internal ticket. Each finding links to its own standalone report section.
+    When a conduct-provenance block is supplied, a tamper-evident "Conduct
+    Provenance" section is appended.
     """
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     by_sev: Dict[str, List[BountyReport]] = {}
@@ -232,6 +281,7 @@ def render_summary_report(
     toc_md = "\n".join(toc_lines)
     details_md = "\n\n---\n\n".join(detail_sections)
     scope_line = f"**Scope:** {scope_label}  \n" if scope_label else ""
+    provenance_md = _render_conduct_provenance(sentinel_provenance)
 
     return f"""# Security Assessment Report
 
@@ -252,7 +302,7 @@ def render_summary_report(
 ## Findings
 
 {details_md}
-"""
+{provenance_md}"""
 
 
 # ---------------------------------------------------------------------------

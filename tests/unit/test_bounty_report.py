@@ -18,6 +18,7 @@ import pytest
 from core.reporting.bounty_report import (
     build_report,
     build_reports,
+    render_summary_report,
     _distinguishing_label,
 )
 
@@ -152,3 +153,40 @@ class TestReportShape:
         # INFO excluded; only the MEDIUM survives.
         assert len(reports) == 1
         assert reports[0].severity == "MEDIUM"
+
+
+# ─────────────────────── Conduct Provenance section ─────────────────────────
+
+class TestConductProvenance:
+    def _reports(self):
+        return build_reports(_headers_findings()[:1], min_severity="MEDIUM")
+
+    def test_section_rendered_when_provenance_present(self):
+        prov = {"root": "abc123def456", "policy_mode": "bounty_safe", "events": 8,
+                "actions_sent": 8, "actions_denied_by_policy": 1,
+                "destructive_actions_sent": 0, "destructive_actions_denied": 1,
+                "cross_object_reads_2xx": 1, "owned_test_accounts_only": True,
+                "capsule_export_available": True, "capsule_id": "scan_x_abc123def456",
+                "capsule_sha256": "sha256:deadbeef"}
+        md = render_summary_report(self._reports(), target="https://x.com",
+                                   scan_id="scan_x", sentinel_provenance=prov)
+        assert "## Conduct Provenance" in md
+        assert "abc123def456" in md                          # the provenance root
+        assert "scan_x_abc123def456" in md                   # the capsule id
+        assert "Destructive actions denied | 1" in md        # denials surfaced as evidence
+        assert "Owned test accounts only | yes" in md
+
+    def test_section_absent_when_no_provenance(self):
+        md = render_summary_report(self._reports(), target="https://x.com", scan_id="scan_x")
+        assert "Conduct Provenance" not in md
+
+    def test_section_absent_when_root_missing(self):
+        md = render_summary_report(self._reports(), target="https://x.com", scan_id="scan_x",
+                                   sentinel_provenance={"events": 0})
+        assert "Conduct Provenance" not in md
+
+    def test_capsule_line_omitted_when_export_unavailable(self):
+        prov = {"root": "abc", "policy_mode": "bounty_safe", "capsule_export_available": False}
+        md = render_summary_report(self._reports(), target="t", scan_id="s",
+                                   sentinel_provenance=prov)
+        assert "## Conduct Provenance" in md and "Capsule artifact" not in md
