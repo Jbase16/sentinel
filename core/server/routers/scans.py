@@ -1157,6 +1157,16 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         from core.wraith.self_escalation import prove_self_escalation
                                         from core.cortex.minimal_amplification import (
                                             prove_minimal_escalation_amplified_bola)
+                                        from core.safety.provenance import ProvenanceSink
+
+                                        # ONE conduct trail (Merkle chain over the existing
+                                        # replay substrate) shared by both personas — the
+                                        # executor seam is the last common checkpoint before
+                                        # any proof request, so nothing can be recorded that
+                                        # wasn't actually attempted.
+                                        _prov = ProvenanceSink()
+                                        _prov.record_context(target=req.target, proof_mode=str(_bl_mode),
+                                                             policy_digest=_bl_policy.digest())
 
                                         def _mk_persona_executor(_ph, _pc):
                                             async def _raw(method, url, body=None):
@@ -1174,8 +1184,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                     except Exception:
                                                         _j = {}
                                                     return _r.status_code, _j
-                                            # Share the ONE policy/budget across both personas.
-                                            return PolicyExecutor(_raw, _bl_policy)
+                                            # Share the ONE policy/budget AND conduct trail.
+                                            return PolicyExecutor(_raw, _bl_policy, provenance=_prov)
 
                                         _pa_h, _pa_c = await authenticate_persona(req.personas[0])   # accessor A
                                         _pb_h, _pb_c = await authenticate_persona(req.personas[1])   # owner B
@@ -1197,6 +1207,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         _amp_objects = session.knowledge.get("bounty_object_types")
                                         _amp_roles = session.knowledge.get("bounty_escalation_roles")
 
+                                        def _cite_provenance(_finding):
+                                            # Attach the conduct trail's verifiable head to the
+                                            # finding BEFORE persist (so it travels into the DB).
+                                            # sentinel_provenance_root is DISTINCT from any
+                                            # target-observed ledger_root a submitter later stamps.
+                                            _md = _finding.setdefault("metadata", {})
+                                            _md["provenance_kind"] = "sentinel_scan_capsule"
+                                            _md["sentinel_provenance_root"] = _prov.root()
+                                            _md["provenance_event_range"] = _prov.event_range()
+                                            _md["sentinel_provenance"] = _prov.summary()
+                                            return _finding
+
                                         async def _run_bounty_proofs():
                                             # 0. PREFERRED: the composed, submission-grade proof —
                                             #    an authorization state-transition (the SAME object
@@ -1210,8 +1232,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                 object_types=_amp_objects, escalation_values=_amp_roles,
                                             )
                                             if _amp:
-                                                _ampf = with_restraint(_amp.to_finding(),
-                                                                       executors=[_exA, _exB])
+                                                _ampf = _cite_provenance(with_restraint(
+                                                    _amp.to_finding(), executors=[_exA, _exB]))
                                                 session.findings.bulk_add([_ampf], persist=True)
                                                 _d = _ampf["metadata"]["authorization_matrix_delta"]
                                                 session.log(
@@ -1228,8 +1250,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                 accessor_persona=(req.personas[0].get("name") or "A"),
                                             )
                                             if _owned:
-                                                _of = with_restraint(_owned.to_finding(),
-                                                                     executors=[_exA, _exB])
+                                                _of = _cite_provenance(with_restraint(
+                                                    _owned.to_finding(), executors=[_exA, _exB]))
                                                 session.findings.bulk_add([_of], persist=True)
                                                 session.log(
                                                     f"[bounty] owned two-persona BOLA confirmed: "
@@ -1242,8 +1264,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                             _se = await prove_self_escalation(
                                                 req.target, send=_exA.send, relogin=_relogin_A)
                                             if _se:
-                                                _sef = with_restraint(_se.to_finding(),
-                                                                      executors=[_exA, _exB])
+                                                _sef = _cite_provenance(with_restraint(
+                                                    _se.to_finding(), executors=[_exA, _exB]))
                                                 session.findings.bulk_add([_sef], persist=True)
                                                 session.log(
                                                     f"[bounty] self-escalation confirmed "
@@ -1472,6 +1494,19 @@ async def get_session_issues(session_id: str):
     issues = await db.get_issues(session_id)
     return {"session_id": session_id, "issues": issues, "count": len(issues)}
 
+def _lift_sentinel_provenance(surfaced: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Pick the richest conduct-provenance block carried by the surfaced findings.
+    The scan-scoped ProvenanceSink is gone by report time, but its root travels with
+    the DB-backed finding (metadata.sentinel_provenance), so the report reconstructs
+    the conduct summary from there."""
+    best: Optional[Dict[str, Any]] = None
+    for f in surfaced:
+        p = (f.get("metadata") or {}).get("sentinel_provenance")
+        if p and p.get("root") and (best is None or p.get("events", 0) >= best.get("events", 0)):
+            best = p
+    return best
+
+
 @router.get("/sessions/{session_id}/bounty-report", dependencies=[Depends(verify_token)])
 async def get_session_bounty_report(
     session_id: str,
@@ -1584,6 +1619,11 @@ async def get_session_bounty_report(
                 break
         report_dicts.append(d)
 
+    # Sentinel's OWN conduct provenance — the Merkle root over the PolicyExecutor
+    # seam, lifted from the surfaced findings (the sink is scan-scoped, but the root
+    # travels with the DB-backed finding). Distinct from any target-observed ledger.
+    sentinel_provenance = _lift_sentinel_provenance(surfaced)
+
     if format.lower() == "json":
         return {
             "session_id": session_id,
@@ -1591,6 +1631,7 @@ async def get_session_bounty_report(
             "count": len(reports),
             "reports": report_dicts,
             "triage": triage_summary,
+            "sentinel_provenance": sentinel_provenance,
         }
 
     # Default: Markdown summary document (SURFACE candidates only).

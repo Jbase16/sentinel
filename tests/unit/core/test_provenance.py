@@ -116,3 +116,18 @@ def test_owned_test_accounts_only_flips_false_on_real_data_access():
 
 def test_empty_sink_has_no_root():
     assert ProvenanceSink().root() is None
+
+
+def test_report_lifts_richest_provenance_from_surfaced_findings():
+    # The bounty report reconstructs the conduct summary from the DB-backed finding
+    # (the scan-scoped sink is long gone), preferring the richest trail.
+    from core.server.routers.scans import _lift_sentinel_provenance
+    surfaced = [
+        {"metadata": {"sentinel_provenance": {"root": "r_small", "events": 2}}},
+        {"metadata": {"sentinel_provenance": {"root": "r_big", "events": 8}}},
+        {"metadata": {}},                                   # a finding with no provenance
+    ]
+    picked = _lift_sentinel_provenance(surfaced)
+    assert picked["root"] == "r_big" and picked["events"] == 8
+    assert _lift_sentinel_provenance([]) is None
+    assert _lift_sentinel_provenance([{"metadata": {}}]) is None

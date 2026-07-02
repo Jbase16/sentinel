@@ -258,6 +258,41 @@ async def test_finding_passes_bountyforge():
                                pol.budget.snapshot()["cross_object_reads"], violations)
 
 
+@pytest.mark.asyncio
+async def test_composed_proof_conduct_is_captured_by_provenance_sink():
+    # The whole point of the seam: the sink records what the proof actually did.
+    from core.safety.provenance import ProvenanceSink
+    app = FakeWorkspaceApp()
+    pol = ExecutionPolicy("bounty_safe")
+    sink = ProvenanceSink()
+    sink.record_context(target="http://t", proof_mode="bounty_safe", policy_digest=pol.digest())
+    exA = PolicyExecutor(app.sender("A"), pol, provenance=sink)
+    exB = PolicyExecutor(app.sender("B"), pol, provenance=sink)
+    proof = await prove_minimal_escalation_amplified_bola(
+        "http://t", owner_send=exB.send, accessor_send=exA.send,
+        object_types=["invoices"], escalation_values=["billing_manager", "workspace_admin"])
+    assert proof is not None
+    assert sink.root() is not None and sink.verify()          # tamper-evident head exists
+    summ = sink.summary()
+    assert summ["cross_object_reads_2xx"] == 1                 # only the amplified 200 read
+    assert summ["destructive_actions_sent"] == 0 and summ["owned_test_accounts_only"] is True
+    # The finding can cite the sentinel root — a field DISTINCT from any target ledger_root.
+    md = proof.to_finding()["metadata"]
+    md["sentinel_provenance_root"] = sink.root()
+    assert md["sentinel_provenance_root"] and "ledger_root" not in md
+
+
+@pytest.mark.asyncio
+async def test_provenance_root_does_not_break_awardforge_acceptance():
+    app = FakeWorkspaceApp()
+    pol, _, _, coro = _run(app)
+    proof = await coro
+    md = dict(proof.to_finding()["metadata"])
+    md["sentinel_provenance_root"] = "ec384e6a..."            # Sentinel's own conduct root
+    md["ledger_root"] = "stamped-by-submitter"                # the target-observed root
+    assert _awardforge_verdict(md, pol.budget.snapshot()["cross_object_reads"]) == "accepted"
+
+
 def test_authorization_matrix_delta_as_dict_is_stable():
     d = AuthorizationMatrixDelta("member", "billing_manager", "invoice", "foreign_workspace")
     assert d.as_dict() == {"principal_before": "member", "principal_after": "billing_manager",
