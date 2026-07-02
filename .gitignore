@@ -53,6 +53,8 @@ ui/SentinelForge.xcodeproj/xcuserdata/
 /archive_stage/
 /artifacts/
 /reports/
+graphify-out/
+*/graphify-out/
 
 # Local model weights — multi-GB; never commit (live in Ollama / on disk)
 *.gguf
