@@ -86,14 +86,28 @@ def test_rules_loaded_scope_missing_holds():
 # ---------------------------------------------------------------- impact nuance
 
 def test_self_escalation_high_holds_and_routes_to_manual_review():
+    # HIGH confidence AND reproducible evidence → a legitimate HOLD (needs a wield
+    # to become payable, which the safe policy forbids → manual review).
     f = _f(vuln_class="mass_assignment", subtype="self_escalation", confidence="HIGH",
-           field="role", baseline="viewer", escalated="admin",
+           field="role", baseline="viewer", escalated="admin", endpoint="/api/users/me",
+           evidence="PATCH /api/users/me persisted role='admin'; fresh login still returned role='admin'",
            intended_invariant="A viewer may not self-elevate.",
-           proof_mode="bounty_safe", restraint={"owned_test_accounts_only": True})
+           observed_violation="the account changed its own role viewer→admin and it persisted after a fresh login",
+           proof_mode="bounty_safe", restraint={"owned_test_accounts_only": True, "destructive_actions_sent": 0})
     r = triage(EvidenceBundle.from_finding(f), _ctx())
     assert r.decision == HOLD and "SELF_ESCALATION_NOT_WIELDED" in r.top_rejection_risks()
     assert "Manual review" in r.next_action
     assert any(e["safe_to_collect"] is False for e in r.evidence_needed())
+
+
+def test_self_escalation_without_repro_is_suppressed():
+    # The distinction the adversary must hold: HIGH confidence WITHOUT reproducible
+    # evidence is not a polite HOLD — a confident hat is not a proof. → SUPPRESS.
+    f = _f(vuln_class="mass_assignment", subtype="self_escalation", confidence="HIGH",
+           field="role", intended_invariant="A viewer may not self-elevate.",
+           proof_mode="bounty_safe", restraint={"owned_test_accounts_only": True, "destructive_actions_sent": 0})
+    r = triage(EvidenceBundle.from_finding(f), _ctx())
+    assert r.decision == SUPPRESS and "NO_REPRO_STEPS" in r.top_rejection_risks()
 
 
 def test_synthetic_low_object_holds_for_impact_framing():
