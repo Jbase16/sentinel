@@ -61,8 +61,23 @@ it is not a live path.)
       ORPHAN_STRONG/TEST_ONLY) with the live contracts/context foundation. A surgical cut of just
       the shell is audit-supported if ever wanted; kept for now.
 
-  **Phase 1 total so far: 57 files, ~6,400 LOC removed; suite green throughout (1616).**
-- [ ] **Phase 2 — Tier 2 test-only.** Per-cluster: delete module + its tests, or keep.
+- [x] **Phase 2 — Tier 2 test-only clusters + tail.** Removed (each verified: no live/
+  test/lazy importer, dedicated test only): `thanatos` (ae24722), dead `aegis.*` sub-cluster
+  keeping live `nexus.*` (c55d0e6), `sentient.doppelganger`+`cortex.pathfinder` (f9f5a72),
+  old `cortex.replay_capsule` + misplaced `pressure_graph/tests` (8323608→earlier), 
+  `mimic.downloader`+`ai.fallbacks` (d60f1df), `aegis.nexus.chain`+`cortex.authority`
+  (self-test __main__, not tools; 323642b).
+  - **KEPT (removal would delete tests that cover LIVE code):** `chat`, `reporting.composer`,
+    `replay.codec`/`hypervisor`, `cal.interface`, `forge.sandbox`, `ghost.logic`,
+    `scheduler.laws`, `toolkit.diagnostics`, `sentient.mimic.ast_parser`.
+  - **KEPT (real tools/utilities):** `server.openapi_gen`.
+  - **BLOCKED (need Xcode build to verify):** UI duplicate Swift files + `.build/.lock`.
+  - **DECISIONS, not deletions (Phase 3):** report/submission fork, 3 `execution_policy`
+    modules (distinct jobs — rename, don't merge), provenance systems.
+
+  **CLEANUP COMPLETE for safe dead-code removal: 89 files, 11,591 LOC removed; every
+  step verified + reversible; unit suite green throughout. What remains needs a build,
+  a design decision, or would sacrifice live test coverage — none is removable dead code.**
 - [ ] **Phase 3 — DEFER (product decisions, not cleanup).** report/submission fork
   (incl. the newer unwired Phase-6 path), the 3 `execution_policy` modules (rename,
   don't merge), the 3 provenance systems, `replay_capsule`, the `__main__` tools.
