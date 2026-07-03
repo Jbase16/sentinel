@@ -31,7 +31,9 @@ it is not a live path.)
 - [x] **Phase 0 — fix the ruler.** `pytest tests/` now collects under
   `--import-mode=importlib`; audit landed here as the tracked ledger.
 - [ ] **Phase 1 — Tier 1 dead code.** Delete ORPHAN_STRONG in per-package batches
-  (`git rm` → full suite green → commit). Pilot: `core.web.browser`.
+  (`git rm` → full suite green → commit). Pilot: `core.web.browser` ✅ (0dae419, empty pkg).
+  Remaining: `core.web.{evidence,mutate,auth,replay}`, `core.{fuzz,analyze,payloads,
+  doppelganger,executor,observer,monitoring,debugging}`, `core.server.tls`, etc.
 - [ ] **Phase 2 — Tier 2 test-only.** Per-cluster: delete module + its tests, or keep.
 - [ ] **Phase 3 — DEFER (product decisions, not cleanup).** report/submission fork
   (incl. the newer unwired Phase-6 path), the 3 `execution_policy` modules (rename,
