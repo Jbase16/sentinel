@@ -37,9 +37,21 @@ it is not a live path.)
   - batch 2 `core.{doppelganger,executor,observer,system}` closure (ce0e17b)
   - batch 3 `core.{fuzz,analyze,payloads,monitoring,debugging}` + server.tls,
     toolkit.tool_callbacks, engine.{runner,scan_orchestrator} (0bc8ad6)
-  - **Deferred (entangled — need per-module care):** `core.recon` (behavioral is
-    ORPHAN_REVIEW/tool-shape), `core.scope`, `core.aegis.*` fragments, `core.sentient.*`
-    fragments, `core.data.pressure_graph.attribution`, web.js_intel, web.evidence_service.
+  - per-module pass (98b4c74, 91abefa, 5ed4ca4, f96523f): removed confirmed true-orphans
+    — `core.recon` cluster + its exclusive `data.evidence`/`data.findings`,
+    `core.sentient.{service,economics,ethics}`, `core.scope`,
+    `data.pressure_graph.attribution`, `web.js_intel` (13 files, 1816 LOC).
+  - **Per-module care caught two that a bulk sweep would have wrongly deleted:**
+    `core.aegis.bridge` is imported (relative) by `aegis.manager`; `core.web.evidence_service`
+    is imported (relative) by `web.orchestrator`. Held.
+  - **Remaining Tier 1 is now cluster/subsystem-level, not orphan-level:**
+    - `core.aegis.*` — mixed cluster (bridge↔manager, plus test-only members).
+    - `core.web.*` — `context/transport/crawler/orchestrator/auth_manager/evidence_service/
+      event_bus/diff/contracts` form a **script-and-test-only web subsystem** (reachable only
+      via `scripts/smoke_test_*` + some tests, NOT the FastAPI runtime). This is a
+      "keep the web.* subsystem at all?" decision → Phase 3, not Tier-1 cleanup.
+
+  **Phase 1 total so far: 57 files, ~6,400 LOC removed; suite green throughout (1616).**
 - [ ] **Phase 2 — Tier 2 test-only.** Per-cluster: delete module + its tests, or keep.
 - [ ] **Phase 3 — DEFER (product decisions, not cleanup).** report/submission fork
   (incl. the newer unwired Phase-6 path), the 3 `execution_policy` modules (rename,
