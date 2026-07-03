@@ -46,10 +46,20 @@ it is not a live path.)
     is imported (relative) by `web.orchestrator`. Held.
   - **Remaining Tier 1 is now cluster/subsystem-level, not orphan-level:**
     - `core.aegis.*` — mixed cluster (bridge↔manager, plus test-only members).
-    - `core.web.*` — `context/transport/crawler/orchestrator/auth_manager/evidence_service/
-      event_bus/diff/contracts` form a **script-and-test-only web subsystem** (reachable only
-      via `scripts/smoke_test_*` + some tests, NOT the FastAPI runtime). This is a
-      "keep the web.* subsystem at all?" decision → Phase 3, not Tier-1 cleanup.
+    - `core.web.*` — **DECISION: KEEP (2026-07-02).** Investigation corrected the audit:
+      this is NOT a script/test-only subsystem. Its foundation `core.web.contracts.*`
+      (`VulnerabilityClass`, `WebMission`, ids, `ScopeViolation`) + `core.web.context.WebContext`
+      is **LIVE** — imported by `core.wraith.{verify_phase,vuln_verifier,candidate_discovery}`
+      and `core.server.routers.{scans,ai}`. wraith was built ON web's foundation, not as a
+      replacement. The abandoned *engine* shell (crawler/orchestrator/diff/transport/event_bus/
+      surface_registry/auth_manager/evidence_service) is unwired dead-ish code but entangled
+      with the live foundation → left intact; see `docs/architecture/WEB_EXPLOITATION_ENGINE_V1.md`
+      (status corrected there). CORRECTION: the audit was right — it marked `web.context` /
+      `web.contracts.enums`/`.errors` LIVE. The "script/test-only web subsystem" framing was a
+      mis-summary on my part that conflated the dead engine shell (orchestrator/crawler/diff/
+      transport/event_bus/surface_registry/auth_manager/evidence_service — genuinely
+      ORPHAN_STRONG/TEST_ONLY) with the live contracts/context foundation. A surgical cut of just
+      the shell is audit-supported if ever wanted; kept for now.
 
   **Phase 1 total so far: 57 files, ~6,400 LOC removed; suite green throughout (1616).**
 - [ ] **Phase 2 — Tier 2 test-only.** Per-cluster: delete module + its tests, or keep.
