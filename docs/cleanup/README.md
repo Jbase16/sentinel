@@ -30,10 +30,16 @@ it is not a live path.)
 
 - [x] **Phase 0 — fix the ruler.** `pytest tests/` now collects under
   `--import-mode=importlib`; audit landed here as the tracked ledger.
-- [ ] **Phase 1 — Tier 1 dead code.** Delete ORPHAN_STRONG in per-package batches
-  (`git rm` → full suite green → commit). Pilot: `core.web.browser` ✅ (0dae419, empty pkg).
-  Remaining: `core.web.{evidence,mutate,auth,replay}`, `core.{fuzz,analyze,payloads,
-  doppelganger,executor,observer,monitoring,debugging}`, `core.server.tls`, etc.
+- [~] **Phase 1 — Tier 1 dead code.** Clean whole-dead subsystems removed (44 files,
+  ~4.6k LOC, suite green throughout, each reversible):
+  - pilot `core.web.browser` (0dae419)
+  - batch 1 `core.web.{evidence,mutate,auth,replay}` + web.mission, web.contracts.validation (d0929db)
+  - batch 2 `core.{doppelganger,executor,observer,system}` closure (ce0e17b)
+  - batch 3 `core.{fuzz,analyze,payloads,monitoring,debugging}` + server.tls,
+    toolkit.tool_callbacks, engine.{runner,scan_orchestrator} (0bc8ad6)
+  - **Deferred (entangled — need per-module care):** `core.recon` (behavioral is
+    ORPHAN_REVIEW/tool-shape), `core.scope`, `core.aegis.*` fragments, `core.sentient.*`
+    fragments, `core.data.pressure_graph.attribution`, web.js_intel, web.evidence_service.
 - [ ] **Phase 2 — Tier 2 test-only.** Per-cluster: delete module + its tests, or keep.
 - [ ] **Phase 3 — DEFER (product decisions, not cleanup).** report/submission fork
   (incl. the newer unwired Phase-6 path), the 3 `execution_policy` modules (rename,
