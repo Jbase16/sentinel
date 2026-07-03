@@ -1,0 +1,161 @@
+# Cleanup Candidates
+Ranked by review safety, not deletion recommendation. No command here deletes anything.
+
+## Tier 0: Do Not Touch
+- `core.base.context` (core/base/context.py): runtime=yes; evidence=runtime_reachable; tool_or_router_shape; duplicate_basename.
+- `core.base.execution_policy` (core/base/execution_policy.py): runtime=yes; evidence=runtime_reachable; duplicate_basename.
+- `core.base.scope` (core/base/scope.py): runtime=yes; evidence=runtime_reachable; tool_or_router_shape.
+- `core.base.session` (core/base/session.py): runtime=yes; evidence=runtime_reachable; string_ref=tests/unit/test_teardown_deadline.py; duplicate_basename.
+- `core.cortex.events` (core/cortex/events.py): runtime=yes; evidence=runtime_reachable; string_ref=tests/integration/test_ghost_lazarus_integration.py; duplicate_basename.
+- `core.cortex.execution_policy` (core/cortex/execution_policy.py): runtime=yes; evidence=runtime_reachable; tool_or_router_shape; duplicate_basename.
+- `core.cortex.minimal_amplification` (core/cortex/minimal_amplification.py): runtime=yes; evidence=runtime_reachable; known_recent_bounty_safe.
+- `core.cortex.reasoning` (core/cortex/reasoning.py): runtime=yes; evidence=runtime_reachable.
+- `core.data.blackbox` (core/data/blackbox.py): runtime=yes; evidence=runtime_reachable; string_ref=tests/integration/test_db_concurrency.py.
+- `core.data.db` (core/data/db.py): runtime=yes; evidence=runtime_reachable; string_ref=core/engine/scanner_engine.py,core/toolkit/finding_verifier.py,tests/integration/test_db_concurrency.py,tests/integration/test_scan_failure.py.
+- `core.engine.scanner_engine` (core/engine/scanner_engine.py): runtime=yes; evidence=runtime_reachable; string_ref=core/engine/scan_orchestrator.py,tests/unit/core/engine/test_scanner_engine.py,tests/unit/test_scan_watchdog.py; tool_or_router_shape.
+- `core.replay.merkle` (core/replay/merkle.py): runtime=yes; evidence=runtime_reachable.
+- `core.replay.models` (core/replay/models.py): runtime=yes; evidence=runtime_reachable; duplicate_basename.
+- `core.safety.action_classifier` (core/safety/action_classifier.py): runtime=yes; evidence=runtime_reachable.
+- `core.safety.ownership_registry` (core/safety/ownership_registry.py): runtime=yes; evidence=runtime_reachable; tool_or_router_shape; known_recent_bounty_safe.
+- `core.safety.proof_budget` (core/safety/proof_budget.py): runtime=yes; evidence=runtime_reachable.
+- `core.safety.proof_mode` (core/safety/proof_mode.py): runtime=yes; evidence=runtime_reachable.
+- `core.safety.provenance` (core/safety/provenance.py): runtime=yes; evidence=runtime_reachable; known_recent_bounty_safe.
+- `core.server.api` (core/server/api.py): runtime=yes; evidence=runtime_reachable; string_ref=sentinelforge/cli/sentinel.py,tests/unit/test_command_validation.py; tool_or_router_shape.
+- `core.server.routers.scans` (core/server/routers/scans.py): runtime=yes; evidence=runtime_reachable; string_ref=core/engine/scan_orchestrator.py,core/intel/compilers/__init__.py,core/intel/compilers/scope_compiler.py,tests/integration/test_scan_failure.py; tool_or_router_shape.
+- `core.server.state` (core/server/state.py): runtime=yes; evidence=runtime_reachable; string_ref=tests/unit/test_command_validation.py.
+
+## Tier 1: Strong Cleanup Candidates
+- `core.web.browser` (core/web/browser/__init__.py, LOC=0, last=0b41d41 2026-02-23 Jbase16): duplicate_basename.
+- `core.web.browser.playwright_runner` (core/web/browser/playwright_runner.py, LOC=0, last=0b41d41 2026-02-23 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.evidence` (core/web/evidence/__init__.py, LOC=0, last=0b41d41 2026-02-23 Jbase16): duplicate_basename.
+- `core.web.evidence.artifacts` (core/web/evidence/artifacts.py, LOC=0, last=0b41d41 2026-02-23 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.mutate` (core/web/mutate/__init__.py, LOC=0, last=0b41d41 2026-02-23 Jbase16): duplicate_basename.
+- `core.web.replay` (core/web/replay/__init__.py, LOC=0, last=0b41d41 2026-02-23 Jbase16): duplicate_basename.
+- `core.analyze` (core/analyze/__init__.py, LOC=1, last=08a3276 2025-12-17 Jason Phillips): duplicate_basename.
+- `core.fuzz` (core/fuzz/__init__.py, LOC=1, last=08a3276 2025-12-17 Jason Phillips): duplicate_basename.
+- `core.payloads` (core/payloads/__init__.py, LOC=1, last=08a3276 2025-12-17 Jason Phillips): duplicate_basename.
+- `core.recon` (core/recon/__init__.py, LOC=2, last=08a3276 2025-12-17 Jason Phillips): duplicate_basename.
+- `core.doppelganger` (core/doppelganger/__init__.py, LOC=4, last=7905715 2026-01-03 Jbase16): duplicate_basename.
+- `core.web.auth` (core/web/auth/__init__.py, LOC=10, last=7bc68e5 2026-03-21 Jbase16): duplicate_basename.
+- `core.web.mission` (core/web/mission.py, LOC=13, last=0b41d41 2026-02-23 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.toolkit.tool_callbacks` (core/toolkit/tool_callbacks.py, LOC=14, last=08a3276 2025-12-17 Jason Phillips): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.contracts.validation` (core/web/contracts/validation.py, LOC=22, last=0b41d41 2026-02-23 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.replay.generator` (core/web/replay/generator.py, LOC=22, last=e58d306 2026-02-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.scope` (core/scope/__init__.py, LOC=25, last=e3e9c38 2026-02-17 Jbase16): duplicate_basename.
+- `core.recon.module` (core/recon/module.py, LOC=31, last=84b664f 2025-12-17 Jason Phillips): duplicate_basename.
+- `core.web.evidence.bundle` (core/web/evidence/bundle.py, LOC=45, last=e58d306 2026-02-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.thanatos.anomaly_tester` (core/thanatos/anomaly_tester.py, LOC=46, last=f02d066 2026-01-05 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.fuzz.module` (core/fuzz/module.py, LOC=76, last=7ea750e 2026-03-23 Jbase16): duplicate_basename.
+- `core.data.pressure_graph.attribution` (core/data/pressure_graph/attribution.py, LOC=79, last=a8d80a0 2026-01-01 copilot-swe-agent[bot]): no_runtime_no_tests_no_dynamic_evidence.
+- `core.engine.runner` (core/engine/runner.py, LOC=102, last=4bccada 2025-12-26 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.engine.scan_orchestrator` (core/engine/scan_orchestrator.py, LOC=111, last=b25b1ec 2026-02-23 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.server.tls` (core/server/tls.py, LOC=182, last=7d63772 2026-03-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.mutate.sqli` (core/web/mutate/sqli.py, LOC=194, last=7bc68e5 2026-03-21 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.mutate.ssrf` (core/web/mutate/ssrf.py, LOC=223, last=7bc68e5 2026-03-21 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.debugging.time_travel` (core/debugging/time_travel.py, LOC=326, last=c73647a 2026-01-02 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.monitoring.continuous` (core/monitoring/continuous.py, LOC=341, last=65d92fe 2026-02-09 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.observer` (core/observer/__init__.py, LOC=14, last=44e7eb4 2026-01-03 Jbase16): duplicate_basename.
+- `core.executor` (core/executor/__init__.py, LOC=15, last=44e7eb4 2026-01-03 Jbase16): duplicate_basename.
+- `core.executor.harness` (core/executor/harness.py, LOC=24, last=44e7eb4 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.sentient.service` (core/sentient/service.py, LOC=55, last=62ead1e 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.aegis.bridge` (core/aegis/bridge.py, LOC=59, last=92cd229 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.executor.interlock` (core/executor/interlock.py, LOC=62, last=44e7eb4 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.mutate.reflection` (core/web/mutate/reflection.py, LOC=65, last=2650584 2026-02-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.mutate.idor` (core/web/mutate/idor.py, LOC=66, last=c579c09 2026-02-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.executor.oracle` (core/executor/oracle.py, LOC=78, last=8249a58 2026-01-04 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.doppelganger.engine` (core/doppelganger/engine.py, LOC=146, last=7d63772 2026-03-24 Jbase16): duplicate_basename.
+- `core.web.auth.form_login` (core/web/auth/form_login.py, LOC=149, last=7d63772 2026-03-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.auth.scripted_login` (core/web/auth/scripted_login.py, LOC=150, last=7d63772 2026-03-24 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.executor.http_harness` (core/executor/http_harness.py, LOC=159, last=7ea750e 2026-03-23 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.scope.enforcer` (core/scope/enforcer.py, LOC=168, last=e3e9c38 2026-02-17 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.sentient.economics` (core/sentient/economics.py, LOC=52, last=7905715 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.sentient.ethics` (core/sentient/ethics.py, LOC=63, last=62ead1e 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.observer.bus` (core/observer/bus.py, LOC=74, last=25535b6 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.observer.sinks` (core/observer/sinks.py, LOC=78, last=25535b6 2026-01-03 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.observer.feedback` (core/observer/feedback.py, LOC=80, last=8249a58 2026-01-04 Jbase16): no_runtime_no_tests_no_dynamic_evidence.
+- `core.web.mutate.base` (core/web/mutate/base.py, LOC=18, last=0cdf465 2026-02-24 Jbase16): duplicate_basename.
+- `core.web.auth.base` (core/web/auth/base.py, LOC=40, last=7bc68e5 2026-03-21 Jbase16): duplicate_basename.
+
+## Tier 2: Test-Only Candidates
+- `core.web.diff` (core/web/diff/__init__.py, LOC=0, tests=transitive/self, last=0b41d41 2026-02-23): test_reachable; duplicate_basename.
+- `core.chat` (core/chat/__init__.py, LOC=3, tests=transitive/self, last=306f676 2025-12-23): test_reachable; duplicate_basename.
+- `core.data.pressure_graph.tests` (core/data/pressure_graph/tests/__init__.py, LOC=3, tests=transitive/self, last=9641480 2025-12-28): test_reachable; duplicate_basename.
+- `core.thanatos` (core/thanatos/__init__.py, LOC=11, tests=transitive/self, last=9ab56a8 2026-01-02): test_reachable; duplicate_basename.
+- `core.intel.extractors` (core/intel/extractors/__init__.py, LOC=23, tests=transitive/self, last=5f46ae0 2026-05-21): test_reachable; duplicate_basename.
+- `core.data.pressure_graph.tests.test_v2_logic` (core/data/pressure_graph/tests/test_v2_logic.py, LOC=53, tests=transitive/self, last=a8d80a0 2026-01-01): test_reachable; __main__; cli_shape.
+- `core.data.pressure_graph.tests.test_property_based` (core/data/pressure_graph/tests/test_property_based.py, LOC=67, tests=transitive/self, last=f59a289 2025-12-29): test_reachable.
+- `core.data.pressure_graph.tests.test_models` (core/data/pressure_graph/tests/test_models.py, LOC=192, tests=transitive/self, last=9641480 2025-12-28): test_reachable.
+- `core.data.pressure_graph.tests.test_propagator` (core/data/pressure_graph/tests/test_propagator.py, LOC=362, tests=transitive/self, last=a034733 2025-12-28): test_reachable.
+- `core.aegis.value_mapper` (core/aegis/value_mapper.py, LOC=36, tests=tests/test_aegis_phase1.py, last=b3929eb 2026-01-04): test_reachable.
+- `core.toolkit.diagnostics` (core/toolkit/diagnostics.py, LOC=42, tests=tests/integration/test_tool_diagnostics.py, last=ac45c4a 2026-01-05): test_reachable; string_ref=tests/integration/test_tool_diagnostics.py; tool_or_router_shape.
+- `core.thanatos.anomaly_client` (core/thanatos/anomaly_client.py, LOC=50, tests=tests/test_thanatos_wrappers.py, last=b3929eb 2026-01-04): test_reachable.
+- `core.thanatos.truth_discriminator` (core/thanatos/truth_discriminator.py, LOC=50, tests=tests/test_thanatos_wrappers.py, last=9ab56a8 2026-01-02): test_reachable.
+- `core.thanatos.karma_model` (core/thanatos/karma_model.py, LOC=51, tests=tests/test_thanatos_wrappers.py, last=9ab56a8 2026-01-02): test_reachable.
+- `core.thanatos.meta_observer` (core/thanatos/meta_observer.py, LOC=51, tests=tests/test_thanatos_wrappers.py, last=9ab56a8 2026-01-02): test_reachable.
+- `core.aegis.economic_recon` (core/aegis/economic_recon.py, LOC=55, tests=tests/test_thanatos_wrappers.py, last=9ab56a8 2026-01-02): test_reachable.
+- `core.cortex.pathfinder` (core/cortex/pathfinder.py, LOC=65, tests=tests/unit/test_pathfinder.py, last=6ec45ef 2025-12-23): test_reachable.
+- `core.scheduler.laws` (core/scheduler/laws.py, LOC=73, tests=tests/integration/test_cal_integration.py, last=5b479a1 2026-01-02): test_reachable.
+- `core.sentient.doppelganger` (core/sentient/doppelganger.py, LOC=84, tests=tests/test_thanatos_wrappers.py, last=19d5fda 2026-01-20): test_reachable.
+- `core.aegis.passive_ingest` (core/aegis/passive_ingest.py, LOC=87, tests=tests/test_aegis_phase1.py, last=b3929eb 2026-01-04): test_reachable.
+- `core.mimic.downloader` (core/mimic/downloader.py, LOC=99, tests=tests/unit/core/mimic/test_asset_downloader.py, last=7d63772 2026-03-24): test_reachable; string_ref=tests/unit/core/mimic/test_asset_downloader.py; duplicate_basename.
+- `core.replay.codec` (core/replay/codec.py, LOC=101, tests=tests/unit/test_merkle_integrity.py, last=94c32f1 2026-01-06): test_reachable.
+- `core.thanatos.mutations` (core/thanatos/mutations.py, LOC=113, tests=transitive/self, last=c4c1907 2026-01-03): test_reachable; tool_or_router_shape; duplicate_basename.
+- `core.ai.fallbacks` (core/ai/fallbacks.py, LOC=267, tests=tests/unit/core/test_trinity_hardening.py, last=c73647a 2026-01-02): test_reachable.
+- `core.omega.risk_calculator` (core/omega/risk_calculator.py, LOC=270, tests=transitive/self, last=7d63772 2026-03-24): test_reachable.
+- `core.omega.mimic_phase` (core/omega/mimic_phase.py, LOC=446, tests=transitive/self, last=7d63772 2026-03-24): test_reachable.
+- `core.sentient.mimic.downloader` (core/sentient/mimic/downloader.py, LOC=620, tests=transitive/self, last=7d63772 2026-03-24): test_reachable; __main__; cli_shape; duplicate_basename.
+- `core.sentient.cronus.time_machine` (core/sentient/cronus/time_machine.py, LOC=646, tests=transitive/self, last=7d63772 2026-03-24): test_reachable; __main__; cli_shape.
+- `core.sentient.cronus.hunter` (core/sentient/cronus/hunter.py, LOC=664, tests=transitive/self, last=7d63772 2026-03-24): test_reachable; __main__; cli_shape.
+- `core.intel.selection` (core/intel/selection/__init__.py, LOC=21, tests=transitive/self, last=30b2850 2026-06-07): test_reachable; duplicate_basename.
+- `core.cortex.memory` (core/cortex/memory.py, LOC=31, tests=tests/verification/verify_cortex.py, last=6ec45ef 2025-12-23): test_reachable.
+- `core.thanatos.ontology_breaker` (core/thanatos/ontology_breaker.py, LOC=31, tests=transitive/self, last=8249a58 2026-01-04): test_reachable.
+- `core.web.contracts.schemas` (core/web/contracts/schemas.py, LOC=35, tests=transitive/self, last=ae925dd 2026-02-24): test_reachable; duplicate_basename.
+- `core.cal.interface` (core/cal/interface.py, LOC=37, tests=tests/unit/core/cal/test_cal.py;tests/verification/verify_cal_core.py, last=b98ee9a 2026-01-01): test_reachable; tool_or_router_shape.
+- `core.forge.sandbox` (core/forge/sandbox.py, LOC=44, tests=tests/verification/verify_forge.py, last=daeb881 2025-12-23): test_reachable.
+- `core.thanatos.isomorphism_engine` (core/thanatos/isomorphism_engine.py, LOC=53, tests=tests/test_thanatos_phase2.py;tests/test_thanatos_wrappers.py, last=9ab56a8 2026-01-02): test_reachable.
+- `core.chat.chat_engine` (core/chat/chat_engine.py, LOC=60, tests=tests/verification/verify_command_deck.py, last=02541ca 2026-01-05): test_reachable.
+- `core.web.auth_manager` (core/web/auth_manager.py, LOC=60, tests=scripts/test_auth_isolation.py, last=7d63772 2026-03-24): test_reachable.
+- `core.sentient.cronus` (core/sentient/cronus/__init__.py, LOC=64, tests=tests/unit/test_cronus.py, last=4e31779 2025-12-28): test_reachable; duplicate_basename.
+- `core.ghost.logic` (core/ghost/logic.py, LOC=68, tests=tests/verification/verify_god_tier.py, last=6ec45ef 2025-12-23): test_reachable.
+- `core.intel.resolver` (core/intel/resolver.py, LOC=88, tests=tests/unit/intel/test_resolver.py, last=5f46ae0 2026-05-21): test_reachable; tool_or_router_shape.
+- `core.intel.compilers.scope_compiler` (core/intel/compilers/scope_compiler.py, LOC=97, tests=tests/unit/intel/test_scope_compiler.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.reporting.composer` (core/reporting/composer.py, LOC=192, tests=tests/integration/test_full_scan.py;tests/unit/test_reporting.py, last=8cdffc5 2026-01-08): test_reachable; string_ref=tests/unit/test_report_composer_real.py.
+- `core.intel.compilers.persona_compiler` (core/intel/compilers/persona_compiler.py, LOC=195, tests=tests/unit/intel/test_persona_compiler.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.foundry.recorder` (core/foundry/recorder.py, LOC=213, tests=tests/unit/test_foundry_recorder.py, last=2b37cb4 2026-06-09): test_reachable; string_ref=tests/unit/test_foundry_recorder.py.
+- `core.intel.selection.scorer` (core/intel/selection/scorer.py, LOC=304, tests=tests/unit/test_program_scorer.py, last=30b2850 2026-06-07): test_reachable; string_ref=tests/unit/test_program_scorer.py.
+- `core.sentient.cronus.differ` (core/sentient/cronus/differ.py, LOC=486, tests=transitive/self, last=7d63772 2026-03-24): test_reachable; __main__; cli_shape.
+- `core.thanatos.scope_gate` (core/thanatos/scope_gate.py, LOC=44, tests=transitive/self, last=62ead1e 2026-01-03): test_reachable.
+- `core.replay.hypervisor` (core/replay/hypervisor.py, LOC=191, tests=tests/integration/test_butterfly_effect.py;tests/integration/test_replay_semantics.py;tests/unit/test_hypervisor.py, last=7f31862 2026-01-06): test_reachable.
+- `core.intel.verifier` (core/intel/verifier.py, LOC=193, tests=tests/unit/intel/test_verifier.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.intel.registrar` (core/intel/registrar.py, LOC=369, tests=tests/unit/intel/test_cli_ingest.py;tests/unit/intel/test_registrar.py, last=5f46ae0 2026-05-21): test_reachable; tool_or_router_shape.
+- `core.web.diff.delta` (core/web/diff/delta.py, LOC=30, tests=scripts/test_auth_isolation.py;tests/manual/test_diff.py, last=e58d306 2026-02-24): test_reachable.
+- `core.intel.extractors.bugcrowd` (core/intel/extractors/bugcrowd.py, LOC=95, tests=tests/unit/intel/test_extractor_bugcrowd.py;tests/unit/intel/test_resolver.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.aegis.graph` (core/aegis/graph.py, LOC=99, tests=tests/test_aegis_phase1.py, last=b3929eb 2026-01-04): test_reachable.
+- `core.thanatos.axiom_synthesizer` (core/thanatos/axiom_synthesizer.py, LOC=120, tests=tests/test_thanatos_wrappers.py, last=b3929eb 2026-01-04): test_reachable.
+- `core.intel.extractors.hackerone` (core/intel/extractors/hackerone.py, LOC=284, tests=tests/unit/intel/test_extractor_hackerone.py;tests/unit/intel/test_resolver.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.web.event_bus` (core/web/event_bus.py, LOC=42, tests=scripts/test_auth_isolation.py;tests/test_mutating_transport.py, last=0cdf465 2026-02-24): test_reachable.
+- `core.web.diff.baseline` (core/web/diff/baseline.py, LOC=39, tests=scripts/test_auth_isolation.py;tests/manual/test_diff.py, last=e58d306 2026-02-24): test_reachable.
+- `core.intel.extractors.generic_url` (core/intel/extractors/generic_url.py, LOC=202, tests=tests/unit/intel/test_generic_url_extractor.py;tests/unit/intel/test_resolver.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.intel.token_store` (core/intel/token_store.py, LOC=275, tests=tests/unit/intel/test_cli_token.py;tests/unit/intel/test_extractor_hackerone.py;tests/unit/intel/test_token_store.py, last=5f46ae0 2026-05-21): test_reachable; string_ref=scripts/sentinel_token.py.
+- `core.intel.llm_extraction` (core/intel/llm_extraction.py, LOC=452, tests=tests/unit/intel/test_extractor_bugcrowd.py;tests/unit/intel/test_extractor_hackerone.py;tests/unit/intel/test_generic_url_extractor.py;tests/unit/intel/test_llm_extraction.py, last=5f46ae0 2026-05-21): test_reachable.
+- `core.intel.extractors.base` (core/intel/extractors/base.py, LOC=65, tests=tests/unit/intel/test_extractor_bugcrowd.py;tests/unit/intel/test_extractor_hackerone.py;tests/unit/intel/test_generic_url_extractor.py;tests/unit/intel/test_resolver.py, last=5f46ae0 2026-05-21): test_reachable; duplicate_basename.
+- `core.web.transport` (core/web/transport.py, LOC=221, tests=scripts/test_auth_isolation.py;tests/test_mutating_transport.py, last=7d63772 2026-03-24): test_reachable.
+
+## Tier 3: Fork Decisions
+- `core.bounty.h1_client` (core/bounty/h1_client.py, runtime=yes, test_only=no, last=7d63772 2026-03-24 Jbase16): runtime_reachable; tool_or_router_shape; duplicate_basename; known_report_submission_fork.
+- `core.reporting.bounty_report` (core/reporting/bounty_report.py, runtime=yes, test_only=no, last=0efceab 2026-07-02 Jbase16): runtime_reachable; string_ref=tests/unit/test_bounty_report.py; known_report_submission_fork.
+- `core.reporting.submission_render` (core/reporting/submission_render.py, runtime=no, test_only=yes, last=5550e1a 2026-07-02 Jbase16): test_reachable; string_ref=core/submission/h1_client.py,tests/unit/test_submission_render.py; known_report_submission_fork.
+- `core.submission` (core/submission/__init__.py, runtime=no, test_only=yes, last=6733b5b 2026-06-07 Jbase16): test_reachable; string_ref=tests/unit/test_h1_submission.py; duplicate_basename; known_report_submission_fork.
+- `core.submission.h1_client` (core/submission/h1_client.py, runtime=no, test_only=yes, last=6733b5b 2026-06-07 Jbase16): test_reachable; string_ref=tests/unit/test_h1_submission.py; duplicate_basename; known_report_submission_fork.
+
+## Tier 4: Dynamic/CLI Review
+- `core.server.openapi_gen` (core/server/openapi_gen.py, LOC=21, last=f02d066 2026-01-05): __main__; cli_shape.
+- `core.web.js_intel` (core/web/js_intel.py, LOC=50, last=0b41d41 2026-02-23): tool_or_router_shape.
+- `core.cortex.authority` (core/cortex/authority.py, LOC=402, last=2bcd112 2026-01-11): __main__; cli_shape.
+- `core.sentient.mimic.ast_parser` (core/sentient/mimic/ast_parser.py, LOC=466, last=7d63772 2026-03-24): __main__; cli_shape.
+- `core.cortex.replay_capsule` (core/cortex/replay_capsule.py, LOC=482, last=bba2307 2026-01-20): tool_or_router_shape.
+- `core.aegis.nexus.chain` (core/aegis/nexus/chain.py, LOC=621, last=7d63772 2026-03-24): __main__; cli_shape.
+- `core.data.findings` (core/data/findings.py, LOC=3, last=98c7a09 2026-01-03): string_ref=tests/unit/test_ledger_determinism.py.
+- `core.data.evidence` (core/data/evidence.py, LOC=46, last=84b664f 2025-12-17): string_ref=tests/unit/test_report_composer_real.py.
+- `core.web.evidence_service` (core/web/evidence_service.py, LOC=285, last=7ea750e 2026-03-23): cli_shape.
+- `core.recon.behavioral` (core/recon/behavioral.py, LOC=587, last=7ea750e 2026-03-23): tool_or_router_shape.

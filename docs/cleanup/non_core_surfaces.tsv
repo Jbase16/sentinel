@@ -1,0 +1,38 @@
+path	loc	role_evidence	core_imports	has_main	dynamic_import	last_commit	last_commit_date	last_author
+Makefile	7	support_or_config		no	no	e58d306	2026-02-24	Jbase16
+pyproject.toml	42	support_or_config		no	no	5cce91b	2026-01-07	Jbase16
+scripts/calibration_36_gitlab.py	167	python_main;imports_core	core.base.session;core.wraith.candidate_discovery;core.wraith.verify_phase	yes	no	27f5498	2026-05-27	Jbase16
+scripts/calibration_50_end_to_end.py	241	python_main;imports_core	core.base.session;core.data.findings_store;core.reporting.bounty_report;core.server.routers.verify;core.verify.console;core.wraith.verify_phase	yes	no	ef6532b	2026-06-06	Jbase16
+scripts/calibration_60_airtable_unauth.py	259	python_main;imports_core	core.base.session;core.wraith.verify_phase	yes	no	4f4b665	2026-06-07	Jbase16
+scripts/check_circular_imports.py	54	python_main;dynamic_import		yes	yes	6da1a7b	2026-01-05	Jbase16
+scripts/check_schema_drift.py	56	python_main;imports_core	core.web.contracts.events;core.web.contracts.models	yes	no	333b679	2026-02-25	Jbase16
+scripts/dummy_server.py	63	python_main		yes	no	ae925dd	2026-02-24	Jbase16
+scripts/generate_web_schemas.py	45	python_main;imports_core	core.web.contracts.events;core.web.contracts.models	yes	no	333b679	2026-02-25	Jbase16
+scripts/inspect_scan.py	377	cli_argparse;python_main		yes	no	5f46ae0	2026-05-21	Jbase16
+scripts/lab/README.md	50	support_or_config		no	no	5f46ae0	2026-05-21	Jbase16
+scripts/lab/docker-compose.yml	34	support_or_config		no	no	5f46ae0	2026-05-21	Jbase16
+scripts/lab/juice-shop-scope.txt	27	support_or_config		no	no	5f46ae0	2026-05-21	Jbase16
+scripts/lab/megashop-personas.json	39	support_or_config		no	no	5f46ae0	2026-05-21	Jbase16
+scripts/local-security-check.sh	125	support_or_config		no	no	9d9a1b3	2025-12-26	copilot-swe-agent[bot]
+scripts/preflight.py	294	operator_preflight;cli_argparse;python_main;dynamic_import		yes	yes	5f46ae0	2026-05-21	Jbase16
+scripts/sentinel_discover.py	290	cli_argparse;python_main;imports_core	core.intel;core.intel.program_scope;core.intel.selection	yes	no	5177ce6	2026-06-07	Jbase16
+scripts/sentinel_ingest.py	357	cli_argparse;python_main;imports_core	core.intel;core.intel.compilers;core.intel.extractors.base;core.intel.policy_enforcer;core.intel.registrar	yes	no	5f46ae0	2026-05-21	Jbase16
+scripts/sentinel_rank.py	143	cli_argparse;python_main;imports_core	core.intel.program_scope;core.intel.selection	yes	no	30b2850	2026-06-07	Jbase16
+scripts/sentinel_token.py	134	cli_argparse;python_main;imports_core	core.intel;core.intel.token_store	yes	no	5f46ae0	2026-05-21	Jbase16
+scripts/smoke_test_idor.py	107	python_main;imports_core	core.web.auth_manager;core.web.context;core.web.contracts.enums;core.web.contracts.ids;core.web.contracts.models;core.web.crawler;core.web.event_bus;core.web.orchestrator	yes	no	a9dc61e	2026-02-26	Jbase16
+scripts/smoke_test_orchestrator.py	88	python_main;imports_core	core.web.context;core.web.contracts.ids;core.web.contracts.models;core.web.crawler;core.web.event_bus;core.web.orchestrator	yes	no	c579c09	2026-02-24	Jbase16
+scripts/start_backend.sh	46	backend_start_entry		no	no	44c8129	2026-01-09	Jbase16
+scripts/test_auth_isolation.py	87	python_main;imports_core	core.web.auth_manager;core.web.context;core.web.contracts.enums;core.web.contracts.ids;core.web.contracts.models;core.web.diff.baseline;core.web.diff.delta;core.web.event_bus;core.web.transport	yes	no	ae925dd	2026-02-24	Jbase16
+scripts/verify_forge_access.py	72	python_main;imports_core	core.base.config	yes	no	333b679	2026-02-25	Jbase16
+tools/lint_structure.py	12	python_main		yes	no	dcbccb3	2025-12-30	Jbase16
+tools/ops/annotate_inline_comments.py	379	python_main		yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/cleanup_disposition.py	358	cli_argparse;python_main		yes	no	dcbccb3	2025-12-30	Jbase16
+tools/ops/debug_cortex.py	38	python_main		yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/manual_scan.py	66	python_main;imports_core	core.base.session;core.data.db;core.engine.scanner_engine	yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/run_headless_scan_with_narrator.py	50	python_main;imports_core	core.cortex.narrator;core.scheduler.decisions	yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/run_real_scan_headless.py	49	python_main;imports_core	core.cortex.events;core.cortex.narrator;core.scheduler.decisions;core.scheduler.modes;core.scheduler.strategos	yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/start_sentinel_brain.py	109	python_main		yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/start_servers.sh	79	support_or_config		no	no	8610a33	2025-12-19	Jbase16
+tools/ops/strip_banners.py	102	python_main		yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/test_tools_install.py	27	python_main;imports_core	core.toolkit.tools	yes	no	8610a33	2025-12-19	Jbase16
+tools/ops/verify_strategic_logging.py	70	python_main;imports_core	core.cortex.events;core.scheduler.modes;core.scheduler.strategos	yes	no	8610a33	2025-12-19	Jbase16
