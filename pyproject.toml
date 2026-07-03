@@ -37,6 +37,11 @@ include = ["core*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# importlib import mode lets the full tree collect despite duplicate test
+# basenames (tests/core/wraith/test_execution_policy.py vs tests/unit/core/...
+# and the two test_verifier.py). Prepend mode aliases them to one module and
+# breaks `pytest tests/` collection outright.
+addopts = "--import-mode=importlib"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
