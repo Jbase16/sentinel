@@ -410,10 +410,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             # path — don't assume `.value` (an unguarded access here turned a clean
             # "out of scope" 400 into an unhandled 500).
             _rc = getattr(check_decision.reason_code, "value", check_decision.reason_code)
+            # verdict has the SAME str-or-enum ambiguity as reason_code — guard it too,
+            # or an out-of-scope target crashes with a 500 instead of this clean error.
+            _verdict = getattr(check_decision.verdict, "value", check_decision.verdict)
             raise SentinelError(
                 ErrorCode.SCAN_TARGET_INVALID,
                 f"Target is outside the declared scope: {_rc}",
-                details={"target": req.target, "verdict": check_decision.verdict.value},
+                details={"target": req.target, "verdict": _verdict},
             )
 
         # Bind ScopeContext physically to the session
