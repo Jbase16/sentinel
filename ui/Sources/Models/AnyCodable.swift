@@ -11,7 +11,7 @@ public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
 
     public init<T>(_ value: T?) {
-        self.value = value ?? ()
+        self.value = value ?? NSNull()
     }
 
     public init(_ value: Any) {
@@ -21,7 +21,11 @@ public struct AnyCodable: Codable, @unchecked Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 
-        if let intVal = try? container.decode(Int.self) {
+        if container.decodeNil() {
+            // JSON null — the decoder previously threw "cannot be decoded" here,
+            // which dropped whole events whose payload contained any null value.
+            value = NSNull()
+        } else if let intVal = try? container.decode(Int.self) {
             value = intVal
         } else if let doubleVal = try? container.decode(Double.self) {
             value = doubleVal
@@ -59,6 +63,8 @@ public struct AnyCodable: Codable, @unchecked Sendable {
             try container.encode(arrayVal.map { AnyCodable($0) })
         case let dictVal as [String: Any]:
             try container.encode(dictVal.mapValues { AnyCodable($0) })
+        case is NSNull:
+            try container.encodeNil()
         default:
             throw EncodingError.invalidValue(
                 value,
