@@ -278,16 +278,21 @@ struct ScanControlView: View {
                 }
             }
 
+            // Scope / bounty inputs apply to Bug Bounty scans ONLY. For Standard (and
+            // other non-bounty modes) send none of them, so a lingering scope rule or
+            // strict toggle from a prior bounty run can't wrongly deny the target
+            // (e.g. a local lab like localhost:3002 resolving out-of-scope).
+            let isBounty = (selectedMode == .bugBounty)
             appState.startScan(
                 target: scanTarget,
                 modules: modules,
                 mode: selectedMode,
                 personas: parsedPersonas,
                 oob: parsedOob,
-                scope: scopeLines.isEmpty ? nil : scopeLines,
-                scopeStrict: appState.scopeStrict,
-                bountyHandle: bountyHandle.isEmpty ? nil : bountyHandle,
-                bountyJSON: parsedBountyJSON
+                scope: (isBounty && !scopeLines.isEmpty) ? scopeLines : nil,
+                scopeStrict: isBounty ? appState.scopeStrict : false,
+                bountyHandle: (isBounty && !bountyHandle.isEmpty) ? bountyHandle : nil,
+                bountyJSON: isBounty ? parsedBountyJSON : nil
             )
         } else {
             print(
