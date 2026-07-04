@@ -345,6 +345,10 @@ private struct AdvancedScanConfigView: View {
     @State private var tab: Int = 0
     /// Ephemeral text for the new-rule input field
     @State private var newRuleText: String = ""
+    
+    // Foundry integration
+    @State private var availablePersonas: [FoundryPersona] = []
+    @State private var isFetchingPersonas = false
 
     private let personasPlaceholder =
         """
@@ -572,9 +576,40 @@ private struct AdvancedScanConfigView: View {
 
     private var personasTab: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Personas (optional) – enables wraith_persona_diff when provided.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            HStack {
+                Text("Personas (optional) – enables wraith_persona_diff when provided.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button(action: { fetchPersonas() }) {
+                    if isFetchingPersonas {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Refresh Personas from Foundry")
+            }
+
+            if !availablePersonas.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(availablePersonas) { p in
+                            Button(action: { injectPersonaTemplate(p) }) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "person.text.rectangle")
+                                    Text(p.label)
+                                }
+                                .font(.system(size: 11, design: .monospaced))
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.bottom, 4)
+                }
+            }
+
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $personasJSON)
                     .font(.system(size: 11, design: .monospaced))
@@ -591,6 +626,56 @@ private struct AdvancedScanConfigView: View {
             Spacer()
         }
         .padding()
+        .onAppear {
+            if availablePersonas.isEmpty { fetchPersonas() }
+        }
+    }
+
+    private func fetchPersonas() {
+        isFetchingPersonas = true
+        Task {
+            do {
+                let fetched = try await FoundryAPIClient.shared.listPersonas()
+                await MainActor.run {
+                    self.availablePersonas = fetched
+                    self.isFetchingPersonas = false
+                }
+            } catch {
+                print("[AdvancedScanConfigView] Error fetching personas: \(error)")
+                await MainActor.run { self.isFetchingPersonas = false }
+            }
+        }
+    }
+
+    private func injectPersonaTemplate(_ p: FoundryPersona) {
+        // vault_persona_id references the persona in the backend Foundry vault; the
+        // {{vault_*}} placeholders are filled with the real identity server-side at
+        // login time, so the password never leaves the vault. Edit login_url /
+        // token_path to match the target's auth flow.
+        let template = """
+        {
+          "name": "\(p.label)",
+          "vault_persona_id": "\(p.personaId)",
+          "login_url": "https://TARGET_HOST/login",
+          "login_body": {
+            "email": "{{vault_email}}",
+            "password": "{{vault_password}}"
+          },
+          "token_path": "authentication.token",
+          "auth_header": "Authorization: Bearer {token}"
+        }
+        """
+        
+        var current = personasJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        if current.isEmpty {
+            personasJSON = "[\n  " + template.replacingOccurrences(of: "\n", with: "\n  ") + "\n]"
+        } else if current.hasSuffix("]") {
+            current.removeLast()
+            current = current.trimmingCharacters(in: .whitespacesAndNewlines)
+            personasJSON = current + ",\n  " + template.replacingOccurrences(of: "\n", with: "\n  ") + "\n]"
+        } else {
+            personasJSON += "\n" + template
+        }
     }
 
     // MARK: - OOB Tab

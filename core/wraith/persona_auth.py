@@ -72,6 +72,22 @@ def _apply_static(persona: Dict[str, Any]) -> Tuple[Dict[str, str], Dict[str, st
     return headers, cookies
 
 
+def _fill_placeholders(obj: Any, subs: Dict[str, str]) -> Any:
+    """Recursively replace ``{{vault_*}}`` placeholder strings with real values.
+    Returns a NEW structure — never mutates the caller's persona dict."""
+    if isinstance(obj, str):
+        out = obj
+        for ph, val in subs.items():
+            if ph in out:
+                out = out.replace(ph, str(val))
+        return out
+    if isinstance(obj, dict):
+        return {k: _fill_placeholders(v, subs) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_fill_placeholders(v, subs) for v in obj]
+    return obj
+
+
 async def authenticate_persona(
     persona: Dict[str, Any],
     *,
@@ -93,6 +109,30 @@ async def authenticate_persona(
     kind = (persona.get("login_kind") or "json").lower()
     body = persona.get("login_body") or {}
     login_headers = dict(persona.get("login_headers") or {})
+
+    # Vault-backed credentials: if the persona references a vault id, resolve the
+    # real identity server-side and fill {{vault_*}} placeholders in the login
+    # body/headers. The secret never leaves the backend — the UI only ever sends
+    # the vault id + placeholders — and nothing below logs the body. Deferred to
+    # here (right before the request). Unknown id → fail closed (unauthenticated).
+    vault_id = persona.get("vault_persona_id")
+    if vault_id:
+        from core.foundry.vault import PersonaVault
+        vp = PersonaVault().get_persona(vault_id)
+        if vp is None:
+            logger.warning("[persona_auth] %r references unknown vault_persona_id=%r; "
+                           "not authenticating (fail-closed)", name, vault_id)
+            return headers, cookies
+        _subs = {
+            "{{vault_email}}": vp.email,
+            "{{vault_password}}": vp.password,
+            "{{vault_username}}": vp.label or vp.email,
+            "{{vault_first_name}}": vp.first_name,
+            "{{vault_last_name}}": vp.last_name,
+            "{{vault_phone}}": vp.phone,
+        }
+        body = _fill_placeholders(body, _subs)
+        login_headers = _fill_placeholders(login_headers, _subs)
 
     request_kwargs: Dict[str, Any] = {"headers": login_headers, "timeout": timeout}
     if kind == "json":
