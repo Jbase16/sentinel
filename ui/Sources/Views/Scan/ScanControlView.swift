@@ -349,6 +349,7 @@ private struct AdvancedScanConfigView: View {
     // Foundry integration
     @State private var availablePersonas: [FoundryPersona] = []
     @State private var isFetchingPersonas = false
+    @State private var showAddPersona = false
 
     private let personasPlaceholder =
         """
@@ -590,6 +591,11 @@ private struct AdvancedScanConfigView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Refresh Personas from Foundry")
+                Button(action: { showAddPersona = true }) {
+                    Image(systemName: "person.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .help("Create a new persona in the Foundry vault")
             }
 
             if !availablePersonas.isEmpty {
@@ -628,6 +634,9 @@ private struct AdvancedScanConfigView: View {
         .padding()
         .onAppear {
             if availablePersonas.isEmpty { fetchPersonas() }
+        }
+        .sheet(isPresented: $showAddPersona) {
+            AddPersonaSheet(onSaved: { fetchPersonas() })
         }
     }
 
@@ -1180,5 +1189,80 @@ struct PlainTextDocument: FileDocument {
     /// Function fileWrapper.
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         return FileWrapper(regularFileWithContents: content.data(using: .utf8)!)
+    }
+}
+
+// MARK: - Create a persona in the Foundry vault (the bootstrap that fills the dropdown)
+
+private struct AddPersonaSheet: View {
+    let onSaved: () -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var label = ""
+    @State private var email = ""
+    @State private var password = ""
+    @State private var firstName = ""
+    @State private var lastName = ""
+    @State private var isSaving = false
+    @State private var errorText: String?
+
+    private var canSave: Bool {
+        !label.trimmingCharacters(in: .whitespaces).isEmpty
+            && email.trimmingCharacters(in: .whitespaces).count >= 3
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("New Persona")
+                .font(.system(size: 16, weight: .bold, design: .monospaced))
+            Text("A researcher-owned identity stored in the Foundry vault. The password is kept server-side (0600) and never leaves the backend — scans reference it by id.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("Label (e.g. research-alice)", text: $label)
+                .textFieldStyle(.roundedBorder)
+            TextField("Email", text: $email)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Password", text: $password)
+                .textFieldStyle(.roundedBorder)
+            HStack(spacing: 8) {
+                TextField("First name (optional)", text: $firstName)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Last name (optional)", text: $lastName)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            if let errorText {
+                Text(errorText).font(.caption).foregroundColor(.red)
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                Button(action: save) {
+                    if isSaving { ProgressView().controlSize(.small) } else { Text("Create") }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canSave || isSaving)
+            }
+        }
+        .padding()
+        .frame(width: 440)
+    }
+
+    private func save() {
+        isSaving = true
+        errorText = nil
+        Task {
+            do {
+                _ = try await FoundryAPIClient.shared.createPersona(
+                    label: label, email: email, password: password,
+                    firstName: firstName, lastName: lastName)
+                await MainActor.run { isSaving = false; onSaved(); dismiss() }
+            } catch {
+                await MainActor.run { isSaving = false; errorText = "\(error)" }
+            }
+        }
     }
 }

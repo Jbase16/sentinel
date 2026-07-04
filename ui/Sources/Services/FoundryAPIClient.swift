@@ -222,6 +222,22 @@ public final class FoundryAPIClient {
         try await send(authed("/v1/foundry/personas"), as: [FoundryPersona].self)
     }
 
+    /// Create a research persona in the vault. The password is stored server-side
+    /// (0600) and never echoed back — the returned FoundryPersona carries only
+    /// `hasPassword`. This is the missing bootstrap: nothing else could populate
+    /// the vault from the UI.
+    public func createPersona(
+        label: String, email: String, password: String = "",
+        firstName: String = "", lastName: String = "", phone: String = ""
+    ) async throws -> FoundryPersona {
+        try await postJSON("/v1/foundry/personas",
+            body: [
+                "label": label, "email": email, "password": password,
+                "first_name": firstName, "last_name": lastName, "phone": phone,
+            ],
+            as: FoundryPersona.self)
+    }
+
     public func listRecipes() async throws -> [FoundryRecipeSummary] {
         try await send(authed("/v1/foundry/recipes"), as: [FoundryRecipeSummary].self)
     }
