@@ -830,7 +830,8 @@ public class HelixAppState: ObservableObject {
         scope: [String]? = nil,
         scopeStrict: Bool = false,
         bountyHandle: String? = nil,
-        bountyJSON: [String: Any]? = nil
+        bountyJSON: [String: Any]? = nil,
+        identityHeaders: [String: String]? = nil
     ) {
         print("[AppState] startScan invoked target=\(target) mode=\(mode.rawValue)")
         Task {
@@ -845,7 +846,8 @@ public class HelixAppState: ObservableObject {
                     scope: scope,
                     scopeStrict: scopeStrict,
                     bountyHandle: bountyHandle,
-                    bountyJSON: bountyJSON
+                    bountyJSON: bountyJSON,
+                    identityHeaders: identityHeaders
                 )
                 print("[AppState] apiClient.startScan succeeded")
 

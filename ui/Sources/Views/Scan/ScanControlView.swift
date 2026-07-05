@@ -46,6 +46,10 @@ struct ScanControlView: View {
     @State private var showAdvancedConfig = false
     @State private var personasJSON: String = ""
     @State private var oobJSON: String = ""
+    /// Persisted HackerOne research handle → sent as the X-HackerOne-Research
+    /// attribution header on bounty scans. Shares the @AppStorage key with the
+    /// field in AdvancedScanConfigView so the two stay in sync.
+    @AppStorage("h1_research_handle") private var researchHandle: String = ""
 
     private var isScanning: Bool {
         // Prioritize event-driven state (isScanRunning) over backend status
@@ -283,6 +287,13 @@ struct ScanControlView: View {
             // strict toggle from a prior bounty run can't wrongly deny the target
             // (e.g. a local lab like localhost:3002 resolving out-of-scope).
             let isBounty = (selectedMode == .bugBounty)
+            // Researcher attribution header (X-HackerOne-Research: <handle>). Programs
+            // like Whatnot REQUIRE it on unauthenticated probes. Bounty scans only.
+            let researchHandleTrimmed = researchHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let identityHeaders: [String: String]? =
+                (isBounty && !researchHandleTrimmed.isEmpty)
+                ? ["X-HackerOne-Research": researchHandleTrimmed]
+                : nil
             appState.startScan(
                 target: scanTarget,
                 modules: modules,
@@ -292,7 +303,8 @@ struct ScanControlView: View {
                 scope: (isBounty && !scopeLines.isEmpty) ? scopeLines : nil,
                 scopeStrict: isBounty ? appState.scopeStrict : false,
                 bountyHandle: (isBounty && !bountyHandle.isEmpty) ? bountyHandle : nil,
-                bountyJSON: isBounty ? parsedBountyJSON : nil
+                bountyJSON: isBounty ? parsedBountyJSON : nil,
+                identityHeaders: identityHeaders
             )
         } else {
             print(
@@ -350,6 +362,9 @@ private struct AdvancedScanConfigView: View {
     @State private var availablePersonas: [FoundryPersona] = []
     @State private var isFetchingPersonas = false
     @State private var showAddPersona = false
+    /// Persisted HackerOne research handle (X-HackerOne-Research). Same @AppStorage
+    /// key as ScanControlView so what you type here is what the scan sends.
+    @AppStorage("h1_research_handle") private var researchHandle: String = ""
 
     private let personasPlaceholder =
         """
@@ -546,6 +561,18 @@ private struct AdvancedScanConfigView: View {
             }
             .padding(.top, 4)
 
+            HStack {
+                Text("Research:")
+                    .font(.caption)
+                    .frame(width: 60, alignment: .trailing)
+                TextField("your H1 username (e.g. phishnchips16)", text: $researchHandle)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text("Sent as X-HackerOne-Research to identify your traffic. Required by some programs (e.g. Whatnot) on unauthenticated requests. Persisted across scans.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Text("Or paste JSON Configuration:")
                 .font(.caption)
                 .padding(.top, 4)
@@ -592,7 +619,10 @@ private struct AdvancedScanConfigView: View {
                 .buttonStyle(.plain)
                 .help("Refresh Personas from Foundry")
                 Button(action: { showAddPersona = true }) {
-                    Image(systemName: "person.badge.plus")
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.badge.plus")
+                        Text("New Persona")
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("Create a new persona in the Foundry vault")
@@ -1194,7 +1224,7 @@ struct PlainTextDocument: FileDocument {
 
 // MARK: - Create a persona in the Foundry vault (the bootstrap that fills the dropdown)
 
-private struct AddPersonaSheet: View {
+struct AddPersonaSheet: View {
     let onSaved: () -> Void
     @Environment(\.dismiss) private var dismiss
 

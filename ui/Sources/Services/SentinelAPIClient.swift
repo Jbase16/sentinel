@@ -137,7 +137,8 @@ public struct SentinelAPIClient: Sendable {
         scope: [String]? = nil,
         scopeStrict: Bool = false,
         bountyHandle: String? = nil,
-        bountyJSON: [String: Any]? = nil
+        bountyJSON: [String: Any]? = nil,
+        identityHeaders: [String: String]? = nil
     )
         async throws
     {
@@ -170,7 +171,13 @@ public struct SentinelAPIClient: Sendable {
         if let bountyJSON, !bountyJSON.isEmpty {
             body["bounty_json"] = bountyJSON
         }
-        
+        // Researcher attribution headers (e.g. X-HackerOne-Research: <handle>) —
+        // the backend injects these on every outbound request, unauthenticated
+        // probes included, via the net-adapter choke point.
+        if let identityHeaders, !identityHeaders.isEmpty {
+            body["identity_headers"] = identityHeaders
+        }
+
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)

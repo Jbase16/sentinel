@@ -44,6 +44,14 @@ class ScanRequest(BaseModel):
     bounty_handle: Optional[str] = None
     bounty_json: Optional[Dict[str, Any]] = None
 
+    # Researcher attribution headers, injected on EVERY outbound request (both
+    # authenticated and unauthenticated) at the net-adapter choke point. This is
+    # the mechanism for programs that require you to identify your traffic — e.g.
+    # Whatnot mandates ``X-HackerOne-Research: <handle>`` on unauthenticated
+    # probes. Send {"X-HackerOne-Research": "<your-h1-handle>"} here. Omitted =
+    # no attribution header (permissive default; fine for lab targets).
+    identity_headers: Optional[Dict[str, str]] = None
+
     # Phase 2H: program-policy enforcement.
     # ``restrictions`` is the parsed body of a ``<program>-restrictions.json``
     # file produced by ``sentinel-ingest``. When set, the engine applies the
@@ -395,10 +403,28 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             for warning in enforcement.warnings:
                 logger.warning("[policy] %s", warning)
 
+        # Researcher attribution headers (e.g. X-HackerOne-Research: <handle>).
+        # The net adapter injects these on every outbound request, unauthenticated
+        # probes included. Sanitize: strip CR/LF (header-injection guard) and drop
+        # empty entries. Empty dict = no header.
+        identity_headers: Dict[str, str] = {}
+        for _k, _v in (req.identity_headers or {}).items():
+            _key = str(_k).strip()
+            _val = str(_v).replace("\r", "").replace("\n", "").strip()
+            if _key and _val:
+                identity_headers[_key] = _val
+        if emode == ExecutionMode.BOUNTY and not identity_headers:
+            logger.warning(
+                "[scope] BOUNTY scan with no attribution headers — many programs "
+                "require identifying your traffic (e.g. X-HackerOne-Research) on "
+                "unauthenticated probes; unattributed requests may be ineligible."
+            )
+
         scope_context = ScopeContext(
             registry=registry,
             policy=execution_policy,
             mode=emode.value,
+            identity_headers=identity_headers,
             scan_id=session.id
         )
 
