@@ -22,6 +22,7 @@
 		442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */ = {isa = PBXBuildFile; fileRef = D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */; };
 		4A1FF7DA7509E33F640B70A5 /* RetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946E142FF6202E3202EA5B2D /* RetryBackoff.swift */; };
 		4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1FB66EC2747EC1973D336E /* DashboardView.swift */; };
+		56F1D7C10092F352980169CD /* GhostBrowserWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F23349083792B008C4E1131 /* GhostBrowserWindow.swift */; };
 		5BF1C14DFCA00863B476778E /* OperationalAlertBanners.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */; };
 		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
 		65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426219598E6076D786D8DAD8 /* ReportComposerView.swift */; };
@@ -31,6 +32,7 @@
 		8226DC9F780680AC29BC0FDB /* GhostAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E92E19E923FA9F4CEDD71B /* GhostAPIClient.swift */; };
 		84565490131B06C520A4801A /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */; };
 		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
+		8D2EC02C24E7EDBC587BBCF1 /* BolaLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF54C363DCAFCDA5E5FAA418 /* BolaLabView.swift */; };
 		8F1F1CC3866F00EBB302665E /* TierBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */; };
 		8FAA39F14BE46EA50154291A /* FoundryConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DBADD02037E358509CA4563 /* FoundryConsoleView.swift */; };
 		9369DFE67CE6BB7E573BBAB3 /* AuditFeedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A68494FDEACABC92B894B50 /* AuditFeedView.swift */; };
@@ -55,6 +57,7 @@
 		C4EDBDE9C6812EFA33977B44 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1269D7C35447A70FD8D1D9FB /* ChatView.swift */; };
 		C94EFAA35A0D3B712FC57FB6 /* GenerateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */; };
 		C97C66E3ACF3313E004CBE13 /* GhostCaptureBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E965EAA183C95650BC9FC8 /* GhostCaptureBrowser.swift */; };
+		CED0A0C8A66B99389F601E4C /* DriverBridgeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E47F14AFA91EECE221531D6A /* DriverBridgeClient.swift */; };
 		D0C5750A70133A74C61FED34 /* FoundryAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC166B404EED51D85979004C /* FoundryAPIClient.swift */; };
 		DBAB5790AC80CE69F7F453E4 /* BountyReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59070AC06A493619616984F /* BountyReportView.swift */; };
 		E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1614A34830DE729E55890F6 /* ScanControlView.swift */; };
@@ -100,6 +103,7 @@
 		8FD7FEF00ADB9A4983F8F7F4 /* DecisionStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionStreamView.swift; sourceTree = "<group>"; };
 		946E142FF6202E3202EA5B2D /* RetryBackoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryBackoff.swift; sourceTree = "<group>"; };
 		9BB1DE1E3EE6C98ABFF1F47D /* BackendSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendSettingsView.swift; sourceTree = "<group>"; };
+		9F23349083792B008C4E1131 /* GhostBrowserWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostBrowserWindow.swift; sourceTree = "<group>"; };
 		A0AEE541E4462F9FE3D09CB8 /* BackendState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendState.swift; sourceTree = "<group>"; };
 		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
 		A6E965EAA183C95650BC9FC8 /* GhostCaptureBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostCaptureBrowser.swift; sourceTree = "<group>"; };
@@ -117,7 +121,9 @@
 		D45E68340782F5F007892DD6 /* HelixError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixError.swift; sourceTree = "<group>"; };
 		D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = PressureShader.metal; sourceTree = "<group>"; };
 		DC166B404EED51D85979004C /* FoundryAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundryAPIClient.swift; sourceTree = "<group>"; };
+		E47F14AFA91EECE221531D6A /* DriverBridgeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DriverBridgeClient.swift; sourceTree = "<group>"; };
 		E654B5888ACF358B53174849 /* ReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportView.swift; sourceTree = "<group>"; };
+		EF54C363DCAFCDA5E5FAA418 /* BolaLabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BolaLabView.swift; sourceTree = "<group>"; };
 		F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
 		F59070AC06A493619616984F /* BountyReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BountyReportView.swift; sourceTree = "<group>"; };
 		F6E914AE1A9757AE1CCF0849 /* VerifyAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyAPIClient.swift; sourceTree = "<group>"; };
@@ -181,6 +187,7 @@
 			children = (
 				7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */,
 				BCE68CC8F07C4B289363C486 /* CortexStream.swift */,
+				E47F14AFA91EECE221531D6A /* DriverBridgeClient.swift */,
 				AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */,
 				DC166B404EED51D85979004C /* FoundryAPIClient.swift */,
 				2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */,
@@ -277,9 +284,18 @@
 		8AE47DA980531B2AFBDB8851 /* Ghost */ = {
 			isa = PBXGroup;
 			children = (
+				9F23349083792B008C4E1131 /* GhostBrowserWindow.swift */,
 				8E9D7718A76376AF130F1182 /* GhostConsoleView.swift */,
 			);
 			path = Ghost;
+			sourceTree = "<group>";
+		};
+		9283ACA840FF0BCDC68ACE66 /* Bola */ = {
+			isa = PBXGroup;
+			children = (
+				EF54C363DCAFCDA5E5FAA418 /* BolaLabView.swift */,
+			);
+			path = Bola;
 			sourceTree = "<group>";
 		};
 		9F4A1567420A88A2907C77A7 /* Pressure */ = {
@@ -336,6 +352,7 @@
 				B28396B11B909875C4B8BB20 /* MainWindowView.swift */,
 				C303CDE894C92523DAC01B0A /* ToolsBankView.swift */,
 				5B656A3896A9D4B8E38F5052 /* Audit */,
+				9283ACA840FF0BCDC68ACE66 /* Bola */,
 				47686AF82049D529E08F45D3 /* Components */,
 				7B41ED2CB39FF224E40A0163 /* Dashboard */,
 				543D8AB14C3728FF56C89EAC /* Foundry */,
@@ -449,12 +466,14 @@
 				FD713260357E395BCDCB0682 /* BackendManager.swift in Sources */,
 				A69DC389458BE83CA02318CC /* BackendSettingsView.swift in Sources */,
 				1A516CAE139B1C4AE47F16B6 /* BackendState.swift in Sources */,
+				8D2EC02C24E7EDBC587BBCF1 /* BolaLabView.swift in Sources */,
 				DBAB5790AC80CE69F7F453E4 /* BountyReportView.swift in Sources */,
 				250D8E25220B3AB535717493 /* ChatBubbleView.swift in Sources */,
 				C4EDBDE9C6812EFA33977B44 /* ChatView.swift in Sources */,
 				B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */,
 				4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */,
 				C45415E684C57681333DF626 /* DecisionStreamView.swift in Sources */,
+				CED0A0C8A66B99389F601E4C /* DriverBridgeClient.swift in Sources */,
 				41D448283BD2E10C0EEE06A0 /* ErrorClassifier.swift in Sources */,
 				A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */,
 				3B4CFF3A62200F95F03F2377 /* FindingModels.swift in Sources */,
@@ -462,6 +481,7 @@
 				8FAA39F14BE46EA50154291A /* FoundryConsoleView.swift in Sources */,
 				C94EFAA35A0D3B712FC57FB6 /* GenerateModels.swift in Sources */,
 				8226DC9F780680AC29BC0FDB /* GhostAPIClient.swift in Sources */,
+				56F1D7C10092F352980169CD /* GhostBrowserWindow.swift in Sources */,
 				C97C66E3ACF3313E004CBE13 /* GhostCaptureBrowser.swift in Sources */,
 				FAF5F3644A98AEA223E96513 /* GhostConsoleView.swift in Sources */,
 				C4EAE38493520E1B56033FEE /* GraphModels.swift in Sources */,

@@ -25,6 +25,8 @@ import SwiftUI
 
 public struct FoundryConsoleView: View {
     @StateObject private var vm = FoundryConsoleViewModel()
+    @State private var showAddPersona = false
+    @State private var showRecordRecipe = false
 
     public init() {}
 
@@ -53,6 +55,17 @@ public struct FoundryConsoleView: View {
         .foregroundColor(.white)
         .onAppear { vm.start() }
         .onDisappear { vm.stop() }
+        .sheet(isPresented: $showAddPersona) {
+            AddPersonaSheet(onSaved: { Task { await vm.refresh() } })
+        }
+        .sheet(isPresented: $showRecordRecipe) {
+            RecordRecipeSheet(
+                isRecording: $vm.isRecording,
+                onRecord: { handle, name, origin in
+                    Task { await vm.recordRecipe(serviceHandle: handle, name: name, origin: origin) }
+                }
+            )
+        }
     }
 
     // MARK: header
@@ -190,6 +203,14 @@ public struct FoundryConsoleView: View {
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.65))
                 Spacer()
+                Button(action: { showAddPersona = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "person.badge.plus")
+                        Text("New Persona")
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Create a new persona in the Foundry vault")
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             Divider()
@@ -219,12 +240,31 @@ public struct FoundryConsoleView: View {
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(.white.opacity(0.5))
                                 Spacer()
-                                Button("Run") { Task { await vm.startSignup(recipe: r) } }
-                                    .buttonStyle(.bordered).controlSize(.small)
-                                    .disabled(vm.personas.isEmpty)
+                                Menu("Run") {
+                                    ForEach(vm.personas, id: \.personaId) { p in
+                                        Button(p.label) { Task { await vm.startSignup(recipe: r, personaId: p.personaId) } }
+                                    }
+                                }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .disabled(vm.personas.isEmpty)
+                                Button(role: .destructive, action: { Task { await vm.deleteRecipe(recipeId: r.recipeId) } }) {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundColor(.red.opacity(0.8))
                             }
                         }
                         if vm.recipes.isEmpty { emptyHint("Record a signup (PF8) or hand-author a recipe.") }
+                        
+                        Button(action: { showRecordRecipe = true }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "record.circle")
+                                Text(vm.isRecording ? "Recording in progress..." : "Record Recipe")
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(vm.isRecording ? .red : .cyberCyan)
+                        .disabled(vm.isRecording)
                     }
                     section("SIGNUP JOBS (\(vm.jobs.count))") {
                         ForEach(vm.jobs) { j in
@@ -273,6 +313,56 @@ public struct FoundryConsoleView: View {
             .foregroundColor(color)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.15)).cornerRadius(4)
+    }
+}
+
+// MARK: - Record Recipe Sheet
+
+private struct RecordRecipeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var isRecording: Bool
+    let onRecord: (String, String, String) -> Void
+
+    @State private var serviceHandle = ""
+    @State private var name = ""
+    @State private var origin = "https://"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("RECORD SIGNUP RECIPE")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyberCyan)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Service Handle").font(.system(size: 10, weight: .bold, design: .monospaced))
+                TextField("e.g. tiktok", text: $serviceHandle)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("Recipe Name").font(.system(size: 10, weight: .bold, design: .monospaced))
+                TextField("e.g. standard signup", text: $name)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("Origin URL").font(.system(size: 10, weight: .bold, design: .monospaced))
+                TextField("e.g. https://tiktok.com/signup", text: $origin)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .font(.system(size: 12, design: .monospaced))
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Start Recording") {
+                    onRecord(serviceHandle, name, origin)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyberCyan)
+                .disabled(serviceHandle.isEmpty || name.isEmpty || origin == "https://")
+            }
+        }
+        .padding(20)
+        .frame(width: 400)
     }
 }
 
@@ -369,6 +459,7 @@ final class FoundryConsoleViewModel: ObservableObject {
     @Published var jobs: [FoundrySignupJob] = []
     @Published var plan: FoundryAccountPlan?
     @Published var errorMessage: String?
+    @Published var isRecording: Bool = false
 
     @Published var planTarget: String = "airtable"
     @Published var selectedVulnClasses: Set<String> = ["idor_cross_principal"]
@@ -429,21 +520,39 @@ final class FoundryConsoleViewModel: ObservableObject {
         }
     }
 
-    func startSignup(recipe: FoundryRecipeSummary) async {
-        guard let persona = personas.first else {
-            errorMessage = "Add a persona before running a signup."
-            return
-        }
+    func startSignup(recipe: FoundryRecipeSummary, personaId: String) async {
         do {
             _ = try await client.startSignup(
-                recipeId: recipe.recipeId, personaId: persona.personaId)
+                recipeId: recipe.recipeId, personaId: personaId)
             await refresh()
         } catch {
             errorMessage = "Signup: \(error.localizedDescription)"
         }
     }
+    
+    func recordRecipe(serviceHandle: String, name: String, origin: String) async {
+        isRecording = true
+        errorMessage = nil
+        do {
+            _ = try await client.recordRecipe(serviceHandle: serviceHandle, name: name, origin: origin)
+            await refresh()
+        } catch {
+            errorMessage = "Record: \(error.localizedDescription)"
+        }
+        isRecording = false
+    }
 
     // Challenge handoff
+    @MainActor
+    func deleteRecipe(recipeId: String) async {
+        do {
+            try await FoundryAPIClient.shared.deleteRecipe(recipeId: recipeId)
+            await refresh()
+        } catch {
+            self.errorMessage = "Delete error: \(error.localizedDescription)"
+        }
+    }
+
     func bindingValueDraft(_ id: String) -> String { valueDrafts[id] ?? "" }
     func setValueDraft(_ id: String, _ value: String) { valueDrafts[id] = value }
 

@@ -179,6 +179,7 @@ class BackendManager: ObservableObject {
     private func backendAlreadyRunning() async -> Bool {
         var request = URLRequest(url: healthCheckURL)
         request.timeoutInterval = 0.5
+        request.cachePolicy = .reloadIgnoringLocalCacheData
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -851,7 +852,7 @@ class BackendManager: ObservableObject {
     }
 
     @MainActor
-    private func appendLogLine(_ line: String) {
+    func appendLogLine(_ line: String) {
         logRingBuffer.append(line)
         if logRingBuffer.count > maxLogLines {
             logRingBuffer.removeFirst(logRingBuffer.count - maxLogLines)

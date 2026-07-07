@@ -90,6 +90,16 @@ struct NetworkGraphView: View {
                         .foregroundColor(.white)
                 }
                 .padding()
+                
+                HStack(alignment: .top) {
+                    Spacer()
+                    if let analysis = appState.latestPressureGraph, let chains = analysis.attackChains, !chains.isEmpty {
+                        AttackChainsPanel(chains: chains)
+                            .frame(width: 350)
+                            .padding(.trailing, 16)
+                            .padding(.top, 16)
+                    }
+                }
 
                 // BREACH WARNING
                 if let target = appState.activeBreachTarget {
@@ -139,5 +149,61 @@ struct NetworkGraphView: View {
             appState.applyGraphLayerVisibility()
             appState.fetchAnalysis()
         }
+    }
+}
+
+private struct AttackChainsPanel: View {
+    let chains: [AttackChainDTO]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ATTACK CHAINS (\(chains.count))")
+                .font(.custom("Courier New", size: 12).bold())
+                .foregroundColor(.red)
+                .padding(.bottom, 4)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(chains) { chain in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Text(chain.id.uppercased())
+                                    .font(.custom("Courier New", size: 11).bold())
+                                    .foregroundColor(.orange)
+                                Spacer()
+                                if let score = chain.score {
+                                    Text(String(format: "SCORE: %.2f", score))
+                                        .font(.custom("Courier New", size: 10))
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                            }
+                            
+                            if let labels = chain.labels {
+                                ForEach(Array(labels.enumerated()), id: \.offset) { idx, label in
+                                    HStack(alignment: .top, spacing: 4) {
+                                        Text(idx == labels.count - 1 ? "└─" : "├─")
+                                            .font(.custom("Courier New", size: 11))
+                                            .foregroundColor(.gray)
+                                        Text(label)
+                                            .font(.custom("Courier New", size: 10))
+                                            .foregroundColor(.white)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(8)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(6)
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.red.opacity(0.3)))
+                    }
+                }
+            }
+            .frame(maxHeight: 400)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .cornerRadius(8)
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
     }
 }

@@ -43,6 +43,7 @@ def create_async_client(
     verify: Optional[bool] = None,
     timeout: Optional[httpx.Timeout] = None,
     follow_redirects: Optional[bool] = None,
+    high_evasion: bool = False,
     **kwargs,
 ) -> httpx.AsyncClient:
     """Create an ``httpx.AsyncClient`` with platform-wide TLS defaults.
@@ -55,10 +56,20 @@ def create_async_client(
         Override timeout.  ``None`` = use ``NetworkConfig.timeout``.
     follow_redirects : bool | None
         Override redirect following.  ``None`` = use ``NetworkConfig.follow_redirects``.
+    high_evasion : bool
+        If True, injects the GhostGatewayTransport to inherit native macOS/WebKit TLS fingerprint
+        and Cloudflare evasion capabilities.
     **kwargs
         Forwarded to ``httpx.AsyncClient()``.
     """
     cfg = _get_network_config()
+    
+    if high_evasion:
+        from core.net.ghost_gateway import GhostGatewayTransport
+        # The transport overrides redirects to ensure we can see 3xx codes in the scanner
+        transport = GhostGatewayTransport()
+        kwargs["transport"] = transport
+        
     return httpx.AsyncClient(
         verify=cfg.verify if verify is None else verify,
         timeout=timeout if timeout is not None else cfg.timeout,

@@ -48,8 +48,9 @@ class HackerOneClient:
     Decoupled from execution; strictly responsible for fetching and standardizing inputs.
     """
     def __init__(self, api_token: Optional[str] = None, api_username: Optional[str] = None):
-        self.api_token = api_token
-        self.api_username = api_username or ""
+        import os
+        self.api_token = api_token or os.environ.get("HACKERONE_API_TOKEN")
+        self.api_username = api_username or os.environ.get("HACKERONE_API_USERNAME") or ""
 
     def fetch_via_api(self, handle: str) -> H1ScopeDTO:
         """Fetch scope directly via authenticated HackerOne API.

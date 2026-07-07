@@ -113,6 +113,7 @@ class ResearchPersona:
             "email": self.email,
             "first_name": self.first_name,
             "last_name": self.last_name,
+            "full_name": f"{self.first_name} {self.last_name}".strip(),
             "password": self.password,
             "phone": self.phone,
             "date_of_birth": self.date_of_birth,

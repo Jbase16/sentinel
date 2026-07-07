@@ -1,0 +1,50 @@
+--- ui/Sources/Services/DriverBridgeClient.swift
++++ ui/Sources/Services/DriverBridgeClient.swift
+@@ -2,6 +2,15 @@
+ import Combine
+ import AppKit
+ 
++func logToSnd(_ message: String) {
++    print(message)
++    if let data = (message + "\n").data(using: .utf8) {
++        let url = URL(fileURLWithPath: "/tmp/snd_swift.log")
++        if let handle = try? FileHandle(forWritingTo: url) {
++            handle.seekToEndOfFile()
++            handle.write(data)
++            handle.closeFile()
++        } else {
++            try? data.write(to: url)
++        }
++    }
++}
++
+ /// Represents the connection to the Python backend's Sentinel Native Driver (SND) bridge.
+ public class DriverBridgeClient: ObservableObject {
+     public static let shared = DriverBridgeClient()
+@@ -22,12 +31,14 @@
+     public func connect() {
+         guard !isConnected else { return }
+         
++        logToSnd("[SND] connect() called")
+         let url = URL(string: "ws://127.0.0.1:8765/v1/driver/bridge")!
+         webSocketTask = session.webSocketTask(with: url)
+         webSocketTask?.resume()
+         
+         isConnected = true
+         receiveMessage()
++        logToSnd("[SND] WebSocket task resumed")
+     }
+     
+     public func disconnect() {
+@@ -43,6 +54,7 @@
+             switch result {
+             case .failure(let error):
+-                BackendManager.shared.appendLogLine("[SND] WebSocket receive error: \(error)")
++                logToSnd("[SND] WebSocket receive error: \(error)")
+                 self.isConnected = false
+                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                     self.connect()
+                 }
+             case .success(let message):
++                logToSnd("[SND] WebSocket received message")
+                 switch message {

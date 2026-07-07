@@ -1306,6 +1306,15 @@ class Database:
         Transactional wipe-and-replace of the graph for a session.
         Ensures the DB always reflects the latest in-memory state.
         """
+        await self.blackbox.enqueue(self._save_graph_snapshot_impl, session_id, nodes, edges)
+
+    async def _save_graph_snapshot_impl(
+        self, session_id: str, nodes: List[Dict], edges: List[Dict]
+    ) -> None:
+        """
+        Transactional wipe-and-replace of the graph for a session.
+        Ensures the DB always reflects the latest in-memory state.
+        """
         if not session_id:
             return
 

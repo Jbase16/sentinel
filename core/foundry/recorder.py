@@ -131,6 +131,10 @@ def infer_binding(
         return "persona:phone"
 
     # Names. autocomplete is the cleanest: given-name / family-name.
+    if autocomplete == "name" or any(
+        w in signal for w in ("full name", "fullname", "first and last name", "first & last name")
+    ):
+        return "persona:full_name"
     if autocomplete == "given-name" or any(
         w in signal for w in ("first name", "firstname", "fname", "given name")
     ):
@@ -267,6 +271,7 @@ def _label_for_binding(binding: str) -> str:
         "persona:phone": "fill phone",
         "persona:first_name": "fill first name",
         "persona:last_name": "fill last name",
+        "persona:full_name": "fill full name",
         "persona:date_of_birth": "fill date of birth",
         "generated:password": "fill password",
         "generated:username": "fill username",

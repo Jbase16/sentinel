@@ -64,10 +64,10 @@ public struct GhostConsoleView: View {
                 )
             case .crossPrincipalInput(let flowId):
                 BobIdentitySheet(
-                    onRun: { auth, cookie in
+                    onRun: { auth, cookie, personaName in
                         vm.activeSheet = nil
                         vm.runCrossPrincipalDiff(
-                            flowId: flowId, bobAuth: auth, bobCookie: cookie
+                            flowId: flowId, bobPersonaName: personaName, bobAuth: auth, bobCookie: cookie
                         )
                     },
                     onClose: { vm.activeSheet = nil }
@@ -652,16 +652,16 @@ final class GhostConsoleViewModel: ObservableObject {
 
     // MARK: cross-principal diff (G5)
 
-    func runCrossPrincipalDiff(flowId: String, bobAuth: String, bobCookie: String) {
+    func runCrossPrincipalDiff(flowId: String, bobPersonaName: String, bobAuth: String, bobCookie: String) {
         Task { [weak self] in
             await self?.executeCrossPrincipalDiff(
-                flowId: flowId, bobAuth: bobAuth, bobCookie: bobCookie
+                flowId: flowId, bobPersonaName: bobPersonaName, bobAuth: bobAuth, bobCookie: bobCookie
             )
         }
     }
 
     private func executeCrossPrincipalDiff(
-        flowId: String, bobAuth: String, bobCookie: String
+        flowId: String, bobPersonaName: String, bobAuth: String, bobCookie: String
     ) async {
         isWorking = true
         workingLabel = "Replaying flow as Bob…"
@@ -693,7 +693,7 @@ final class GhostConsoleViewModel: ObservableObject {
 
         do {
             let diff = try await client.crossPrincipalDiff(
-                flowId: flowId, bobHeaders: headers, bobCookies: cookies
+                flowId: flowId, bobPersonaName: bobPersonaName, bobHeaders: headers, bobCookies: cookies
             )
             self.activeSheet = .crossPrincipalResult(diff)
             errorMessage = nil
@@ -940,12 +940,17 @@ private struct StepDiffRow: View {
 // MARK: - Cross-principal diff (G5): Bob identity input
 
 private struct BobIdentitySheet: View {
-    /// (authToken, cookieString)
-    let onRun: (String, String) -> Void
+    /// (authToken, cookieString, personaName)
+    let onRun: (String, String, String) -> Void
     let onClose: () -> Void
 
     @State private var auth: String = ""
     @State private var cookie: String = ""
+    
+    // Foundry integration
+    @State private var selectedPersonaName: String = "bob"
+    @State private var availablePersonas: [FoundryPersona] = []
+    @State private var isFetchingPersonas = false
 
     private var canRun: Bool {
         !auth.trimmingCharacters(in: .whitespaces).isEmpty
@@ -971,6 +976,38 @@ private struct BobIdentitySheet: View {
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.75))
                 .fixedSize(horizontal: false, vertical: true)
+                
+            HStack {
+                Text("ATTRIBUTION PERSONA (from Foundry)")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.55))
+                Spacer()
+                if isFetchingPersonas {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button(action: fetchPersonas) {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Refresh Personas from Foundry")
+                }
+            }
+            
+            if !availablePersonas.isEmpty {
+                Picker("", selection: $selectedPersonaName) {
+                    Text("Default (bob)").tag("bob")
+                    ForEach(availablePersonas) { p in
+                        Text(p.label).tag(p.label)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("No personas found in vault. Defaulting to 'bob'.")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.4))
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("BOB'S AUTH TOKEN")
@@ -998,7 +1035,7 @@ private struct BobIdentitySheet: View {
 
             HStack {
                 Spacer()
-                Button { onRun(auth, cookie) } label: {
+                Button { onRun(auth, cookie, selectedPersonaName) } label: {
                     Label("Run Diff", systemImage: "person.2.fill")
                 }
                 .buttonStyle(.borderedProminent)
@@ -1007,9 +1044,28 @@ private struct BobIdentitySheet: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 560, minHeight: 340)
+        .frame(minWidth: 560, minHeight: 400)
         .background(Color(red: 0.05, green: 0.05, blue: 0.08))
         .foregroundColor(.white)
+        .onAppear {
+            if availablePersonas.isEmpty { fetchPersonas() }
+        }
+    }
+    
+    private func fetchPersonas() {
+        isFetchingPersonas = true
+        Task {
+            do {
+                let fetched = try await FoundryAPIClient.shared.listPersonas()
+                await MainActor.run {
+                    self.availablePersonas = fetched
+                    self.isFetchingPersonas = false
+                }
+            } catch {
+                print("[BobIdentitySheet] Error fetching personas: \(error)")
+                await MainActor.run { self.isFetchingPersonas = false }
+            }
+        }
     }
 }
 

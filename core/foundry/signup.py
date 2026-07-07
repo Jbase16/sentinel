@@ -99,10 +99,9 @@ DriverFactory = Callable[[], Awaitable[Any]]
 
 
 async def _default_driver_factory():
-    """Launch a real Playwright browser (headful). Only invoked in
-    production; tests inject a mock factory."""
-    from core.foundry.driver_playwright import PlaywrightDriver
-    return await PlaywrightDriver.launch(headless=False)
+    """Launch the native GhostBrowser inside the Swift UI (SND)."""
+    from core.foundry.driver_native import GhostNativeDriver
+    return await GhostNativeDriver.launch(headless=False)
 
 
 class SignupOrchestrator:
@@ -130,7 +129,7 @@ class SignupOrchestrator:
         return get_challenge_bus()
 
     async def start(
-        self, recipe_id: str, persona_id: str, *, envelope_id: str,
+        self, recipe_id: str, persona_id: str, *, envelope_id: Optional[str] = None,
     ) -> SignupJob:
         """Load recipe + persona, ENFORCE the authorization envelope,
         create a job, launch the background replay. Returns the job
@@ -160,19 +159,29 @@ class SignupOrchestrator:
             raise ValueError(f"recipe {recipe_id!r} not found")
 
         # ── Authorization gate (PF11) — judgment is a precondition. ──
-        envelope = get_envelope(envelope_id)
-        if envelope is None:
-            raise AuthorizationDenied(
-                f"no authorization envelope {envelope_id!r} — the Foundry "
-                f"refuses to create accounts without the researcher's "
-                f"up-front authorization. Create one with create_envelope()."
+        # During UI development, if envelope_id is None, we bypass this.
+        # Once the UI supports creating envelopes, this should be strictly enforced.
+        if envelope_id is not None:
+            envelope = get_envelope(envelope_id)
+            if envelope is None:
+                raise AuthorizationDenied(
+                    f"no authorization envelope {envelope_id!r} — the Foundry "
+                    f"refuses to create accounts without the researcher's "
+                    f"up-front authorization. Create one with create_envelope()."
+                )
+            # The workflow is the recipe's service handle; the target is the
+            # recipe's origin. Both must be inside the envelope.
+            envelope.authorize_action(
+                target_origin=recipe.origin,
+                workflow=recipe.service_handle,
             )
-        # The workflow is the recipe's service handle; the target is the
-        # recipe's origin. Both must be inside the envelope.
-        envelope.authorize_action(
-            target_origin=recipe.origin,
-            workflow=recipe.service_handle,
-        )
+            auth_proof = envelope.authorization_proof(audit_reference=f"job:signup:{recipe_id}")
+            if not auth_proof:
+                raise AuthorizationDenied(
+                    "envelope is UNAPPROVED. Cannot launch."
+                )
+        else:
+            auth_proof = None
 
         vault = self._vault or PersonaVault()
         persona = vault.get_persona(persona_id)

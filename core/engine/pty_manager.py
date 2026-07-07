@@ -71,34 +71,49 @@ class PTYSession:
         self.running = True
         self.exit_code: Optional[int] = None
 
-        # Fork the PTY
-        # pid=0 children, pid>0 parent
-        self.pid, self.fd = pty.fork()
+        import subprocess
+        
+        # Create a PTY master/slave pair
+        master_fd, slave_fd = pty.openpty()
+        self.fd = master_fd
 
-        if self.pid == 0:
-            # --- CHILD PROCESS ---
-            os.environ["TERM"] = "xterm-256color"
-            try:
-                os.execlp(self.cmd[0], *self.cmd)
-            except Exception as e:
-                # Child context: keep it simple.
-                print(f"Failed to exec: {e}")
-                os._exit(1)
-        else:
-            # --- PARENT PROCESS ---
-            logger.info(f"Started PTY Session {session_id} (PID: {self.pid})")
+        env = os.environ.copy()
+        env["TERM"] = "xterm-256color"
 
-            # Optional: non-blocking mode (select already prevents blocking reads).
-            # flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
-            # fcntl.fcntl(self.fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-            # Start the Reader Thread
-            self.thread = threading.Thread(
-                target=self._reader_loop,
-                name=f"pty-reader-{session_id}",
-                daemon=True,
+        # Use subprocess.Popen which safely uses posix_spawn on macOS (avoids fork crashes)
+        # start_new_session=True puts the process in its own session (POSIX_SPAWN_SETSID)
+        try:
+            self.proc = subprocess.Popen(
+                self.cmd,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                env=env,
+                start_new_session=True
             )
-            self.thread.start()
+            self.pid = self.proc.pid
+        except Exception as e:
+            logger.error(f"Failed to exec {self.cmd}: {e}")
+            os.close(master_fd)
+            os.close(slave_fd)
+            raise
+
+        # The parent must close the slave_fd so that when the child exits, the master gets EOF
+        os.close(slave_fd)
+
+        logger.info(f"Started PTY Session {session_id} (PID: {self.pid})")
+
+        # Optional: non-blocking mode (select already prevents blocking reads).
+        # flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
+        # fcntl.fcntl(self.fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+
+        # Start the Reader Thread
+        self.thread = threading.Thread(
+            target=self._reader_loop,
+            name=f"pty-reader-{session_id}",
+            daemon=True,
+        )
+        self.thread.start()
 
     def _reader_loop(self) -> None:
         """

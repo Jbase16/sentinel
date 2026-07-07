@@ -57,12 +57,16 @@ struct SentinelApp: App {
         let llm = LLMService()
         _llmService = StateObject(wrappedValue: llm)
         _appState = StateObject(wrappedValue: HelixAppState(llm: llm))
+        
+        // Start SND WebSocket bridge client
+        _ = DriverBridgeClient.shared
     }
 
     var body: some Scene {
         WindowGroup {
             MainWindowView()
                 .environmentObject(appState)
+                .textSelection(.enabled)
                 .task {
                     // Auto-boot the Neural Core when the window opens
                     backendManager.start()

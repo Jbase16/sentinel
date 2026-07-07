@@ -27,6 +27,43 @@ async def health_check():
     """Simple health check endpoint."""
     return {"status": "ok", "timestamp": asyncio.get_running_loop().time()}
 
+@router.get("/test_cookies")
+async def test_cookies():
+    from core.foundry.driver_native import GhostNativeDriver
+    from curl_cffi import requests
+    import json
+    
+    print('Connecting to UI from within uvicorn...')
+    driver = await GhostNativeDriver.launch(headless=True)
+    
+    print('Extracting User-Agent from Oracle...')
+    ua_raw = await driver.eval("navigator.userAgent")
+    ua = ua_raw if isinstance(ua_raw, str) else ua_raw.get('value', ua_raw)
+    print(f'Oracle UA: {ua}')
+
+    print('Navigating to whatnot...')
+    await driver.navigate('https://www.whatnot.com/')
+    
+    await asyncio.sleep(10)
+    
+    print('Extracting cookies...')
+    cookies = await driver._send('get_cookies')
+    
+    print('Testing cf_clearance portability with curl_cffi...')
+    res = requests.post(
+        'https://api.whatnot.com/graphql', 
+        headers={'Content-Type': 'application/json', 'User-Agent': ua},
+        cookies=cookies,
+        json={'query': '{ __schema { types { name } } }'},
+        impersonate='safari'
+    )
+    return {
+        "oracle_ua": ua,
+        "cookies_harvested": list(cookies.keys()),
+        "status_code": res.status_code,
+        "response_preview": res.text[:500]
+    }
+
 @router.get("/tools", dependencies=[Depends(verify_token)])
 async def list_tools():
     """List all available and installed security tools."""

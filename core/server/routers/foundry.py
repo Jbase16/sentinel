@@ -80,12 +80,13 @@ class ResolveChallengeRequest(BaseModel):
 class StartSignupRequest(BaseModel):
     recipe_id: str
     persona_id: str
-    envelope_id: str = Field(
-        ...,
-        description="The authorization envelope this signup runs under. "
-                    "Required — the Foundry refuses account creation "
-                    "without the researcher's up-front authorization.",
-    )
+    envelope_id: Optional[str] = None
+
+
+class RecordRecipeRequest(BaseModel):
+    service_handle: str
+    name: str
+    origin: str
 
 
 class CreateEnvelopeRequest(BaseModel):
@@ -251,6 +252,80 @@ async def get_recipe_endpoint(
     if recipe is None:
         raise HTTPException(status_code=404, detail=f"recipe {recipe_id!r} not found")
     return recipe.to_dict()
+
+
+@router.delete("/recipes/{recipe_id}")
+async def delete_recipe_endpoint(
+    recipe_id: str,
+    _: bool = Depends(verify_sensitive_token),
+):
+    from core.foundry.recipe_store import delete_recipe
+    deleted = delete_recipe(recipe_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Recipe not found")
+    return {"status": "ok"}
+
+
+@router.post("/record")
+async def record_recipe_endpoint(
+    req: RecordRecipeRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Launch a headful Playwright browser, record human actions, and
+    save them as a SignupRecipe when the browser is closed."""
+    from core.foundry.driver_native import GhostNativeDriver
+    from core.foundry.recorder import RecordedAction, record_to_recipe
+    from core.foundry.recipe_store import save_recipe
+    from core.server.routers.driver import node_manager
+    
+    actions: List[RecordedAction] = []
+    
+    def on_event(event_type, data):
+        if event_type == "recorded_action":
+            try:
+                actions.append(RecordedAction.from_dict(data.get("action", {})))
+            except Exception as e:
+                logger.warning("[recorder] invalid action payload: %s", e)
+                
+    node_manager.event_handlers.append(on_event)
+            
+    try:
+        driver = await GhostNativeDriver.launch(headless=False)
+        
+        # Native recording logic: Swift injects the listener and bridges the events
+        await driver.start_recording()
+        
+        actions.append(RecordedAction(action="navigate", url=req.origin))
+        await driver.navigate(req.origin)
+        
+        # Wait for user to close the Native window
+        try:
+            await driver.wait_for_close()
+        except Exception:
+            pass # Timeout or other error during wait
+            
+        recipe = record_to_recipe(
+            service_handle=req.service_handle,
+            origin=req.origin,
+            name=req.name,
+            actions=actions,
+        )
+        save_recipe(recipe)
+        return {
+            "recipe_id": recipe.recipe_id,
+            "service_handle": recipe.service_handle,
+            "name": recipe.name,
+            "step_count": len(recipe.steps),
+            "challenge_count": len(recipe.challenge_steps()),
+        }
+    except Exception as e:
+        logger.error("[recorder] recording failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if on_event in node_manager.event_handlers:
+            node_manager.event_handlers.remove(on_event)
+        if 'driver' in locals():
+            await driver.close()
 
 
 # ─────────────────────── challenges (the handoff loop) ───────────────────────

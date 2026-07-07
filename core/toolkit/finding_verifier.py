@@ -85,6 +85,10 @@ def _category(finding: Dict[str, Any]) -> Optional[str]:
         return "cookie"
     if "administrative interface" in t or "admin panel" in t or "admin interface" in t:
         return "exposed_admin"
+    if "backup artifact" in t or "source code" in t or "config file" in t or "dump.sql" in t or ".env" in t:
+        return "backup_artifact"
+    if "secret exposure" in t or "api key" in t or "token" in t:
+        return "secret"
     return None
 
 
@@ -225,6 +229,23 @@ async def verify_finding(
             if sc == 200:
                 return CONFIRMED, f"200 — reachable without auth at {url}"
             return REFUTED, f"{sc} — not a reachable admin interface"
+
+        if cat == "backup_artifact":
+            resp = await client.get(url, timeout=timeout, follow_redirects=False)
+            sc = resp.status_code
+            if sc >= 400:
+                return REFUTED, f"{sc} — artifact is protected or missing"
+            ct = resp.headers.get("content-type", "").lower()
+            if "text/html" in ct and not url.endswith((".html", ".htm", "/")):
+                return REFUTED, f"200 but returned HTML (likely soft 404 or block page)"
+            return CONFIRMED, f"200 — artifact is genuinely accessible at {url}"
+
+        if cat == "secret":
+            data = _data(finding)
+            evidence = str(data.get("proof") or data.get("evidence_summary") or data.get("message") or finding.get("description") or "").lower()
+            if "csrf" in evidence or "xsrf" in evidence:
+                return REFUTED, "Flagged secret is a common anti-CSRF token, not a sensitive key"
+            return UNVERIFIABLE, "Secret exposure cannot be definitively verified automatically"
 
     except Exception as e:
         return UNVERIFIABLE, f"re-test error: {type(e).__name__}: {e}"

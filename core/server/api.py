@@ -395,7 +395,7 @@ async def health():
 
 
 # Import routers AFTER v1_router exists
-from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost, forge, verify, foundry
+from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost, forge, verify, foundry, driver
 
 v1_router.include_router(scans.router)
 v1_router.include_router(ai.router)
@@ -403,6 +403,7 @@ v1_router.include_router(system.router)
 v1_router.include_router(ghost.router, prefix="/ghost")
 v1_router.include_router(verify.router, prefix="/verify")
 v1_router.include_router(foundry.router, prefix="/foundry")
+v1_router.include_router(driver.router, prefix="/driver")
 v1_router.include_router(forge.router)
 
 v1_router.include_router(cortex.router)

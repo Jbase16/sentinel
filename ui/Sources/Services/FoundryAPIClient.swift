@@ -242,6 +242,48 @@ public final class FoundryAPIClient {
         try await send(authed("/v1/foundry/recipes"), as: [FoundryRecipeSummary].self)
     }
 
+    /// Record a signup recipe in a live Playwright session.
+    /// Uses a custom long-lived URLSession since the human has to actually sign up.
+    public func deleteRecipe(recipeId: String) async throws {
+        var req = authed("/v1/foundry/recipes/\(recipeId)", method: "DELETE")
+        let (data, res) = try await URLSession.shared.data(for: req)
+        guard let http = res as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let errStr = String(data: data, encoding: .utf8) ?? "Unknown HTTP error"
+            throw NSError(domain: "Foundry", code: (res as? HTTPURLResponse)?.statusCode ?? 500,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to delete recipe: \(errStr)"])
+        }
+    }
+
+    public func recordRecipe(serviceHandle: String, name: String, origin: String) async throws -> FoundryRecipeSummary {
+        var req = authed("/v1/foundry/record", method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: Any] = [
+            "service_handle": serviceHandle,
+            "name": name,
+            "origin": origin
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 900 // 15 mins for manual recording
+        config.timeoutIntervalForResource = 900
+        let longSession = URLSession(configuration: config)
+        
+        do {
+            let (data, resp) = try await longSession.data(for: req)
+            guard let http = resp as? HTTPURLResponse else {
+                throw FoundryAPIError.networkError("non-HTTP response")
+            }
+            if http.statusCode >= 400 {
+                throw FoundryAPIError.httpError(
+                    code: http.statusCode,
+                    message: String(data: data, encoding: .utf8) ?? "")
+            }
+            return try JSONDecoder().decode(FoundryRecipeSummary.self, from: data)
+        } catch let e as FoundryAPIError { throw e }
+        catch { throw FoundryAPIError.networkError("\(error)") }
+    }
+
     // MARK: signup
 
     public func startSignup(recipeId: String, personaId: String) async throws -> FoundrySignupJob {

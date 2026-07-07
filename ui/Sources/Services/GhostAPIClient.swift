@@ -422,6 +422,8 @@ public final class GhostAPIClient {
     /// session cookie — which REPLACE the captured credentials on replay.
     public func crossPrincipalDiff(
         flowId: String,
+        alicePersonaName: String = "alice",
+        bobPersonaName: String = "bob",
         bobHeaders: [String: String] = [:],
         bobCookies: [String: String] = [:]
     ) async throws -> GhostCrossPrincipalDiff {
@@ -430,8 +432,8 @@ public final class GhostAPIClient {
         )
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = [
-            "alice_persona_name": "alice",
-            "bob_persona_name": "bob",
+            "alice_persona_name": alicePersonaName,
+            "bob_persona_name": bobPersonaName,
             "bob_headers": bobHeaders,
             "bob_cookies": bobCookies,
         ]

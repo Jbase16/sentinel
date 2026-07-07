@@ -340,7 +340,11 @@ public class EventStreamClient: ObservableObject {
                     await handleEvent(event)
                 } catch {
                     print("[EventStreamClient] Decode error: \(error)")
-                    print("[EventStreamClient] Raw JSON: \(json)")
+                    if let fallback = decodeLoosely(String(json)) {
+                        await handleEvent(fallback)
+                    } else {
+                        print("[EventStreamClient] Raw JSON: \(json)")
+                    }
                 }
             }
         }
@@ -409,7 +413,12 @@ public class EventStreamClient: ObservableObject {
             break
 
         case .unknown:
-            print("[EventStreamClient] Unknown event type: \(event.type)")
+            if event.type == "nexus_context_attached" || event.type == "scan_recon_skipped" || event.type == "system_self_audit_created" {
+                // Defensive routing for legitimate but unmodeled events
+                scanEventPublisher.send(event)
+            } else {
+                print("[EventStreamClient] Unknown event type: \(event.type)")
+            }
         }
     }
 
@@ -443,6 +452,78 @@ public class EventStreamClient: ObservableObject {
         lastKnownEpoch = nil
         UserDefaults.standard.removeObject(forKey: sequenceKey)
         UserDefaults.standard.removeObject(forKey: epochKey)
+    }
+
+    // MARK: - Fallback tolerant decoder
+    /// Loosely parse a GraphEvent using JSONSerialization and sanitize nulls in arrays/dicts
+    private func decodeLoosely(_ json: String) -> GraphEvent? {
+        guard let data = json.data(using: .utf8) else { return nil }
+
+        // Recursively drop NSNull from arrays/dicts to avoid AnyCodable decode traps
+        func sanitize(_ value: Any) -> Any? {
+            if value is NSNull { return nil }
+            if let arr = value as? [Any] {
+                let cleaned = arr.compactMap { sanitize($0) }
+                return cleaned
+            }
+            if let dict = value as? [String: Any] {
+                var out: [String: Any] = [:]
+                for (k, v) in dict {
+                    if let sv = sanitize(v) { out[k] = sv }
+                }
+                return out
+            }
+            return value
+        }
+
+        do {
+            let obj = try JSONSerialization.jsonObject(with: data, options: [])
+            guard let dict = obj as? [String: Any] else { return nil }
+
+            let id = (dict["id"] as? String) ?? UUID().uuidString
+            let type = (dict["type"] as? String) ?? (dict["event_type"] as? String) ?? "unknown"
+
+            let timestamp: Double = {
+                if let d = dict["timestamp"] as? Double { return d }
+                if let i = dict["timestamp"] as? Int { return Double(i) }
+                if let s = dict["timestamp"] as? String, let d = Double(s) { return d }
+                return Date().timeIntervalSince1970
+            }()
+
+            let wallTime = (dict["wall_time"] as? String) ?? ""
+
+            let sequence: Int = {
+                if let i = dict["sequence"] as? Int { return i }
+                if let d = dict["sequence"] as? Double { return Int(d) }
+                if let s = dict["sequence"] as? String, let i = Int(s) { return i }
+                return 0
+            }()
+
+            let source = dict["source"] as? String
+            let epoch = dict["epoch"] as? String
+
+            var payloadMap: [String: AnyCodable] = [:]
+            if let rawPayload = dict["payload"] {
+                if let sanitized = sanitize(rawPayload) as? [String: Any] {
+                    for (k, v) in sanitized {
+                        payloadMap[k] = AnyCodable(v)
+                    }
+                }
+            }
+
+            return GraphEvent(
+                id: id,
+                type: type,
+                timestamp: timestamp,
+                wall_time: wallTime,
+                sequence: sequence,
+                payload: payloadMap,
+                source: source,
+                epoch: epoch
+            )
+        } catch {
+            return nil
+        }
     }
 }
 
