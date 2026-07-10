@@ -62,7 +62,15 @@ final class BolaLabViewModel: ObservableObject {
             ]
             request.httpBody = try JSONSerialization.data(withJSONObject: payload)
             
-            let (_, _) = try await URLSession.shared.data(for: request)
+            let (data, _) = try await URLSession.shared.data(for: request)
+            
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let status = json["status"] as? String, status == "error",
+               let msg = json["message"] as? String {
+                actorStatuses[persona.personaId] = "Error: \(msg)"
+                isCapturing[persona.personaId] = false
+                return
+            }
         } catch {
             actorStatuses[persona.personaId] = "Error: \(error.localizedDescription)"
             isCapturing[persona.personaId] = false
@@ -126,6 +134,24 @@ struct BolaLabView: View {
                             vm.startCapture(for: persona)
                         } onStop: {
                             vm.stopCapture(for: persona)
+                        } onOpenWindow: {
+                            let window = GhostBrowserWindow(
+                                contentRect: NSRect(x: 100, y: 100, width: 1024, height: 768),
+                                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                                backing: .buffered,
+                                defer: false
+                            )
+                            window.title = "SND Window - \(persona.label)"
+                            
+                            let wc = NSWindowController(window: window)
+                            wc.showWindow(nil)
+                            window.makeKeyAndOrderFront(nil)
+                            
+                            DriverBridgeClient.shared.personaWindows[persona.label] = window
+                            
+                            Task {
+                                try? await window.navigate(url: vm.targetUrl)
+                            }
                         }
                     }
                     
@@ -147,7 +173,7 @@ struct BolaLabView: View {
         }
     }
     
-    private func actorPanel(name: String, status: String, isCapturing: Bool, color: Color, onStart: @escaping () -> Void, onStop: @escaping () -> Void) -> some View {
+    private func actorPanel(name: String, status: String, isCapturing: Bool, color: Color, onStart: @escaping () -> Void, onStop: @escaping () -> Void, onOpenWindow: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("\(name) (Attacker/Victim)")
                 .font(.system(size: 18, weight: .bold, design: .monospaced))
@@ -159,6 +185,11 @@ struct BolaLabView: View {
                 .lineLimit(2)
             
             HStack {
+                Button(action: onOpenWindow) {
+                    Label("Window", systemImage: "macwindow")
+                }
+                .buttonStyle(.bordered)
+                
                 Button(action: onStart) {
                     Label("Capture \(name)", systemImage: "record.circle")
                 }

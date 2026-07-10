@@ -3,14 +3,12 @@ Phase 7-PF8 tests for core/foundry/recorder.py.
 
 The recorder's value is binding inference — "look at the field, figure
 out what it means". Tests pin the inference for every field kind and
-the confirm-password reuse, plus the action-log → recipe translation
+the confirm-password consistency, plus the action-log → recipe translation
 and the end-to-end "recorded recipe replays correctly".
 """
 from __future__ import annotations
 
 import asyncio
-
-import pytest
 
 from core.foundry.recipe import ChallengeKind, StepKind
 from core.foundry.recorder import (
@@ -41,21 +39,20 @@ class TestInferBinding:
         assert infer_binding({"placeholder": "you@example.com email"}) == "persona:email"
 
     def test_password_by_type(self):
-        assert infer_binding({"type": "password"}) == "generated:password"
+        assert infer_binding({"type": "password"}) == "persona:password"
 
     def test_password_by_name(self):
-        assert infer_binding({"name": "passwd"}) == "generated:password"
+        assert infer_binding({"name": "passwd"}) == "persona:password"
 
-    def test_confirm_password_reuses_generated(self):
-        # A field labeled "confirm password" → the SAME generated value.
+    def test_confirm_password_uses_persona_password(self):
+        # Password and confirmation both resolve to the vault-backed password.
         assert infer_binding({"type": "password", "name": "confirm_password"}) == \
-            "extracted:generated_password"
+            "persona:password"
 
-    def test_second_password_field_is_confirm(self):
-        # Even without "confirm" in the name, the SECOND password field
-        # (password_seen=True) is treated as a confirm.
+    def test_password_seen_compatibility_argument_preserves_persona_binding(self):
+        # Existing callers may still supply password_seen; the binding stays stable.
         assert infer_binding({"type": "password"}, password_seen=True) == \
-            "extracted:generated_password"
+            "persona:password"
 
     def test_phone_by_autocomplete(self):
         assert infer_binding({"autocomplete": "tel"}) == "persona:phone"
@@ -142,8 +139,8 @@ class TestRecordToRecipe:
         assert bindings == [
             "persona:email",
             "persona:first_name",
-            "generated:password",
-            "extracted:generated_password",  # confirm reuses generated
+            "persona:password",
+            "persona:password",  # confirmation reuses the persona password
         ]
 
     def test_required_persona_fields_derived(self):
@@ -151,8 +148,8 @@ class TestRecordToRecipe:
             service_handle="airtable", origin="https://staging.airtable.com",
             name="signup", actions=_airtable_signup_actions(),
         )
-        # email + first_name (password is generated, not a persona field).
-        assert set(recipe.required_persona_fields) == {"email", "first_name"}
+        # email + first_name + password
+        assert set(recipe.required_persona_fields) == {"email", "first_name", "password"}
 
     def test_challenges_recorded(self):
         recipe = record_to_recipe(
@@ -184,10 +181,10 @@ class TestRecordToRecipe:
 
 
 class TestConfirmPasswordReuse:
-    def test_confirm_password_matches_generated(self):
+    def test_confirm_password_matches_persona_password(self):
         """The big one: a recorded recipe with password + confirm-password
-        must, at replay time, fill BOTH fields with the SAME generated
-        value. Without the generated-stash, the confirm wouldn't match."""
+        must, at replay time, fill BOTH fields with the SAME vault-backed
+        persona password."""
         from core.foundry.replay import RecipeReplayer
         from core.foundry.vault import ResearchPersona
         from tests.unit.test_foundry_replay import MockDriver
@@ -208,7 +205,7 @@ class TestConfirmPasswordReuse:
             ],
         )
         persona = ResearchPersona(
-            persona_id="p", label="a", email="a@x", password="ignored",
+            persona_id="p", label="a", email="a@x", password="vault-password",
             first_name="A", last_name="B",
         )
         driver = MockDriver()
@@ -221,7 +218,7 @@ class TestConfirmPasswordReuse:
         ))
         assert outcome.succeeded
         fills = driver.fills()
-        # Two password fills, IDENTICAL value (the generated one, reused).
+        # Both fields receive the exact password stored for this persona.
         assert len(fills) == 2
         assert fills[0]["value"] == fills[1]["value"]
-        assert len(fills[0]["value"]) == 20  # generated password length
+        assert fills[0]["value"] == persona.password

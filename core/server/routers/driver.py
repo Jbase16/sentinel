@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request
@@ -128,7 +129,6 @@ async def driver_bridge_endpoint(websocket: WebSocket):
         logger.error("[snd-bridge] unexpected error: %s", e)
         node_manager.disconnect(websocket)
 
-import uuid
 @router.post("/start_capture")
 async def start_capture(request: Request):
     global ACTIVE_CAPTURE_PATH
@@ -145,6 +145,7 @@ async def start_capture(request: Request):
             open(capture_file, "w").close()
     except Exception as e:
         logger.error("[snd-bridge] start_capture err: %s", e)
+        return {"status": "error", "message": f"Failed to initialize capture file: {e}"}
         
     # Wait for Swift execution node to be connected
     timeout = 10.0

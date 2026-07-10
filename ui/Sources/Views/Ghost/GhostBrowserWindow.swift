@@ -63,6 +63,10 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     
     // MARK: - API
     
+    public func callAsyncJavaScript(_ script: String, arguments: [String: Any], in world: WKContentWorld = .page) async throws -> Any? {
+        return try await webView.callAsyncJavaScript(script, arguments: arguments, in: nil, in: world)
+    }
+    
     public func navigate(url: String) async throws {
         guard let nsurl = URL(string: url) else {
             throw NSError(domain: "SND", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
@@ -379,13 +383,24 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             window.fetch = async function(...args) {
                 const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
                 
-                if (url.includes('/graphql')) {
                     let reqBody = '';
                     if (args[1] && args[1].body) {
                         if (typeof args[1].body === 'string') {
                             reqBody = args[1].body;
                         } else {
                             reqBody = '[Binary/FormData]';
+                        }
+                    }
+                    
+                    let reqHeaders = {};
+                    if (args[1] && args[1].headers) {
+                        let h = args[1].headers;
+                        if (h instanceof Headers) {
+                            h.forEach((v, k) => reqHeaders[k] = v);
+                        } else if (Array.isArray(h)) {
+                            h.forEach(pair => { if (pair.length === 2) reqHeaders[pair[0]] = pair[1]; });
+                        } else if (typeof h === 'object') {
+                            reqHeaders = {...h};
                         }
                     }
                     
@@ -397,6 +412,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                                 action: 'network_capture',
                                 type: 'fetch',
                                 url: url,
+                                request_headers: reqHeaders,
                                 request_body: reqBody,
                                 response_body: text
                             });
@@ -405,6 +421,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                                 action: 'network_capture',
                                 type: 'fetch',
                                 url: url,
+                                request_headers: reqHeaders,
                                 request_body: reqBody,
                                 response_body: '[Error reading response]'
                             });
@@ -413,7 +430,6 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                     } catch (err) {
                         throw err;
                     }
-                }
                 
                 return originalFetch.apply(this, args);
             };
@@ -421,33 +437,41 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             const originalXHR = window.XMLHttpRequest.prototype.open;
             const originalXHRSend = window.XMLHttpRequest.prototype.send;
             
+            const originalXHRSetRequestHeader = window.XMLHttpRequest.prototype.setRequestHeader;
+            
             window.XMLHttpRequest.prototype.open = function(method, url) {
                 this._sndUrl = url;
+                this._sndReqHeaders = {};
                 return originalXHR.apply(this, arguments);
             };
             
+            window.XMLHttpRequest.prototype.setRequestHeader = function(header, value) {
+                if (!this._sndReqHeaders) this._sndReqHeaders = {};
+                this._sndReqHeaders[header] = value;
+                return originalXHRSetRequestHeader.apply(this, arguments);
+            };
+            
             window.XMLHttpRequest.prototype.send = function(body) {
-                if (this._sndUrl && this._sndUrl.includes('/graphql')) {
-                    const reqBody = typeof body === 'string' ? body : '[Binary/FormData]';
-                    const url = this._sndUrl;
+                const reqBody = typeof body === 'string' ? body : '[Binary/FormData]';
+                const url = this._sndUrl || '';
+                
+                this.addEventListener('load', function() {
+                    let resBody = '';
+                    if (this.responseType === '' || this.responseType === 'text') {
+                        resBody = this.responseText;
+                    } else {
+                        resBody = '[Binary]';
+                    }
                     
-                    this.addEventListener('load', function() {
-                        let resBody = '';
-                        if (this.responseType === '' || this.responseType === 'text') {
-                            resBody = this.responseText;
-                        } else {
-                            resBody = '[Binary]';
-                        }
-                        
-                        window.webkit.messageHandlers.sndRecordingBridge.postMessage({
-                            action: 'network_capture',
-                            type: 'xhr',
-                            url: url,
-                            request_body: reqBody,
-                            response_body: resBody
-                        });
+                    window.webkit.messageHandlers.sndRecordingBridge.postMessage({
+                        action: 'network_capture',
+                        type: 'xhr',
+                        url: url,
+                        request_headers: this._sndReqHeaders || {},
+                        request_body: reqBody,
+                        response_body: resBody
                     });
-                }
+                });
                 return originalXHRSend.apply(this, arguments);
             };
         })();

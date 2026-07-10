@@ -32,6 +32,9 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     // Open Ghost browser window
     private var currentBrowserWindowController: NSWindowController?
     
+    // Registry of authenticated persona windows for BOLA testing
+    public var personaWindows: [String: GhostBrowserWindow] = [:]
+    
     private override init() {
         super.init()
         connect()
@@ -146,6 +149,10 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     result = try await closeBrowser()
                 case "get_cookies":
                     result = try await getCookies()
+                case "replay":
+                    await executeReplay(reqId: reqId, args: args)
+                    // executeReplay handles sending its own response/error, so we return early
+                    return
                 default:
                     throw NSError(domain: "SND", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unknown command \(command)"])
                 }
@@ -290,5 +297,40 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     @MainActor private func getCookies() async throws -> [String: String] {
         let b = try getBrowser()
         return try await b.getCookies()
+    }
+    
+    @MainActor
+    private func executeReplay(reqId: String, args: [String: Any]) async {
+        guard let persona = args["persona"] as? String,
+              let window = personaWindows[persona] else {
+            sendError(reqId: reqId, error: "no authenticated window for persona '\(args["persona"] ?? "?")'")
+            return
+        }
+        
+        let params: [String: Any] = [
+            "url":     args["url"]     as? String ?? "",
+            "method":  args["method"]  as? String ?? "POST",
+            "headers": args["headers"] as? [String: String] ?? [:],
+            "body":    args["body"]    as? String as Any,
+        ]
+        
+        let js = """
+        const p = args;
+        const resp = await fetch(p.url, {
+            method: p.method, headers: p.headers,
+            body: (p.method === 'GET' || p.method === 'HEAD') ? undefined : p.body,
+            credentials: 'include'
+        });
+        const text = await resp.text();
+        const h = {}; resp.headers.forEach((v, k) => h[k] = v);
+        return { status: resp.status, headers: h, body: text };
+        """
+        
+        do {
+            let result = try await window.callAsyncJavaScript(js, arguments: ["args": params], in: .page)
+            sendResponse(reqId: reqId, result: (result as? [String: Any]) ?? [:])
+        } catch {
+            sendError(reqId: reqId, error: "\(error)")
+        }
     }
 }

@@ -50,11 +50,17 @@ ui/SentinelForge.xcodeproj/xcuserdata/
 *.db
 *.sqlite
 *.sqlite3
+/data/graphql_capture*.jsonl
 /archive_stage/
 /artifacts/
 /reports/
 graphify-out/
 */graphify-out/
+
+# Local capture/review scratch
+/plan_review*.md
+/fix_recipes.py
+/test_file_create.py
 
 # Local model weights — multi-GB; never commit (live in Ollama / on disk)
 *.gguf

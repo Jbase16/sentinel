@@ -4,7 +4,7 @@ core/foundry/recorder.py — Phase 7-PF8: the Recipe Recorder.
 Turns a captured browser action log into a SignupRecipe — and, crucially,
 INFERS the right binding for each field from its semantics. A fill into a
 field that looks like an email becomes `persona:email`; a password field
-becomes `generated:password`; a recaptcha iframe becomes a
+becomes `persona:password`; a recaptcha iframe becomes a
 `CHALLENGE(captcha)` step. The researcher records a signup once (manually,
 through a real browser); the recorder produces a parameterized recipe
 that replays for any persona.
@@ -74,11 +74,6 @@ class RecordedAction:
 # ─────────────────────────── binding inference ───────────────────────────
 
 
-# The "stash key" the replay engine remembers a generated password under,
-# so a confirm-password field can reference the SAME value.
-_GENERATED_PASSWORD_REF = "extracted:generated_password"
-
-
 def _field_signal(field: Dict[str, str]) -> str:
     """Concatenate the field's identifying attributes into one lowercase
     haystack for substring matching."""
@@ -101,11 +96,11 @@ def infer_binding(
     Args:
       field: the field metadata (name, id, type, label, placeholder,
              autocomplete, aria-label).
-      password_seen: True if a password field was already filled earlier
-             in this recipe — so a SECOND password field is treated as a
-             confirm-password and bound to the SAME generated value.
+      password_seen: Retained for caller compatibility. Password and confirmation
+             fields both bind to the persona's vault-backed password, so this flag
+             does not alter the returned binding.
 
-    Returns a binding string ("persona:email", "generated:password", …).
+    Returns a binding string ("persona:email", "persona:password", …).
 
     The order of checks matters: more-specific signals (autocomplete,
     type) win over fuzzy name matching.
@@ -116,10 +111,7 @@ def infer_binding(
 
     # Password fields — strongest signal is type=password.
     if ftype == "password" or "password" in signal or "passwd" in signal:
-        # A second password field is a confirm — reuse the generated one.
-        if password_seen or "confirm" in signal or "repeat" in signal or "verify" in signal:
-            return _GENERATED_PASSWORD_REF
-        return "generated:password"
+        return "persona:password"
 
     # Email — autocomplete=email, type=email, or "email" in the signal.
     if autocomplete == "email" or ftype == "email" or "email" in signal or "e-mail" in signal:
@@ -192,7 +184,6 @@ def record_to_recipe(
     so a malformed capture surfaces immediately.
     """
     steps: List[RecipeStep] = []
-    password_seen = False
     review_flags: List[str] = []
 
     for i, act in enumerate(actions):
@@ -203,9 +194,7 @@ def record_to_recipe(
             ))
 
         elif act.action == "fill":
-            binding = infer_binding(act.field, password_seen=password_seen)
-            if binding in ("generated:password",):
-                password_seen = True
+            binding = infer_binding(act.field)
             if binding == "literal:REVIEW_THIS_FIELD":
                 review_flags.append(
                     f"step {len(steps)}: field "
@@ -273,9 +262,8 @@ def _label_for_binding(binding: str) -> str:
         "persona:last_name": "fill last name",
         "persona:full_name": "fill full name",
         "persona:date_of_birth": "fill date of birth",
-        "generated:password": "fill password",
+        "persona:password": "fill password",
         "generated:username": "fill username",
-        _GENERATED_PASSWORD_REF: "confirm password",
         "literal:REVIEW_THIS_FIELD": "fill (REVIEW)",
     }
     return mapping.get(binding, "fill field")
