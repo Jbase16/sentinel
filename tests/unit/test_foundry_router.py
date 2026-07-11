@@ -29,6 +29,8 @@ def _run(coro):
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("SENTINELFORGE_PERSONA_VAULT", str(tmp_path / "personas"))
     monkeypatch.setenv("SENTINELFORGE_RECIPE_STORE", str(tmp_path / "recipes"))
+    monkeypatch.setenv("SENTINELFORGE_AUTHZ_STORE", str(tmp_path / "authorizations"))
+    monkeypatch.delenv("SENTINELFORGE_BEHAVIOR_PRIMARY", raising=False)
     _reset_bus_for_tests()
     yield
     _reset_bus_for_tests()
@@ -108,6 +110,109 @@ class TestPersonaEndpoints:
         audit = _run(persona_audit_endpoint(persona["persona_id"], _=True))
         assert len(audit) == 1
         assert audit[0]["service_handle"] == "airtable"
+
+
+# ───────────────── behavioral primary planner ─────────────────
+
+
+class TestBehavioralAuthorizationEndpoint:
+    ORIGIN = "https://api.example.test"
+    SOURCE_ID = "RlLB9Tjpk7YfkTaBB0SpzA"
+    PEER_ID = "9QsBs4y23m6HH4aB38ffkA"
+
+    def _setup(self):
+        import json
+
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.foundry.authorization import create_envelope
+        from core.foundry.vault import PersonaVault
+        from core.server.routers.foundry import RunBehavioralAuthorizationRequest
+
+        vault = PersonaVault()
+        source_persona = vault.add_persona(label="source", email="source@research.example")
+        peer_persona = vault.add_persona(label="peer", email="peer@research.example")
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[CONTROLLED_WORKFLOW],
+            disclosure_attestation=True,
+        )
+
+        def record(persona_id, resource_id, private_marker):
+            operation = "GetPrivateObject"
+            return {
+                "method": "POST",
+                "url": f"{self.ORIGIN}/gql/batch",
+                "request_headers": {
+                    "content-type": "application/json",
+                    "x-csrf-token": f"csrf-{persona_id}",
+                },
+                "request_body": json.dumps([{
+                    "operationName": operation,
+                    "query": (
+                        "query GetPrivateObject($BizEncId: ID!) "
+                        "{ privateObject(id: $BizEncId) { id } }"
+                    ),
+                    "variables": {"BizEncId": resource_id},
+                }]),
+                "response_body": json.dumps({"owner": private_marker}),
+            }
+
+        source_records = [record(source_persona.persona_id, self.SOURCE_ID, "SourcePrivateMarker")]
+        peer_records = [record(peer_persona.persona_id, self.PEER_ID, "PeerPrivateMarker")]
+        request = RunBehavioralAuthorizationRequest(
+            target_origin=self.ORIGIN,
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+            source_records=source_records,
+            peer_records=peer_records,
+        )
+        return request, source_persona, peer_persona
+
+    def test_disabled_endpoint_returns_plan_without_constructing_live_traffic(self, monkeypatch):
+        from core.server.routers.foundry import run_behavioral_authorization_endpoint
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _, _ = self._setup()
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("disabled primary planner must not reach SND")
+
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "disabled"
+        assert result["plan"]["selected_proposal_id"]
+        assert result["execution"] is None
+
+    def test_enabled_endpoint_executes_one_legacy_verified_experiment(self, monkeypatch):
+        from core.server.routers.foundry import run_behavioral_authorization_endpoint
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, peer_persona = self._setup()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        calls = []
+
+        async def fake_send(_transport, persona, replay_request):
+            calls.append((persona, replay_request))
+            if persona == peer_persona.persona_id:
+                return ReplayResponse(200, '{"owner":"PeerPrivateMarker"}')
+            if self.SOURCE_ID in (replay_request.body or ""):
+                return ReplayResponse(200, '{"owner":"SourcePrivateMarker"}')
+            return ReplayResponse(200, '{"owner":"PeerPrivateMarker"}')
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "completed"
+        assert len(calls) == 3
+        assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
+        assert result["finding"]["metadata"]["behavioral_primary_planner"]
+        assert calls[0][1].headers["x-csrf-token"] == f"csrf-{peer_persona.persona_id}"
+        assert calls[1][1].headers["x-csrf-token"] == f"csrf-{source_persona.persona_id}"
 
 
 # ───────────────────────── recipes ─────────────────────────

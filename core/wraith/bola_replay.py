@@ -39,7 +39,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple
 
-from core.wraith.bola import BolaFinding, _contains, _stringify
+from core.wraith.bola import BolaFinding, _contains
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +349,8 @@ class OpVerdict:
     finding: Optional[BolaFinding] = None
 
 
-def _is_denied(resp: ReplayResponse) -> bool:
+def is_denied_response(resp: ReplayResponse) -> bool:
+    """Return whether a replay response represents an authorization denial."""
     if resp.status in (401, 403):
         return True
     b = resp.body.lower()
@@ -359,12 +360,19 @@ def _is_denied(resp: ReplayResponse) -> bool:
 
 async def _classify(
     op: ObjectScopedOp, attacker: str, victim: str, attacker_id: str, victim_id: str,
-    transport: ReplayTransport,
+    transport: ReplayTransport, victim_op: Optional[ObjectScopedOp] = None,
 ) -> OpVerdict:
     # 1. victim baseline — the op pointed at the victim's object, sent AS the victim
     #    (swap attacker_id → victim_id so it references the victim's object) → the
     #    victim's own legitimate view, from which we mine the private markers.
-    victim_base = await transport.send(victim, build_request(op, victim_id, attacker_id))
+    if victim_op is None:
+        victim_request = build_request(op, victim_id, attacker_id)
+    else:
+        # A paired capture carries the victim persona's own CSRF/auth headers.
+        # Use that operation unmodified instead of transplanting attacker-session
+        # headers into the victim baseline.
+        victim_request = build_request(victim_op, victim_id, victim_id)
+    victim_base = await transport.send(victim, victim_request)
     # 2. attacker baseline — the op as the attacker, unmodified → attacker data + shape.
     atk_base = await transport.send(attacker, build_request(op, attacker_id, attacker_id))
     # 3. the attack — attacker session, victim's id swapped in.
@@ -372,7 +380,7 @@ async def _classify(
 
     if not (200 <= attack.status < 300):
         return OpVerdict(op.label, "DENIED", f"attack HTTP {attack.status}")
-    if _is_denied(attack):
+    if is_denied_response(attack):
         return OpVerdict(op.label, "DENIED", "attack returned an authorization error")
 
     markers = extract_victim_markers(victim_base.body, atk_base.body,
@@ -393,6 +401,32 @@ async def _classify(
                   f"victim id {victim_id!r} ({op.id_where}) and the response carried victim-private "
                   f"marker(s) absent from the attacker's own baseline: {leaked[:8]}"))
     return OpVerdict(op.label, "BOLA_CONFIRMED", "cross-tenant read confirmed", finding)
+
+
+async def classify_operation(
+    op: ObjectScopedOp,
+    attacker: str,
+    victim: str,
+    attacker_id: str,
+    victim_id: str,
+    transport: ReplayTransport,
+    *,
+    victim_op: Optional[ObjectScopedOp] = None,
+) -> OpVerdict:
+    """Run the established three-leg BOLA oracle for one selected operation.
+
+    The public wrapper lets controlled schedulers select exactly one operation
+    while keeping this module's existing marker-diff verdict authoritative.
+    """
+    return await _classify(
+        op,
+        attacker,
+        victim,
+        attacker_id,
+        victim_id,
+        transport,
+        victim_op=victim_op,
+    )
 
 
 async def hunt(
@@ -440,8 +474,8 @@ async def hunt(
     verdicts: List[OpVerdict] = []
     for op in ops:
         try:
-            v = await _classify(op, attacker_persona, victim_persona,
-                                attacker_id, victim_id, transport)
+            v = await classify_operation(op, attacker_persona, victim_persona,
+                                         attacker_id, victim_id, transport)
         except Exception as e:
             v = OpVerdict(op.label, "ERROR", f"{type(e).__name__}: {e}")
         verdicts.append(v)

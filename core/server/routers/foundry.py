@@ -28,8 +28,10 @@ drops in cleanly once a Driver exists.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -109,6 +111,17 @@ class CreateEnvelopeRequest(BaseModel):
     max_accounts_per_service: int = 3
     legal_posture: str = ""
     ttl_days: int = 30
+
+
+class RunBehavioralAuthorizationRequest(BaseModel):
+    """One autonomous paired-world behavioral authorization run."""
+
+    target_origin: str = Field(..., min_length=8)
+    envelope_id: str = Field(..., min_length=1)
+    source_persona_id: str = Field(..., min_length=1)
+    peer_persona_id: str = Field(..., min_length=1)
+    source_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
+    peer_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
 
 
 # ─────────────────────────── plan ───────────────────────────
@@ -448,6 +461,145 @@ async def envelope_proof_endpoint(
             ),
         )
     return proof
+
+
+# ───────────────── behavioral primary planner ─────────────────
+
+
+_MAX_BEHAVIORAL_CAPTURE_BYTES = 16 * 1024 * 1024
+
+
+def _behavioral_scope_filter(target_origin: str):
+    parsed_target = urlsplit(target_origin)
+    if parsed_target.scheme not in {"http", "https"} or not parsed_target.netloc:
+        raise ValueError("target_origin must be an absolute HTTP(S) origin")
+    origin = f"{parsed_target.scheme}://{parsed_target.netloc}"
+
+    def in_scope(url: str) -> bool:
+        parsed = urlsplit(str(url or ""))
+        if not parsed.scheme and not parsed.netloc:
+            return str(url or "").startswith("/")
+        return (
+            parsed.scheme in {"http", "https"}
+            and f"{parsed.scheme}://{parsed.netloc}" == origin
+        )
+
+    return origin, in_scope
+
+
+def _bounded_in_scope_records(
+    records: List[Dict[str, Any]], scope_filter
+) -> List[Dict[str, Any]]:
+    encoded_size = sum(len(json.dumps(record, separators=(",", ":"))) for record in records)
+    if encoded_size > _MAX_BEHAVIORAL_CAPTURE_BYTES:
+        raise ValueError("paired capture exceeds the 16 MiB execution limit")
+    return [dict(record) for record in records if scope_filter(str(record.get("url") or ""))]
+
+
+@router.post("/behavioral-authorization")
+async def run_behavioral_authorization_endpoint(
+    req: RunBehavioralAuthorizationRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Plan one experiment autonomously and, when enabled, execute it once.
+
+    ``SENTINELFORGE_BEHAVIOR_PRIMARY`` defaults off. In that state this endpoint
+    returns the behavioral plan but cannot reach the SND replay transport.
+    """
+    from core.behavior.active import (
+        CONTROLLED_WORKFLOW,
+        ControlledAuthorizationExecutor,
+        ControlledExecutionDenied,
+    )
+    from core.behavior.scheduler import (
+        BehavioralPrimaryScheduler,
+        PrimaryPlannerConfig,
+        PrimaryPlannerError,
+    )
+    from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
+    from core.foundry.authorization import get_envelope
+    from core.foundry.vault import PersonaVault
+    from core.safety.provenance import ProvenanceSink
+    from core.wraith.bola_replay import ReplayRequest, SNDReplayTransport
+
+    try:
+        target_origin, scope_filter = _behavioral_scope_filter(req.target_origin)
+        source_records = _bounded_in_scope_records(req.source_records, scope_filter)
+        peer_records = _bounded_in_scope_records(req.peer_records, scope_filter)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not source_records or not peer_records:
+        raise HTTPException(status_code=400, detail="paired captures have no in-scope records")
+
+    vault = PersonaVault()
+    source_persona = vault.get_persona(req.source_persona_id)
+    peer_persona = vault.get_persona(req.peer_persona_id)
+    if source_persona is None or peer_persona is None:
+        raise HTTPException(status_code=404, detail="one or both research personas were not found")
+    envelope = get_envelope(req.envelope_id)
+    if envelope is None:
+        raise HTTPException(status_code=404, detail=f"envelope {req.envelope_id!r} not found")
+    if CONTROLLED_WORKFLOW not in envelope.allowed_workflows:
+        # Surface the missing up-front permission even while runtime activation
+        # is disabled; otherwise enabling later would change a plan into a 403.
+        raise HTTPException(
+            status_code=409,
+            detail=f"authorization envelope does not permit {CONTROLLED_WORKFLOW!r}",
+        )
+
+    config = PrimaryPlannerConfig.from_environment()
+    scheduler = BehavioralPrimaryScheduler(config)
+    controlled_executor = None
+    if config.enabled:
+        transport = SNDReplayTransport()
+        policy = ExecutionPolicy("bounty_safe", scope_filter=scope_filter)
+        provenance = ProvenanceSink()
+        provenance.record_context(
+            target=target_origin,
+            proof_mode="bounty_safe",
+            policy_digest=policy.digest(),
+        )
+
+        def make_executor(persona_id: str) -> PolicyExecutor:
+            async def raw_send(method, url, body=None, **kwargs):
+                headers = kwargs.get("headers") or {}
+                response = await transport.send(
+                    persona_id,
+                    ReplayRequest(
+                        method=str(method),
+                        url=str(url),
+                        body=(body if isinstance(body, str) or body is None else json.dumps(body)),
+                        headers={str(key): str(value) for key, value in headers.items()},
+                    ),
+                )
+                return response.status, response.body
+
+            return PolicyExecutor(raw_send, policy, provenance=provenance)
+
+        controlled_executor = ControlledAuthorizationExecutor(
+            target_origin=target_origin,
+            authorization=envelope,
+            source_persona=source_persona,
+            peer_persona=peer_persona,
+            executors={
+                source_persona.persona_id: make_executor(source_persona.persona_id),
+                peer_persona.persona_id: make_executor(peer_persona.persona_id),
+            },
+        )
+
+    try:
+        run = await scheduler.run(
+            source_records,
+            peer_records,
+            source_persona=source_persona,
+            peer_persona=peer_persona,
+            controlled_executor=controlled_executor,
+        )
+    except ControlledExecutionDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PrimaryPlannerError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return run.to_dict()
 
 
 @router.post("/signup")

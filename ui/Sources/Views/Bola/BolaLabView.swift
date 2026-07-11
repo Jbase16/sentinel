@@ -147,6 +147,9 @@ struct BolaLabView: View {
                             wc.showWindow(nil)
                             window.makeKeyAndOrderFront(nil)
                             
+                            // The backend addresses owned personas by immutable vault ID.
+                            // Keep the label alias for older replay callers.
+                            DriverBridgeClient.shared.personaWindows[persona.personaId] = window
                             DriverBridgeClient.shared.personaWindows[persona.label] = window
                             
                             Task {
