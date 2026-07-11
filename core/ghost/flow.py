@@ -452,6 +452,20 @@ class FlowMapper:
             elapsed_ms=elapsed_ms,
             cookies_after_step=post_step_jar,
         )
+        # Passive behavioral shadowing is opt-in and fail-isolated.  The observer
+        # has no transport/execution capability, and any fault must leave Ghost's
+        # existing capture contract untouched.
+        if os.environ.get("SENTINELFORGE_BEHAVIOR_SHADOW", "").strip().lower() in {
+            "1", "true", "yes", "on",
+        }:
+            try:
+                from core.behavior.shadow import observe_flow_step_if_enabled
+                observe_flow_step_if_enabled(flow_id, target_step)
+            except Exception as exc:
+                logger.debug(
+                    "[behavior-shadow] finalize observer failed: %s",
+                    type(exc).__name__,
+                )
         return True
 
     # ───────────────── persistence (on-disk) ─────────────────
