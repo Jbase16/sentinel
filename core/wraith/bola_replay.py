@@ -71,6 +71,7 @@ class ReplayRequest:
     url: str
     body: Optional[str] = None
     headers: Dict[str, str] = field(default_factory=dict)
+    max_response_chars: Optional[int] = None
 
 
 @dataclass
@@ -78,6 +79,7 @@ class ReplayResponse:
     status: int
     body: str = ""
     headers: Dict[str, str] = field(default_factory=dict)
+    body_truncated: bool = False
 
 
 @dataclass
@@ -375,8 +377,21 @@ async def _classify(
     victim_base = await transport.send(victim, victim_request)
     # 2. attacker baseline — the op as the attacker, unmodified → attacker data + shape.
     atk_base = await transport.send(attacker, build_request(op, attacker_id, attacker_id))
+    if victim_base.body_truncated or atk_base.body_truncated:
+        return OpVerdict(
+            op.label,
+            "AMBIGUOUS",
+            "baseline response exceeded the bounded replay limit",
+        )
     # 3. the attack — attacker session, victim's id swapped in.
     attack = await transport.send(attacker, build_request(op, victim_id, attacker_id))
+
+    if attack.body_truncated:
+        return OpVerdict(
+            op.label,
+            "AMBIGUOUS",
+            "counterfactual response exceeded the bounded replay limit",
+        )
 
     if not (200 <= attack.status < 300):
         return OpVerdict(op.label, "DENIED", f"attack HTTP {attack.status}")
@@ -512,9 +527,12 @@ class SNDReplayTransport:
             "request_id": uuid.uuid4().hex,
             "command": "replay",
             "args": {"persona": persona, "method": req.method, "url": req.url,
-                     "headers": req.headers, "body": req.body},
+                     "headers": req.headers, "body": req.body,
+                     "max_response_chars": req.max_response_chars},
         }, timeout=self.timeout) or {}
         return ReplayResponse(
             status=int(result.get("status", 0) or 0),
             body=result.get("body", "") or "",
-            headers=result.get("headers", {}) or {})
+            headers=result.get("headers", {}) or {},
+            body_truncated=bool(result.get("body_truncated")),
+        )

@@ -140,9 +140,12 @@ class ExecutionPolicy:
         return body_hash({
             "mode": self.mode,
             "allowed_classes": sorted(self.allowed) if self.allowed else None,
+            "max_total_requests": b.max_total_requests,
+            "max_requests_per_endpoint": b.max_requests_per_endpoint,
             "max_cross_object_reads": b.max_cross_object_reads,
             "max_privilege_mutations": b.max_privilege_mutations,
-            "max_creates": b.max_creates, "allow_delete": b.allow_delete,
+            "max_creates": b.max_creates,
+            "allow_delete": b.allow_delete,
             "allow_real_user_data_access": b.allow_real_user_data_access,
         }) or ""
 

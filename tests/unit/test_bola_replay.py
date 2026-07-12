@@ -148,3 +148,57 @@ async def test_hunt_classifies_all_three():
 async def test_hunt_autodetects_ids_when_not_given():
     findings, verdicts = await br.hunt(_cap(ALICE), _cap(BOB), transport=MockTarget())
     assert any(v.verdict == "BOLA_CONFIRMED" for v in verdicts)
+
+
+@pytest.mark.asyncio
+async def test_truncated_baseline_is_ambiguous_and_skips_counterfactual():
+    op = br.find_object_scoped_ops(br.parse_capture(_cap(ALICE)), ALICE)[0]
+
+    class TruncatedBaseline:
+        def __init__(self):
+            self.calls = 0
+
+        async def send(self, _persona, _request):
+            self.calls += 1
+            return br.ReplayResponse(
+                200,
+                '{"ownerName":"PrivateMarker"}',
+                body_truncated=self.calls == 1,
+            )
+
+    transport = TruncatedBaseline()
+    verdict = await br.classify_operation(
+        op, "attacker", "victim", ALICE, BOB, transport
+    )
+
+    assert verdict.verdict == "AMBIGUOUS"
+    assert "baseline response exceeded" in verdict.detail
+    assert transport.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_truncated_counterfactual_cannot_confirm_finding():
+    op = br.find_object_scoped_ops(br.parse_capture(_cap(ALICE)), ALICE)[0]
+
+    class TruncatedAttack:
+        def __init__(self):
+            self.calls = 0
+
+        async def send(self, persona, _request):
+            self.calls += 1
+            body = (
+                '{"ownerName":"BobBurgersPrivateLLC"}'
+                if persona == "victim" or self.calls == 3
+                else '{"ownerName":"AliceCafePrivateLLC"}'
+            )
+            return br.ReplayResponse(200, body, body_truncated=self.calls == 3)
+
+    transport = TruncatedAttack()
+    verdict = await br.classify_operation(
+        op, "attacker", "victim", ALICE, BOB, transport
+    )
+
+    assert verdict.verdict == "AMBIGUOUS"
+    assert verdict.finding is None
+    assert "counterfactual response exceeded" in verdict.detail
+    assert transport.calls == 3

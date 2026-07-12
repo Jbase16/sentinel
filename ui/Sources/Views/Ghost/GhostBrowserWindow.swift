@@ -2,11 +2,33 @@ import AppKit
 import WebKit
 
 public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
+    private struct CaptureOrigin: Equatable {
+        let scheme: String
+        let host: String
+        let port: Int
+
+        init?(url: URL) {
+            guard let rawScheme = url.scheme?.lowercased(),
+                  ["http", "https"].contains(rawScheme),
+                  let rawHost = url.host?.lowercased(),
+                  !rawHost.isEmpty else { return nil }
+            scheme = rawScheme
+            host = rawHost
+            port = url.port ?? (rawScheme == "https" ? 443 : 80)
+        }
+    }
+
     private var webView: WKWebView!
     public var onClose: (() -> Void)?
     
     // For waiting on navigation
     private var navigationContinuation: CheckedContinuation<Void, Error>?
+    private var networkCapturePersonaId = ""
+    private var networkCaptureSessionId = ""
+    private var networkCaptureEnabled = false
+    private var networkCaptureScriptCount = 0
+    private var networkCaptureOrigin: CaptureOrigin?
+    private var mainFrameResponseStatus = 0
     
     public override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
@@ -38,8 +60,52 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     // MARK: - Navigation Delegate
     
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        navigationContinuation?.resume()
+        let continuation = navigationContinuation
         navigationContinuation = nil
+        captureMainFrameIfEnabled {
+            continuation?.resume()
+        }
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
+    ) {
+        if navigationResponse.isForMainFrame,
+           let response = navigationResponse.response as? HTTPURLResponse {
+            mainFrameResponseStatus = response.statusCode
+        }
+        decisionHandler(.allow)
+    }
+
+    public func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard networkCaptureEnabled,
+              navigationAction.targetFrame?.isMainFrame == true,
+              let requestedURL = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+        guard let allowedOrigin = networkCaptureOrigin,
+              CaptureOrigin(url: requestedURL) == allowedOrigin else {
+            decisionHandler(.cancel)
+            let error = NSError(
+                domain: "SND",
+                code: 403,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Capture blocked a cross-origin main-frame navigation"
+                ]
+            )
+            navigationContinuation?.resume(throwing: error)
+            navigationContinuation = nil
+            return
+        }
+        decisionHandler(.allow)
     }
     
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -50,6 +116,51 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     public func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         navigationContinuation?.resume(throwing: error)
         navigationContinuation = nil
+    }
+
+    private func captureMainFrameIfEnabled(completion: @escaping () -> Void) {
+        guard networkCaptureEnabled,
+              let url = webView.url?.absoluteString,
+              !url.isEmpty else {
+            completion()
+            return
+        }
+        let personaId = networkCapturePersonaId
+        let captureSessionId = networkCaptureSessionId
+        let status = mainFrameResponseStatus
+        let js = """
+        (() => {
+            const raw = document.body?.innerText
+                || document.documentElement?.innerText || '';
+            const limit = 2097152;
+            return {
+                body: raw.slice(0, limit),
+                truncated: raw.length > limit
+            };
+        })();
+        """
+        webView.evaluateJavaScript(js) { value, _ in
+            let capture = value as? [String: Any]
+            DriverBridgeClient.shared.sendSpontaneousEvent(
+                event: "recorded_action",
+                payload: [
+                    "action": [
+                        "action": "network_capture",
+                        "persona_id": personaId,
+                        "capture_session": captureSessionId,
+                        "type": "navigation",
+                        "url": url,
+                        "method": "GET",
+                        "request_headers": [:],
+                        "request_body": "",
+                        "response_status": status,
+                        "response_body": capture?["body"] as? String ?? "",
+                        "response_truncated": capture?["truncated"] as? Bool ?? false,
+                    ]
+                ]
+            )
+            completion()
+        }
     }
     
     // MARK: - UI Delegate
@@ -71,8 +182,19 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         guard let nsurl = URL(string: url) else {
             throw NSError(domain: "SND", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
         }
+        if networkCaptureEnabled {
+            guard let origin = CaptureOrigin(url: nsurl) else {
+                throw NSError(
+                    domain: "SND",
+                    code: 400,
+                    userInfo: [NSLocalizedDescriptionKey: "Invalid capture origin"]
+                )
+            }
+            networkCaptureOrigin = origin
+        }
         
         return try await withCheckedThrowingContinuation { continuation in
+            self.mainFrameResponseStatus = 0
             self.navigationContinuation = continuation
             webView.load(URLRequest(url: nsurl))
         }
@@ -373,65 +495,197 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         _ = try? await webView.evaluateJavaScript(js)
     }
     
-    public func startNetworkCapture() async throws {
+    public func startNetworkCapture(
+        personaId: String? = nil,
+        captureSessionId: String
+    ) throws {
+        guard networkCaptureScriptCount < 128 else {
+            throw NSError(
+                domain: "SND",
+                code: 429,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Capture script limit reached; reopen this persona window"
+                ]
+            )
+        }
+        networkCapturePersonaId = personaId ?? ""
+        networkCaptureSessionId = captureSessionId
+        networkCaptureEnabled = true
+        let personaData = try JSONEncoder().encode(personaId ?? "")
+        let captureSessionData = try JSONEncoder().encode(captureSessionId)
+        guard let personaLiteral = String(data: personaData, encoding: .utf8),
+              let captureSessionLiteral = String(
+                  data: captureSessionData,
+                  encoding: .utf8
+              ) else {
+            throw NSError(
+                domain: "SND",
+                code: 500,
+                userInfo: [NSLocalizedDescriptionKey: "Could not encode capture context"]
+            )
+        }
         let js = """
         (function() {
+            window._sndCapturePersonaId = \(personaLiteral);
+            window._sndCaptureSessionId = \(captureSessionLiteral);
+            window._sndNetworkCaptureEnabled = true;
             if (window._sndNetworkCaptureInitialized) return;
             window._sndNetworkCaptureInitialized = true;
+
+            const MAX_REQUEST_CHARS = 262144;
+            const MAX_RESPONSE_CHARS = 2097152;
+
+            function absoluteURL(value) {
+                try { return new URL(value, document.baseURI).href; }
+                catch (_) { return String(value || ''); }
+            }
+
+            function boundedText(value, limit) {
+                const text = typeof value === 'string' ? value : '';
+                return {text: text.slice(0, limit), truncated: text.length > limit};
+            }
+
+            function currentCaptureContext() {
+                return {
+                    persona_id: window._sndCapturePersonaId,
+                    capture_session: window._sndCaptureSessionId
+                };
+            }
+
+            function postNetworkActivity(context, phase) {
+                try {
+                    window.webkit.messageHandlers.sndRecordingBridge.postMessage({
+                        action: 'network_activity',
+                        persona_id: context.persona_id,
+                        capture_session: context.capture_session,
+                        phase: phase
+                    });
+                } catch (_) {}
+            }
+
+            function captureStillCurrent(context) {
+                return window._sndNetworkCaptureEnabled
+                    && window._sndCapturePersonaId === context.persona_id
+                    && window._sndCaptureSessionId === context.capture_session;
+            }
+
+            async function readBoundedResponse(response, limit) {
+                if (!response.body || typeof response.body.getReader !== 'function') {
+                    return boundedText(await response.text(), limit);
+                }
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let text = '';
+                let truncated = false;
+                while (true) {
+                    const part = await reader.read();
+                    if (part.done) break;
+                    const decoded = decoder.decode(part.value, {stream: true});
+                    const remaining = limit - text.length;
+                    if (decoded.length > remaining) {
+                        text += decoded.slice(0, Math.max(0, remaining));
+                        truncated = true;
+                        await reader.cancel();
+                        break;
+                    }
+                    text += decoded;
+                }
+                if (!truncated) {
+                    const tail = decoder.decode();
+                    const remaining = limit - text.length;
+                    text += tail.slice(0, Math.max(0, remaining));
+                    truncated = tail.length > remaining;
+                }
+                return {text: text, truncated: truncated};
+            }
             
             const originalFetch = window.fetch;
             window.fetch = async function(...args) {
-                const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url ? args[0].url : '');
-                
-                    let reqBody = '';
-                    if (args[1] && args[1].body) {
-                        if (typeof args[1].body === 'string') {
-                            reqBody = args[1].body;
-                        } else {
-                            reqBody = '[Binary/FormData]';
-                        }
+                const rawUrl = typeof args[0] === 'string'
+                    ? args[0] : (args[0] && args[0].url ? args[0].url : '');
+                const requestUrl = absoluteURL(rawUrl);
+                const method = ((args[1] && args[1].method)
+                    || (args[0] && args[0].method) || 'GET').toUpperCase();
+
+                let rawReqBody = '';
+                if (args[1] && args[1].body) {
+                    if (typeof args[1].body === 'string') {
+                        rawReqBody = args[1].body;
+                    } else {
+                        rawReqBody = '[Binary/FormData]';
                     }
-                    
-                    let reqHeaders = {};
-                    if (args[1] && args[1].headers) {
-                        let h = args[1].headers;
-                        if (h instanceof Headers) {
-                            h.forEach((v, k) => reqHeaders[k] = v);
-                        } else if (Array.isArray(h)) {
-                            h.forEach(pair => { if (pair.length === 2) reqHeaders[pair[0]] = pair[1]; });
-                        } else if (typeof h === 'object') {
-                            reqHeaders = {...h};
-                        }
+                }
+                const reqBody = boundedText(rawReqBody, MAX_REQUEST_CHARS);
+
+                let reqHeaders = {};
+                const suppliedHeaders = (args[1] && args[1].headers)
+                    || (args[0] && args[0].headers);
+                if (suppliedHeaders) {
+                    let h = suppliedHeaders;
+                    if (h instanceof Headers) {
+                        h.forEach((v, k) => reqHeaders[k] = v);
+                    } else if (Array.isArray(h)) {
+                        h.forEach(pair => { if (pair.length === 2) reqHeaders[pair[0]] = pair[1]; });
+                    } else if (typeof h === 'object') {
+                        reqHeaders = {...h};
                     }
-                    
+                }
+
+                const captureActive = window._sndNetworkCaptureEnabled === true;
+                const captureContext = currentCaptureContext();
+                if (captureActive) postNetworkActivity(captureContext, 'start');
+                try {
+                    const response = await originalFetch.apply(this, args);
+                    if (!captureActive) return response;
+                    let clone;
                     try {
-                        const response = await originalFetch.apply(this, args);
-                        const clone = response.clone();
-                        clone.text().then(text => {
-                            window.webkit.messageHandlers.sndRecordingBridge.postMessage({
-                                action: 'network_capture',
-                                type: 'fetch',
-                                url: url,
-                                request_headers: reqHeaders,
-                                request_body: reqBody,
-                                response_body: text
-                            });
-                        }).catch(e => {
-                            window.webkit.messageHandlers.sndRecordingBridge.postMessage({
-                                action: 'network_capture',
-                                type: 'fetch',
-                                url: url,
-                                request_headers: reqHeaders,
-                                request_body: reqBody,
-                                response_body: '[Error reading response]'
-                            });
-                        });
+                        clone = response.clone();
+                    } catch (_) {
+                        postNetworkActivity(captureContext, 'end');
                         return response;
-                    } catch (err) {
-                        throw err;
                     }
-                
-                return originalFetch.apply(this, args);
+                    readBoundedResponse(clone, MAX_RESPONSE_CHARS)
+                        .then(captured => {
+                            if (!captureStillCurrent(captureContext)) return;
+                            window.webkit.messageHandlers.sndRecordingBridge.postMessage({
+                                action: 'network_capture',
+                                persona_id: captureContext.persona_id,
+                                capture_session: captureContext.capture_session,
+                                type: 'fetch',
+                                url: requestUrl,
+                                method: method,
+                                request_headers: reqHeaders,
+                                request_body: reqBody.text,
+                                request_truncated: reqBody.truncated,
+                                response_status: response.status,
+                                response_body: captured.text,
+                                response_truncated: captured.truncated
+                            });
+                        })
+                        .catch(() => {
+                            if (!captureStillCurrent(captureContext)) return;
+                            window.webkit.messageHandlers.sndRecordingBridge.postMessage({
+                                action: 'network_capture',
+                                persona_id: captureContext.persona_id,
+                                capture_session: captureContext.capture_session,
+                                type: 'fetch',
+                                url: requestUrl,
+                                method: method,
+                                request_headers: reqHeaders,
+                                request_body: reqBody.text,
+                                request_truncated: reqBody.truncated,
+                                response_status: response.status,
+                                response_body: '[Error reading response]',
+                                response_truncated: false
+                            });
+                        })
+                        .finally(() => postNetworkActivity(captureContext, 'end'));
+                    return response;
+                } catch (err) {
+                    if (captureActive) postNetworkActivity(captureContext, 'end');
+                    throw err;
+                }
             };
             
             const originalXHR = window.XMLHttpRequest.prototype.open;
@@ -441,6 +695,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             
             window.XMLHttpRequest.prototype.open = function(method, url) {
                 this._sndUrl = url;
+                this._sndMethod = method;
                 this._sndReqHeaders = {};
                 return originalXHR.apply(this, arguments);
             };
@@ -452,36 +707,89 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             };
             
             window.XMLHttpRequest.prototype.send = function(body) {
-                const reqBody = typeof body === 'string' ? body : '[Binary/FormData]';
-                const url = this._sndUrl || '';
-                
+                const rawReqBody = typeof body === 'string' ? body : '[Binary/FormData]';
+                const reqBody = boundedText(rawReqBody, MAX_REQUEST_CHARS);
+                const requestUrl = absoluteURL(this._sndUrl || '');
+                const captureActive = window._sndNetworkCaptureEnabled === true;
+                const captureContext = currentCaptureContext();
+                if (captureActive) postNetworkActivity(captureContext, 'start');
+
                 this.addEventListener('load', function() {
-                    let resBody = '';
+                    if (!captureActive || !captureStillCurrent(captureContext)) return;
+                    let rawResBody = '';
                     if (this.responseType === '' || this.responseType === 'text') {
-                        resBody = this.responseText;
+                        rawResBody = this.responseText;
                     } else {
-                        resBody = '[Binary]';
+                        rawResBody = '[Binary]';
                     }
+                    const resBody = boundedText(rawResBody, MAX_RESPONSE_CHARS);
                     
                     window.webkit.messageHandlers.sndRecordingBridge.postMessage({
                         action: 'network_capture',
+                        persona_id: captureContext.persona_id,
+                        capture_session: captureContext.capture_session,
                         type: 'xhr',
-                        url: url,
+                        url: requestUrl,
+                        method: this._sndMethod || 'GET',
                         request_headers: this._sndReqHeaders || {},
-                        request_body: reqBody,
-                        response_body: resBody
+                        request_body: reqBody.text,
+                        request_truncated: reqBody.truncated,
+                        response_status: this.status,
+                        response_body: resBody.text,
+                        response_truncated: resBody.truncated
                     });
                 });
-                return originalXHRSend.apply(this, arguments);
+                this.addEventListener('loadend', function() {
+                    if (captureActive) postNetworkActivity(captureContext, 'end');
+                }, {once: true});
+                try {
+                    return originalXHRSend.apply(this, arguments);
+                } catch (err) {
+                    if (captureActive) postNetworkActivity(captureContext, 'end');
+                    throw err;
+                }
             };
         })();
         """
         
         let script = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: false)
         webView.configuration.userContentController.addUserScript(script)
-        
-        // Also evaluate it right now for the current page
-        _ = try? await webView.evaluateJavaScript(js)
+        networkCaptureScriptCount += 1
+    }
+
+    public func stopNetworkCapture() async throws {
+        networkCaptureEnabled = false
+        networkCaptureOrigin = nil
+        _ = try await webView.evaluateJavaScript("window._sndNetworkCaptureEnabled = false;")
+    }
+
+    public func scriptResourceURLs() async throws -> [String] {
+        let js = """
+        (() => {
+            const raw = [
+                ...Array.from(document.scripts || []).map(s => s.src),
+                ...performance.getEntriesByType('resource')
+                    .filter(e => e.initiatorType === 'script')
+                    .map(e => e.name)
+            ];
+            const urls = [];
+            const seen = new Set();
+            for (const value of raw) {
+                if (!value) continue;
+                try {
+                    const absolute = new URL(value, document.baseURI).href;
+                    if (!seen.has(absolute)) {
+                        seen.add(absolute);
+                        urls.push(absolute);
+                    }
+                } catch (_) {}
+                if (urls.length >= 64) break;
+            }
+            return urls;
+        })();
+        """
+        let value = try await webView.evaluateJavaScript(js)
+        return value as? [String] ?? []
     }
     
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {

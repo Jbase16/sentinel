@@ -48,6 +48,17 @@ class _ControlledExecutionAbort(RuntimeError):
     """Abort the experiment after a baseline or sequencing failure."""
 
 
+class BoundedResponseText(str):
+    """String-compatible transport body carrying a non-semantic truncation bit."""
+
+    body_truncated: bool
+
+    def __new__(cls, value: str, *, body_truncated: bool = False):
+        instance = super().__new__(cls, value)
+        instance.body_truncated = bool(body_truncated)
+        return instance
+
+
 @dataclass(frozen=True)
 class ControlledExecutionResult:
     proposal_id: str
@@ -128,6 +139,24 @@ def _validate_personas(source: ResearchPersona, peer: ResearchPersona) -> None:
         raise ControlledExecutionDenied("two_distinct_owned_personas_are_required")
     if not source.email or not peer.email:
         raise ControlledExecutionDenied("owned_personas_require_accountable_email_identity")
+
+
+def validate_controlled_capture_context(
+    *,
+    target_origin: str,
+    authorization: AuthorizationEnvelope,
+    source_persona: ResearchPersona,
+    peer_persona: ResearchPersona,
+) -> str:
+    """Validate every pre-capture identity and authorization invariant.
+
+    This deliberately excludes transport and capture data so a URL orchestrator
+    can fail closed before navigating either authenticated persona window.
+    """
+    normalized_origin = _origin(target_origin)
+    _validate_personas(source_persona, peer_persona)
+    _validate_envelope(authorization, normalized_origin)
+    return normalized_origin
 
 
 def _validated_proposal(
@@ -323,7 +352,11 @@ class _PolicyReplayTransport:
         )
         after = executor.policy.budget.snapshot()["total_requests"]
         self.sent += max(0, after - before)
-        response = bola_replay.ReplayResponse(status=int(status), body=_response_body(body))
+        response = bola_replay.ReplayResponse(
+            status=int(status),
+            body=_response_body(body),
+            body_truncated=bool(getattr(body, "body_truncated", False)),
+        )
         if self.attempted < 3:
             if status == DENIED_STATUS:
                 raise _ControlledExecutionAbort("baseline_denied_by_policy")
@@ -353,8 +386,12 @@ class ControlledAuthorizationExecutor:
         self._consumed = False
 
     def _preflight(self) -> None:
-        _validate_personas(self.source_persona, self.peer_persona)
-        _validate_envelope(self.authorization, self.target_origin)
+        validate_controlled_capture_context(
+            target_origin=self.target_origin,
+            authorization=self.authorization,
+            source_persona=self.source_persona,
+            peer_persona=self.peer_persona,
+        )
         expected = {self.source_persona.persona_id, self.peer_persona.persona_id}
         if set(self.executors) != expected:
             raise ControlledExecutionDenied("executor_persona_set_mismatch")
@@ -369,6 +406,10 @@ class ControlledAuthorizationExecutor:
             raise ControlledExecutionDenied("controlled_execution_requires_scope_filter")
         if source_executor.provenance is None or source_executor.provenance is not peer_executor.provenance:
             raise ControlledExecutionDenied("persona_executors_must_share_one_provenance_sink")
+
+    def validate_preflight(self) -> None:
+        """Validate the authorization/policy context without consuming the executor."""
+        self._preflight()
 
     async def execute(
         self,
@@ -446,7 +487,8 @@ class ControlledAuthorizationExecutor:
             restraint["policy_denials"] = (
                 len(source_executor.skipped) + len(peer_executor.skipped)
             )
-            restraint["stopped_after_first_proof"] = True
+            restraint["stopped_after_first_proof"] = verdict.finding is not None
+            restraint["stopped_after_terminal_verdict"] = True
             return ControlledExecutionResult(
                 proposal_id=validated.proposal_id,
                 legacy_verdict=verdict,

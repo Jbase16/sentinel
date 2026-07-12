@@ -116,12 +116,22 @@ class CreateEnvelopeRequest(BaseModel):
 class RunBehavioralAuthorizationRequest(BaseModel):
     """One autonomous paired-world behavioral authorization run."""
 
-    target_origin: str = Field(..., min_length=8)
-    envelope_id: str = Field(..., min_length=1)
-    source_persona_id: str = Field(..., min_length=1)
-    peer_persona_id: str = Field(..., min_length=1)
+    target_origin: str = Field(..., min_length=8, max_length=4096)
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    source_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
     peer_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
+    script_urls: List[str] = Field(default_factory=list, max_length=64)
+
+
+class RunBehavioralAuthorizationFromURLRequest(BaseModel):
+    """Capture two owned worlds from one URL, then run the primary planner."""
+
+    target_url: str = Field(..., min_length=8, max_length=4096)
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    source_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
 
 
 # ─────────────────────────── plan ───────────────────────────
@@ -467,6 +477,7 @@ async def envelope_proof_endpoint(
 
 
 _MAX_BEHAVIORAL_CAPTURE_BYTES = 16 * 1024 * 1024
+_MAX_BEHAVIORAL_RESPONSE_CHARS = 2 * 1024 * 1024
 
 
 def _behavioral_scope_filter(target_origin: str):
@@ -490,10 +501,30 @@ def _behavioral_scope_filter(target_origin: str):
 def _bounded_in_scope_records(
     records: List[Dict[str, Any]], scope_filter
 ) -> List[Dict[str, Any]]:
-    encoded_size = sum(len(json.dumps(record, separators=(",", ":"))) for record in records)
-    if encoded_size > _MAX_BEHAVIORAL_CAPTURE_BYTES:
-        raise ValueError("paired capture exceeds the 16 MiB execution limit")
     return [dict(record) for record in records if scope_filter(str(record.get("url") or ""))]
+
+
+def _behavioral_capture_bytes(*record_sets: List[Dict[str, Any]]) -> int:
+    return sum(
+        len(
+            json.dumps(
+                record,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+        for records in record_sets
+        for record in records
+    )
+
+
+def _bounded_script_urls(script_urls: List[str], scope_filter) -> List[str]:
+    normalized = [str(url).strip() for url in script_urls]
+    if any(len(url) > 16 * 1024 for url in normalized):
+        raise ValueError("script URL exceeds the 16 KiB execution limit")
+    in_scope = {url for url in normalized if url and scope_filter(url)}
+    return sorted(in_scope)[:16]
 
 
 @router.post("/behavioral-authorization")
@@ -507,6 +538,7 @@ async def run_behavioral_authorization_endpoint(
     returns the behavioral plan but cannot reach the SND replay transport.
     """
     from core.behavior.active import (
+        BoundedResponseText,
         CONTROLLED_WORKFLOW,
         ControlledAuthorizationExecutor,
         ControlledExecutionDenied,
@@ -516,16 +548,34 @@ async def run_behavioral_authorization_endpoint(
         PrimaryPlannerConfig,
         PrimaryPlannerError,
     )
+    from core.behavior.explorer import BehavioralReadExplorer
+    from core.behavior.graphql_catalog import PersistedOperationCatalog
+    from core.behavior.receipts import (
+        COMPLETED,
+        BehavioralReceiptStore,
+        ReceiptStoreError,
+        redacted_outcome,
+        redacted_receipt_context,
+        request_fingerprint,
+    )
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
     from core.safety.provenance import ProvenanceSink
+    from core.safety.proof_budget import ProofBudget
+    from core.safety.action_classifier import SAFE_READ
     from core.wraith.bola_replay import ReplayRequest, SNDReplayTransport
 
     try:
         target_origin, scope_filter = _behavioral_scope_filter(req.target_origin)
+        if (
+            _behavioral_capture_bytes(req.source_records, req.peer_records)
+            > _MAX_BEHAVIORAL_CAPTURE_BYTES
+        ):
+            raise ValueError("paired capture exceeds the 16 MiB execution limit")
         source_records = _bounded_in_scope_records(req.source_records, scope_filter)
         peer_records = _bounded_in_scope_records(req.peer_records, scope_filter)
+        script_urls = _bounded_script_urls(req.script_urls, scope_filter)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not source_records or not peer_records:
@@ -549,10 +599,43 @@ async def run_behavioral_authorization_endpoint(
 
     config = PrimaryPlannerConfig.from_environment()
     scheduler = BehavioralPrimaryScheduler(config)
+    catalog = PersistedOperationCatalog()
+    catalog.ingest_capture_records(source_records, source="source_capture")
+    catalog.ingest_capture_records(peer_records, source="peer_capture")
+    asset_resolution = {"attempted": 0, "fetched": 0, "failed": 0, "documents_added": 0}
     controlled_executor = None
+    executors = None
+    receipt_store = None
+    receipt_fingerprint = None
+    receipt_reservation_token = None
+    read_exploration = {
+        "status": "disabled",
+        "pairs_attempted": 0,
+        "pairs_completed": 0,
+        "requests_attempted": 0,
+        "requests_sent": 0,
+        "successful_responses": 0,
+        "policy_denials": 0,
+        "failed_requests": 0,
+        "candidates_discovered": 0,
+        "selected_after_pair": 0,
+        "frontier_exhausted": False,
+    }
     if config.enabled:
         transport = SNDReplayTransport()
-        policy = ExecutionPolicy("bounty_safe", scope_filter=scope_filter)
+        policy = ExecutionPolicy(
+            "bounty_safe",
+            scope_filter=scope_filter,
+            budget=ProofBudget(
+                max_total_requests=40,
+                max_requests_per_endpoint=5,
+                max_cross_object_reads=1,
+                max_privilege_mutations=0,
+                max_creates=0,
+                allow_delete=False,
+                allow_real_user_data_access=False,
+            ),
+        )
         provenance = ProvenanceSink()
         provenance.record_context(
             target=target_origin,
@@ -563,6 +646,13 @@ async def run_behavioral_authorization_endpoint(
         def make_executor(persona_id: str) -> PolicyExecutor:
             async def raw_send(method, url, body=None, **kwargs):
                 headers = kwargs.get("headers") or {}
+                response_cap = kwargs.get("_max_response_chars")
+                if (
+                    isinstance(response_cap, bool)
+                    or not isinstance(response_cap, int)
+                    or response_cap <= 0
+                ):
+                    response_cap = _MAX_BEHAVIORAL_RESPONSE_CHARS
                 response = await transport.send(
                     persona_id,
                     ReplayRequest(
@@ -570,22 +660,180 @@ async def run_behavioral_authorization_endpoint(
                         url=str(url),
                         body=(body if isinstance(body, str) or body is None else json.dumps(body)),
                         headers={str(key): str(value) for key, value in headers.items()},
+                        max_response_chars=response_cap,
                     ),
                 )
-                return response.status, response.body
+                return response.status, BoundedResponseText(
+                    response.body,
+                    body_truncated=response.body_truncated,
+                )
 
             return PolicyExecutor(raw_send, policy, provenance=provenance)
 
+        executors = {
+            source_persona.persona_id: make_executor(source_persona.persona_id),
+            peer_persona.persona_id: make_executor(peer_persona.persona_id),
+        }
         controlled_executor = ControlledAuthorizationExecutor(
             target_origin=target_origin,
             authorization=envelope,
             source_persona=source_persona,
             peer_persona=peer_persona,
-            executors={
-                source_persona.persona_id: make_executor(source_persona.persona_id),
-                peer_persona.persona_id: make_executor(peer_persona.persona_id),
-            },
+            executors=executors,
         )
+        try:
+            controlled_executor.validate_preflight()
+        except ControlledExecutionDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        receipt_store = BehavioralReceiptStore()
+        try:
+            receipt_fingerprint = request_fingerprint({
+                "schema_version": 1,
+                "target_origin": target_origin,
+                "envelope_id": req.envelope_id,
+                "source_persona_id": source_persona.persona_id,
+                "peer_persona_id": peer_persona.persona_id,
+                "source_records": source_records,
+                "peer_records": peer_records,
+                "script_urls": script_urls,
+            })
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="behavioral request cannot be fingerprinted deterministically",
+            ) from exc
+        try:
+            reservation = receipt_store.reserve(
+                receipt_fingerprint,
+                context=redacted_receipt_context(
+                    target_origin=target_origin,
+                    envelope_id=req.envelope_id,
+                    source_persona_id=source_persona.persona_id,
+                    peer_persona_id=peer_persona.persona_id,
+                ),
+            )
+        except (OSError, ReceiptStoreError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="behavioral receipt store unavailable; execution refused",
+            ) from exc
+        if not reservation.created:
+            if reservation.receipt.state == COMPLETED and reservation.receipt.outcome:
+                cached = dict(reservation.receipt.outcome)
+                cached["status"] = "already_executed"
+                cached["receipt"] = {
+                    "receipt_id": reservation.receipt.receipt_id,
+                    "state": reservation.receipt.state,
+                    "reused": True,
+                }
+                return cached
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "identical behavioral execution is already reserved or terminal "
+                    f"(receipt={reservation.receipt.receipt_id}, "
+                    f"state={reservation.receipt.state})"
+                ),
+            )
+        receipt_reservation_token = reservation.reservation_token
+        if receipt_reservation_token is None:
+            raise HTTPException(
+                status_code=503,
+                detail="behavioral receipt reservation token unavailable; execution refused",
+            )
+
+        source_executor = executors[source_persona.persona_id]
+        for script_url in script_urls:
+            asset_resolution["attempted"] += 1
+            try:
+                status, body = await source_executor.send(
+                    "GET",
+                    script_url,
+                    None,
+                    hint=SAFE_READ,
+                    actor=source_persona.persona_id,
+                    target_owner=source_persona.persona_id,
+                    target_is_researcher_owned=True,
+                    proof_goal="resolve_persisted_graphql_operation",
+                    _max_response_chars=catalog.limits.max_artifact_bytes,
+                )
+            except Exception:
+                asset_resolution["failed"] += 1
+                continue
+            if 200 <= int(status) < 300 and isinstance(body, str):
+                asset_resolution["fetched"] += 1
+                asset_resolution["documents_added"] += catalog.ingest_artifact(
+                    script_url, body
+                )
+            else:
+                asset_resolution["failed"] += 1
+
+    source_resolution = catalog.resolve_records(source_records)
+    peer_resolution = catalog.resolve_records(peer_records)
+    source_records = list(source_resolution.records)
+    peer_records = list(peer_resolution.records)
+
+    if config.enabled and executors is not None:
+        preliminary_plan = scheduler.plan(
+            source_records,
+            peer_records,
+            source_persona=source_persona,
+            peer_persona=peer_persona,
+        )
+        if preliminary_plan.selected is None:
+            try:
+                explorer = BehavioralReadExplorer(
+                    target_origin=target_origin,
+                    source_persona_id=source_persona.persona_id,
+                    peer_persona_id=peer_persona.persona_id,
+                    executors=executors,
+                )
+                exploration_result = await explorer.explore(
+                    source_records,
+                    peer_records,
+                    stop_when=lambda current_source, current_peer: (
+                        scheduler.plan(
+                            current_source,
+                            current_peer,
+                            source_persona=source_persona,
+                            peer_persona=peer_persona,
+                        ).selected
+                        is not None
+                    ),
+                )
+            except Exception as exc:
+                logger.exception("behavioral read exploration failed")
+                if (
+                    receipt_store is not None
+                    and receipt_fingerprint is not None
+                    and receipt_reservation_token is not None
+                ):
+                    try:
+                        receipt_store.abort(
+                            receipt_fingerprint,
+                            reservation_token=receipt_reservation_token,
+                            reason="read_exploration_error",
+                        )
+                    except (OSError, ReceiptStoreError):
+                        logger.exception("failed to terminate exploration receipt")
+                raise HTTPException(
+                    status_code=500,
+                    detail="behavioral read exploration failed",
+                ) from exc
+            else:
+                source_records = list(exploration_result.source_records)
+                peer_records = list(exploration_result.peer_records)
+                read_exploration = {
+                    "status": "completed",
+                    **exploration_result.diagnostics,
+                }
+                source_resolution = catalog.resolve_records(source_records)
+                peer_resolution = catalog.resolve_records(peer_records)
+                source_records = list(source_resolution.records)
+                peer_records = list(peer_resolution.records)
+        else:
+            read_exploration["status"] = "not_needed"
 
     try:
         run = await scheduler.run(
@@ -596,10 +844,302 @@ async def run_behavioral_authorization_endpoint(
             controlled_executor=controlled_executor,
         )
     except ControlledExecutionDenied as exc:
+        if (
+            receipt_store is not None
+            and receipt_fingerprint is not None
+            and receipt_reservation_token is not None
+        ):
+            try:
+                receipt_store.abort(
+                    receipt_fingerprint,
+                    reservation_token=receipt_reservation_token,
+                    reason="controlled_execution_denied",
+                )
+            except (OSError, ReceiptStoreError):
+                logger.exception("failed to terminate denied behavioral receipt")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except PrimaryPlannerError as exc:
+        if (
+            receipt_store is not None
+            and receipt_fingerprint is not None
+            and receipt_reservation_token is not None
+        ):
+            try:
+                receipt_store.abort(
+                    receipt_fingerprint,
+                    reservation_token=receipt_reservation_token,
+                    reason="primary_planner_error",
+                )
+            except (OSError, ReceiptStoreError):
+                logger.exception("failed to terminate errored behavioral receipt")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return run.to_dict()
+    response = run.to_dict()
+    response["graphql_resolution"] = {
+        "catalog": catalog.diagnostics(),
+        "assets": asset_resolution,
+        "source": source_resolution.diagnostics(),
+        "peer": peer_resolution.diagnostics(),
+    }
+    response["read_exploration"] = read_exploration
+    if (
+        receipt_store is not None
+        and receipt_fingerprint is not None
+        and receipt_reservation_token is not None
+    ):
+        try:
+            completed_receipt = receipt_store.complete(
+                receipt_fingerprint,
+                reservation_token=receipt_reservation_token,
+                outcome=redacted_outcome(response),
+            )
+        except (OSError, ReceiptStoreError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "behavioral execution completed but its durable receipt could not "
+                    "be finalized; identical retries remain blocked"
+                ),
+            ) from exc
+        response["receipt"] = {
+            "receipt_id": completed_receipt.receipt_id,
+            "state": completed_receipt.state,
+            "reused": False,
+        }
+    return response
+
+
+@router.post("/behavioral-authorization-from-url")
+async def run_behavioral_authorization_from_url_endpoint(
+    req: RunBehavioralAuthorizationFromURLRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Capture both registered persona windows sequentially and execute one plan.
+
+    Every authorization and native-window precondition is checked before an
+    orchestration receipt is reserved and before either browser is navigated.
+    Once capture begins, the durable receipt prevents an identical click from
+    silently repeating target traffic after any terminal outcome.
+    """
+    from core.behavior.active import (
+        ControlledExecutionDenied,
+        validate_controlled_capture_context,
+    )
+    from core.behavior.receipts import (
+        COMPLETED,
+        BehavioralReceiptStore,
+        ReceiptStoreError,
+        redacted_outcome,
+        redacted_receipt_context,
+        request_fingerprint,
+    )
+    from core.behavior.scheduler import PrimaryPlannerConfig
+    from core.foundry.authorization import get_envelope
+    from core.foundry.vault import PersonaVault
+    from core.server.routers.driver import (
+        CaptureConflict,
+        DriverBridgeError,
+        PersonaWindowUnavailable,
+        capture_persona_pair,
+        ensure_capture_available,
+        validate_capture_url,
+        validate_persona_windows,
+    )
+
+    try:
+        target_url = validate_capture_url(req.target_url)
+        target_origin, _scope_filter = _behavioral_scope_filter(target_url)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if not PrimaryPlannerConfig.from_environment().enabled:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click behavioral execution requires "
+                "SENTINELFORGE_BEHAVIOR_PRIMARY=1"
+            ),
+        )
+
+    vault = PersonaVault()
+    source_persona = vault.get_persona(req.source_persona_id)
+    peer_persona = vault.get_persona(req.peer_persona_id)
+    if source_persona is None or peer_persona is None:
+        raise HTTPException(status_code=404, detail="one or both research personas were not found")
+    envelope = get_envelope(req.envelope_id)
+    if envelope is None:
+        raise HTTPException(status_code=404, detail=f"envelope {req.envelope_id!r} not found")
+    try:
+        validate_controlled_capture_context(
+            target_origin=target_origin,
+            authorization=envelope,
+            source_persona=source_persona,
+            peer_persona=peer_persona,
+        )
+    except ControlledExecutionDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    try:
+        fingerprint = request_fingerprint({
+            "schema_version": 1,
+            "mode": "behavioral_url_capture_orchestration",
+            "target_url": target_url,
+            "envelope_id": req.envelope_id,
+            "source_persona_id": source_persona.persona_id,
+            "peer_persona_id": peer_persona.persona_id,
+        })
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="one-click request cannot be fingerprinted deterministically",
+        ) from exc
+
+    receipt_store = BehavioralReceiptStore()
+
+    def duplicate_response(receipt):
+        if receipt.state == COMPLETED and receipt.outcome:
+            cached = dict(receipt.outcome)
+            cached["status"] = "already_executed"
+            cached["orchestration_receipt"] = {
+                "receipt_id": receipt.receipt_id,
+                "state": receipt.state,
+                "reused": True,
+            }
+            return cached
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "identical one-click execution is already reserved or terminal "
+                f"(receipt={receipt.receipt_id}, state={receipt.state})"
+            ),
+        )
+
+    try:
+        existing = receipt_store.load(fingerprint)
+    except (OSError, ReceiptStoreError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="behavioral receipt store unavailable; capture refused",
+        ) from exc
+    if existing is not None:
+        return duplicate_response(existing)
+
+    try:
+        ensure_capture_available()
+        await validate_persona_windows(
+            (source_persona.persona_id, peer_persona.persona_id)
+        )
+        ensure_capture_available()
+    except CaptureConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PersonaWindowUnavailable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (DriverBridgeError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        reservation = receipt_store.reserve(
+            fingerprint,
+            context=redacted_receipt_context(
+                target_origin=target_origin,
+                envelope_id=req.envelope_id,
+                source_persona_id=source_persona.persona_id,
+                peer_persona_id=peer_persona.persona_id,
+            ),
+        )
+    except (OSError, ReceiptStoreError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="behavioral receipt store unavailable; capture refused",
+        ) from exc
+    if not reservation.created:
+        return duplicate_response(reservation.receipt)
+    reservation_token = reservation.reservation_token
+    if reservation_token is None:
+        raise HTTPException(
+            status_code=503,
+            detail="behavioral receipt reservation token unavailable; capture refused",
+        )
+
+    def abort_receipt(reason: str) -> None:
+        try:
+            receipt_store.abort(
+                fingerprint,
+                reservation_token=reservation_token,
+                reason=reason,
+            )
+        except (OSError, ReceiptStoreError):
+            logger.exception("failed to terminate one-click behavioral receipt")
+
+    try:
+        source_capture, peer_capture, script_urls = await capture_persona_pair(
+            target_url=target_url,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+        )
+        response = await run_behavioral_authorization_endpoint(
+            RunBehavioralAuthorizationRequest(
+                target_origin=target_origin,
+                envelope_id=req.envelope_id,
+                source_persona_id=source_persona.persona_id,
+                peer_persona_id=peer_persona.persona_id,
+                source_records=list(source_capture.records),
+                peer_records=list(peer_capture.records),
+                script_urls=list(script_urls),
+            ),
+            _=True,
+        )
+    except HTTPException:
+        abort_receipt("behavioral_run_rejected")
+        raise
+    except (CaptureConflict, PersonaWindowUnavailable) as exc:
+        abort_receipt("capture_unavailable")
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (DriverBridgeError, OSError, RuntimeError) as exc:
+        abort_receipt("capture_orchestration_failed")
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        abort_receipt("capture_orchestration_failed")
+        logger.exception("unexpected one-click behavioral orchestration failure")
+        raise HTTPException(
+            status_code=500,
+            detail="one-click behavioral orchestration failed",
+        ) from exc
+
+    receiptable_response = dict(response)
+    if receiptable_response.get("status") == "already_executed":
+        execution = receiptable_response.get("execution")
+        if isinstance(execution, dict) and execution.get("status") in {
+            "completed",
+            "aborted",
+        }:
+            receiptable_response["status"] = execution["status"]
+        elif execution is None:
+            receiptable_response["status"] = "no_executable_candidate"
+    try:
+        completed_receipt = receipt_store.complete(
+            fingerprint,
+            reservation_token=reservation_token,
+            outcome=redacted_outcome(receiptable_response),
+        )
+    except (OSError, ReceiptStoreError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "one-click execution completed but its durable receipt could not "
+                "be finalized; identical retries remain blocked"
+            ),
+        ) from exc
+
+    response["capture_pair"] = {
+        "source": source_capture.summary(),
+        "peer": peer_capture.summary(),
+    }
+    response["orchestration_receipt"] = {
+        "receipt_id": completed_receipt.receipt_id,
+        "state": completed_receipt.state,
+        "reused": False,
+    }
+    return response
 
 
 @router.post("/signup")
