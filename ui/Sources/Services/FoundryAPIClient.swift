@@ -96,6 +96,67 @@ public struct FoundryPersona: Codable, Identifiable {
     }
 }
 
+public struct FoundryAuthorizationEnvelope: Codable, Identifiable {
+    public let envelopeId: String
+    public let targetHandle: String
+    public let authorizedOrigins: [String]
+    public let allowedWorkflows: [String]
+    public let context: String
+
+    public var id: String { envelopeId }
+    public var isApproved: Bool { context == "approved" }
+
+    enum CodingKeys: String, CodingKey {
+        case envelopeId = "envelope_id"
+        case targetHandle = "target_handle"
+        case authorizedOrigins = "authorized_origins"
+        case allowedWorkflows = "allowed_workflows"
+        case context
+    }
+}
+
+public struct BehavioralAuthorizationPlan: Codable {
+    public let selectedProposalId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case selectedProposalId = "selected_proposal_id"
+    }
+}
+
+public struct BehavioralAuthorizationExecution: Codable {
+    public let legacyVerdict: String
+
+    enum CodingKeys: String, CodingKey {
+        case legacyVerdict = "legacy_verdict"
+    }
+}
+
+public struct BehavioralReadExploration: Codable {
+    public let status: String
+    public let pairsCompleted: Int
+    public let requestsSent: Int
+    public let selectedAfterPair: Int
+
+    enum CodingKeys: String, CodingKey {
+        case status
+        case pairsCompleted = "pairs_completed"
+        case requestsSent = "requests_sent"
+        case selectedAfterPair = "selected_after_pair"
+    }
+}
+
+public struct BehavioralAuthorizationResponse: Codable {
+    public let status: String
+    public let plan: BehavioralAuthorizationPlan
+    public let execution: BehavioralAuthorizationExecution?
+    public let readExploration: BehavioralReadExploration?
+
+    enum CodingKeys: String, CodingKey {
+        case status, plan, execution
+        case readExploration = "read_exploration"
+    }
+}
+
 public struct FoundryRecipeSummary: Codable, Identifiable {
     public let recipeId: String
     public let serviceHandle: String
@@ -220,6 +281,60 @@ public final class FoundryAPIClient {
 
     public func listPersonas() async throws -> [FoundryPersona] {
         try await send(authed("/v1/foundry/personas"), as: [FoundryPersona].self)
+    }
+
+    public func listAuthorizationEnvelopes() async throws -> [FoundryAuthorizationEnvelope] {
+        try await send(
+            authed("/v1/foundry/envelopes"),
+            as: [FoundryAuthorizationEnvelope].self
+        )
+    }
+
+    public func runBehavioralAuthorization(
+        targetOrigin: String,
+        envelopeId: String,
+        sourcePersonaId: String,
+        peerPersonaId: String,
+        sourceRecords: [[String: Any]],
+        peerRecords: [[String: Any]],
+        scriptURLs: [String] = []
+    ) async throws -> BehavioralAuthorizationResponse {
+        try await postJSON(
+            "/v1/foundry/behavioral-authorization",
+            body: [
+                "target_origin": targetOrigin,
+                "envelope_id": envelopeId,
+                "source_persona_id": sourcePersonaId,
+                "peer_persona_id": peerPersonaId,
+                "source_records": sourceRecords,
+                "peer_records": peerRecords,
+                "script_urls": scriptURLs,
+            ],
+            as: BehavioralAuthorizationResponse.self
+        )
+    }
+
+    public func runBehavioralAuthorizationFromURL(
+        targetURL: String,
+        envelopeId: String,
+        sourcePersonaId: String,
+        peerPersonaId: String
+    ) async throws -> BehavioralAuthorizationResponse {
+        var request = authed(
+            "/v1/foundry/behavioral-authorization-from-url",
+            method: "POST"
+        )
+        request.timeoutInterval = 900
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: [
+                "target_url": targetURL,
+                "envelope_id": envelopeId,
+                "source_persona_id": sourcePersonaId,
+                "peer_persona_id": peerPersonaId,
+            ]
+        )
+        return try await send(request, as: BehavioralAuthorizationResponse.self)
     }
 
     /// Create a research persona in the vault. The password is stored server-side

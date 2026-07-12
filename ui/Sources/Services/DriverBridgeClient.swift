@@ -39,13 +39,25 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         super.init()
         connect()
     }
+
+    private static func readAPIToken() -> String? {
+        let path = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge", isDirectory: true)
+            .appendingPathComponent("api_token")
+        return try? String(contentsOf: path, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     
     public func connect() {
         guard !isConnected else { return }
         logToSnd("[SND] connect() called")
         
         let url = URL(string: "ws://127.0.0.1:8765/v1/driver/bridge")!
-        webSocketTask = session.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        if let token = Self.readAPIToken(), !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        webSocketTask = session.webSocketTask(with: request)
         webSocketTask?.resume()
         
         isConnected = true
@@ -114,7 +126,10 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     result = try await launchBrowser(args: args)
                 case "navigate":
                     if let url = args["url"] as? String {
-                        result = try await navigate(url: url)
+                        result = try await navigate(
+                            url: url,
+                            personaId: args["persona"] as? String
+                        )
                     }
                 case "click":
                     if let selector = args["selector"] as? [String: String] {
@@ -142,7 +157,39 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                 case "start_recording":
                     result = try await startRecording()
                 case "start_network_capture":
-                    result = try await startNetworkCapture()
+                    guard let captureSessionId = args["capture_session"] as? String,
+                          !captureSessionId.isEmpty else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "capture_session is required"
+                            ]
+                        )
+                    }
+                    result = try startNetworkCapture(
+                        personaId: args["persona"] as? String,
+                        captureSessionId: captureSessionId
+                    )
+                case "stop_network_capture":
+                    result = try await stopNetworkCapture(personaId: args["persona"] as? String)
+                case "validate_persona_windows":
+                    guard let personaIds = args["personas"] as? [String] else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "personas must be an array of persona identifiers"
+                            ]
+                        )
+                    }
+                    result = try validatePersonaWindows(personaIds: personaIds)
+                case "script_resource_urls":
+                    result = try await scriptResourceURLs(
+                        personaId: args["persona"] as? String
+                    )
                 case "wait_for_close":
                     result = try await waitForClose()
                 case "close":
@@ -215,7 +262,20 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     }
     
     @MainActor
-    private func getBrowser() throws -> GhostBrowserWindow {
+    private func getBrowser(personaId: String? = nil) throws -> GhostBrowserWindow {
+        if let personaId {
+            guard let personaWindow = personaWindows[personaId] else {
+                throw NSError(
+                    domain: "SND",
+                    code: 404,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "No authenticated window for persona '\(personaId)'"
+                    ]
+                )
+            }
+            return personaWindow
+        }
         guard let wc = currentBrowserWindowController,
               let window = wc.window as? GhostBrowserWindow else {
             throw NSError(domain: "SND", code: 404, userInfo: [NSLocalizedDescriptionKey: "No active browser session"])
@@ -223,8 +283,8 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return window
     }
     
-    @MainActor private func navigate(url: String) async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func navigate(url: String, personaId: String? = nil) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         try await b.navigate(url: url)
         return "ok"
     }
@@ -268,10 +328,57 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return "ok"
     }
     
-    @MainActor private func startNetworkCapture() async throws -> String {
-        let b = try getBrowser()
-        try await b.startNetworkCapture()
+    @MainActor
+    private func startNetworkCapture(
+        personaId: String? = nil,
+        captureSessionId: String
+    ) throws -> String {
+        let b = try getBrowser(personaId: personaId)
+        try b.startNetworkCapture(
+            personaId: personaId,
+            captureSessionId: captureSessionId
+        )
         return "ok"
+    }
+
+    @MainActor private func stopNetworkCapture(personaId: String? = nil) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
+        try await b.stopNetworkCapture()
+        return "ok"
+    }
+
+    @MainActor
+    private func validatePersonaWindows(personaIds: [String]) throws -> String {
+        guard !personaIds.isEmpty,
+              Set(personaIds).count == personaIds.count,
+              personaIds.allSatisfy({ !$0.isEmpty }) else {
+            throw NSError(
+                domain: "SND",
+                code: 400,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "persona windows must contain distinct identifiers"
+                ]
+            )
+        }
+        let missing = personaIds.filter { personaWindows[$0] == nil }
+        guard missing.isEmpty else {
+            throw NSError(
+                domain: "SND",
+                code: 404,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "No registered window for persona '\(missing.joined(separator: ", "))'"
+                ]
+            )
+        }
+        return "ok"
+    }
+
+    @MainActor
+    private func scriptResourceURLs(personaId: String?) async throws -> [String] {
+        let b = try getBrowser(personaId: personaId)
+        return try await b.scriptResourceURLs()
     }
     
     @MainActor private func waitForClose() async throws -> String {
@@ -312,6 +419,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             "method":  args["method"]  as? String ?? "POST",
             "headers": args["headers"] as? [String: String] ?? [:],
             "body":    args["body"]    as? String as Any,
+            "maxResponseChars": args["max_response_chars"] as? Int as Any,
         ]
         
         let js = """
@@ -321,9 +429,46 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             body: (p.method === 'GET' || p.method === 'HEAD') ? undefined : p.body,
             credentials: 'include'
         });
-        const text = await resp.text();
+        const cap = Number.isInteger(p.maxResponseChars) && p.maxResponseChars > 0
+            ? p.maxResponseChars : 2097152;
+        async function readBounded(response, limit) {
+            if (!response.body || typeof response.body.getReader !== 'function') {
+                const raw = await response.text();
+                return {text: raw.slice(0, limit), truncated: raw.length > limit};
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let text = '';
+            let truncated = false;
+            while (true) {
+                const part = await reader.read();
+                if (part.done) break;
+                const decoded = decoder.decode(part.value, {stream: true});
+                const remaining = limit - text.length;
+                if (decoded.length > remaining) {
+                    text += decoded.slice(0, Math.max(0, remaining));
+                    truncated = true;
+                    await reader.cancel();
+                    break;
+                }
+                text += decoded;
+            }
+            if (!truncated) {
+                const tail = decoder.decode();
+                const remaining = limit - text.length;
+                text += tail.slice(0, Math.max(0, remaining));
+                truncated = tail.length > remaining;
+            }
+            return {text: text, truncated: truncated};
+        }
+        const captured = await readBounded(resp, cap);
         const h = {}; resp.headers.forEach((v, k) => h[k] = v);
-        return { status: resp.status, headers: h, body: text };
+        return {
+            status: resp.status,
+            headers: h,
+            body: captured.text,
+            body_truncated: captured.truncated
+        };
         """
         
         do {

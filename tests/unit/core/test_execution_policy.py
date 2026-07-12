@@ -15,7 +15,7 @@ execution_policy). These pin the ban-preventing envelope:
 import pytest
 
 from core.safety import action_classifier as ac
-from core.safety.proof_budget import endpoint_key
+from core.safety.proof_budget import ProofBudget, endpoint_key
 from core.cortex.execution_policy import (
     DENIED_STATUS, ExecutionPolicy, PolicyExecutor, make_executor,
 )
@@ -43,6 +43,23 @@ def test_reads_and_privilege_and_unknown():
 def test_endpoint_key_collapses_ids():
     assert endpoint_key("http://h/api/files/file_500") == endpoint_key("http://h/api/files/file_501")
     assert endpoint_key("http://h/rest/basket/7") == endpoint_key("http://h/rest/basket/999")
+
+
+def test_policy_digest_commits_to_total_and_endpoint_request_limits():
+    first = ExecutionPolicy(
+        "bounty_safe",
+        budget=ProofBudget(max_total_requests=40, max_requests_per_endpoint=5),
+    )
+    different_total = ExecutionPolicy(
+        "bounty_safe",
+        budget=ProofBudget(max_total_requests=41, max_requests_per_endpoint=5),
+    )
+    different_endpoint = ExecutionPolicy(
+        "bounty_safe",
+        budget=ProofBudget(max_total_requests=40, max_requests_per_endpoint=4),
+    )
+
+    assert len({first.digest(), different_total.digest(), different_endpoint.digest()}) == 3
 
 
 # ----------------------------------------------------------------- policy gate

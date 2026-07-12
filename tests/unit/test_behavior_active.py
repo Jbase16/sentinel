@@ -13,6 +13,7 @@ from core.behavior.active import (
     CONTROLLED_WORKFLOW,
     ControlledAuthorizationExecutor,
     ControlledExecutionDenied,
+    validate_controlled_capture_context,
 )
 import core.behavior.active as active_module
 from core.behavior.proposals import compile_authorization_proposals
@@ -134,6 +135,36 @@ def test_gate_c_has_no_direct_network_client_or_raw_send_bypass():
         isinstance(node, ast.Attribute) and node.attr == "raw_send"
         for node in ast.walk(tree)
     )
+
+
+def test_pre_capture_context_validates_scope_signature_and_owned_worlds():
+    source = _persona("source")
+    peer = _persona("peer")
+    envelope = _envelope()
+
+    normalized = validate_controlled_capture_context(
+        target_origin=f"{ORIGIN}/objects/1",
+        authorization=envelope,
+        source_persona=source,
+        peer_persona=peer,
+    )
+
+    assert normalized == ORIGIN
+    envelope.authorization_basis = "tampered"
+    with pytest.raises(ControlledExecutionDenied, match="signature_mismatch"):
+        validate_controlled_capture_context(
+            target_origin=ORIGIN,
+            authorization=envelope,
+            source_persona=source,
+            peer_persona=peer,
+        )
+    with pytest.raises(ControlledExecutionDenied, match="two_distinct_owned_personas"):
+        validate_controlled_capture_context(
+            target_origin=ORIGIN,
+            authorization=_envelope(),
+            source_persona=source,
+            peer_persona=source,
+        )
 
 
 @pytest.mark.asyncio
