@@ -383,6 +383,21 @@ def test_external_side_effect_hidden_in_json_is_rejected_during_preflight():
         runtime.validate_preflight()
 
 
+def test_privilege_field_hidden_behind_owned_create_hint_is_rejected():
+    records = _records(create_body='{"title":"test","role":"admin"}')
+
+    async def raw(method, url, body=None, **kwargs):
+        raise AssertionError("preflight must not send")
+
+    runtime, _executor = _runtime(raw, records=records)
+
+    with pytest.raises(
+        ControlledSequenceDenied,
+        match="runtime_create_body_is_not_proven_safe",
+    ):
+        runtime.validate_preflight()
+
+
 @pytest.mark.asyncio
 async def test_runtime_executor_is_single_use_even_after_success():
     async def raw(method, url, body=None, **kwargs):
