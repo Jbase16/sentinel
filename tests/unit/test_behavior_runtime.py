@@ -23,6 +23,10 @@ from core.behavior.admission import (
 )
 import core.behavior as behavior_package
 from core.behavior.lineage import PlanRehydrator, ValueLineageLedger
+from core.behavior.manifest import (
+    ExecutionManifestCompiler,
+    ExecutionManifestDenied,
+)
 from core.behavior.receipts import BehavioralReceiptStore
 from core.behavior.runtime import (
     CONTROLLED_SEQUENCE_WORKFLOW,
@@ -94,6 +98,16 @@ def _authorization():
     return envelope
 
 
+def _plan_for_ledger(ledger):
+    operations = {item.label: item for item in ledger.operations}
+    return BackwardExploitCompiler(ledger.operations).compile(
+        BackwardGoal(
+            "read_fresh_owned_note",
+            operations["GET /api/notes/{id}"].operation_id,
+        )
+    )
+
+
 def _enriched_ledger(
     records=None,
     *,
@@ -120,9 +134,7 @@ def _enriched_ledger(
     )
     ledger = ValueLineageLedger(records, operation_contracts=enriched)
     operations = {item.label: item for item in ledger.operations}
-    plan = BackwardExploitCompiler(ledger.operations).compile(
-        BackwardGoal("read_fresh_owned_note", operations["GET /api/notes/{id}"].operation_id)
-    )
+    plan = _plan_for_ledger(ledger)
     recipe = PlanRehydrator(ledger).build_recipe(plan, world_id="alice")
     intents = {
         operations["POST /api/notes"].operation_id: RuntimeStepIntent(
@@ -594,3 +606,206 @@ async def test_failed_admission_is_terminal_and_cannot_renew_budget(tmp_path):
     with pytest.raises(ControlledAdmissionDenied, match="already_reserved_or_terminal"):
         await retry.execute()
     assert calls == []
+
+
+def _compile_manifest_from_runtime(
+    runtime,
+    *,
+    admission_config=None,
+    receipt_store=None,
+    plan=None,
+    recipe=None,
+):
+    return ExecutionManifestCompiler().compile(
+        target_origin=runtime.target_origin,
+        authorization=runtime.authorization,
+        actor_persona_id=runtime.actor_persona_id,
+        executor=runtime.executor,
+        ledger=runtime.ledger,
+        plan=plan or _plan_for_ledger(runtime.ledger),
+        recipe=recipe or runtime.recipe,
+        admission_config=admission_config,
+        receipt_store=receipt_store,
+    )
+
+
+def test_manifest_compiler_derives_complete_runtime_without_traffic():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, executor = _runtime(raw)
+    bundle = _compile_manifest_from_runtime(runtime)
+
+    assert calls == []
+    assert executor.policy.budget.snapshot()["total_requests"] == 0
+    assert [item.role for item in bundle.manifest.steps] == [
+        "owned_create",
+        "owned_read",
+        "owned_cleanup",
+    ]
+    assert bundle.manifest.sequence_id == bundle.runtime.validate_preflight()
+    assert bundle.manifest.executable is False
+    assert bundle.admission.config.enabled is False
+    serialized = json.dumps(bundle.manifest.to_dict(), sort_keys=True)
+    for raw_value in (ORIGIN, CAPTURED_ID, FRESH_ID, "alice", "runtime-test-envelope"):
+        assert raw_value not in serialized
+
+
+def test_manifest_compilation_is_deterministic_for_identical_evidence_and_authority():
+    async def raw(method, url, body=None, **kwargs):
+        return 200, {}
+
+    authorization = _authorization()
+    first_runtime, _first_executor = _runtime(raw, authorization=authorization)
+    second_runtime, _second_executor = _runtime(raw, authorization=authorization)
+
+    first = _compile_manifest_from_runtime(first_runtime).manifest
+    second = _compile_manifest_from_runtime(second_runtime).manifest
+
+    assert first.to_dict() == second.to_dict()
+
+
+@pytest.mark.asyncio
+async def test_manifest_bundle_integrates_with_existing_guarded_admission(tmp_path):
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        if method == "POST":
+            return 201, {"noteId": FRESH_ID}
+        if method == "PATCH":
+            return 200, {"archived": True}
+        return 200, {"title": "controlled"}
+
+    runtime, _executor = _runtime(raw)
+    bundle = _compile_manifest_from_runtime(
+        runtime,
+        admission_config=ControlledAdmissionConfig(enabled=True),
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    )
+    assert calls == []
+
+    result = await bundle.admission.execute()
+
+    assert result.status == "completed"
+    assert [method for method, _url in calls] == ["POST", "GET", "PATCH"]
+
+
+def test_manifest_rejects_unknown_cleanup_safety_without_traffic():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, _executor = _runtime(raw, cleanup_safety=OperationSafety.UNKNOWN)
+
+    with pytest.raises(ExecutionManifestDenied, match="cleanup_contract_is_unsupported"):
+        _compile_manifest_from_runtime(runtime)
+    assert calls == []
+
+
+def test_manifest_rejects_forged_plan_identity_without_traffic():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, _executor = _runtime(raw)
+    plan = replace(
+        _plan_for_ledger(runtime.ledger),
+        plan_id="backward_plan:" + "0" * 64,
+    )
+
+    with pytest.raises(ExecutionManifestDenied, match="plan_identity_mismatch"):
+        _compile_manifest_from_runtime(runtime, plan=plan)
+    assert calls == []
+
+
+def test_manifest_rejects_removed_analysis_authority_blocker():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, _executor = _runtime(raw)
+    original = _plan_for_ledger(runtime.ledger)
+    plan = replace(
+        original,
+        execution_blockers=tuple(
+            item
+            for item in original.execution_blockers
+            if item != "analysis_only_no_execution_authority"
+        ),
+    )
+
+    with pytest.raises(ExecutionManifestDenied, match="authority_blocker_is_missing"):
+        _compile_manifest_from_runtime(runtime, plan=plan)
+    assert calls == []
+
+
+def test_manifest_rejects_stale_capture_recipe_without_traffic():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, _executor = _runtime(raw)
+    stale_recipe = replace(
+        runtime.recipe,
+        capture_digest="lineage_capture:" + "0" * 64,
+    )
+
+    with pytest.raises(ExecutionManifestDenied, match="evidence_digest_mismatch"):
+        _compile_manifest_from_runtime(runtime, recipe=stale_recipe)
+    assert calls == []
+
+
+def test_manifest_rejects_read_only_plan_without_owned_create():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, _executor = _runtime(raw)
+    operations = {item.label: item for item in runtime.ledger.operations}
+    read = operations["GET /api/notes/{id}"]
+    plan = BackwardExploitCompiler(runtime.ledger.operations).compile(
+        BackwardGoal("read_existing_note", read.operation_id),
+        initial_capabilities=read.requires,
+    )
+    recipe = PlanRehydrator(runtime.ledger).build_recipe(plan, world_id="alice")
+
+    with pytest.raises(
+        ExecutionManifestDenied,
+        match="requires_one_create_and_owned_read",
+    ):
+        _compile_manifest_from_runtime(runtime, plan=plan, recipe=recipe)
+    assert calls == []
+
+
+def test_manifest_uses_runtime_preflight_as_final_cleanup_oracle():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    records = list(_records())
+    records[2] = {**records[2], "request_body": '{"title":"not cleanup"}'}
+    runtime, _executor = _runtime(raw, records=tuple(records))
+
+    with pytest.raises(ExecutionManifestDenied, match="runtime_preflight_denied"):
+        _compile_manifest_from_runtime(runtime)
+    assert calls == []
+
+
+def test_manifest_compiler_is_not_exported_from_passive_behavior_package():
+    assert not hasattr(behavior_package, "ExecutionManifestCompiler")
