@@ -28,7 +28,7 @@ so the executor is a transparent pass-through and existing behavior is unchanged
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from core.safety.action_classifier import CROSS_OBJECT_READ, DESTRUCTIVE, OWNED_CREATE, classify
@@ -60,6 +60,7 @@ class CandidateAction:
     target_is_researcher_owned: Optional[bool] = None
     expected_side_effect: Optional[str] = None
     proof_goal: Optional[str] = None
+    budget_reservation_id: Optional[str] = field(default=None, repr=False)
 
 
 @dataclass
@@ -116,7 +117,11 @@ class ExecutionPolicy:
                 return Decision(False, "cross_object_read_target_not_proven_researcher_created", ac)
 
         # 5. Budget.
-        ok, reason = self.budget.allows(ac, endpoint_key(a.url))
+        ok, reason = self.budget.allows(
+            ac,
+            endpoint_key(a.url),
+            reservation_id=a.budget_reservation_id,
+        )
         if not ok:
             return Decision(False, reason, ac)
 
@@ -130,8 +135,20 @@ class ExecutionPolicy:
             method, url, body, hint=hint,
             target_is_researcher_owned=target_is_researcher_owned))
 
-    def record(self, action_class: str, url: str, status: Optional[int] = None) -> None:
-        self.budget.record(action_class, endpoint_key(url), status)
+    def record(
+        self,
+        action_class: str,
+        url: str,
+        status: Optional[int] = None,
+        *,
+        reservation_id: Optional[str] = None,
+    ) -> None:
+        self.budget.record(
+            action_class,
+            endpoint_key(url),
+            status,
+            reservation_id=reservation_id,
+        )
 
     def digest(self) -> str:
         """A short, stable fingerprint of the safety envelope this policy enforces, so
@@ -171,7 +188,12 @@ class PolicyExecutor:
             self._emit_provenance(action, decision, allowed=False, status=None, resp=None)
             return DENIED_STATUS, {"_policy_denied": decision.reason}
         status, resp = await self.raw_send(action.method, action.url, action.body, **kw)
-        self.policy.record(decision.action_class, action.url, status)
+        self.policy.record(
+            decision.action_class,
+            action.url,
+            status,
+            reservation_id=action.budget_reservation_id,
+        )
         self._register_ownership(action, decision, status, resp)
         self._emit_provenance(action, decision, allowed=True, status=status, resp=resp)
         return status, resp
@@ -184,7 +206,7 @@ class PolicyExecutor:
         if reg is None or decision.action_class != OWNED_CREATE:
             return
         try:
-            if 200 <= int(status) < 300:
+            if status is not None and 200 <= int(status) < 300:
                 reg.register_created(action.url, resp, actor_persona=action.actor_persona_id)
         except Exception as exc:
             logger.warning("[execution_policy] ownership register failed: %s: %s",
@@ -217,7 +239,9 @@ class PolicyExecutor:
                    target_owner: Optional[str] = None,
                    target_is_researcher_owned: Optional[bool] = None,
                    expected_side_effect: Optional[str] = None,
-                   proof_goal: Optional[str] = None, **kw: Any) -> Tuple[int, Any]:
+                   proof_goal: Optional[str] = None,
+                   budget_reservation_id: Optional[str] = None,
+                   **kw: Any) -> Tuple[int, Any]:
         # NB: every CandidateAction field is named here so it lands on the action,
         # not in **kw — **kw is reserved for genuine transport kwargs (e.g. _auth)
         # and is forwarded to the raw send. Leaking an intent field (proof_goal) into
@@ -226,7 +250,10 @@ class PolicyExecutor:
             method, url, body, hint=hint, actor_persona_id=actor,
             target_owner_persona_id=target_owner,
             target_is_researcher_owned=target_is_researcher_owned,
-            expected_side_effect=expected_side_effect, proof_goal=proof_goal), **kw)
+            expected_side_effect=expected_side_effect,
+            proof_goal=proof_goal,
+            budget_reservation_id=budget_reservation_id,
+        ), **kw)
 
     def restraint_summary(self) -> Dict[str, Any]:
         """What was done and what was refused — for the report's restraint section."""

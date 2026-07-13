@@ -43,6 +43,12 @@ def test_reads_and_privilege_and_unknown():
 def test_endpoint_key_collapses_ids():
     assert endpoint_key("http://h/api/files/file_500") == endpoint_key("http://h/api/files/file_501")
     assert endpoint_key("http://h/rest/basket/7") == endpoint_key("http://h/rest/basket/999")
+    assert endpoint_key("http://h/api/notes/note_7fa9f13a2b4c5d6e") == endpoint_key(
+        "http://h/api/notes/note_91c8a20b3d4e5f6a"
+    )
+    assert endpoint_key("http://h/api/notes/release_notes") != endpoint_key(
+        "http://h/api/notes/security_notes"
+    )
 
 
 def test_policy_digest_commits_to_total_and_endpoint_request_limits():
@@ -116,6 +122,55 @@ def test_bounty_caps_per_endpoint_enumeration():
     assert allowed == cap        # enumeration stops at the per-endpoint cap
 
 
+def test_budget_reservation_is_atomic_and_blocks_unreserved_budget_theft():
+    budget = ProofBudget(
+        max_total_requests=2,
+        max_requests_per_endpoint=1,
+        max_creates=1,
+    )
+    sequence = (
+        (ac.SAFE_READ, endpoint_key("http://h/api/input")),
+        (ac.OWNED_CREATE, endpoint_key("http://h/api/notes")),
+    )
+
+    reservation_id, reason = budget.try_reserve(sequence)
+
+    assert reason == "ok" and reservation_id is not None
+    assert budget.reservation_remaining(reservation_id) == 2
+    allowed, denied_reason = budget.allows(
+        ac.SAFE_READ,
+        endpoint_key("http://h/api/other"),
+    )
+    assert allowed is False and denied_reason == "total_request_budget_exhausted"
+    second, second_reason = budget.try_reserve(
+        ((ac.SAFE_READ, endpoint_key("http://h/api/other")),)
+    )
+    assert second is None and second_reason == "total_request_budget_exhausted"
+    assert budget.snapshot()["total_requests"] == 0
+
+
+def test_releasing_budget_reservation_returns_only_unused_slots():
+    budget = ProofBudget(max_total_requests=3)
+    reservation_id, _ = budget.try_reserve(
+        (
+            (ac.SAFE_READ, endpoint_key("http://h/a")),
+            (ac.SAFE_READ, endpoint_key("http://h/b")),
+        )
+    )
+    assert reservation_id is not None
+    budget.record(
+        ac.SAFE_READ,
+        endpoint_key("http://h/a"),
+        200,
+        reservation_id=reservation_id,
+    )
+
+    assert budget.reservation_remaining(reservation_id) == 1
+    assert budget.release_reservation(reservation_id) == 1
+    assert budget.release_reservation(reservation_id) == 0
+    assert budget.snapshot()["total_requests"] == 1
+
+
 def test_bounty_refuses_out_of_scope():
     p = _policy("bounty_safe", scope_filter=lambda u: "in-scope" in u)
     assert not p.evaluate("GET", "http://h/other").allowed
@@ -171,6 +226,60 @@ async def test_intent_kwargs_do_not_leak_to_raw_transport():
                           target_is_researcher_owned=True, actor="A", target_owner="B",
                           proof_goal="single_cross_owned_object_read")
     assert st == 200 and seen.get("called")
+
+
+@pytest.mark.asyncio
+async def test_executor_consumes_reserved_actions_only_in_declared_order():
+    sent = []
+
+    async def raw(method, url, body=None, **kw):
+        sent.append((method, url))
+        return (201, {"id": "n1"}) if method == "POST" else (200, {})
+
+    budget = ProofBudget(max_total_requests=2, max_creates=1)
+    policy = ExecutionPolicy("bounty_safe", budget=budget)
+    executor = PolicyExecutor(raw, policy)
+    read_url = "http://h/api/input"
+    create_url = "http://h/api/notes"
+    reservation_id, _ = budget.try_reserve(
+        (
+            (ac.SAFE_READ, endpoint_key(read_url)),
+            (ac.OWNED_CREATE, endpoint_key(create_url)),
+        )
+    )
+    assert reservation_id is not None
+
+    denied, response = await executor.send(
+        "POST",
+        create_url,
+        {"title": "test"},
+        hint=ac.OWNED_CREATE,
+        budget_reservation_id=reservation_id,
+    )
+    assert denied == DENIED_STATUS
+    assert response["_policy_denied"] == "budget_reservation_sequence_mismatch"
+    assert sent == []
+    assert budget.reservation_remaining(reservation_id) == 2
+
+    assert (
+        await executor.send(
+            "GET",
+            read_url,
+            budget_reservation_id=reservation_id,
+        )
+    )[0] == 200
+    assert (
+        await executor.send(
+            "POST",
+            create_url,
+            {"title": "test"},
+            hint=ac.OWNED_CREATE,
+            budget_reservation_id=reservation_id,
+        )
+    )[0] == 201
+    assert budget.reservation_remaining(reservation_id) == 0
+    assert budget.snapshot()["total_requests"] == 2
+    assert budget.snapshot()["creates"] == 1
 
 
 @pytest.mark.asyncio

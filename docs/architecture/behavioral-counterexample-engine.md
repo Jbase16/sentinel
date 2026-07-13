@@ -250,7 +250,8 @@ remain `unknown` safety rather than being guessed safe.
 This phase is intentionally incapable of execution. Every result is `analysis_only` and
 `executable: false`, including prerequisite-complete plans. Unknown or consequential
 operations add blockers, owned writes require a cleanup contract, and the compiler has
-no transport or `PolicyExecutor`. The next compiler phase must rehydrate exact values,
+no transport or `PolicyExecutor`. The lineage phase below supplies exact capture
+bindings, but any active phase must still
 prove ownership, validate cleanup, and reserve an execution budget through existing
 policy and provenance gates before even one compiled step can run.
 
@@ -259,6 +260,81 @@ as transformations capable of manufacturing the state required by a valuable sin
 is not merely ranking endpoints or chaining findings that already exist; it can explain
 which observed operations would have to execute, in which order, to make a currently
 unavailable security experiment possible.
+
+### Exact value lineage and controlled rehydration
+
+`ValueLineageLedger` adds the missing evidence between a semantic compiler edge and the
+captured bytes that support it. It extracts bounded candidate values from REST paths,
+query parameters, JSON and form request bodies, and JSON responses. A producer-output to
+consumer-input binding exists only when the semantic capability, exact value hash,
+isolated world, and temporal order all match. Two personas observing the same value do
+not create lineage, repeated producer locations are ambiguous, and duplicate request
+templates are never selected arbitrarily.
+
+Public lineage contracts contain only capability names, hashes, world and capture
+references, and exact locators. Raw identifiers, tokens, URLs, headers, bodies, and
+session material remain inside the session-local ledger. Its capture digest commits to
+the complete input records, while its catalog digest uses the same operation contract
+as the backward compiler. Short raw path values and authorization headers cannot enter
+the serialized snapshot.
+
+`PlanRehydrator` converts a prerequisite-complete `BackwardPlan` into a deterministic
+`RehydrationRecipe`. It verifies the plan catalog, requires exactly one same-world
+request template for every step, proves each non-initial capability through one exact
+lineage binding, and binds the recipe identity to the plan, capture, catalog, world,
+steps, bindings, validation errors, and execution blockers. Changed captures, forged
+recipes, unsupported locators, missing ownership proof, and secret-bearing capabilities
+fail closed.
+
+This remains an analysis slice and adds zero target traffic. A ready recipe is still
+`executable: false`; the in-memory rehydrated step has no send method, redacts its
+representation, and cannot cross `PolicyExecutor`. The next active slice must replace
+captured producer values with fresh runtime outputs, register researcher ownership at
+the executor seam, prove cleanup operations, and reserve a non-renewable multi-step
+budget before execution authority can be considered.
+
+The one-of-a-kind element is the evidence chain from a backward semantic dependency to
+the exact producer field and exact downstream request slot that carried the same value.
+Sentinel is no longer merely saying that `CreateInvoice` could enable `ExportInvoice`;
+it can prove where its invoice identifier emerged, where that exact identifier was
+consumed, in which isolated world, and whether the supporting capture is still current.
+
+### Controlled compiled runtime: fresh owned-state substitution
+
+`ControlledRuntimeSequenceExecutor` is an explicit-import, single-use execution seam
+for a deliberately narrow class of lineage-ready recipes. Before any target traffic or
+budget reservation, it verifies the signed authorization envelope and workflow, exact
+target origin, isolated persona world, bounty-safe policy, scope filter, ownership
+registry, provenance sink, operation intents, structural action classification, and an
+owned reversible cleanup contract. It supports only same-origin `POST` creation,
+same-origin `GET` reads of the newly owned object, and `PATCH` or `PUT` cleanup whose
+body is restricted to a small archival/deactivation vocabulary. `DELETE`, external
+side effects, payments, messages, unknown writes, non-path ownership, and ambiguous
+lineage fail closed.
+
+After preflight, the proof budget atomically reserves the complete ordered sequence.
+The runtime executes the create, extracts the fresh identifier from the exact response
+locator proven by capture lineage, substitutes it only into the proven downstream path
+slot, registers that concrete URL as researcher-owned, and then permits the read through
+the existing `PolicyExecutor`. Cleanup is attempted for every successfully registered
+create even when a later main step fails. Unused reservation entries are released, all
+actual requests remain budgeted and provenance-recorded, and the result contains only
+bounded counters, hashes, status, and fixed error codes rather than runtime identifiers
+or response data.
+
+This module is not imported by `core.behavior`, registered with Ghost, exposed through
+an API, connected to the UI, or selected by a scheduler. Therefore this slice changes
+the authority of direct internal callers that deliberately construct every required
+contract, but it changes no production target traffic and grants no autonomous runtime
+authority to Sentinel's existing workflows. It also does not infer cleanup, create
+accounts, follow browser flows, handle query/body-only ownership, or claim that a safe
+sequence proves a vulnerability.
+
+The novel element is the transactional bridge from captured causal evidence to fresh,
+owned runtime state: the same exact field-to-path lineage that justified the plan
+controls substitution, ownership registration, budget reservation, and compensating
+cleanup as one fail-closed unit. The compiler is no longer limited to replaying stale
+captured identifiers, while the executor still cannot improvise an unsafe step.
 
 ### Gate D: generalized security relations
 
