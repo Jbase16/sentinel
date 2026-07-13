@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import replace
@@ -14,7 +15,15 @@ from core.behavior.compiler import (
     OperationSafety,
     operation_contracts_from_records,
 )
+from core.behavior.admission import (
+    COMPILED_ADMISSION_ENV,
+    ControlledAdmissionConfig,
+    ControlledAdmissionDenied,
+    ControlledSequenceAdmission,
+)
+import core.behavior as behavior_package
 from core.behavior.lineage import PlanRehydrator, ValueLineageLedger
+from core.behavior.receipts import BehavioralReceiptStore
 from core.behavior.runtime import (
     CONTROLLED_SEQUENCE_WORKFLOW,
     ControlledRuntimeSequenceExecutor,
@@ -307,6 +316,25 @@ def test_cleanup_requires_explicit_owned_reversible_safety_contract():
 
 
 @pytest.mark.asyncio
+async def test_runtime_sequence_seal_rejects_authorization_change_before_traffic():
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    authorization = _authorization()
+    runtime, _executor = _runtime(raw, authorization=authorization)
+    expected_sequence_id = runtime.validate_preflight()
+    authorization.authorization_basis = "Different authorized research basis"
+    authorization.sign()
+
+    with pytest.raises(ControlledSequenceDenied, match="sequence_identity_changed"):
+        await runtime.execute(expected_sequence_id=expected_sequence_id)
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_cleanup_failure_is_reported_and_never_hidden_as_success():
     async def raw(method, url, body=None, **kwargs):
         if method == "POST":
@@ -368,3 +396,201 @@ def test_enrichment_cannot_rewrite_semantic_capability_edges():
             records,
             operation_contracts=(forged, *[item for item in observed if item != create]),
         )
+
+
+@pytest.mark.asyncio
+async def test_compiled_admission_defaults_off_before_receipt_or_traffic(tmp_path):
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    runtime, _executor = _runtime(raw)
+    admission = ControlledSequenceAdmission(
+        runtime,
+        config=ControlledAdmissionConfig(enabled=False),
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    )
+
+    with pytest.raises(ControlledAdmissionDenied, match="admission_is_disabled"):
+        await admission.execute()
+    assert calls == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_compiled_admission_environment_gate_is_exact_and_not_package_exported(
+    monkeypatch,
+):
+    monkeypatch.delenv(COMPILED_ADMISSION_ENV, raising=False)
+    assert ControlledAdmissionConfig.from_environment().enabled is False
+    monkeypatch.setenv(COMPILED_ADMISSION_ENV, "true")
+    assert ControlledAdmissionConfig.from_environment().enabled is True
+    monkeypatch.setenv(COMPILED_ADMISSION_ENV, "truthy")
+    assert ControlledAdmissionConfig.from_environment().enabled is False
+    assert not hasattr(behavior_package, "ControlledSequenceAdmission")
+
+
+@pytest.mark.asyncio
+async def test_admission_revalidates_authorization_before_receipt_or_traffic(tmp_path):
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    authorization = _authorization()
+    authorization.attestation_signature = ""
+    runtime, _executor = _runtime(raw, authorization=authorization)
+    admission = ControlledSequenceAdmission(
+        runtime,
+        config=ControlledAdmissionConfig(enabled=True),
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    )
+
+    with pytest.raises(ControlledSequenceDenied, match="authorization_envelope_is_unsigned"):
+        await admission.execute()
+    assert calls == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_compiled_admission_executes_once_and_reuses_redacted_receipt(tmp_path):
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        if method == "POST":
+            return 201, {"noteId": FRESH_ID}
+        if method == "PATCH":
+            return 200, {"archived": True}
+        return 200, {"title": "controlled"}
+
+    store = BehavioralReceiptStore(tmp_path)
+    authorization = _authorization()
+    runtime, _executor = _runtime(raw, authorization=authorization)
+    admission = ControlledSequenceAdmission(
+        runtime,
+        config=ControlledAdmissionConfig(enabled=True),
+        receipt_store=store,
+    )
+    fingerprint = admission.validate_preflight()
+    first = await admission.execute()
+
+    duplicate_runtime, _duplicate_executor = _runtime(
+        raw,
+        authorization=authorization,
+    )
+    duplicate = await ControlledSequenceAdmission(
+        duplicate_runtime,
+        config=ControlledAdmissionConfig(enabled=True),
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    ).execute()
+
+    assert first.status == "completed"
+    assert first.reused is False
+    assert duplicate.status == "already_executed"
+    assert duplicate.reused is True
+    assert len(calls) == 3
+    assert duplicate.execution == first.execution
+    encoded = (tmp_path / f"behavioral-{fingerprint}.json").read_text()
+    assert FRESH_ID not in encoded
+    assert CAPTURED_ID not in encoded
+    assert ORIGIN not in encoded
+
+
+@pytest.mark.asyncio
+async def test_concurrent_compiled_admission_has_one_traffic_owner(tmp_path):
+    calls = []
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def first_raw(method, url, body=None, **kwargs):
+        calls.append(("first", method, url))
+        if method == "POST":
+            entered.set()
+            await release.wait()
+            return 201, {"noteId": FRESH_ID}
+        if method == "PATCH":
+            return 200, {"archived": True}
+        return 200, {"title": "controlled"}
+
+    async def second_raw(method, url, body=None, **kwargs):
+        calls.append(("second", method, url))
+        raise AssertionError("duplicate admission must not send traffic")
+
+    store = BehavioralReceiptStore(tmp_path)
+    authorization = _authorization()
+    first_runtime, _first_executor = _runtime(
+        first_raw,
+        authorization=authorization,
+    )
+    second_runtime, _second_executor = _runtime(
+        second_raw,
+        authorization=authorization,
+    )
+    config = ControlledAdmissionConfig(enabled=True)
+    first_admission = ControlledSequenceAdmission(
+        first_runtime,
+        config=config,
+        receipt_store=store,
+    )
+    second_admission = ControlledSequenceAdmission(
+        second_runtime,
+        config=config,
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    )
+
+    first_task = asyncio.create_task(first_admission.execute())
+    await entered.wait()
+    with pytest.raises(ControlledAdmissionDenied, match="already_reserved_or_terminal"):
+        await second_admission.execute()
+    release.set()
+    result = await first_task
+
+    assert result.status == "completed"
+    assert [owner for owner, _method, _url in calls] == ["first", "first", "first"]
+
+
+@pytest.mark.asyncio
+async def test_failed_admission_is_terminal_and_cannot_renew_budget(tmp_path):
+    calls = []
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url))
+        return 200, {}
+
+    budget = ProofBudget(
+        max_total_requests=2,
+        max_requests_per_endpoint=3,
+        max_creates=1,
+        allow_real_user_data_access=False,
+    )
+    store = BehavioralReceiptStore(tmp_path)
+    authorization = _authorization()
+    runtime, _executor = _runtime(
+        raw,
+        budget=budget,
+        authorization=authorization,
+    )
+    admission = ControlledSequenceAdmission(
+        runtime,
+        config=ControlledAdmissionConfig(enabled=True),
+        receipt_store=store,
+    )
+
+    with pytest.raises(ControlledSequenceDenied, match="budget_reservation_denied"):
+        await admission.execute()
+    retry_runtime, _retry_executor = _runtime(
+        raw,
+        budget=budget,
+        authorization=authorization,
+    )
+    retry = ControlledSequenceAdmission(
+        retry_runtime,
+        config=ControlledAdmissionConfig(enabled=True),
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    )
+    with pytest.raises(ControlledAdmissionDenied, match="already_reserved_or_terminal"):
+        await retry.execute()
+    assert calls == []

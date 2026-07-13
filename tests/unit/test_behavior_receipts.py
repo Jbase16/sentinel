@@ -17,6 +17,7 @@ from core.behavior.receipts import (
     BehavioralReceiptContext,
     ReceiptStoreError,
     redacted_outcome,
+    redacted_compiled_outcome,
     redacted_receipt_context,
     request_fingerprint,
 )
@@ -283,3 +284,63 @@ def test_fingerprint_is_deterministic_but_order_sensitive():
 
     with pytest.raises(ValueError, match="Out of range float values"):
         request_fingerprint({"records": [float("nan")]})
+
+
+def _compiled_outcome():
+    return {
+        "sequence_id": "controlled_runtime_sequence:" + "b" * 64,
+        "status": "completed",
+        "main_steps_attempted": 2,
+        "main_steps_completed": 2,
+        "cleanup_steps_attempted": 1,
+        "cleanup_steps_completed": 1,
+        "policy_denials": 0,
+        "runtime_values_bound": 2,
+        "orphaned_owned_state_possible": False,
+        "provenance_root": "c" * 64,
+        "budget_snapshot": {
+            "total_requests": 3,
+            "cross_object_reads": 0,
+            "privilege_mutations": 0,
+            "creates": 1,
+            "endpoints_touched": 2,
+        },
+        "error_code": None,
+        "fresh_id": "note_secret_runtime_id",
+    }
+
+
+def test_compiled_receipt_persists_only_strict_redacted_summary(tmp_path):
+    store = BehavioralReceiptStore(tmp_path)
+    fingerprint = request_fingerprint({"mode": "compiled", "recipe": "secret"})
+    reservation = store.reserve(fingerprint, context=_context())
+    assert reservation.reservation_token is not None
+
+    outcome = redacted_compiled_outcome(_compiled_outcome())
+    completed = store.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token,
+        outcome=outcome,
+    )
+
+    assert completed.outcome == outcome
+    encoded = (tmp_path / f"behavioral-{fingerprint}.json").read_text()
+    assert "note_secret_runtime_id" not in encoded
+    assert "fresh_id" not in encoded
+
+
+def test_compiled_receipt_rejects_inconsistent_success_state():
+    outcome = _compiled_outcome()
+    outcome["orphaned_owned_state_possible"] = True
+
+    with pytest.raises(ReceiptStoreError, match="completed receipt is inconsistent"):
+        redacted_compiled_outcome(outcome)
+
+
+def test_compiled_receipt_rejects_arbitrary_error_text():
+    outcome = _compiled_outcome()
+    outcome["status"] = "aborted"
+    outcome["error_code"] = "runtime_transport_secret_token"
+
+    with pytest.raises(ReceiptStoreError, match="error code is invalid"):
+        redacted_compiled_outcome(outcome)

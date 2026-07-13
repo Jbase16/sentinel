@@ -581,8 +581,33 @@ class ControlledRuntimeSequenceExecutor:
         descriptor = {
             "recipe_id": self.recipe.recipe_id,
             "actor_world": self.recipe.world_ref,
+            "actor_persona_ref": stable_hash(
+                "controlled_runtime_actor",
+                self.actor_persona_id,
+            ),
+            "target_origin_ref": stable_hash(
+                "controlled_runtime_target",
+                self.target_origin,
+            ),
+            "authorization_signature": self.authorization.attestation_signature,
             "main": [item.operation.operation_id for item in main_steps],
             "cleanup": [item.step.operation.operation_id for item in cleanup_steps],
+            "intents": [
+                {
+                    "operation_id": item.operation.operation_id,
+                    "hint": item.intent.hint,
+                    "expected_side_effect": item.intent.expected_side_effect,
+                }
+                for item in main_steps
+            ]
+            + [
+                {
+                    "operation_id": item.step.operation.operation_id,
+                    "hint": item.step.intent.hint,
+                    "expected_side_effect": item.step.intent.expected_side_effect,
+                }
+                for item in cleanup_steps
+            ],
             "bindings": sorted(all_bindings),
             "policy_digest": self.executor.policy.digest(),
         }
@@ -602,11 +627,20 @@ class ControlledRuntimeSequenceExecutor:
 
         return self._preflight().sequence_id
 
-    async def execute(self) -> ControlledSequenceResult:
+    async def execute(
+        self,
+        *,
+        expected_sequence_id: Optional[str] = None,
+    ) -> ControlledSequenceResult:
         async with self._lock:
             if self._consumed:
                 raise ControlledSequenceDenied("runtime_sequence_executor_already_consumed")
             preflight = self._preflight()
+            if (
+                expected_sequence_id is not None
+                and preflight.sequence_id != expected_sequence_id
+            ):
+                raise ControlledSequenceDenied("runtime_sequence_identity_changed")
             self._consumed = True
             budget = self.executor.policy.budget
             reserved_actions = tuple(
@@ -742,7 +776,7 @@ class ControlledRuntimeSequenceExecutor:
                         error_code = (
                             str(exc)
                             if isinstance(exc, ControlledSequenceDenied)
-                            else f"runtime_transport_{type(exc).__name__}"
+                            else "runtime_transport_error"
                         )
                         main_aborted = True
                         remaining_main = len(preflight.main_steps) - index - (
@@ -813,7 +847,7 @@ class ControlledRuntimeSequenceExecutor:
                             error_code = (
                                 str(exc)
                                 if isinstance(exc, ControlledSequenceDenied)
-                                else f"runtime_cleanup_transport_{type(exc).__name__}"
+                                else "runtime_cleanup_transport_error"
                             )
                         if (
                             not cleanup_consumed
