@@ -6,6 +6,7 @@ controlled compiled runtime follows the same rule and requires an explicit impor
 from :mod:`core.behavior.runtime`; its durable admission coordinator likewise requires
 an explicit import from :mod:`core.behavior.admission`. The transport-free execution
 manifest compiler is also explicit-only through :mod:`core.behavior.manifest`.
+The passive lifecycle miner similarly requires :mod:`core.behavior.lifecycle`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

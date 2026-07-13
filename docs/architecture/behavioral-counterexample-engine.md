@@ -418,6 +418,50 @@ policy, and durable admission all become one content-addressed manifest without 
 target values. This closes the manual translation gap where a correct analysis could
 otherwise be assembled into a materially different execution.
 
+### Evidence-backed owned lifecycle mining
+
+`LifecycleContractMiner` removes the remaining manual safety/ownership enrichment for
+the manifest-v1 lifecycle. It first builds the conservative observed catalog and exact
+lineage ledger from captured exchanges. A candidate exists only when one successful
+same-world `POST` response produces a non-sensitive identifier that appears exactly in
+the path of a successful `GET` and in the path of one subsequent successful `PATCH` or
+`PUT`. The cleanup body must pass the same shared archival/deactivation predicate used
+again by the active runtime. The create body must also be structured and free of
+privilege, financial, messaging, tenant, recipient, or external-destination fields.
+The structural action classifier must independently confirm both writes as
+`OWNED_CREATE` and `OWNED_UPDATE_LOW_RISK`.
+
+The miner rejects repeated or ambiguous producer locations, multiple cleanup bindings,
+duplicate operation observations, role conflicts, cleanup operations that vary for the
+same create contract, cross-world values, query/body-only ownership, sensitive
+capabilities, consequential create paths, and unsafe cleanup bodies. Only accepted
+operations are copied into a new enriched catalog: the create receives
+`owned_reversible_write` plus its exact cleanup operation, reads receive
+`requires_owned_state`, and cleanup receives both. Every other operation retains its
+original conservative posture. The unchanged captures are then reprocessed against
+that exact enriched catalog so lineage and catalog identities remain coherent.
+
+Mining performs no network I/O, policy evaluation, budget reservation, receipt write,
+authorization decision, or execution. It is not exported from `core.behavior`, wired to
+Ghost, scheduled, exposed through an API, or connected to the UI. This slice therefore
+changes neither target traffic nor execution authority. It also does not select which
+owned read is security-relevant, infer destructive rollback, support query/body-owned
+objects, or claim a vulnerability from a valid lifecycle.
+
+In plain language, Sentinel can now learn from a capture that “this request created our
+test note, this request read that exact note, and this request safely archived it.” That
+learned lifecycle can pass directly into the backward planner and manifest compiler
+without a developer manually labeling the operations. If two cleanup actions look
+possible, the identifier crosses personas, or cleanup changes arbitrary content,
+Sentinel leaves the operations untrusted and builds nothing. It still prepares rather
+than starts the experiment.
+
+The one-of-a-kind property is evidence-derived execution typing: an operation becomes
+an owned reversible create or cleanup only because an exact captured value proves the
+entire same-world lifecycle and the active runtime shares the identical cleanup safety
+predicate. Safety metadata is no longer a hand-authored bridge between observation and
+execution, yet it remains deterministic and independently rechecked.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,

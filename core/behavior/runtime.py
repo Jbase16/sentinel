@@ -41,11 +41,14 @@ from .lineage import (
     ValueLineageLedger,
 )
 from .normalize import stable_hash
+from .safety_contracts import (
+    classification_body,
+    is_proven_safe_cleanup_body,
+    is_proven_safe_owned_create_body,
+)
 
 CONTROLLED_SEQUENCE_WORKFLOW = "behavioral_compiled_owned_sequence"
 _ALLOWED_HINTS = frozenset({SAFE_READ, OWNED_CREATE, OWNED_UPDATE_LOW_RISK})
-_CLEANUP_FIELDS = frozenset({"active", "archived", "is_archived", "state", "status"})
-_CLEANUP_VALUES = frozenset({"archive", "archived", "inactive", "removed", "test_complete"})
 
 
 class ControlledSequenceDenied(RuntimeError):
@@ -357,39 +360,6 @@ def _extract_runtime_value(response: Any, binding: LineageBinding) -> Any:
     return _pointer_get(response, binding.producer_locator.pointer)
 
 
-def _classification_body(body: Any) -> Any:
-    if not isinstance(body, str):
-        return body
-    stripped = body.lstrip()
-    if stripped.startswith(("{", "[")):
-        try:
-            return json.loads(body)
-        except (TypeError, ValueError):
-            return body
-    return body
-
-
-def _valid_cleanup_body(body: Any) -> bool:
-    parsed = _classification_body(body)
-    if not isinstance(parsed, Mapping) or not parsed:
-        return False
-    keys = {str(key).lower() for key in parsed}
-    if not keys <= _CLEANUP_FIELDS:
-        return False
-    for key, value in parsed.items():
-        normalized_key = str(key).lower()
-        if normalized_key in {"active", "archived", "is_archived"}:
-            if value not in {False, True}:
-                return False
-            if normalized_key == "active" and value is not False:
-                return False
-            if normalized_key in {"archived", "is_archived"} and value is not True:
-                return False
-        elif str(value).strip().lower() not in _CLEANUP_VALUES:
-            return False
-    return True
-
-
 class ControlledRuntimeSequenceExecutor:
     """Single-use executor for one owned, reversible compiled sequence."""
 
@@ -451,7 +421,7 @@ class ControlledRuntimeSequenceExecutor:
                 raise ControlledSequenceDenied("runtime_cleanup_method_is_not_reversible_update")
             if intent.expected_side_effect != "cleanup_owned_test_object":
                 raise ControlledSequenceDenied("runtime_cleanup_intent_is_invalid")
-            if not _valid_cleanup_body(request.body):
+            if not is_proven_safe_cleanup_body(request.body):
                 raise ControlledSequenceDenied("runtime_cleanup_body_is_not_proven_safe")
         elif intent.hint == SAFE_READ:
             if request.method != "GET" or operation.safety != OperationSafety.READ_ONLY:
@@ -472,18 +442,22 @@ class ControlledRuntimeSequenceExecutor:
         classified = classify(
             request.method,
             request.url,
-            _classification_body(request.body),
+            classification_body(request.body),
             hint=intent.hint,
         )
         if classified != intent.hint:
             raise ControlledSequenceDenied(
                 f"runtime_structural_classification_overruled_intent:{classified}"
             )
+        if intent.hint == OWNED_CREATE and not is_proven_safe_owned_create_body(
+            request.body
+        ):
+            raise ControlledSequenceDenied("runtime_create_body_is_not_proven_safe")
         decision = self.executor.policy.evaluate_action(
             CandidateAction(
                 method=request.method,
                 url=request.url,
-                body=_classification_body(request.body),
+                body=classification_body(request.body),
                 hint=intent.hint,
                 actor_persona_id=self.actor_persona_id,
                 expected_side_effect=intent.expected_side_effect,
