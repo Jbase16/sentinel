@@ -90,6 +90,30 @@ class OwnershipRegistry:
                             "collection": key[1], "object_id": key[2]}
         return key
 
+    def register_created_value(
+        self,
+        create_url: str,
+        object_id: Any,
+        *,
+        actor_persona: Optional[str] = None,
+    ) -> Optional[Key]:
+        """Register an exact ID extracted from a successful create response.
+
+        This supports nonstandard response fields such as ``noteId``. Callers must
+        invoke it only after the executor observed a successful ``OWNED_CREATE``;
+        the registry remains an in-memory policy structure, not caller evidence.
+        """
+
+        key = _created_key(create_url, object_id)
+        if key is None:
+            return None
+        self._owned[key] = {
+            "actor_persona": actor_persona,
+            "collection": key[1],
+            "object_id": key[2],
+        }
+        return key
+
     def is_owned(self, read_url: str) -> bool:
         """True iff the object this read targets was researcher-created in this session."""
         key = _read_key(read_url)

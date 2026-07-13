@@ -77,6 +77,8 @@ _SAFE_PATH_TERMS = frozenset(
         "membership",
         "memberships",
         "new",
+        "note",
+        "notes",
         "order",
         "orders",
         "organization",
@@ -169,6 +171,26 @@ class Capability:
 
 def _unique_capabilities(values: Iterable[Capability]) -> Tuple[Capability, ...]:
     return tuple(sorted(set(values), key=lambda item: item.key))
+
+
+def value_capability_for_field_path(path: Sequence[str]) -> Optional[Capability]:
+    """Return the compiler's canonical VALUE capability for a semantic field path."""
+
+    if not path:
+        return None
+    normalized = tuple(
+        _semantic_name(item, field_name="field path")
+        for item in path
+    )
+    leaf = normalized[-1]
+    if not _CAPABILITY_FIELD.search(leaf):
+        return None
+    if leaf in {"id", "ids", "key", "token", "url", "uuid"} and len(normalized) >= 2:
+        parent = normalized[-2]
+        if parent.endswith("s") and len(parent) > 1:
+            parent = parent[:-1]
+        leaf = f"{parent}_{leaf}"
+    return Capability(CapabilityKind.VALUE, leaf)
 
 
 @dataclass(frozen=True)
@@ -307,6 +329,7 @@ class BackwardPlan:
     terminal_operation_id: str
     status: str
     step_ids: Tuple[str, ...]
+    initial_capabilities: Tuple[Capability, ...]
     missing_capabilities: Tuple[Capability, ...]
     execution_blockers: Tuple[str, ...]
     explored_states: int
@@ -327,6 +350,9 @@ class BackwardPlan:
             "terminal_operation_id": self.terminal_operation_id,
             "status": self.status,
             "step_ids": list(self.step_ids),
+            "initial_capabilities": [
+                item.to_dict() for item in self.initial_capabilities
+            ],
             "missing_capabilities": [item.to_dict() for item in self.missing_capabilities],
             "execution_blockers": list(self.execution_blockers),
             "explored_states": self.explored_states,
@@ -464,6 +490,7 @@ class BackwardExploitCompiler:
         *,
         initial_capabilities: Sequence[Capability] = (),
     ) -> BackwardPlan:
+        initial = frozenset(initial_capabilities)
         terminal = self.operations.get(goal.terminal_operation_id)
         if terminal is None:
             return self._blocked(
@@ -473,6 +500,7 @@ class BackwardExploitCompiler:
                 blockers=("terminal_operation_not_found",),
                 explored_states=0,
                 exhausted=False,
+                initial=initial,
             )
         missing_outputs = set(goal.required_outputs) - set(terminal.produces)
         if missing_outputs:
@@ -483,9 +511,9 @@ class BackwardExploitCompiler:
                 blockers=("terminal_does_not_produce_required_output",),
                 explored_states=0,
                 exhausted=False,
+                initial=initial,
             )
 
-        initial = frozenset(initial_capabilities)
         queue: list[tuple[Any, int, frozenset[str]]] = []
         serial = 0
         start: frozenset[str] = frozenset()
@@ -524,6 +552,7 @@ class BackwardExploitCompiler:
                     terminal_operation_id=goal.terminal_operation_id,
                     status="planned",
                     step_ids=ordered,
+                    initial_capabilities=_unique_capabilities(initial),
                     missing_capabilities=(),
                     execution_blockers=blockers,
                     explored_states=explored,
@@ -574,6 +603,7 @@ class BackwardExploitCompiler:
             blockers=tuple(sorted(dead_blockers)),
             explored_states=explored,
             exhausted=exhausted,
+            initial=initial,
         )
 
     def _blocked(
@@ -585,6 +615,7 @@ class BackwardExploitCompiler:
         blockers: Tuple[str, ...],
         explored_states: int,
         exhausted: bool,
+        initial: frozenset[Capability],
     ) -> BackwardPlan:
         payload = {
             "goal_id": goal.goal_id,
@@ -600,6 +631,7 @@ class BackwardExploitCompiler:
             terminal_operation_id=goal.terminal_operation_id,
             status="blocked",
             step_ids=step_ids,
+            initial_capabilities=_unique_capabilities(initial),
             missing_capabilities=missing,
             execution_blockers=tuple(sorted(set((*blockers, "analysis_only_no_execution_authority")))),
             explored_states=explored_states,
@@ -613,15 +645,6 @@ class BackwardExploitCompiler:
 def _shape_capabilities(shape: Mapping[str, Any]) -> Tuple[Capability, ...]:
     output: set[Capability] = set()
 
-    def capability_name(path: Tuple[str, ...]) -> str:
-        leaf = path[-1]
-        if leaf in {"id", "ids", "key", "token", "url", "uuid"} and len(path) >= 2:
-            parent = path[-2]
-            if parent.endswith("s") and len(parent) > 1:
-                parent = parent[:-1]
-            return f"{parent}_{leaf}"
-        return leaf
-
     def walk(value: Any, path: Tuple[str, ...] = ()) -> None:
         if not isinstance(value, Mapping):
             return
@@ -631,8 +654,9 @@ def _shape_capabilities(shape: Mapping[str, Any]) -> Tuple[Capability, ...]:
                 for key, child in fields.items():
                     field = _semantic_name(str(key), field_name="shape field")
                     next_path = (*path, field)
-                    if _CAPABILITY_FIELD.search(field):
-                        output.add(Capability(CapabilityKind.VALUE, capability_name(next_path)))
+                    capability = value_capability_for_field_path(next_path)
+                    if capability is not None:
+                        output.add(capability)
                     walk(child, next_path)
         elif value.get("kind") == "array":
             variants = value.get("item_variants")
@@ -826,4 +850,5 @@ __all__ = [
     "OperationSafety",
     "high_value_goals",
     "operation_contracts_from_records",
+    "value_capability_for_field_path",
 ]
