@@ -377,6 +377,47 @@ policy configuration, and executable sequence. The execution budget is therefore
 durable property of the evidence-backed experiment itself rather than a resettable
 property of one process invocation.
 
+### Execution-manifest compiler
+
+`ExecutionManifestCompiler` removes the hand-written assembly between an exact
+`BackwardPlan`/`RehydrationRecipe` pair and the controlled runtime/admission boundary.
+Manifest v1 accepts only one observed `POST` operation explicitly classified as an
+owned reversible create, one or more observed `GET` operations explicitly marked as
+requiring owned state, and one observed `PATCH` or `PUT` cleanup operation outside the
+main plan. Every owned read must have exactly one direct response-field-to-request-path
+binding from that create. Sensitive, query/body-owned, read-only, multiple-create,
+unknown-safety, unobserved, stale, forged, or ambiguous shapes are rejected.
+
+Compilation verifies the backward plan identity, plan/recipe step equality, complete
+catalog and capture digests, allowed analysis blockers, exact rehydration recipe
+identity, cleanup metadata and capture uniqueness, authorization envelope, actor world,
+target origin, bounty-safe policy, ownership registry, provenance sink, and runtime
+structural classification. It deterministically derives only three intents:
+`OWNED_CREATE`, `SAFE_READ`, and `OWNED_UPDATE_LOW_RISK`. The resulting manifest commits
+to redacted target, authorization, and actor references, the policy digest, sequence,
+plan, recipe, capture, catalog, terminal operation, and ordered roles. It remains
+`executable: false`; execution still requires the separate default-off durable admission
+gate.
+
+This compiler performs no target I/O, reserves no budget, writes no receipt, and is not
+exported from `core.behavior`, selected by a scheduler, exposed through an API, or wired
+to the UI. Consequently this slice changes neither target traffic nor execution
+authority. It also does not infer operation safety, invent cleanup, select a goal,
+support arbitrary state machines, or decide whether an observed result is a valid
+security finding.
+
+In plain language, Sentinel can now package a proven create-note, read-that-new-note,
+archive-note chain for its guarded start switch without a developer manually labeling
+each runtime step. If the evidence only shows a read, the cleanup is uncertain, or the
+identifier travels somewhere other than the proven URL path, Sentinel refuses to build
+the package. It prepares the exact approved chain but still does not start it.
+
+The novel property is the deterministic proof-carrying handoff: semantic backward plan,
+exact captured value lineage, explicit safety metadata, runtime intent, authorization,
+policy, and durable admission all become one content-addressed manifest without raw
+target values. This closes the manual translation gap where a correct analysis could
+otherwise be assembled into a materially different execution.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,
