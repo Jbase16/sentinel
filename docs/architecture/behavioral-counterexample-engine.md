@@ -224,6 +224,42 @@ bounded counters and verdict state. Captures, request values, response bodies, o
 names, and semantic finding evidence are rejected by the persisted schema. This makes
 the active proof budget non-renewable by restarting the UI or backend.
 
+### Backward-chaining exploit compiler: analysis kernel
+
+`BackwardExploitCompiler` introduces a separate prerequisite graph rather than
+overloading the passive behavior graph or the post-finding causal graph. Each
+`OperationContract` is a redacted typed transformation: it consumes semantic
+capabilities, produces semantic capabilities, records whether success was actually
+observed, and carries a static safety posture. A `BackwardGoal` names a terminal
+operation and any output that operation must produce for the goal to be meaningful.
+
+The compiler plans backward from the terminal operation, selects observed producers for
+missing capabilities, and orders the resulting operations forward only when their
+prerequisites can actually be satisfied. The bounded best-first search prefers safe,
+observed producers; detects dependency cycles that have no bootstrap capability; and
+returns explicit missing-capability, step-limit, and search-limit blockers. Plan identity
+commits to the complete redacted operation catalog, compiler policy, limits, goal,
+initial capabilities, and ordered step IDs.
+
+Already-captured REST and GraphQL exchanges can feed this kernel without another target
+request. The adapter retains only normalized paths, operation names, semantic field
+names, structural hashes, and status-derived success state. Raw identifiers, tokens,
+URLs, request values, and response values are not retained. Non-read captured operations
+remain `unknown` safety rather than being guessed safe.
+
+This phase is intentionally incapable of execution. Every result is `analysis_only` and
+`executable: false`, including prerequisite-complete plans. Unknown or consequential
+operations add blockers, owned writes require a cleanup contract, and the compiler has
+no transport or `PolicyExecutor`. The next compiler phase must rehydrate exact values,
+prove ownership, validate cleanup, and reserve an execution budget through existing
+policy and provenance gates before even one compiled step can run.
+
+The novel distinction is that Sentinel is beginning to represent a remote application
+as transformations capable of manufacturing the state required by a valuable sink. It
+is not merely ranking endpoints or chaining findings that already exist; it can explain
+which observed operations would have to execute, in which order, to make a currently
+unavailable security experiment possible.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,
