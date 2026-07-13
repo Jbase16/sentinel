@@ -336,6 +336,47 @@ controls substitution, ownership registration, budget reservation, and compensat
 cleanup as one fail-closed unit. The compiler is no longer limited to replaying stale
 captured identifiers, while the executor still cannot improvise an unsafe step.
 
+### Durable compiled-sequence admission
+
+`ControlledSequenceAdmission` places a default-off, durable admission boundary around
+one fully constructed `ControlledRuntimeSequenceExecutor`. The environment gate
+`SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION` must be explicitly true. Admission then
+runs the runtime's complete traffic-free preflight and fingerprints the sequence,
+recipe, plan, capture, catalog, isolated world, target, authorization envelope, actor,
+and policy digest before reserving an owner-only receipt. Only the process holding the
+unpersisted reservation token can execute and finalize that fingerprint.
+
+Completed, aborted, cleanup-failed, concurrently reserved, and crash-stranded attempts
+cannot silently receive another execution budget. A completed duplicate returns only
+the cached redacted sequence summary. A failure before runtime completion advances the
+receipt to an aborted terminal state; cancellation or a receipt-finalization failure
+leaves the exclusive reservation in place, which also blocks replay. Persisted compiled
+outcomes accept only the sequence hash, bounded step and policy counters, orphan-state
+flag, provenance root, budget snapshot, and a bounded fixed error code. URLs, persona
+IDs, envelope IDs, request and response material, captured identifiers, and fresh
+runtime values are excluded by schema validation.
+
+The admission module remains an explicit internal import. It is not exported from
+`core.behavior`, registered with Ghost, selected by the primary scheduler, exposed by
+an API, or connected to the UI. This slice therefore grants execution authority only
+to a caller that deliberately enables the new gate and constructs the already-authorized
+runtime object. Default production behavior sends no new target traffic. It still does
+not choose a goal, compile arbitrary captures, infer intents or cleanup, launch browser
+flows, or determine that the resulting behavior is a bounty-valid vulnerability.
+
+In plain language, Sentinel now has a guarded internal start switch that works once for
+one exact approved chain. For example, an internal coordinator can start the proven
+create-note, read-that-new-note, archive-note chain; a second click, second process, or
+restart receives the prior redacted result or a refusal instead of repeating requests.
+The switch is not yet connected to ordinary scans or a user-facing one-click action, so
+Sentinel cannot independently decide when to press it.
+
+The one-of-a-kind property is that admission identity commits simultaneously to the
+backward plan, exact capture lineage, isolated actor world, authorization envelope,
+policy configuration, and executable sequence. The execution budget is therefore a
+durable property of the evidence-backed experiment itself rather than a resettable
+property of one process invocation.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,

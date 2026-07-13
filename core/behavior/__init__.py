@@ -3,7 +3,8 @@
 Gate C lives in :mod:`core.behavior.active` and is deliberately not imported here,
 so importing the passive shadow observer does not load an execution surface. The
 controlled compiled runtime follows the same rule and requires an explicit import
-from :mod:`core.behavior.runtime`.
+from :mod:`core.behavior.runtime`; its durable admission coordinator likewise requires
+an explicit import from :mod:`core.behavior.admission`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

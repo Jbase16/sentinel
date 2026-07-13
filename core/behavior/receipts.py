@@ -36,10 +36,55 @@ _VALID_EXECUTION_STATUSES = frozenset({"completed", "aborted"})
 _VALID_EXPLORATION_STATUSES = frozenset(
     {"completed", "disabled", "failed", "not_needed"}
 )
+_VALID_COMPILED_STATUSES = frozenset({"completed", "aborted", "cleanup_failed"})
 _VALID_LEGACY_VERDICTS = frozenset(
     {"BOLA_CONFIRMED", "DENIED", "NO_CROSS_READ", "AMBIGUOUS", "ERROR"}
 )
 _PROPOSAL_REF = re.compile(r"^authorization_proposal:[0-9a-f]{64}$")
+_COMPILED_SEQUENCE_REF = re.compile(r"^controlled_runtime_sequence:[0-9a-f]{64}$")
+_COMPILED_ERROR_CODES = frozenset(
+    {
+        "runtime_body_is_not_structured",
+        "runtime_body_json_is_invalid",
+        "runtime_body_json_is_not_container",
+        "runtime_cleanup_changed_endpoint_budget_key",
+        "runtime_cleanup_failed",
+        "runtime_cleanup_target_is_not_registered",
+        "runtime_cleanup_transport_error",
+        "runtime_cleanup_value_is_unavailable",
+        "runtime_consumer_locator_is_not_supported",
+        "runtime_create_id_is_missing_or_ambiguous",
+        "runtime_create_ownership_registration_failed",
+        "runtime_dependency_value_is_unavailable",
+        "runtime_form_body_is_not_text",
+        "runtime_owned_target_is_not_registered",
+        "runtime_parameter_locator_is_invalid",
+        "runtime_parameter_locator_missing",
+        "runtime_parameter_occurrence_is_invalid",
+        "runtime_path_index_is_invalid",
+        "runtime_path_locator_is_invalid",
+        "runtime_path_locator_missing",
+        "runtime_producer_locator_is_not_supported",
+        "runtime_request_array_index_invalid",
+        "runtime_request_array_index_missing",
+        "runtime_request_locator_crosses_scalar",
+        "runtime_request_locator_is_empty",
+        "runtime_request_locator_missing",
+        "runtime_request_locator_parent_is_scalar",
+        "runtime_response_array_index_invalid",
+        "runtime_response_array_index_missing",
+        "runtime_response_json_is_invalid",
+        "runtime_response_json_is_not_container",
+        "runtime_response_locator_crosses_scalar",
+        "runtime_response_locator_missing",
+        "runtime_response_value_is_invalid",
+        "runtime_response_value_is_not_scalar_identifier",
+        "runtime_step_denied_by_policy",
+        "runtime_step_returned_non_2xx",
+        "runtime_substitution_changed_endpoint_budget_key",
+        "runtime_transport_error",
+    }
+)
 _ABORT_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _CONTEXT_PREFIXES = {
     "target_ref": "behavioral_receipt_target:",
@@ -181,7 +226,7 @@ class BehavioralExecutionReceipt:
         if state == COMPLETED:
             if not isinstance(outcome, Mapping) or abort_reason is not None:
                 raise ReceiptStoreError("behavioral completed receipt is invalid")
-            normalized_outcome = redacted_outcome(outcome)
+            normalized_outcome = _redacted_stored_outcome(outcome)
             if normalized_outcome != dict(outcome):
                 raise ReceiptStoreError("behavioral receipt outcome is not strictly redacted")
         elif state == ABORTED:
@@ -350,6 +395,96 @@ def _redacted_read_exploration(value: Any) -> Dict[str, Any]:
     }
 
 
+def redacted_compiled_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return the only compiled-runtime fields permitted in a durable receipt."""
+
+    sequence_id = value.get("sequence_id")
+    status = value.get("status")
+    if (
+        not isinstance(sequence_id, str)
+        or _COMPILED_SEQUENCE_REF.fullmatch(sequence_id) is None
+    ):
+        raise ReceiptStoreError("compiled receipt sequence identity is invalid")
+    if status not in _VALID_COMPILED_STATUSES:
+        raise ReceiptStoreError("compiled receipt status is invalid")
+    counters = {
+        key: _nonnegative_int(value.get(key), field_name=f"compiled.{key}")
+        for key in (
+            "main_steps_attempted",
+            "main_steps_completed",
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "policy_denials",
+            "runtime_values_bound",
+        )
+    }
+    if (
+        counters["main_steps_completed"] > counters["main_steps_attempted"]
+        or counters["cleanup_steps_completed"]
+        > counters["cleanup_steps_attempted"]
+    ):
+        raise ReceiptStoreError("compiled receipt counters are inconsistent")
+    orphaned = value.get("orphaned_owned_state_possible")
+    if not isinstance(orphaned, bool):
+        raise ReceiptStoreError("compiled receipt orphan state is invalid")
+    provenance_root = value.get("provenance_root")
+    if not isinstance(provenance_root, str) or not re_full_sha256(provenance_root):
+        raise ReceiptStoreError("compiled receipt provenance root is invalid")
+    budget = _count_section(
+        value.get("budget_snapshot"),
+        (
+            "total_requests",
+            "cross_object_reads",
+            "privilege_mutations",
+            "creates",
+            "endpoints_touched",
+        ),
+        section="compiled.budget_snapshot",
+    )
+    attempted = (
+        counters["main_steps_attempted"] + counters["cleanup_steps_attempted"]
+    )
+    if (
+        budget["total_requests"] > attempted
+        or budget["cross_object_reads"] > budget["total_requests"]
+        or budget["privilege_mutations"] > budget["total_requests"]
+        or budget["creates"] > budget["total_requests"]
+        or budget["endpoints_touched"] > budget["total_requests"]
+    ):
+        raise ReceiptStoreError("compiled receipt budget is inconsistent")
+    error_code = value.get("error_code")
+    if error_code is not None and error_code not in _COMPILED_ERROR_CODES:
+        raise ReceiptStoreError("compiled receipt error code is invalid")
+    if status == "completed":
+        if (
+            error_code is not None
+            or orphaned
+            or counters["main_steps_attempted"]
+            != counters["main_steps_completed"]
+            or counters["cleanup_steps_attempted"]
+            != counters["cleanup_steps_completed"]
+        ):
+            raise ReceiptStoreError("compiled completed receipt is inconsistent")
+    elif error_code is None:
+        raise ReceiptStoreError("compiled unsuccessful receipt requires an error code")
+    if status == "cleanup_failed" and (
+        not orphaned
+        or counters["cleanup_steps_attempted"]
+        == counters["cleanup_steps_completed"]
+    ):
+        raise ReceiptStoreError("compiled cleanup failure receipt is inconsistent")
+    return {
+        "kind": "compiled_sequence",
+        "sequence_id": sequence_id,
+        "status": status,
+        **counters,
+        "orphaned_owned_state_possible": orphaned,
+        "provenance_root": provenance_root,
+        "budget_snapshot": budget,
+        "error_code": error_code,
+    }
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
     status = response.get("status")
@@ -385,6 +520,12 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
             response.get("read_exploration")
         )
     return output
+
+
+def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "compiled_sequence":
+        return redacted_compiled_outcome(value)
+    return redacted_outcome(value)
 
 
 class BehavioralReceiptStore:
@@ -614,7 +755,9 @@ class BehavioralReceiptStore:
             if not hmac.compare_digest(current.reservation_hash, supplied_hash):
                 raise ReceiptStoreError("behavioral receipt reservation token mismatch")
 
-            normalized_outcome = redacted_outcome(outcome) if outcome is not None else None
+            normalized_outcome = (
+                _redacted_stored_outcome(outcome) if outcome is not None else None
+            )
             normalized_reason = abort_reason
             if state == COMPLETED and normalized_outcome is None:
                 raise ReceiptStoreError("completed receipt requires a redacted outcome")
