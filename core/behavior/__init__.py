@@ -10,6 +10,8 @@ The passive lifecycle miner similarly requires :mod:`core.behavior.lifecycle`.
 The owned-experiment factory remains explicit-only through :mod:`core.behavior.factory`.
 Latent client affordance mining remains explicit-only through
 :mod:`core.behavior.affordances`.
+The security-obligation graph remains explicit-only through
+:mod:`core.behavior.obligations`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
