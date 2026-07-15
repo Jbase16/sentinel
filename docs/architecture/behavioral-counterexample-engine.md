@@ -462,6 +462,44 @@ entire same-world lifecycle and the active runtime shares the identical cleanup 
 predicate. Safety metadata is no longer a hand-authored bridge between observation and
 execution, yet it remains deterministic and independently rechecked.
 
+### Owned-experiment factory
+
+`OwnedExperimentFactory` closes the passive assembly gap from captured exchanges to a
+bounded inventory of controlled runtime bundles. It mines owned lifecycle candidates,
+creates one deterministic `BackwardGoal` per directly bound owned `GET`, compiles each
+goal through `BackwardExploitCompiler`, builds its exact-world `RehydrationRecipe`, and
+passes the result through `ExecutionManifestCompiler`. The factory rejects other actor
+worlds, blocked plans, incomplete recipes, and unsupported manifests; deduplicates by
+content-addressed manifest identity; and caps compilation before work begins. A global
+authorization, target, policy, provenance, ownership-registry, or runtime-preflight
+failure rejects the factory call rather than being hidden as an ordinary candidate
+failure.
+
+Every prepared experiment retains the existing authorization-bound runtime and durable
+admission object, but the factory supplies `ControlledAdmissionConfig(enabled=False)`
+explicitly. Environment configuration therefore cannot silently make factory output
+executable. Inventory serialization contains only hashes, contract identifiers,
+derived roles, and bounded counters. The factory performs no transport call, reserves
+no proof budget, writes no receipt, chooses no candidate for execution, and is not
+exported from `core.behavior`, scheduled, exposed through an API, or connected to the
+UI. This slice changes neither target traffic nor execution authority. It also does not
+decide whether an owned read is security-relevant, discover unobserved endpoints,
+generalize beyond direct path-bound identifiers, or claim a vulnerability or payout.
+
+In plain language, if Sentinel has already seen one safe test object being created,
+read in two different ways, and safely archived, it can now automatically prepare two
+separate guarded experiments—one for each read—without a developer wiring either chain
+by hand. It throws away a package if the object belongs to another persona or any proof
+step does not line up, and it never presses the start switch. Sentinel still cannot use
+this factory to invent missing requests, decide that a result is a bounty-worthy bug,
+or execute anything automatically.
+
+The novel property is exhaustive proof-preserving experiment assembly: every admissible
+owned read in a capture set becomes a deduplicated, content-addressed package whose
+lineage, cleanup, authorization, policy, actor world, and runtime structure have already
+survived the same gates used at execution. This removes per-experiment manual driving
+without weakening the boundary between passive understanding and controlled action.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,

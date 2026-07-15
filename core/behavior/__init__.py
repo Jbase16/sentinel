@@ -7,6 +7,7 @@ from :mod:`core.behavior.runtime`; its durable admission coordinator likewise re
 an explicit import from :mod:`core.behavior.admission`. The transport-free execution
 manifest compiler is also explicit-only through :mod:`core.behavior.manifest`.
 The passive lifecycle miner similarly requires :mod:`core.behavior.lifecycle`.
+The owned-experiment factory remains explicit-only through :mod:`core.behavior.factory`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
