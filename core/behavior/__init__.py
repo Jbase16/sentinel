@@ -12,6 +12,8 @@ Latent client affordance mining remains explicit-only through
 :mod:`core.behavior.affordances`.
 The security-obligation graph remains explicit-only through
 :mod:`core.behavior.obligations`.
+Evidence-referenced fixed-point closure remains explicit-only through
+:mod:`core.behavior.closure`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
