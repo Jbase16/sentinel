@@ -500,6 +500,52 @@ lineage, cleanup, authorization, policy, actor world, and runtime structure have
 survived the same gates used at execution. This removes per-experiment manual driving
 without weakening the boundary between passive understanding and controlled action.
 
+### Capability-linked latent affordance mining
+
+`LatentAffordanceMiner` joins two previously disconnected evidence surfaces: semantic
+capabilities produced by successful captured JSON responses and parameterized operations
+published in already-acquired JavaScript, source maps, or OpenAPI documents. A candidate
+exists only when one unambiguous producer in an isolated world emits a canonical
+capability such as `job_id` or `download_token`, one same-origin artifact route contains
+exactly one compatible path or query parameter, and the method/route shape has not
+already been observed. Named parameters require exact semantic agreement. Generic
+parameters such as `{id}` additionally require their resource parent to agree with the
+produced capability.
+
+The miner rejects cross-origin URLs, credential-bearing URLs, path traversal, partial or
+multi-parameter templates, ambiguous producers, ambiguous same-world matches, observed
+operations, malformed source maps, unsupported artifact types, and every artifact or
+candidate beyond explicit byte/count bounds. Candidate identity is structural and
+stable as additional evidence arrives; a separate evidence digest seals exact capture
+locators, value hashes, and artifact hashes. Public results retain route templates and
+semantic capability names but never raw identifiers, tokens, artifact contents, source
+URLs, target origins, or persona names. Sensitive token/key handoffs are marked and
+remain confirmation-only.
+
+This module consumes only caller-supplied captures and artifact text. It imports no
+transport, performs no target I/O, reserves no proof budget, and grants no execution
+authority. It is explicit-only, with no scheduler, API, UI, or runtime wiring. A latent
+affordance proves that the target published a plausible producer-to-consumer handoff; it
+does not prove that the route exists at runtime, that the current actor may access it,
+or that the resulting behavior is vulnerable. Version 1 deliberately excludes
+concatenated/computed routes, more than one unresolved parameter, non-JSON producers,
+and arbitrary route guessing.
+
+In plain language, if exporting Alice's controlled document returned a `jobId` and an
+already-downloaded client file contains an unused request for
+`/api/export-jobs/${jobId}`, Sentinel now connects those clues and records a possible
+hidden elevator. If that route was already visited, belongs to another site, needs two
+unknown keys, or two captured actions could have produced the value, Sentinel records
+nothing. It has found evidence of a door in the building plans, but it still does not
+touch the door.
+
+The one-of-a-kind property is capability-directed hidden-surface discovery rather than
+route keyword scoring: target-produced values become typed keys, artifact operations
+become typed locks, and only structurally compatible, previously unseen pairs enter the
+security frontier. Additional artifacts strengthen the same stable affordance instead
+of manufacturing duplicate leads. This is the first passive input required by the
+future security-obligation graph and fixed-point stopping contract.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,
