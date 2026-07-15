@@ -586,6 +586,51 @@ three disconnected feature outputs. The target's own behavior continuously defin
 questions Sentinel must answer, while graph identity makes forgotten or dropped work
 detectable.
 
+### Evidence-referenced fixed-point closure
+
+`SecurityClosureEvaluator` applies content-addressed `ObligationDisposition` records to
+one security-obligation graph. Every terminal disposition requires redacted,
+content-addressed evidence references; an obligation cannot be silently deleted or
+assigned two answers. `upheld`, `violated`, and `subsumed` decisions require every
+prerequisite to be upheld or validly subsumed. Subsumption must point to a semantically
+equivalent question whose coverage chain ends at an upheld obligation, and cycles are
+rejected. Disposition count is bounded by graph size and each disposition accepts at
+most 64 evidence references. `blocked` and `unreachable` remain explicit non-resolution
+states.
+
+The resulting `SecurityClosureCertificate` uses a strict outcome order. Any violated
+obligation yields `finding`. Empty or truncated graphs and explicit blocked or
+unreachable obligations yield `blocked`. Unanswered obligations yield `open`. A fully
+resolved graph remains `open` until the caller supplies a prior derivation graph with an
+identical digest at round two or later; only then is it `conditionally_closed`. The
+certificate commits to the current and previous graph digests, every disposition,
+status counts, unresolved, blocked, and finding identities, and the reason closure was
+withheld.
+
+This is evidence-frontier closure, not proof that a target has no vulnerabilities. It
+means only that all questions derivable from the current bounded evidence were resolved
+and that the supplied prior graph contains no different questions. New captures,
+artifacts, relations, or derivation rules invalidate that frontier and require another
+closure cycle. The evaluator performs no discovery, target request, proof-budget
+reservation, or execution. It is explicit-only and not exported, scheduled, routed, or
+connected to the UI. It validates evidence-reference structure and accounting, not the
+authenticity or semantic sufficiency of a future proof oracle's evidence, and it cannot
+prove that a caller actually scheduled two independent derivation runs. This pass
+changes neither target traffic nor execution authority.
+
+In plain language, Sentinel now needs a recorded answer linked to supporting receipts
+for every room on its current map. “We could not enter” stays visibly blocked, “the lock
+failed” becomes a finding, and “the lock held” closes only that question. Even after
+every question has an answer, Sentinel compares the map with a second supplied map; if
+a new room appears, the search continues. If the maps are unchanged, Sentinel may close
+this version of the map—but it never claims the whole building has no hidden rooms.
+
+The novel property is a proof-accounting stopping contract rather than a timer or
+checklist exhaustion. Sentinel closes a bounded search frontier only when its
+target-derived obligation graph is fully accounted for and structurally stable, while
+every inability to continue remains a machine-verifiable blocker instead of being
+laundered into “no finding.”
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,
