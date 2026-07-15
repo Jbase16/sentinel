@@ -546,6 +546,46 @@ security frontier. Additional artifacts strengthen the same stable affordance in
 of manufacturing duplicate leads. This is the first passive input required by the
 future security-obligation graph and fixed-point stopping contract.
 
+### Security-obligation graph
+
+`SecurityObligationGraphBuilder` converts the passive behavioral evidence surfaces into
+one deterministic dependency graph of security questions. Each proven lifecycle read
+produces an `upheld` owned-control node and an `open` ownership-boundary obligation that
+depends on that control. Each Alice/Bob authorization proposal becomes an open
+counterexample obligation. Each latent affordance becomes an open operation-confirmation
+obligation plus an open capability-confinement obligation that cannot be resolved before
+the operation itself is confirmed.
+
+Obligation identity commits to target, property, subject, dependencies, risk class, and
+whether resolution eventually requires execution. Exact lifecycle, proposal, artifact,
+capture-locator, and affordance evidence is sealed separately, so stronger corroboration
+does not manufacture a new security question. The graph rejects missing dependencies,
+cycles, target mismatches, forged identities, duplicate evidence, and malformed status
+or risk contracts. Explicit obligation, dependency, and evidence limits fail closed and
+are included in the graph digest; dropped work can therefore never be mistaken for full
+coverage.
+
+The builder is pure analysis. It imports no transport, sends no target request, reserves
+no proof budget, grants no execution authority, and is not exported from
+`core.behavior`, scheduled, exposed through an API, or wired to the UI. An `open` node
+is a durable question, not a finding. An `upheld` owned-control node proves only that a
+known-good lifecycle was observed; it does not imply that the related ownership boundary
+is secure.
+
+In plain language, Sentinel now keeps a living map where every known door has its own
+unanswered security question. A normal Alice-owned document proves that Alice's key
+works, but it simultaneously creates the unresolved question “can another key open this
+door?” A possible hidden elevator creates “does this elevator exist?” first and “does it
+keep Alice's key confined?” second. Sentinel cannot silently skip the second question or
+pretend an empty map means a safe building. This pass changes neither target traffic nor
+execution authority.
+
+The novel property is evidence-derived search accounting: controls, adversarial persona
+swaps, and hidden capability handoffs become one dependency-aware frontier instead of
+three disconnected feature outputs. The target's own behavior continuously defines the
+questions Sentinel must answer, while graph identity makes forgotten or dropped work
+detectable.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,
