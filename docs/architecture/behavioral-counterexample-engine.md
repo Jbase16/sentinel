@@ -631,6 +631,61 @@ target-derived obligation graph is fully accounted for and structurally stable, 
 every inability to continue remains a machine-verifiable blocker instead of being
 laundered into “no finding.”
 
+### Closed-loop behavioral shadow orchestration
+
+`BehavioralShadowOrchestrator` composes the previously separate passive contracts into
+one content-addressed control-plane result. One bounded invocation mines the actor's
+owned lifecycles, compiles paired-world authorization proposals when a peer capture is
+present, mines capability-linked latent affordances from caller-supplied artifacts,
+attempts default-off owned-experiment assembly when authorization and policy context is
+available, derives the security-obligation graph, evaluates closure, and ranks every
+remaining open obligation. The run identity commits to every component digest, the
+experiment-stage outcome, closure certificate, ranked frontier, and an explicit count
+of open obligations omitted by the ranking bound. Truncating presentation therefore
+cannot be mistaken for resolving or deleting search work.
+
+Ranking distinguishes an unanswered question from a question that has a proven safe
+resolution seam. An ownership boundary is actionable only when the factory produced a
+matching proof-carrying owned experiment. An authorization counterexample is actionable
+only when it is classified as a read and its captured REST or GraphQL read semantics are
+independently proven. State mutations, unresolved persisted operations,
+latent-operation confirmation, unresolved capability confinement, missing
+prerequisites, denied factory preflight, and questions with no matching resolver remain
+visible but unavailable. Prepared does not mean executable: the run and every component
+remain `executable: false`, and all factory admissions are constructed disabled.
+
+The existing Foundry behavioral endpoint now returns this artifact under
+`behavioral_shadow` before its optional controlled proof run. It reuses the already
+bounded capture records and any client artifact bodies the existing GraphQL resolver
+already fetched. Its compiler-only policy executor has a transport function that always
+refuses; orchestration cannot create an additional target request, reserve proof budget,
+write an execution receipt, or promote its selected obligation into runtime. A shadow
+failure is reported explicitly without breaking the established controlled proof path.
+This pass therefore changes neither target traffic nor execution authority.
+
+In plain language, Sentinel's maps, unanswered lock questions, and prepared locksmith
+jobs now reach one foreman. The foreman puts jobs with a real safe tool at the front and
+keeps “we saw a possible hidden elevator but do not yet have a safe way to test it” on
+the board instead of pretending it can be run. For example, a proven create/read/archive
+note lifecycle can become the selected prepared experiment, while a published export
+job route remains an unanswered lead until a controlled confirmation method exists.
+Sentinel still does not press the start switch in this pass.
+
+The one-of-a-kind property is obligation-first resolver binding. Sentinel does not rank
+a canned test list and then look for justification; target-derived security questions
+are the durable control plane, and an existing proof-carrying resolver must bind back to
+the exact question before it can be selected as actionable. This makes missing
+capabilities, denied authority, and unexplored hidden surfaces first-class search state
+instead of silent coverage gaps.
+
+Current limitations are explicit. The coordinator is wired to the Foundry behavioral
+route, not yet the general scan runner. Latent affordance mining receives artifact text
+only when that text was already acquired; it adds no fetch of its own. Version 1 can
+prepare owned experiments only for the existing exact path-bound create/read/cleanup
+contract, and it can resolve paired-world authorization proposals only through the
+established read-only proof path. Closure remains accounting over the supplied bounded
+frontier, not a claim that the target contains no other vulnerabilities.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,

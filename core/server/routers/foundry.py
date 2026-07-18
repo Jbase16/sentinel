@@ -558,11 +558,17 @@ async def run_behavioral_authorization_endpoint(
         redacted_receipt_context,
         request_fingerprint,
     )
+    from core.behavior.orchestrator import (
+        BehavioralShadowOrchestrator,
+        OwnedExperimentShadowContext,
+    )
+    from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
     from core.safety.provenance import ProvenanceSink
     from core.safety.proof_budget import ProofBudget
+    from core.safety.ownership_registry import OwnershipRegistry
     from core.safety.action_classifier import SAFE_READ
     from core.wraith.bola_replay import ReplayRequest, SNDReplayTransport
 
@@ -602,7 +608,13 @@ async def run_behavioral_authorization_endpoint(
     catalog = PersistedOperationCatalog()
     catalog.ingest_capture_records(source_records, source="source_capture")
     catalog.ingest_capture_records(peer_records, source="peer_capture")
-    asset_resolution = {"attempted": 0, "fetched": 0, "failed": 0, "documents_added": 0}
+    asset_resolution = {
+        "attempted": 0,
+        "fetched": 0,
+        "failed": 0,
+        "documents_added": 0,
+    }
+    shadow_artifacts = []
     controlled_executor = None
     executors = None
     receipt_store = None
@@ -766,6 +778,15 @@ async def run_behavioral_authorization_endpoint(
                 asset_resolution["documents_added"] += catalog.ingest_artifact(
                     script_url, body
                 )
+                try:
+                    shadow_artifacts.append(ClientArtifact(script_url, body))
+                except ValueError:
+                    asset_resolution["shadow_artifacts_rejected"] = (
+                        asset_resolution.get("shadow_artifacts_rejected", 0) + 1
+                    )
+                    logger.warning(
+                        "fetched client artifact was rejected by shadow contract"
+                    )
             else:
                 asset_resolution["failed"] += 1
 
@@ -835,6 +856,59 @@ async def run_behavioral_authorization_endpoint(
         else:
             read_exploration["status"] = "not_needed"
 
+    # Build the full evidence frontier before the optional active run. This
+    # compiler-only executor has no target transport, and factory admissions
+    # remain default-off even when a proof-carrying experiment is prepared.
+    async def _shadow_transport_forbidden(*_args, **_kwargs):
+        raise RuntimeError("behavioral shadow transport is unavailable")
+
+    shadow_policy = ExecutionPolicy(
+        "bounty_safe",
+        scope_filter=scope_filter,
+        budget=ProofBudget(
+            max_total_requests=3,
+            max_requests_per_endpoint=3,
+            max_creates=1,
+            allow_real_user_data_access=False,
+        ),
+        ownership_registry=OwnershipRegistry(),
+    )
+    shadow_provenance = ProvenanceSink()
+    shadow_provenance.record_context(
+        target=target_origin,
+        proof_mode="bounty_safe_shadow",
+        policy_digest=shadow_policy.digest(),
+    )
+    shadow_executor = PolicyExecutor(
+        _shadow_transport_forbidden,
+        shadow_policy,
+        provenance=shadow_provenance,
+    )
+    try:
+        shadow_response = BehavioralShadowOrchestrator().run(
+            source_records,
+            target_origin=target_origin,
+            world_id=source_persona.persona_id,
+            peer_records=peer_records,
+            peer_world_id=peer_persona.persona_id,
+            artifacts=tuple(shadow_artifacts),
+            experiment_context=OwnedExperimentShadowContext(
+                authorization=envelope,
+                actor_persona_id=source_persona.persona_id,
+                executor=shadow_executor,
+            ),
+        ).to_dict()
+    except Exception:
+        # Shadow analysis must not break the established controlled proof path.
+        logger.exception("behavioral shadow orchestration failed")
+        shadow_response = {
+            "schema_version": 1,
+            "mode": "behavioral_closed_loop_shadow_v1",
+            "executable": False,
+            "status": "error",
+            "error_code": "shadow_orchestration_failed",
+        }
+
     try:
         run = await scheduler.run(
             source_records,
@@ -874,6 +948,7 @@ async def run_behavioral_authorization_endpoint(
                 logger.exception("failed to terminate errored behavioral receipt")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     response = run.to_dict()
+    response["behavioral_shadow"] = shadow_response
     response["graphql_resolution"] = {
         "catalog": catalog.diagnostics(),
         "assets": asset_resolution,

@@ -219,6 +219,11 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["status"] == "disabled"
         assert result["plan"]["selected_proposal_id"]
         assert result["execution"] is None
+        assert result["behavioral_shadow"]["status"] == "open"
+        assert result["behavioral_shadow"]["executable"] is False
+        assert result["behavioral_shadow"]["selected"]["resolution_kind"] == (
+            "authorization_proposal"
+        )
 
     def test_invalid_envelope_blocks_resolver_traffic(self, monkeypatch):
         from fastapi import HTTPException
