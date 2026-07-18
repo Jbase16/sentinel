@@ -280,6 +280,13 @@ class ScanSession:
             finally:
                 self._log_file_handle = None
 
+    def close(self) -> None:
+        """Release resources retained by a session that is leaving app state."""
+        pressure_graph = getattr(self, "pressure_graph", None)
+        if pressure_graph is not None:
+            pressure_graph.close()
+        self.close_log_file()
+
     def start_ghost(self, port: int = 8080):
         """
         Activate the Ghost Protocol network proxy for this session.

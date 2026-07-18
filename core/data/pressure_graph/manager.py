@@ -67,6 +67,8 @@ class PressureGraphManager(Observable):
         self._issues_store = issues_store
         self._killchain_store = killchain_store
         self._findings_store = findings_store
+        self._closed = False
+        self._event_subscription = None
         
         # Graph data
         self.nodes: Dict[str, PressureNode] = {}
@@ -97,7 +99,7 @@ class PressureGraphManager(Observable):
     
     async def _load_state(self):
         """Load graph state from DB."""
-        if not self.session_id:
+        if self._closed or not self.session_id:
             return
             
         nodes_data, edges_data = await self.db.load_graph_snapshot(self.session_id)
@@ -175,7 +177,7 @@ class PressureGraphManager(Observable):
 
     async def save_snapshot(self):
         """Persist current graph state to DB."""
-        if not self.session_id:
+        if self._closed or not self.session_id:
             return
 
         nodes_data = [
@@ -306,9 +308,32 @@ class PressureGraphManager(Observable):
             
         # Wire EventBus for Physics (Friction/Dynamics)
         try:
-            get_event_bus().subscribe(self._on_event)
+            self._event_subscription = get_event_bus().subscribe(self._on_event)
         except Exception:
             pass
+
+    def close(self) -> None:
+        """Release store and event subscriptions owned by this session graph."""
+        if self._closed:
+            return
+        self._closed = True
+
+        store = self._issues_store if self._issues_store else issues_store
+        if store and hasattr(store, "issues_changed"):
+            store.issues_changed.disconnect(self._on_issues_changed)
+
+        k_store = self._killchain_store if self._killchain_store else killchain_store
+        if k_store and hasattr(k_store, "edges_changed"):
+            k_store.edges_changed.disconnect(self._on_killchain_changed)
+
+        if self._findings_store and hasattr(self._findings_store, "findings_changed"):
+            self._findings_store.findings_changed.disconnect(self._on_findings_changed)
+
+        if self._event_subscription is not None:
+            try:
+                self._event_subscription.unsubscribe()
+            finally:
+                self._event_subscription = None
             
     def _initialize_engines(self):
         """Initialize sub-engines when graph has data."""

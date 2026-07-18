@@ -867,6 +867,12 @@ class BackendManager: ObservableObject {
         if !fileManager.fileExists(atPath: logFile.path) {
             fileManager.createFile(atPath: logFile.path, contents: nil)
         }
+        // Backend output can contain targets and request metadata. Keep the
+        // local diagnostic log private even if the process umask is permissive.
+        try? fileManager.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o600))],
+            ofItemAtPath: logFile.path
+        )
 
         if let handle = try? FileHandle(forWritingTo: logFile) {
             handle.seekToEndOfFile()

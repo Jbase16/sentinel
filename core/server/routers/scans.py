@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from core.server.state import get_state
 from core.server.routers.auth import verify_sensitive_token, verify_token
-from core.errors import SentinelError, ErrorCode
+from core.errors import SentinelError, ErrorCode, ToolError
 from core.data.db import Database
 
 logger = logging.getLogger(__name__)
@@ -264,14 +264,6 @@ async def begin_scan_logic(req: ScanRequest) -> str:
 
         state.cancel_requested.clear()
 
-        session = ScanSession(req.target)
-        # Seed per-scan knowledge used by internal tools. This is opt-in and
-        # intentionally shallow-validated at the API boundary.
-        if req.personas:
-            session.knowledge["personas"] = req.personas
-        if req.oob:
-            session.knowledge["oob"] = req.oob
-
         # ─── Scope enforcement ────────────────────────────────────────────
         from core.base.scope import ScopeRegistry, ScopeRule, AssetType, ScopeDecision
         from core.base.context import ScopeContext
@@ -331,7 +323,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         elif req.bounty_handle:
             from core.bounty.h1_client import HackerOneClient, parse_to_registry
             client = HackerOneClient()
-            dto = client.fetch_via_api(req.bounty_handle)
+            try:
+                dto = client.fetch_via_api(req.bounty_handle)
+            except ValueError as exc:
+                raise SentinelError(
+                    ErrorCode.SCAN_TARGET_INVALID,
+                    "Unable to load HackerOne program scope",
+                    details={
+                        "integration": "hackerone",
+                        "program_handle": req.bounty_handle,
+                        "reason": str(exc),
+                    },
+                ) from exc
             parse_to_registry(dto, registry)
 
         # 3. Create Context
@@ -420,17 +423,9 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 "unauthenticated probes; unattributed requests may be ineligible."
             )
 
-        scope_context = ScopeContext(
-            registry=registry,
-            policy=execution_policy,
-            mode=emode.value,
-            identity_headers=identity_headers,
-            scan_id=session.id
-        )
-
         # Fail-fast: the primary target itself must be in scope.
-        check_decision = scope_context.registry.resolve(req.target)
-        is_bounty = scope_context.mode == ExecutionMode.BOUNTY
+        check_decision = registry.resolve(req.target)
+        is_bounty = emode == ExecutionMode.BOUNTY
         if check_decision.verdict == ScopeDecision.DENY or (check_decision.verdict == ScopeDecision.UNKNOWN and (is_bounty or scope_strict_effective)):
             # reason_code may be a plain str or an enum depending on the resolver
             # path — don't assume `.value` (an unguarded access here turned a clean
@@ -444,6 +439,23 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 f"Target is outside the declared scope: {_rc}",
                 details={"target": req.target, "verdict": _verdict},
             )
+
+        # Resource-owning session objects are created only after synchronous
+        # admission succeeds. Rejected requests must not attach root log
+        # handlers or subscribe pressure graphs to global stores.
+        session = ScanSession(req.target)
+        if req.personas:
+            session.knowledge["personas"] = req.personas
+        if req.oob:
+            session.knowledge["oob"] = req.oob
+
+        scope_context = ScopeContext(
+            registry=registry,
+            policy=execution_policy,
+            mode=emode.value,
+            identity_headers=identity_headers,
+            scan_id=session.id,
+        )
 
         # Bind ScopeContext physically to the session
         session.scope_context = scope_context
@@ -593,16 +605,21 @@ async def begin_scan_logic(req: ScanRequest) -> str:
 
         async def _runner() -> None:
             start_time = time.time()
+            tool_outcomes = {"attempted": 0, "succeeded": 0, "failed": 0}
             try:
                 async def dispatch_tool(tool: str) -> List[Dict]:
                     findings = []
                     exit_code = 0
                     tool_error: Optional[Dict[str, Any]] = None
+                    failure_recorded = False
 
                     if tool not in allowed_tools:
                         session.log(f"⚠️ [Security] Tool '{tool}' blocked")
-                        return []
+                        tool_outcomes["attempted"] += 1
+                        tool_outcomes["failed"] += 1
+                        raise ToolError(tool, 126, "Tool is not allowed for this scan")
 
+                    tool_outcomes["attempted"] += 1
                     engine = ScannerEngine(session=session)
                     try:
                         event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], scan_id=session.id)
@@ -619,14 +636,46 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         exit_code = 130 if state.cancel_requested.is_set() else 0
                         if tool_error and "exit_code" in tool_error:
                             exit_code = int(tool_error["exit_code"])
+                        if tool_error:
+                            tool_outcomes["failed"] += 1
+                            failure_recorded = True
+                            raise ToolError(
+                                tool,
+                                exit_code,
+                                str(tool_error.get("stderr", "Tool execution failed")),
+                            )
+                        tool_outcomes["succeeded"] += 1
                         return findings
                     except asyncio.CancelledError:
                         # Local task cancellation (e.g., from Strategos tool timeout)
                         # should NOT poison the global scan state.
+                        if not state.cancel_requested.is_set():
+                            tool_outcomes["failed"] += 1
+                            failure_recorded = True
+                        raise
+                    except ToolError as exc:
+                        if not failure_recorded:
+                            tool_outcomes["failed"] += 1
+                            failure_recorded = True
+                        if tool_error is None:
+                            tool_error = dict(exc.details)
+                            exit_code = int(exc.details.get("exit_code", 1))
                         raise
                     except Exception as exc:
                         session.log(f"[Strategos] Tool failed ({tool}): {exc}")
-                        return []
+                        exit_code = exit_code or 1
+                        tool_error = {
+                            "tool": tool,
+                            "exit_code": exit_code,
+                            "stderr": "Tool execution raised an internal error",
+                        }
+                        tool_outcomes["failed"] += 1
+                        failure_recorded = True
+                        raise ToolError(
+                            tool,
+                            exit_code,
+                            "Tool execution raised an internal error",
+                        ) from exc
                     finally:
                         event_bus.emit_tool_completed(
                             tool=tool,
@@ -647,6 +696,17 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     log_fn=session.log,
                     knowledge=session.knowledge,
                 )
+
+                if (
+                    tool_outcomes["attempted"] > 0
+                    and tool_outcomes["succeeded"] == 0
+                    and tool_outcomes["failed"] > 0
+                ):
+                    raise SentinelError(
+                        ErrorCode.TOOL_EXEC_FAILED,
+                        "Scan failed because every attempted tool failed",
+                        details=dict(tool_outcomes),
+                    )
 
                 # --- Phase 3: active verification (Run #26 wiring) -----------
                 # In bug_bounty mode, after recon, probe a curated set of
