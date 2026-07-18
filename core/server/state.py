@@ -41,13 +41,19 @@ class ApplicationState:
             return self.session_manager.get(session_id)
 
     async def unregister_session(self, session_id: str) -> None:
+        session = None
         async with self.session_manager_lock:
-            if session_id in self.session_manager:
-                del self.session_manager[session_id]
+            session = self.session_manager.pop(session_id, None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                logger.warning("Failed to close session %s", session_id, exc_info=True)
 
     async def cleanup_old_sessions(self, max_age: timedelta = timedelta(days=1)) -> int:
         now = datetime.now(timezone.utc)
         to_remove = []
+        removed_sessions = []
 
         async with self.session_manager_lock:
             for session_id, session in self.session_manager.items():
@@ -64,7 +70,19 @@ class ApplicationState:
                         to_remove.append(session_id)
 
             for session_id in to_remove:
-                del self.session_manager[session_id]
+                session = self.session_manager.pop(session_id, None)
+                if session is not None:
+                    removed_sessions.append(session)
+
+        for session in removed_sessions:
+            try:
+                session.close()
+            except Exception:
+                logger.warning(
+                    "Failed to close expired session %s",
+                    getattr(session, "id", "unknown"),
+                    exc_info=True,
+                )
 
         return len(to_remove)
 

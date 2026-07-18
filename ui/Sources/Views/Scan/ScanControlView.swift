@@ -546,7 +546,7 @@ private struct AdvancedScanConfigView: View {
             Text("HackerOne Integration")
                 .font(.subheadline).bold()
             Text(
-                "Provide a program handle (if authenticated via SENTINEL_H1_TOKEN) or paste the JSON payload from the HackerOne API."
+                "Provide a program handle (using HACKERONE_API_USERNAME and HACKERONE_API_TOKEN) or paste the JSON payload from the HackerOne API."
             )
             .font(.caption2)
             .foregroundColor(.secondary)

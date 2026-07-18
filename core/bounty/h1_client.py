@@ -49,7 +49,13 @@ class HackerOneClient:
     """
     def __init__(self, api_token: Optional[str] = None, api_username: Optional[str] = None):
         import os
-        self.api_token = api_token or os.environ.get("HACKERONE_API_TOKEN")
+        # HACKERONE_API_TOKEN is canonical. Keep accepting the legacy name
+        # previously advertised by the macOS UI so existing setups still work.
+        self.api_token = (
+            api_token
+            or os.environ.get("HACKERONE_API_TOKEN")
+            or os.environ.get("SENTINEL_H1_TOKEN")
+        )
         self.api_username = api_username or os.environ.get("HACKERONE_API_USERNAME") or ""
 
     def fetch_via_api(self, handle: str) -> H1ScopeDTO:
@@ -60,8 +66,10 @@ class HackerOneClient:
 
         See: https://api.hackerone.com/core-resources/#programs
         """
-        if not self.api_token:
-            raise ValueError("API fetching requires a valid HackerOne API token.")
+        if not self.api_token or not self.api_username:
+            raise ValueError(
+                "API fetching requires HACKERONE_API_USERNAME and HACKERONE_API_TOKEN."
+            )
 
         url = f"{H1_API_BASE}/hackers/programs/{handle}"
         auth = (self.api_username, self.api_token)

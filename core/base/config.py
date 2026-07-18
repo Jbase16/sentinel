@@ -29,6 +29,40 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
+_SENSITIVE_QUERY_PARAM_RE = re.compile(
+    r"([?&](?:access_token|api_token|authorization|api_key|token|auth|key)=)[^&\s]*",
+    re.IGNORECASE,
+)
+
+
+def _redact_sensitive_query_params(value: str) -> str:
+    """Redact credentials embedded in URL query strings before logging."""
+    return _SENSITIVE_QUERY_PARAM_RE.sub(r"\1[REDACTED]", value)
+
+
+class _SensitiveQueryLoggingFilter(logging.Filter):
+    """Sanitize both formatted messages and Uvicorn's structured arguments."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            record.msg = _redact_sensitive_query_params(record.msg)
+
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _redact_sensitive_query_params(value) if isinstance(value, str) else value
+                for value in record.args
+            )
+        elif isinstance(record.args, dict):
+            record.args = {
+                key: _redact_sensitive_query_params(value) if isinstance(value, str) else value
+                for key, value in record.args.items()
+            }
+        return True
+
+
+_SENSITIVE_QUERY_LOGGING_FILTER = _SensitiveQueryLoggingFilter()
+
+
 def _env_path(var_name: str) -> Optional[Path]:
     """Read an environment variable as a Path, or None."""
     value = os.getenv(var_name)
@@ -1350,6 +1384,12 @@ def setup_logging(config: Optional[SentinelConfig] = None) -> None:
         handlers=handlers,  # Where logs go (console and/or file)
         force=True,  # Replace any existing logging configuration
     )
+
+    # Uvicorn records the full WebSocket path in record.args. Filtering the
+    # originating logger protects every downstream handler, including a
+    # per-scan handler attached after this function returns.
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.addFilter(_SENSITIVE_QUERY_LOGGING_FILTER)
 
 
 # ============================================================================
