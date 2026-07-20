@@ -272,7 +272,10 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["status"] == "completed"
         assert len(calls) == 3
         assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
+        assert result["plan"]["mode"] == "behavioral_closed_loop_resolver_v1"
+        assert result["plan"]["selected_obligation_id"]
         assert result["finding"]["metadata"]["behavioral_primary_planner"]
+        assert result["finding"]["metadata"]["behavioral_closed_loop_resolver"]
         assert result["behavioral_shadow"]["status"] == "finding"
         assert result["behavioral_shadow"]["closure"]["counts"]["violated"] == 1
         assert result["behavioral_shadow"]["receipt_feedback"]["status"] == "ready"
@@ -285,6 +288,105 @@ class TestBehavioralAuthorizationEndpoint:
         assert calls[0][1].headers["x-csrf-token"] == f"csrf-{peer_persona.persona_id}"
         assert calls[1][1].headers["x-csrf-token"] == f"csrf-{source_persona.persona_id}"
         assert all(call[1].max_response_chars == 2 * 1024 * 1024 for call in calls)
+
+    def test_frontier_defers_preparatory_setup_and_dispatches_exact_auth_obligation(
+        self, monkeypatch
+    ):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
+        from core.foundry.authorization import create_envelope
+        from core.server.routers.foundry import run_behavioral_authorization_endpoint
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, peer_persona = self._setup()
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[CONTROLLED_WORKFLOW, CONTROLLED_SEQUENCE_WORKFLOW],
+            disclosure_attestation=True,
+        )
+        note_id = "note_7fa9f13a2b4c5d6e"
+        request.envelope_id = envelope.envelope_id
+        request.source_records = [
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "POST",
+                "url": f"{self.ORIGIN}/api/notes",
+                "request_body": '{"title":"controlled marker"}',
+                "response_status": 201,
+                "response_body": json.dumps({"noteId": note_id}),
+            },
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "GET",
+                "url": f"{self.ORIGIN}/api/notes/{note_id}",
+                "response_status": 200,
+                "response_body": '{"title":"controlled marker"}',
+            },
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "PATCH",
+                "url": f"{self.ORIGIN}/api/notes/{note_id}",
+                "request_body": '{"archived":true}',
+                "response_status": 200,
+                "response_body": '{"archived":true}',
+            },
+            request.source_records[0],
+        ]
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        calls = []
+
+        async def fake_send(_transport, persona, replay_request):
+            calls.append((persona, replay_request))
+            if persona == peer_persona.persona_id:
+                return ReplayResponse(200, '{"owner":"PeerPrivateMarker"}')
+            if self.SOURCE_ID in (replay_request.body or ""):
+                return ReplayResponse(200, '{"owner":"SourcePrivateMarker"}')
+            return ReplayResponse(200, '{"owner":"PeerPrivateMarker"}')
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "completed"
+        assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
+        assert result["plan"]["selected"]["frontier_index"] == 1
+        assert result["plan"]["diagnostics"]["deferred_preparatory_items"] == 1
+        assert result["plan"]["selected_obligation_id"] != (
+            result["behavioral_shadow"].get("selected") or {}
+        ).get("obligation_id")
+        assert len(calls) == 3
+
+    def test_enabled_route_refuses_execution_when_obligation_frontier_fails(
+        self, monkeypatch, tmp_path
+    ):
+        from fastapi import HTTPException
+
+        from core.behavior.orchestrator import BehavioralShadowOrchestrator
+        from core.server.routers.foundry import run_behavioral_authorization_endpoint
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _, _ = self._setup()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+
+        def broken_frontier(*_args, **_kwargs):
+            raise RuntimeError("frontier failed")
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("a missing frontier must block target traffic")
+
+        monkeypatch.setattr(BehavioralShadowOrchestrator, "run", broken_frontier)
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert error.value.status_code == 500
+        assert "frontier failed; execution refused" in error.value.detail
+        receipts = list((tmp_path / "behavioral_receipts").glob("*.json"))
+        assert len(receipts) == 1
+        assert json.loads(receipts[0].read_text())["state"] == "aborted"
 
     def test_truncated_baseline_cannot_reach_counterfactual_or_confirm(self, monkeypatch):
         from core.server.routers.foundry import run_behavioral_authorization_endpoint

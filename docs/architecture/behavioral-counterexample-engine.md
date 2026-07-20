@@ -93,13 +93,13 @@ Implemented as a controlled, single-experiment activation gate:
   execution receipt before target traffic, preventing retries or replay amplification
   across requests, processes, and app restarts.
 
-### Primary-planner activation bridge
+### Primary activation and obligation dispatch
 
-The behavioral engine can now own proposal selection through
-`BehavioralPrimaryScheduler`. Ranking is deterministic and based on proof feasibility:
-proven read semantics, usable paired baselines, cross-world response differentiation,
-and direct resource locators. The scheduler executes only the highest-ranked proposal
-and never invokes the legacy multi-operation hunt, so primary-planner activation
+`BehavioralPrimaryScheduler` supplies the bounded read-eligibility predicate used by
+active exploration, but it no longer owns final execution selection. The unified
+security-obligation frontier is authoritative at the runtime handoff. Its one-step
+resolver binds the highest-ranked outcome-bearing obligation to one exact controlled
+proposal and never invokes the legacy multi-operation hunt, so primary activation
 cannot duplicate target traffic.
 
 The operator-only `POST /v1/foundry/behavioral-authorization` endpoint is the runtime
@@ -735,8 +735,67 @@ Current limitations remain deliberate. Version 1 adapts only the established
 authorization receipt schema. Aborted receipt-store records cannot identify a proposal
 and therefore remain unbound. Compiled owned-experiment receipts remain preparatory until
 a separate proof oracle can establish the corresponding ownership boundary. The route
-updates one completed receipt into one derivation round; it does not yet autonomously
-select and execute the next ranked obligation.
+updates one completed receipt into one derivation round; the feedback adapter itself
+does not select or execute another obligation.
+
+### Single-step closed-loop obligation resolver
+
+`SingleStepObligationResolver` makes the unified `BehavioralShadowRun` frontier the
+authority for final active selection. It walks the deterministic ranked frontier,
+requires an exact content-addressed binding from one open obligation to one proposal in
+the same shadow run, and dispatches at most the highest-ranked binding for which an
+existing resolver can produce a terminal security verdict. The selected proposal is
+still recompiled and validated against the current captures inside
+`ControlledAuthorizationExecutor`; every target request still crosses the existing
+signed-envelope, origin, persona, bounty-safe policy, shared budget, provenance, and
+durable route-receipt gates. The established three-leg BOLA oracle remains the only
+component allowed to declare the authorization result.
+
+Proof-carrying owned create/read/cleanup packages remain actionable preparation on the
+frontier, but this resolver deliberately defers them. Their compiled receipt proves that
+owned state was manufactured, read, and cleaned up; it does not prove whether a second
+principal could cross that ownership boundary. If a lower-ranked authorization
+obligation has a real verdict oracle, it may be selected and the number of higher-ranked
+preparatory items deferred is explicit in resolver diagnostics. Missing or ambiguous
+proposal bindings fail closed. When active mode is enabled, failure to build the
+authoritative obligation frontier aborts the durable receipt and refuses all proof
+traffic instead of silently falling back to the older proposal scheduler.
+
+The Foundry route now uses `BehavioralPrimaryScheduler` only as the bounded eligibility
+predicate for pre-frontier read exploration. It no longer calls that scheduler's active
+execution method. After the frontier is built, exactly one obligation-selected proposal
+may enter the existing controlled executor; its terminal receipt is then adapted into a
+disposition and the frontier is derived again as before. Resolver plans retain
+`selected_proposal_id` for the current receipt and Swift contracts while adding the
+selected obligation, shadow-run identity, frontier index, and content-addressed plan
+identity. Focused tests verify deterministic redaction, exact binding, deferral of
+preparatory-only work, disabled-mode zero traffic, no-candidate zero traffic, route-level
+selection, and refusal when the frontier is unavailable.
+
+In plain language, Sentinel's foreman—not a separate checklist—now chooses the next test
+that can actually answer a security question. Suppose the board's first job says “we can
+safely create and archive our own note,” while the second says “test whether Bob can read
+Alice's document.” The first job is useful preparation but cannot answer whether the lock
+fails, so Sentinel records that it deferred the setup job and runs the second job once
+through the proven lock-testing machine. It then files the receipt against that exact
+question and redraws the board. Sentinel still cannot turn a successful setup sequence
+into a finding, automatically resolve hidden-route questions, or execute repeatedly
+until the whole frontier closes.
+
+This slice changes target traffic and execution authority only inside the already
+explicitly enabled `SENTINELFORGE_BEHAVIOR_PRIMARY` path. It does not increase request
+budgets, action classes, origins, personas, workflows, or retry authority. Default-off
+behavior still sends no resolver traffic. When enabled, the same maximum of one existing
+three-leg authorization experiment may run, but the obligation frontier now chooses
+that experiment and a missing frontier prevents it entirely.
+
+The one-of-a-kind property is outcome-aware obligation dispatch. Sentinel does not
+equate an executable procedure with evidence that answers the security question that
+caused it. The control plane can rank preparation, proof, and blocked work together,
+while the active seam admits only an exact question-to-oracle binding and preserves the
+rest as explicit unresolved state. That mechanically prevents scheduler drift and the
+common autonomous-testing failure where “the tool ran successfully” becomes “the
+security property was proven.”
 
 ### Gate D: generalized security relations
 

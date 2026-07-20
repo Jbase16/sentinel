@@ -532,7 +532,7 @@ async def run_behavioral_authorization_endpoint(
     req: RunBehavioralAuthorizationRequest,
     _: bool = Depends(verify_sensitive_token),
 ):
-    """Plan one experiment autonomously and, when enabled, execute it once.
+    """Resolve one frontier obligation and, when enabled, execute it once.
 
     ``SENTINELFORGE_BEHAVIOR_PRIMARY`` defaults off. In that state this endpoint
     returns the behavioral plan but cannot reach the SND replay transport.
@@ -546,7 +546,11 @@ async def run_behavioral_authorization_endpoint(
     from core.behavior.scheduler import (
         BehavioralPrimaryScheduler,
         PrimaryPlannerConfig,
-        PrimaryPlannerError,
+    )
+    from core.behavior.resolver import (
+        ClosedLoopResolverConfig,
+        ClosedLoopResolverDenied,
+        SingleStepObligationResolver,
     )
     from core.behavior.explorer import BehavioralReadExplorer
     from core.behavior.graphql_catalog import PersistedOperationCatalog
@@ -604,8 +608,10 @@ async def run_behavioral_authorization_endpoint(
             detail=f"authorization envelope does not permit {CONTROLLED_WORKFLOW!r}",
         )
 
-    config = PrimaryPlannerConfig.from_environment()
+    resolver_config = ClosedLoopResolverConfig.from_environment()
+    config = PrimaryPlannerConfig(enabled=resolver_config.enabled)
     scheduler = BehavioralPrimaryScheduler(config)
+    obligation_resolver = SingleStepObligationResolver(resolver_config)
     catalog = PersistedOperationCatalog()
     catalog.ingest_capture_records(source_records, source="source_capture")
     catalog.ingest_capture_records(peer_records, source="peer_capture")
@@ -904,7 +910,6 @@ async def run_behavioral_authorization_endpoint(
         )
         shadow_response = shadow_run.to_dict()
     except Exception:
-        # Shadow analysis must not break the established controlled proof path.
         logger.exception("behavioral shadow orchestration failed")
         shadow_response = {
             "schema_version": 1,
@@ -914,14 +919,42 @@ async def run_behavioral_authorization_endpoint(
             "error_code": "shadow_orchestration_failed",
         }
 
-    try:
-        run = await scheduler.run(
-            source_records,
-            peer_records,
-            source_persona=source_persona,
-            peer_persona=peer_persona,
-            controlled_executor=controlled_executor,
+    if shadow_run is None and resolver_config.enabled:
+        if (
+            receipt_store is not None
+            and receipt_fingerprint is not None
+            and receipt_reservation_token is not None
+        ):
+            try:
+                receipt_store.abort(
+                    receipt_fingerprint,
+                    reservation_token=receipt_reservation_token,
+                    reason="obligation_frontier_error",
+                )
+            except (OSError, ReceiptStoreError):
+                logger.exception("failed to terminate frontier-error receipt")
+        raise HTTPException(
+            status_code=500,
+            detail="behavioral obligation frontier failed; execution refused",
         )
+
+    try:
+        if shadow_run is None:
+            # Disabled mode has no execution authority. Preserve its diagnostic
+            # proposal response even if optional shadow analysis failed.
+            run = await scheduler.run(
+                source_records,
+                peer_records,
+                source_persona=source_persona,
+                peer_persona=peer_persona,
+            )
+        else:
+            run = await obligation_resolver.run(
+                shadow_run,
+                source_records,
+                peer_records,
+                controlled_executor=controlled_executor,
+            )
     except ControlledExecutionDenied as exc:
         if (
             receipt_store is not None
@@ -937,7 +970,7 @@ async def run_behavioral_authorization_endpoint(
             except (OSError, ReceiptStoreError):
                 logger.exception("failed to terminate denied behavioral receipt")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except PrimaryPlannerError as exc:
+    except ClosedLoopResolverDenied as exc:
         if (
             receipt_store is not None
             and receipt_fingerprint is not None
@@ -947,7 +980,7 @@ async def run_behavioral_authorization_endpoint(
                 receipt_store.abort(
                     receipt_fingerprint,
                     reservation_token=receipt_reservation_token,
-                    reason="primary_planner_error",
+                    reason="closed_loop_resolver_error",
                 )
             except (OSError, ReceiptStoreError):
                 logger.exception("failed to terminate errored behavioral receipt")
