@@ -273,6 +273,15 @@ class TestBehavioralAuthorizationEndpoint:
         assert len(calls) == 3
         assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
         assert result["finding"]["metadata"]["behavioral_primary_planner"]
+        assert result["behavioral_shadow"]["status"] == "finding"
+        assert result["behavioral_shadow"]["closure"]["counts"]["violated"] == 1
+        assert result["behavioral_shadow"]["receipt_feedback"]["status"] == "ready"
+        assert result["behavioral_shadow"]["receipt_feedback"]["diagnostics"] == {
+            "receipts_seen": 1,
+            "dispositions_created": 1,
+            "unbound_receipts": 0,
+            "unsupported_receipts": 0,
+        }
         assert calls[0][1].headers["x-csrf-token"] == f"csrf-{peer_persona.persona_id}"
         assert calls[1][1].headers["x-csrf-token"] == f"csrf-{source_persona.persona_id}"
         assert all(call[1].max_response_chars == 2 * 1024 * 1024 for call in calls)
@@ -303,6 +312,9 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["execution"]["requests_attempted"] == 2
         assert result["execution"]["restraint"]["stopped_after_first_proof"] is False
         assert result["finding"] is None
+        assert result["behavioral_shadow"]["status"] == "blocked"
+        assert result["behavioral_shadow"]["closure"]["counts"]["blocked"] == 1
+        assert result["behavioral_shadow"]["receipt_feedback"]["status"] == "ready"
         assert len(calls) == 2
 
     def test_top_level_url_records_execute_as_generic_rest_proof(self, monkeypatch):

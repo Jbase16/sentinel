@@ -14,6 +14,8 @@ The security-obligation graph remains explicit-only through
 :mod:`core.behavior.obligations`.
 Evidence-referenced fixed-point closure remains explicit-only through
 :mod:`core.behavior.closure`.
+Receipt-to-disposition feedback remains explicit-only through
+:mod:`core.behavior.feedback`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
