@@ -686,6 +686,58 @@ contract, and it can resolve paired-world authorization proposals only through t
 established read-only proof path. Closure remains accounting over the supplied bounded
 frontier, not a claim that the target contains no other vulnerabilities.
 
+### Receipt-to-disposition feedback
+
+`ReceiptDispositionAdapter` converts a terminal, strictly redacted behavioral execution
+receipt into an evidence-referenced disposition only when the receipt context matches the
+current target, authorization envelope, and ordered persona pair, and its selected
+proposal binds to exactly one open read-only authorization obligation. The adapter
+round-trips every supplied receipt through the persisted receipt validator before using
+it. Duplicate receipts, conflicting receipts for one obligation, non-terminal receipts,
+context mismatches, unrecognized verdicts, and proposals without an exact open graph
+binding fail closed.
+
+The established three-leg BOLA oracle remains authoritative. `BOLA_CONFIRMED` violates
+the exact obligation; a completed `DENIED` or `NO_CROSS_READ` result upholds only that
+tested boundary; `AMBIGUOUS`, `ERROR`, and aborted executions become blocked. A terminal
+receipt with no selected proposal cannot close anything. Compiled create/read/cleanup
+receipts are explicitly unsupported as authorization evidence: successfully
+manufacturing and cleaning up owned state does not prove that another principal was
+unable to access it.
+
+After the Foundry route durably finalizes an execution receipt, it passively adapts the
+receipt, reruns the same shadow derivation against the previous graph, and returns the
+updated closure plus the content-addressed feedback batch. The second derivation has no
+transport and cannot reserve budget. If feedback accounting fails, the original proof
+receipt and pre-execution frontier remain intact and the response exposes an explicit
+feedback error instead of losing or reinterpreting the completed execution.
+
+In plain language, Sentinel now attaches the test receipt to the exact lock question that
+caused the test. If Bob opened Alice's document and the independent oracle found Alice's
+private marker, that question becomes a finding. If the completed experiment proved Bob
+was denied, only that exact question is closed. If the evidence was ambiguous, Sentinel
+marks the question blocked. A receipt saying “we successfully created and cleaned up our
+own test document” is never misrepresented as proof that Bob could not read it.
+
+This pass changes neither target traffic nor execution authority. It observes the result
+of the already authorized, already bounded proof and updates the passive accounting
+frontier afterward. It does not select or execute another obligation.
+
+The one-of-a-kind property is receipt-bound epistemic feedback: runtime success is not
+allowed to become a security conclusion merely because an experiment completed. A
+content-addressed target-and-persona-scoped receipt must bind to the exact target-derived
+question, and only the independent oracle's terminal semantics determine whether that
+question was upheld, violated, or blocked. Execution bookkeeping and security proof are
+therefore mechanically separated while still forming a deterministic closed evidence
+loop.
+
+Current limitations remain deliberate. Version 1 adapts only the established
+authorization receipt schema. Aborted receipt-store records cannot identify a proposal
+and therefore remain unbound. Compiled owned-experiment receipts remain preparatory until
+a separate proof oracle can establish the corresponding ownership boundary. The route
+updates one completed receipt into one derivation round; it does not yet autonomously
+select and execute the next ranked obligation.
+
 ### Gate D: generalized security relations
 
 Add one independently tested relation at a time: integrity, authority monotonicity,

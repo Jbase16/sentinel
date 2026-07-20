@@ -562,6 +562,7 @@ async def run_behavioral_authorization_endpoint(
         BehavioralShadowOrchestrator,
         OwnedExperimentShadowContext,
     )
+    from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
     from core.foundry.authorization import get_envelope
@@ -884,20 +885,24 @@ async def run_behavioral_authorization_endpoint(
         shadow_policy,
         provenance=shadow_provenance,
     )
+    shadow_orchestrator = BehavioralShadowOrchestrator()
+    shadow_context = OwnedExperimentShadowContext(
+        authorization=envelope,
+        actor_persona_id=source_persona.persona_id,
+        executor=shadow_executor,
+    )
+    shadow_run = None
     try:
-        shadow_response = BehavioralShadowOrchestrator().run(
+        shadow_run = shadow_orchestrator.run(
             source_records,
             target_origin=target_origin,
             world_id=source_persona.persona_id,
             peer_records=peer_records,
             peer_world_id=peer_persona.persona_id,
             artifacts=tuple(shadow_artifacts),
-            experiment_context=OwnedExperimentShadowContext(
-                authorization=envelope,
-                actor_persona_id=source_persona.persona_id,
-                executor=shadow_executor,
-            ),
-        ).to_dict()
+            experiment_context=shadow_context,
+        )
+        shadow_response = shadow_run.to_dict()
     except Exception:
         # Shadow analysis must not break the established controlled proof path.
         logger.exception("behavioral shadow orchestration failed")
@@ -980,6 +985,45 @@ async def run_behavioral_authorization_endpoint(
             "state": completed_receipt.state,
             "reused": False,
         }
+        if shadow_run is not None:
+            try:
+                feedback = ReceiptDispositionAdapter().adapt(
+                    shadow_run.graph,
+                    (completed_receipt,),
+                    expected_context=redacted_receipt_context(
+                        target_origin=target_origin,
+                        envelope_id=req.envelope_id,
+                        source_persona_id=source_persona.persona_id,
+                        peer_persona_id=peer_persona.persona_id,
+                    ),
+                )
+                feedback_run = shadow_orchestrator.run(
+                    source_records,
+                    target_origin=target_origin,
+                    world_id=source_persona.persona_id,
+                    peer_records=peer_records,
+                    peer_world_id=peer_persona.persona_id,
+                    artifacts=tuple(shadow_artifacts),
+                    experiment_context=shadow_context,
+                    dispositions=feedback.dispositions,
+                    previous_graph=shadow_run.graph,
+                    derivation_round=2,
+                )
+                shadow_response = feedback_run.to_dict()
+                shadow_response["receipt_feedback"] = feedback.to_dict()
+            except Exception:
+                # A feedback failure cannot erase or falsify the already finalized
+                # proof receipt.  Keep the pre-execution frontier and expose the
+                # failed accounting step explicitly.
+                logger.exception("behavioral receipt feedback failed")
+                shadow_response["receipt_feedback"] = {
+                    "schema_version": 1,
+                    "mode": "behavioral_receipt_feedback_v1",
+                    "executable": False,
+                    "status": "error",
+                    "error_code": "receipt_feedback_failed",
+                }
+            response["behavioral_shadow"] = shadow_response
     return response
 
 
