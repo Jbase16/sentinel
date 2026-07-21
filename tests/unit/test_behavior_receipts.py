@@ -16,6 +16,7 @@ from core.behavior.receipts import (
     BehavioralReceiptStore,
     BehavioralReceiptContext,
     ReceiptStoreError,
+    redacted_fresh_owned_boundary_outcome,
     redacted_outcome,
     redacted_compiled_outcome,
     redacted_receipt_context,
@@ -78,6 +79,52 @@ def _response():
                 "ambiguous_operations": 0,
             },
         },
+    }
+
+
+def _fresh_boundary_response():
+    return {
+        "status": "completed",
+        "plan": {
+            "selected_proposal_id": None,
+            "selected_experiment_id": "owned_experiment:" + "d" * 64,
+            "selected_obligation_id": "security_obligation:" + "e" * 64,
+        },
+        "execution": {
+            "kind": "fresh_owned_boundary",
+            "boundary_id": "fresh_owned_boundary:" + "a" * 64,
+            "experiment_id": "owned_experiment:" + "d" * 64,
+            "lifecycle_id": "owned_lifecycle:" + "b" * 64,
+            "terminal_operation_id": "action:" + "8" * 64,
+            "peer_experiment_id": "owned_experiment:" + "f" * 64,
+            "status": "completed",
+            "legacy_verdict": "BOLA_CONFIRMED",
+            "legacy_detail": "alice-fresh-secret-marker",
+            "finding_confirmed": True,
+            "requests_attempted": 7,
+            "requests_sent": 7,
+            "creates_attempted": 2,
+            "creates_completed": 2,
+            "proof_legs_attempted": 3,
+            "proof_legs_sent": 3,
+            "cleanup_steps_attempted": 2,
+            "cleanup_steps_completed": 2,
+            "policy_denials": 0,
+            "orphaned_owned_state_possible": False,
+            "provenance_root": "c" * 64,
+            "budget_snapshot": {
+                "total_requests": 7,
+                "cross_object_reads": 1,
+                "privilege_mutations": 0,
+                "creates": 2,
+                "endpoints_touched": 2,
+            },
+            "error_code": None,
+            "fresh_object_id": "note_fresh_secret_7fa9f13a2b4c",
+        },
+        "finding": {"evidence": "alice-fresh-secret-marker"},
+        "finding_confirmed": True,
+        "graphql_resolution": _response()["graphql_resolution"],
     }
 
 
@@ -199,6 +246,42 @@ def test_read_exploration_receipt_persists_only_bounded_counters(tmp_path):
         "frontier_exhausted": False,
     }
     assert "raw-secret" not in json.dumps(completed.to_dict())
+
+
+def test_fresh_boundary_receipt_is_exact_redacted_and_reloadable(tmp_path):
+    store = BehavioralReceiptStore(tmp_path)
+    fingerprint = request_fingerprint({"mode": "fresh-boundary", "secret": "raw"})
+    reservation = store.reserve(fingerprint, context=_context())
+    assert reservation.reservation_token is not None
+
+    outcome = redacted_outcome(_fresh_boundary_response())
+    completed = store.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token,
+        outcome=outcome,
+    )
+    reloaded = store.load(fingerprint)
+
+    assert completed.outcome == outcome
+    assert reloaded is not None
+    assert reloaded.outcome == outcome
+    assert outcome["kind"] == "fresh_owned_boundary"
+    assert outcome["plan"]["selected_obligation_id"].startswith(
+        "security_obligation:"
+    )
+    encoded = json.dumps(completed.to_dict(), sort_keys=True)
+    assert "alice-fresh-secret-marker" not in encoded
+    assert "note_fresh_secret" not in encoded
+    assert "fresh_object_id" not in encoded
+
+
+def test_fresh_boundary_receipt_rejects_counter_over_fixed_package_bound():
+    response = _fresh_boundary_response()
+    response["execution"]["creates_attempted"] = 3
+    response["execution"]["requests_attempted"] = 8
+
+    with pytest.raises(ReceiptStoreError, match="counters are inconsistent"):
+        redacted_fresh_owned_boundary_outcome(response)
 
 
 def test_aborted_or_reserved_receipt_cannot_refresh_budget(tmp_path):

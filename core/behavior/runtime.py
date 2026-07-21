@@ -601,6 +601,33 @@ class ControlledRuntimeSequenceExecutor:
 
         return self._preflight().sequence_id
 
+    async def _claim_preflight(
+        self,
+        *,
+        expected_sequence_id: Optional[str] = None,
+    ) -> _Preflight:
+        """Atomically consume this runtime for an explicit package coordinator.
+
+        The returned contract is intentionally private to ``core.behavior``. It
+        lets a higher-level atomic executor reuse the exact validated requests,
+        lineage, and cleanup plan without first running and cleaning up the
+        standalone sequence.
+        """
+
+        async with self._lock:
+            if self._consumed:
+                raise ControlledSequenceDenied(
+                    "runtime_sequence_executor_already_consumed"
+                )
+            preflight = self._preflight()
+            if (
+                expected_sequence_id is not None
+                and preflight.sequence_id != expected_sequence_id
+            ):
+                raise ControlledSequenceDenied("runtime_sequence_identity_changed")
+            self._consumed = True
+            return preflight
+
     async def execute(
         self,
         *,

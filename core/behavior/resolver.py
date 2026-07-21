@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .active import ControlledAuthorizationExecutor, ControlledExecutionResult
+from .boundary import FreshOwnedBoundaryExecutor, FreshOwnedBoundaryResult
+from .factory import PreparedOwnedExperiment
 from .normalize import stable_hash
 from .orchestrator import BehavioralShadowRun, RankedSecurityObligation
 from .proposals import AuthorizationExperimentProposal
@@ -75,35 +77,58 @@ class ClosedLoopResolverDiagnostics:
 @dataclass(frozen=True)
 class ClosedLoopResolverSelection:
     obligation_id: str
-    proposal_id: str
+    resolution_kind: str
+    resolution_ref: str
     frontier_index: int
     rank_score: int
-    proposal: AuthorizationExperimentProposal = field(repr=False, compare=False)
-    resolution_kind: str = "authorization_proposal"
+    proposal: Optional[AuthorizationExperimentProposal] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if (
-            not isinstance(self.proposal, AuthorizationExperimentProposal)
-            or self.proposal.proposal_id != self.proposal_id
-            or not self.obligation_id.startswith("security_obligation:")
+            not self.obligation_id.startswith("security_obligation:")
             or _HASH_REF.fullmatch(self.obligation_id) is None
-            or not self.proposal_id.startswith("authorization_proposal:")
-            or _HASH_REF.fullmatch(self.proposal_id) is None
+            or _HASH_REF.fullmatch(self.resolution_ref) is None
             or isinstance(self.frontier_index, bool)
             or not isinstance(self.frontier_index, int)
             or self.frontier_index < 0
             or isinstance(self.rank_score, bool)
             or not isinstance(self.rank_score, int)
             or self.rank_score < 0
-            or self.resolution_kind != "authorization_proposal"
+            or self.resolution_kind
+            not in {"authorization_proposal", "owned_experiment"}
+            or (
+                self.resolution_kind == "authorization_proposal"
+                and (
+                    not isinstance(self.proposal, AuthorizationExperimentProposal)
+                    or self.proposal.proposal_id != self.resolution_ref
+                    or not self.resolution_ref.startswith("authorization_proposal:")
+                )
+            )
+            or (
+                self.resolution_kind == "owned_experiment"
+                and (
+                    self.proposal is not None
+                    or not self.resolution_ref.startswith("owned_experiment:")
+                )
+            )
         ):
             raise ValueError("closed-loop resolver selection is invalid")
+
+    @property
+    def proposal_id(self) -> Optional[str]:
+        if self.resolution_kind == "authorization_proposal":
+            return self.resolution_ref
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "obligation_id": self.obligation_id,
             "resolution_kind": self.resolution_kind,
-            "resolution_ref": self.proposal_id,
+            "resolution_ref": self.resolution_ref,
             "frontier_index": self.frontier_index,
             "rank_score": self.rank_score,
         }
@@ -114,6 +139,7 @@ def _plan_payload(
     shadow_run_id: str,
     selected: Optional[ClosedLoopResolverSelection],
     ranked: Sequence[RankedSecurityObligation],
+    dispatchable_resolution_refs: Sequence[str],
     diagnostics: ClosedLoopResolverDiagnostics,
 ) -> Dict[str, Any]:
     return {
@@ -121,6 +147,7 @@ def _plan_payload(
         "shadow_run_id": shadow_run_id,
         "selected": selected.to_dict() if selected is not None else None,
         "ranked": [item.to_dict() for item in ranked],
+        "dispatchable_resolution_refs": list(dispatchable_resolution_refs),
         "diagnostics": diagnostics.to_dict(),
     }
 
@@ -131,6 +158,7 @@ class ClosedLoopResolverPlan:
     shadow_run_id: str
     selected: Optional[ClosedLoopResolverSelection]
     ranked: Tuple[RankedSecurityObligation, ...]
+    dispatchable_resolution_refs: Tuple[str, ...]
     diagnostics: ClosedLoopResolverDiagnostics
     mode: str = CLOSED_LOOP_RESOLVER_MODE
 
@@ -139,18 +167,23 @@ class ClosedLoopResolverPlan:
             shadow_run_id=self.shadow_run_id,
             selected=self.selected,
             ranked=self.ranked,
+            dispatchable_resolution_refs=self.dispatchable_resolution_refs,
             diagnostics=self.diagnostics,
         )
         actionable_items = tuple(item for item in self.ranked if item.actionable)
         outcome_indices = tuple(
             index
             for index, item in enumerate(self.ranked)
-            if item.actionable and item.resolution_kind == "authorization_proposal"
+            if item.actionable
+            and item.resolution_ref in self.dispatchable_resolution_refs
+        )
+        expected_dispatchable_refs = tuple(
+            self.ranked[index].resolution_ref for index in outcome_indices
         )
         deferred_items = tuple(
             item
             for item in actionable_items
-            if item.resolution_kind == "owned_experiment"
+            if item.resolution_ref not in self.dispatchable_resolution_refs
         )
         selected_matches = ()
         if self.selected is not None:
@@ -161,7 +194,7 @@ class ClosedLoopResolverPlan:
                 and item.obligation_id == self.selected.obligation_id
                 and item.actionable
                 and item.resolution_kind == self.selected.resolution_kind
-                and item.resolution_ref == self.selected.proposal_id
+                and item.resolution_ref == self.selected.resolution_ref
                 and item.score == self.selected.rank_score
             )
         if (
@@ -171,6 +204,13 @@ class ClosedLoopResolverPlan:
             or _HASH_REF.fullmatch(self.shadow_run_id) is None
             or len(selected_matches) != (1 if self.selected is not None else 0)
             or len(self.ranked) != self.diagnostics.frontier_items
+            or tuple(dict.fromkeys(self.dispatchable_resolution_refs))
+            != self.dispatchable_resolution_refs
+            or expected_dispatchable_refs != self.dispatchable_resolution_refs
+            or any(
+                not isinstance(item, str) or _HASH_REF.fullmatch(item) is None
+                for item in self.dispatchable_resolution_refs
+            )
             or len(actionable_items) != self.diagnostics.actionable_items
             or len(outcome_indices) != self.diagnostics.outcome_bearing_items
             or len(deferred_items) != self.diagnostics.deferred_preparatory_items
@@ -193,10 +233,17 @@ class ClosedLoopResolverPlan:
                 shadow_run_id=self.shadow_run_id,
                 selected=selected,
                 ranked=self.ranked,
+                dispatchable_resolution_refs=self.dispatchable_resolution_refs,
                 diagnostics=self.diagnostics,
             ),
             # Retained for the existing receipt and Swift response contracts.
             "selected_proposal_id": selected.proposal_id if selected else None,
+            "selected_experiment_id": (
+                selected.resolution_ref
+                if selected is not None
+                and selected.resolution_kind == "owned_experiment"
+                else None
+            ),
             "selected_obligation_id": selected.obligation_id if selected else None,
         }
 
@@ -205,18 +252,33 @@ class ClosedLoopResolverPlan:
 class ClosedLoopResolverRun:
     status: str
     plan: ClosedLoopResolverPlan
-    execution: Optional[ControlledExecutionResult] = None
+    execution: Optional[ControlledExecutionResult | FreshOwnedBoundaryResult] = None
 
     def __post_init__(self) -> None:
         if self.execution is None:
             if self.status not in {"disabled", "no_executable_candidate"}:
                 raise ValueError("closed-loop resolver inactive status is invalid")
-        elif (
-            self.plan.selected is None
-            or self.execution.proposal_id != self.plan.selected.proposal_id
-            or self.status != self.execution.status
-        ):
-            raise ValueError("closed-loop resolver execution is inconsistent")
+        else:
+            selected = self.plan.selected
+            execution_ref = (
+                self.execution.proposal_id
+                if isinstance(self.execution, ControlledExecutionResult)
+                else self.execution.experiment_id
+            )
+            if (
+                selected is None
+                or execution_ref != selected.resolution_ref
+                or self.status != self.execution.status
+                or (
+                    selected.resolution_kind == "authorization_proposal"
+                    and not isinstance(self.execution, ControlledExecutionResult)
+                )
+                or (
+                    selected.resolution_kind == "owned_experiment"
+                    and not isinstance(self.execution, FreshOwnedBoundaryResult)
+                )
+            ):
+                raise ValueError("closed-loop resolver execution is inconsistent")
 
     @property
     def finding(self) -> Optional[Dict[str, Any]]:
@@ -231,7 +293,8 @@ class ClosedLoopResolverRun:
             "plan_id": self.plan.plan_id,
             "shadow_run_id": self.plan.shadow_run_id,
             "obligation_id": selected.obligation_id,
-            "proposal_id": selected.proposal_id,
+            "resolution_kind": selected.resolution_kind,
+            "resolution_ref": selected.resolution_ref,
             "frontier_index": selected.frontier_index,
             "rank_score": selected.rank_score,
             "authoritative_verdict_engine": self.execution.authoritative_engine,
@@ -239,12 +302,22 @@ class ClosedLoopResolverRun:
         metadata["behavioral_closed_loop_resolver"] = resolver_metadata
         # Compatibility for existing report/UI consumers. Selection authority is
         # the obligation plan above, not BehavioralPrimaryScheduler.
-        metadata["behavioral_primary_planner"] = {
-            "mode": self.plan.mode,
-            "proposal_id": selected.proposal_id,
-            "rank_score": selected.rank_score,
-            "authoritative_verdict_engine": self.execution.authoritative_engine,
-        }
+        if selected.proposal_id is not None:
+            metadata["behavioral_primary_planner"] = {
+                "mode": self.plan.mode,
+                "proposal_id": selected.proposal_id,
+                "rank_score": selected.rank_score,
+                "authoritative_verdict_engine": self.execution.authoritative_engine,
+            }
+        else:
+            assert isinstance(self.execution, FreshOwnedBoundaryResult)
+            metadata["behavioral_fresh_owned_boundary"] = {
+                "mode": self.execution.mode,
+                "boundary_id": self.execution.boundary_id,
+                "experiment_id": self.execution.experiment_id,
+                "peer_experiment_id": self.execution.peer_experiment_id,
+                "cleanup_status": self.execution.status,
+            }
         metadata["proof_mode"] = "bounty_safe"
         metadata["restraint"] = dict(self.execution.restraint)
         metadata["sentinel_provenance_root"] = self.execution.provenance_root
@@ -282,11 +355,46 @@ class SingleStepObligationResolver:
             proposals[proposal.proposal_id] = proposal
         return proposals
 
-    def plan(self, shadow_run: BehavioralShadowRun) -> ClosedLoopResolverPlan:
+    @staticmethod
+    def _experiments_by_id(
+        shadow_run: BehavioralShadowRun,
+    ) -> Mapping[str, PreparedOwnedExperiment]:
+        inventory = shadow_run.experiment_stage.inventory
+        if inventory is None:
+            return {}
+        experiments: Dict[str, PreparedOwnedExperiment] = {}
+        for experiment in inventory.experiments:
+            if experiment.experiment_id in experiments:
+                raise ClosedLoopResolverDenied(
+                    "shadow_experiment_identity_is_ambiguous"
+                )
+            experiments[experiment.experiment_id] = experiment
+        return experiments
+
+    def plan(
+        self,
+        shadow_run: BehavioralShadowRun,
+        *,
+        fresh_boundary_executor: Optional[FreshOwnedBoundaryExecutor] = None,
+    ) -> ClosedLoopResolverPlan:
         if not isinstance(shadow_run, BehavioralShadowRun):
             raise TypeError("shadow_run must be a BehavioralShadowRun")
+        if fresh_boundary_executor is not None and not isinstance(
+            fresh_boundary_executor,
+            FreshOwnedBoundaryExecutor,
+        ):
+            raise TypeError(
+                "fresh_boundary_executor must be a FreshOwnedBoundaryExecutor"
+            )
         proposals = self._proposals_by_id(shadow_run)
+        experiments = self._experiments_by_id(shadow_run)
+        boundary_refs = (
+            frozenset(fresh_boundary_executor.supported_experiment_ids())
+            if fresh_boundary_executor is not None
+            else frozenset()
+        )
         selected = None
+        dispatchable_refs = []
         actionable = 0
         outcome_bearing = 0
         deferred = 0
@@ -297,10 +405,24 @@ class SingleStepObligationResolver:
                 continue
             actionable += 1
             if item.resolution_kind == "owned_experiment":
-                # The compiled sequence proves setup/cleanup behavior only. Until
-                # a cross-principal oracle consumes its fresh state, execution
-                # cannot resolve the ownership-boundary obligation.
-                deferred += 1
+                experiment = experiments.get(str(item.resolution_ref))
+                if experiment is None:
+                    raise ClosedLoopResolverDenied(
+                        "frontier_experiment_ref_is_unbound"
+                    )
+                if experiment.experiment_id not in boundary_refs:
+                    deferred += 1
+                    continue
+                outcome_bearing += 1
+                dispatchable_refs.append(experiment.experiment_id)
+                if selected is None:
+                    selected = ClosedLoopResolverSelection(
+                        obligation_id=item.obligation_id,
+                        resolution_kind="owned_experiment",
+                        resolution_ref=experiment.experiment_id,
+                        frontier_index=index,
+                        rank_score=item.score,
+                    )
                 continue
             if item.resolution_kind != "authorization_proposal":
                 raise ClosedLoopResolverDenied(
@@ -310,10 +432,12 @@ class SingleStepObligationResolver:
             if proposal is None:
                 raise ClosedLoopResolverDenied("frontier_resolution_ref_is_unbound")
             outcome_bearing += 1
+            dispatchable_refs.append(proposal.proposal_id)
             if selected is None:
                 selected = ClosedLoopResolverSelection(
                     obligation_id=item.obligation_id,
-                    proposal_id=proposal.proposal_id,
+                    resolution_kind="authorization_proposal",
+                    resolution_ref=proposal.proposal_id,
                     frontier_index=index,
                     rank_score=item.score,
                     proposal=proposal,
@@ -335,6 +459,7 @@ class SingleStepObligationResolver:
             shadow_run_id=shadow_run.run_id,
             selected=selected,
             ranked=shadow_run.ranked_frontier,
+            dispatchable_resolution_refs=tuple(dispatchable_refs),
             diagnostics=diagnostics,
         )
         return ClosedLoopResolverPlan(
@@ -342,6 +467,7 @@ class SingleStepObligationResolver:
             shadow_run_id=shadow_run.run_id,
             selected=selected,
             ranked=shadow_run.ranked_frontier,
+            dispatchable_resolution_refs=tuple(dispatchable_refs),
             diagnostics=diagnostics,
         )
 
@@ -352,21 +478,35 @@ class SingleStepObligationResolver:
         peer_records: Sequence[Mapping[str, Any]],
         *,
         controlled_executor: Optional[ControlledAuthorizationExecutor] = None,
+        fresh_boundary_executor: Optional[FreshOwnedBoundaryExecutor] = None,
     ) -> ClosedLoopResolverRun:
-        plan = self.plan(shadow_run)
+        plan = self.plan(
+            shadow_run,
+            fresh_boundary_executor=fresh_boundary_executor,
+        )
         if not self.config.enabled:
             return ClosedLoopResolverRun("disabled", plan)
         if plan.selected is None:
             return ClosedLoopResolverRun("no_executable_candidate", plan)
-        if not isinstance(controlled_executor, ControlledAuthorizationExecutor):
-            raise ClosedLoopResolverDenied(
-                "enabled_closed_loop_resolver_requires_controlled_executor"
+        if plan.selected.resolution_kind == "owned_experiment":
+            if not isinstance(fresh_boundary_executor, FreshOwnedBoundaryExecutor):
+                raise ClosedLoopResolverDenied(
+                    "enabled_owned_resolution_requires_fresh_boundary_executor"
+                )
+            execution = await fresh_boundary_executor.execute(
+                plan.selected.resolution_ref
             )
-        execution = await controlled_executor.execute(
-            plan.selected.proposal,
-            source_records,
-            peer_records,
-        )
+        else:
+            if not isinstance(controlled_executor, ControlledAuthorizationExecutor):
+                raise ClosedLoopResolverDenied(
+                    "enabled_closed_loop_resolver_requires_controlled_executor"
+                )
+            assert plan.selected.proposal is not None
+            execution = await controlled_executor.execute(
+                plan.selected.proposal,
+                source_records,
+                peer_records,
+            )
         return ClosedLoopResolverRun(execution.status, plan, execution)
 
 
