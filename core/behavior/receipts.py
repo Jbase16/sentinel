@@ -31,7 +31,9 @@ RESERVED = "reserved"
 COMPLETED = "completed"
 ABORTED = "aborted"
 _VALID_STATES = frozenset({RESERVED, COMPLETED, ABORTED})
-_VALID_RUN_STATUSES = frozenset({"completed", "aborted", "no_executable_candidate"})
+_VALID_RUN_STATUSES = frozenset(
+    {"completed", "aborted", "cleanup_failed", "no_executable_candidate"}
+)
 _VALID_EXECUTION_STATUSES = frozenset({"completed", "aborted"})
 _VALID_EXPLORATION_STATUSES = frozenset(
     {"completed", "disabled", "failed", "not_needed"}
@@ -41,7 +43,31 @@ _VALID_LEGACY_VERDICTS = frozenset(
     {"BOLA_CONFIRMED", "DENIED", "NO_CROSS_READ", "AMBIGUOUS", "ERROR"}
 )
 _PROPOSAL_REF = re.compile(r"^authorization_proposal:[0-9a-f]{64}$")
+_OWNED_EXPERIMENT_REF = re.compile(r"^owned_experiment:[0-9a-f]{64}$")
+_OWNED_LIFECYCLE_REF = re.compile(r"^owned_lifecycle:[0-9a-f]{64}$")
+_ACTION_REF = re.compile(r"^action:[0-9a-f]{64}$")
+_FRESH_BOUNDARY_REF = re.compile(r"^fresh_owned_boundary:[0-9a-f]{64}$")
+_SECURITY_OBLIGATION_REF = re.compile(r"^security_obligation:[0-9a-f]{64}$")
 _COMPILED_SEQUENCE_REF = re.compile(r"^controlled_runtime_sequence:[0-9a-f]{64}$")
+_FRESH_BOUNDARY_ERROR_CODES = frozenset(
+    {
+        "fresh_boundary_baseline_is_not_usable",
+        "fresh_boundary_cleanup_failed",
+        "fresh_boundary_create_identifier_is_unavailable",
+        "fresh_boundary_create_policy_denied",
+        "fresh_boundary_create_returned_non_2xx",
+        "fresh_boundary_create_transport_error",
+        "fresh_boundary_cross_probe_policy_denied",
+        "fresh_boundary_identifiers_are_not_distinct",
+        "fresh_boundary_oracle_request_changed",
+        "fresh_boundary_ownership_registration_failed",
+        "fresh_boundary_proof_aborted",
+        "fresh_boundary_proof_leg_budget_exceeded",
+        "fresh_boundary_proof_transport_error",
+        "fresh_boundary_runtime_binding_changed",
+        "fresh_boundary_unexpected_proof_error",
+    }
+)
 _COMPILED_ERROR_CODES = frozenset(
     {
         "runtime_body_is_not_structured",
@@ -290,6 +316,34 @@ def _selected_proposal(plan: Any) -> Optional[str]:
     return proposal_id
 
 
+def _selected_experiment(plan: Any) -> Optional[str]:
+    if not isinstance(plan, Mapping):
+        raise ReceiptStoreError("behavioral receipt plan is invalid")
+    experiment_id = plan.get("selected_experiment_id")
+    if experiment_id is None:
+        return None
+    if (
+        not isinstance(experiment_id, str)
+        or _OWNED_EXPERIMENT_REF.fullmatch(experiment_id) is None
+    ):
+        raise ReceiptStoreError("behavioral receipt experiment reference is invalid")
+    return experiment_id
+
+
+def _selected_obligation(plan: Any) -> Optional[str]:
+    if not isinstance(plan, Mapping):
+        raise ReceiptStoreError("behavioral receipt plan is invalid")
+    obligation_id = plan.get("selected_obligation_id")
+    if obligation_id is None:
+        return None
+    if (
+        not isinstance(obligation_id, str)
+        or _SECURITY_OBLIGATION_REF.fullmatch(obligation_id) is None
+    ):
+        raise ReceiptStoreError("behavioral receipt obligation reference is invalid")
+    return obligation_id
+
+
 def _redacted_execution(value: Any) -> Optional[Dict[str, Any]]:
     if value is None:
         return None
@@ -485,8 +539,167 @@ def redacted_compiled_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def redacted_fresh_owned_boundary_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Return the bounded fresh-state proof fields permitted in a receipt."""
+
+    status = response.get("status")
+    if status not in {"completed", "aborted", "cleanup_failed"}:
+        raise ReceiptStoreError("fresh boundary receipt status is invalid")
+    selected_experiment = _selected_experiment(response.get("plan"))
+    selected_obligation = _selected_obligation(response.get("plan"))
+    if (
+        selected_experiment is None
+        or selected_obligation is None
+        or _selected_proposal(response.get("plan")) is not None
+    ):
+        raise ReceiptStoreError("fresh boundary receipt selection is invalid")
+    execution = response.get("execution")
+    if not isinstance(execution, Mapping) or execution.get("kind") != (
+        "fresh_owned_boundary"
+    ):
+        raise ReceiptStoreError("fresh boundary receipt execution is invalid")
+    refs = {
+        "boundary_id": (execution.get("boundary_id"), _FRESH_BOUNDARY_REF),
+        "experiment_id": (execution.get("experiment_id"), _OWNED_EXPERIMENT_REF),
+        "lifecycle_id": (execution.get("lifecycle_id"), _OWNED_LIFECYCLE_REF),
+        "terminal_operation_id": (
+            execution.get("terminal_operation_id"),
+            _ACTION_REF,
+        ),
+        "peer_experiment_id": (
+            execution.get("peer_experiment_id"),
+            _OWNED_EXPERIMENT_REF,
+        ),
+    }
+    if any(
+        not isinstance(value, str) or pattern.fullmatch(value) is None
+        for value, pattern in refs.values()
+    ) or execution.get("experiment_id") != selected_experiment:
+        raise ReceiptStoreError("fresh boundary receipt identity is invalid")
+    verdict = execution.get("legacy_verdict")
+    if verdict not in _VALID_LEGACY_VERDICTS:
+        raise ReceiptStoreError("fresh boundary receipt verdict is invalid")
+    finding_confirmed = response.get("finding_confirmed")
+    if not isinstance(finding_confirmed, bool):
+        finding_confirmed = bool(response.get("finding"))
+    execution_finding = execution.get("finding_confirmed")
+    if not isinstance(execution_finding, bool) or (
+        execution_finding != finding_confirmed
+        or (verdict == "BOLA_CONFIRMED") != finding_confirmed
+    ):
+        raise ReceiptStoreError("fresh boundary finding state is inconsistent")
+    counters = {
+        key: _nonnegative_int(execution.get(key), field_name=f"fresh_boundary.{key}")
+        for key in (
+            "requests_attempted",
+            "requests_sent",
+            "creates_attempted",
+            "creates_completed",
+            "proof_legs_attempted",
+            "proof_legs_sent",
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "policy_denials",
+        )
+    }
+    if (
+        counters["requests_sent"] > counters["requests_attempted"]
+        or counters["requests_attempted"]
+        != counters["creates_attempted"]
+        + counters["proof_legs_attempted"]
+        + counters["cleanup_steps_attempted"]
+        or counters["creates_completed"] > counters["creates_attempted"]
+        or counters["creates_attempted"] > 2
+        or counters["proof_legs_sent"] > counters["proof_legs_attempted"]
+        or counters["proof_legs_attempted"] > 3
+        or counters["cleanup_steps_completed"]
+        > counters["cleanup_steps_attempted"]
+        or counters["cleanup_steps_attempted"] > 2
+    ):
+        raise ReceiptStoreError("fresh boundary receipt counters are inconsistent")
+    orphaned = execution.get("orphaned_owned_state_possible")
+    if not isinstance(orphaned, bool):
+        raise ReceiptStoreError("fresh boundary orphan state is invalid")
+    error_code = execution.get("error_code")
+    if error_code is not None and error_code not in _FRESH_BOUNDARY_ERROR_CODES:
+        raise ReceiptStoreError("fresh boundary error code is invalid")
+    if status == "completed" and (
+        error_code is not None
+        or orphaned
+        or counters["creates_completed"] != 2
+        or counters["cleanup_steps_completed"] != 2
+    ):
+        raise ReceiptStoreError("fresh boundary completed state is inconsistent")
+    if status == "aborted" and error_code is None:
+        raise ReceiptStoreError("fresh boundary aborted state requires an error")
+    if status == "cleanup_failed" and (
+        error_code != "fresh_boundary_cleanup_failed" or not orphaned
+    ):
+        raise ReceiptStoreError("fresh boundary cleanup failure is inconsistent")
+    provenance_root = execution.get("provenance_root")
+    if not isinstance(provenance_root, str) or not re_full_sha256(provenance_root):
+        raise ReceiptStoreError("fresh boundary provenance root is invalid")
+    budget = _count_section(
+        execution.get("budget_snapshot"),
+        (
+            "total_requests",
+            "cross_object_reads",
+            "privilege_mutations",
+            "creates",
+            "endpoints_touched",
+        ),
+        section="fresh_boundary.budget_snapshot",
+    )
+    if (
+        budget["total_requests"] > counters["requests_attempted"]
+        or budget["cross_object_reads"] > 1
+        or budget["privilege_mutations"] != 0
+        or budget["creates"] > 2
+        or budget["endpoints_touched"] > budget["total_requests"]
+    ):
+        raise ReceiptStoreError("fresh boundary budget is inconsistent")
+    output = {
+        "kind": "fresh_owned_boundary",
+        "status": status,
+        "plan": {
+            "selected_proposal_id": None,
+            "selected_experiment_id": selected_experiment,
+            "selected_obligation_id": selected_obligation,
+        },
+        "execution": {
+            "kind": "fresh_owned_boundary",
+            **{key: value for key, (value, _pattern) in refs.items()},
+            "status": status,
+            "legacy_verdict": verdict,
+            "finding_confirmed": finding_confirmed,
+            **counters,
+            "orphaned_owned_state_possible": orphaned,
+            "provenance_root": provenance_root,
+            "budget_snapshot": budget,
+            "error_code": error_code,
+        },
+        "finding": None,
+        "finding_confirmed": finding_confirmed,
+        "graphql_resolution": _redacted_graphql_diagnostics(
+            response.get("graphql_resolution")
+        ),
+    }
+    if "read_exploration" in response:
+        output["read_exploration"] = _redacted_read_exploration(
+            response.get("read_exploration")
+        )
+    return output
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    execution_value = response.get("execution")
+    if isinstance(execution_value, Mapping) and execution_value.get("kind") == (
+        "fresh_owned_boundary"
+    ):
+        return redacted_fresh_owned_boundary_outcome(response)
     status = response.get("status")
     if status not in _VALID_RUN_STATUSES:
         raise ReceiptStoreError("behavioral receipt run status is invalid")
@@ -525,6 +738,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
     if value.get("kind") == "compiled_sequence":
         return redacted_compiled_outcome(value)
+    if value.get("kind") == "fresh_owned_boundary":
+        return redacted_fresh_owned_boundary_outcome(value)
     return redacted_outcome(value)
 
 

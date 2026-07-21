@@ -36,6 +36,10 @@ def _isolate(monkeypatch, tmp_path):
     )
     monkeypatch.setenv("SENTINELFORGE_CAPTURE_STORE", str(tmp_path / "captures"))
     monkeypatch.delenv("SENTINELFORGE_BEHAVIOR_PRIMARY", raising=False)
+    monkeypatch.delenv(
+        "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
+        raising=False,
+    )
     _reset_bus_for_tests()
     yield
     _reset_bus_for_tests()
@@ -357,6 +361,117 @@ class TestBehavioralAuthorizationEndpoint:
             result["behavioral_shadow"].get("selected") or {}
         ).get("obligation_id")
         assert len(calls) == 3
+
+    def test_fresh_owned_frontier_creates_proves_and_cleans_both_personas(
+        self,
+        monkeypatch,
+    ):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
+        from core.foundry.authorization import create_envelope
+        from core.server.routers.foundry import run_behavioral_authorization_endpoint
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, peer_persona = self._setup()
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[CONTROLLED_WORKFLOW, CONTROLLED_SEQUENCE_WORKFLOW],
+            disclosure_attestation=True,
+        )
+        request.envelope_id = envelope.envelope_id
+        source_captured = "note_source_7fa9f13a2b4c"
+        peer_captured = "note_peer_4a5b6c7d8e9f0"
+        source_fresh = "note_fresh_source_8b9c0d1e2f3a4"
+        peer_fresh = "note_fresh_peer_5b6c7d8e9f0a1"
+
+        def lifecycle(persona_id, object_id, marker):
+            headers = {"x-csrf-token": f"csrf-{persona_id}"}
+            return [
+                {
+                    "persona_id": persona_id,
+                    "method": "POST",
+                    "url": f"{self.ORIGIN}/api/notes",
+                    "request_headers": headers,
+                    "request_body": '{"title":"controlled marker"}',
+                    "response_status": 201,
+                    "response_body": json.dumps({"noteId": object_id}),
+                },
+                {
+                    "persona_id": persona_id,
+                    "method": "GET",
+                    "url": f"{self.ORIGIN}/api/notes/{object_id}",
+                    "request_headers": headers,
+                    "response_status": 200,
+                    "response_body": json.dumps({"owner": marker}),
+                },
+                {
+                    "persona_id": persona_id,
+                    "method": "PATCH",
+                    "url": f"{self.ORIGIN}/api/notes/{object_id}",
+                    "request_headers": headers,
+                    "request_body": '{"archived":true}',
+                    "response_status": 200,
+                    "response_body": '{"archived":true}',
+                },
+            ]
+
+        request.source_records = lifecycle(
+            source_persona.persona_id,
+            source_captured,
+            "source-captured-private",
+        )
+        request.peer_records = lifecycle(
+            peer_persona.persona_id,
+            peer_captured,
+            "peer-captured-private",
+        )
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION", "1")
+        calls = []
+
+        async def fake_send(_transport, persona, replay_request):
+            calls.append((persona, replay_request))
+            if replay_request.method == "POST":
+                object_id = (
+                    source_fresh
+                    if persona == source_persona.persona_id
+                    else peer_fresh
+                )
+                return ReplayResponse(201, json.dumps({"noteId": object_id}))
+            if replay_request.method == "PATCH":
+                return ReplayResponse(200, '{"archived":true}')
+            if source_fresh in replay_request.url:
+                return ReplayResponse(200, '{"owner":"source-fresh-private"}')
+            return ReplayResponse(200, '{"owner":"peer-fresh-private"}')
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "completed"
+        assert result["plan"]["selected"]["resolution_kind"] == "owned_experiment"
+        assert result["plan"]["selected"]["frontier_index"] == 0
+        assert result["execution"]["kind"] == "fresh_owned_boundary"
+        assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
+        assert result["execution"]["requests_sent"] == 7
+        assert result["execution"]["cleanup_steps_completed"] == 2
+        assert result["finding"]["metadata"]["behavioral_fresh_owned_boundary"]
+        assert result["behavioral_shadow"]["status"] == "finding"
+        assert result["behavioral_shadow"]["receipt_feedback"]["status"] == "ready"
+        assert [
+            (persona, replay_request.method)
+            for persona, replay_request in calls
+        ] == [
+            (source_persona.persona_id, "POST"),
+            (peer_persona.persona_id, "POST"),
+            (source_persona.persona_id, "GET"),
+            (peer_persona.persona_id, "GET"),
+            (peer_persona.persona_id, "GET"),
+            (peer_persona.persona_id, "PATCH"),
+            (source_persona.persona_id, "PATCH"),
+        ]
 
     def test_enabled_route_refuses_execution_when_obligation_frontier_fails(
         self, monkeypatch, tmp_path

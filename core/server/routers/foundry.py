@@ -552,6 +552,16 @@ async def run_behavioral_authorization_endpoint(
         ClosedLoopResolverDenied,
         SingleStepObligationResolver,
     )
+    from core.behavior.boundary import (
+        FreshOwnedBoundaryConfig,
+        FreshOwnedBoundaryDenied,
+        FreshOwnedBoundaryExecutor,
+    )
+    from core.behavior.factory import (
+        OwnedExperimentFactory,
+        OwnedExperimentFactoryDenied,
+    )
+    from core.behavior.runtime import ControlledSequenceDenied
     from core.behavior.explorer import BehavioralReadExplorer
     from core.behavior.graphql_catalog import PersistedOperationCatalog
     from core.behavior.receipts import (
@@ -609,6 +619,7 @@ async def run_behavioral_authorization_endpoint(
         )
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
+    fresh_boundary_config = FreshOwnedBoundaryConfig.from_environment()
     config = PrimaryPlannerConfig(enabled=resolver_config.enabled)
     scheduler = BehavioralPrimaryScheduler(config)
     obligation_resolver = SingleStepObligationResolver(resolver_config)
@@ -623,7 +634,9 @@ async def run_behavioral_authorization_endpoint(
     }
     shadow_artifacts = []
     controlled_executor = None
+    fresh_boundary_executor = None
     executors = None
+    boundary_executors = None
     receipt_store = None
     receipt_fingerprint = None
     receipt_reservation_token = None
@@ -662,7 +675,11 @@ async def run_behavioral_authorization_endpoint(
             policy_digest=policy.digest(),
         )
 
-        def make_executor(persona_id: str) -> PolicyExecutor:
+        def make_executor(
+            persona_id: str,
+            execution_policy: ExecutionPolicy,
+            execution_provenance: ProvenanceSink,
+        ) -> PolicyExecutor:
             async def raw_send(method, url, body=None, **kwargs):
                 headers = kwargs.get("headers") or {}
                 response_cap = kwargs.get("_max_response_chars")
@@ -687,11 +704,55 @@ async def run_behavioral_authorization_endpoint(
                     body_truncated=response.body_truncated,
                 )
 
-            return PolicyExecutor(raw_send, policy, provenance=provenance)
+            return PolicyExecutor(
+                raw_send,
+                execution_policy,
+                provenance=execution_provenance,
+            )
 
         executors = {
-            source_persona.persona_id: make_executor(source_persona.persona_id),
-            peer_persona.persona_id: make_executor(peer_persona.persona_id),
+            source_persona.persona_id: make_executor(
+                source_persona.persona_id,
+                policy,
+                provenance,
+            ),
+            peer_persona.persona_id: make_executor(
+                peer_persona.persona_id,
+                policy,
+                provenance,
+            ),
+        }
+        boundary_policy = ExecutionPolicy(
+            "bounty_safe",
+            scope_filter=scope_filter,
+            budget=ProofBudget(
+                max_total_requests=7,
+                max_requests_per_endpoint=5,
+                max_cross_object_reads=1,
+                max_privilege_mutations=0,
+                max_creates=2,
+                allow_delete=False,
+                allow_real_user_data_access=False,
+            ),
+            ownership_registry=OwnershipRegistry(),
+        )
+        boundary_provenance = ProvenanceSink()
+        boundary_provenance.record_context(
+            target=target_origin,
+            proof_mode="bounty_safe",
+            policy_digest=boundary_policy.digest(),
+        )
+        boundary_executors = {
+            source_persona.persona_id: make_executor(
+                source_persona.persona_id,
+                boundary_policy,
+                boundary_provenance,
+            ),
+            peer_persona.persona_id: make_executor(
+                peer_persona.persona_id,
+                boundary_policy,
+                boundary_provenance,
+            ),
         }
         controlled_executor = ControlledAuthorizationExecutor(
             target_origin=target_origin,
@@ -708,7 +769,11 @@ async def run_behavioral_authorization_endpoint(
         receipt_store = BehavioralReceiptStore()
         try:
             receipt_fingerprint = request_fingerprint({
-                "schema_version": 1,
+                "schema_version": 2,
+                "execution_profile": {
+                    "primary": resolver_config.enabled,
+                    "fresh_owned_boundary": fresh_boundary_config.enabled,
+                },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
                 "source_persona_id": source_persona.persona_id,
@@ -873,9 +938,12 @@ async def run_behavioral_authorization_endpoint(
         "bounty_safe",
         scope_filter=scope_filter,
         budget=ProofBudget(
-            max_total_requests=3,
-            max_requests_per_endpoint=3,
-            max_creates=1,
+            max_total_requests=7,
+            max_requests_per_endpoint=5,
+            max_cross_object_reads=1,
+            max_privilege_mutations=0,
+            max_creates=2,
+            allow_delete=False,
             allow_real_user_data_access=False,
         ),
         ownership_registry=OwnershipRegistry(),
@@ -938,6 +1006,61 @@ async def run_behavioral_authorization_endpoint(
             detail="behavioral obligation frontier failed; execution refused",
         )
 
+    if (
+        shadow_run is not None
+        and fresh_boundary_config.enabled
+        and boundary_executors is not None
+        and shadow_run.experiment_stage.inventory is not None
+    ):
+        try:
+            factory = OwnedExperimentFactory()
+            source_inventory = factory.build(
+                source_records,
+                target_origin=target_origin,
+                authorization=envelope,
+                actor_persona_id=source_persona.persona_id,
+                executor=boundary_executors[source_persona.persona_id],
+            )
+            peer_inventory = factory.build(
+                peer_records,
+                target_origin=target_origin,
+                authorization=envelope,
+                actor_persona_id=peer_persona.persona_id,
+                executor=boundary_executors[peer_persona.persona_id],
+            )
+            candidate_boundary = FreshOwnedBoundaryExecutor(
+                source_inventory=source_inventory,
+                peer_inventory=peer_inventory,
+                source_persona=source_persona,
+                peer_persona=peer_persona,
+                config=fresh_boundary_config,
+            )
+            if candidate_boundary.supported_experiment_ids():
+                fresh_boundary_executor = candidate_boundary
+        except (OwnedExperimentFactoryDenied, ControlledSequenceDenied) as exc:
+            logger.warning("fresh owned boundary preflight unavailable: %s", exc)
+        except Exception as exc:
+            if (
+                receipt_store is not None
+                and receipt_fingerprint is not None
+                and receipt_reservation_token is not None
+            ):
+                try:
+                    receipt_store.abort(
+                        receipt_fingerprint,
+                        reservation_token=receipt_reservation_token,
+                        reason="fresh_boundary_preflight_error",
+                    )
+                except (OSError, ReceiptStoreError):
+                    logger.exception(
+                        "failed to terminate fresh-boundary preflight receipt"
+                    )
+            logger.exception("fresh owned boundary preflight failed")
+            raise HTTPException(
+                status_code=500,
+                detail="fresh owned boundary preflight failed; execution refused",
+            ) from exc
+
     try:
         if shadow_run is None:
             # Disabled mode has no execution authority. Preserve its diagnostic
@@ -954,8 +1077,13 @@ async def run_behavioral_authorization_endpoint(
                 source_records,
                 peer_records,
                 controlled_executor=controlled_executor,
+                fresh_boundary_executor=fresh_boundary_executor,
             )
-    except ControlledExecutionDenied as exc:
+    except (
+        ControlledExecutionDenied,
+        ControlledSequenceDenied,
+        FreshOwnedBoundaryDenied,
+    ) as exc:
         if (
             receipt_store is not None
             and receipt_fingerprint is not None
@@ -1084,6 +1212,7 @@ async def run_behavioral_authorization_from_url_endpoint(
         redacted_receipt_context,
         request_fingerprint,
     )
+    from core.behavior.boundary import FreshOwnedBoundaryConfig
     from core.behavior.scheduler import PrimaryPlannerConfig
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
@@ -1132,8 +1261,14 @@ async def run_behavioral_authorization_from_url_endpoint(
 
     try:
         fingerprint = request_fingerprint({
-            "schema_version": 1,
+            "schema_version": 2,
             "mode": "behavioral_url_capture_orchestration",
+            "execution_profile": {
+                "primary": True,
+                "fresh_owned_boundary": (
+                    FreshOwnedBoundaryConfig.from_environment().enabled
+                ),
+            },
             "target_url": target_url,
             "envelope_id": req.envelope_id,
             "source_persona_id": source_persona.persona_id,
@@ -1263,6 +1398,7 @@ async def run_behavioral_authorization_from_url_endpoint(
         if isinstance(execution, dict) and execution.get("status") in {
             "completed",
             "aborted",
+            "cleanup_failed",
         }:
             receiptable_response["status"] = execution["status"]
         elif execution is None:

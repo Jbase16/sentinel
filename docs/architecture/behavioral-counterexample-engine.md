@@ -731,12 +731,13 @@ question was upheld, violated, or blocked. Execution bookkeeping and security pr
 therefore mechanically separated while still forming a deterministic closed evidence
 loop.
 
-Current limitations remain deliberate. Version 1 adapts only the established
-authorization receipt schema. Aborted receipt-store records cannot identify a proposal
-and therefore remain unbound. Compiled owned-experiment receipts remain preparatory until
-a separate proof oracle can establish the corresponding ownership boundary. The route
-updates one completed receipt into one derivation round; the feedback adapter itself
-does not select or execute another obligation.
+Current limitations remain deliberate. The adapter recognizes the established captured-
+object authorization receipt and the fresh-owned boundary receipt described below.
+Aborted receipt-store records that lack an exact graph binding remain unbound. Standalone
+compiled owned-experiment receipts remain preparatory because setup completion alone does
+not establish an authorization verdict. The route updates one completed receipt into one
+derivation round; the feedback adapter itself does not select or execute another
+obligation.
 
 ### Single-step closed-loop obligation resolver
 
@@ -751,14 +752,14 @@ signed-envelope, origin, persona, bounty-safe policy, shared budget, provenance,
 durable route-receipt gates. The established three-leg BOLA oracle remains the only
 component allowed to declare the authorization result.
 
-Proof-carrying owned create/read/cleanup packages remain actionable preparation on the
-frontier, but this resolver deliberately defers them. Their compiled receipt proves that
-owned state was manufactured, read, and cleaned up; it does not prove whether a second
-principal could cross that ownership boundary. If a lower-ranked authorization
-obligation has a real verdict oracle, it may be selected and the number of higher-ranked
-preparatory items deferred is explicit in resolver diagnostics. Missing or ambiguous
-proposal bindings fail closed. When active mode is enabled, failure to build the
-authoritative obligation frontier aborts the durable receipt and refuses all proof
+Proof-carrying owned create/read/cleanup packages are outcome-bearing only when the
+fresh-owned boundary coordinator described below can bind the same package to a
+symmetric peer lifecycle and the established BOLA oracle. Otherwise the resolver still
+defers them: a compiled setup receipt alone proves no cross-principal property. If a
+lower-ranked authorization obligation has a real verdict oracle, it may be selected and
+the number of higher-ranked preparatory items deferred remains explicit in diagnostics.
+Missing or ambiguous bindings fail closed. When active mode is enabled, failure to build
+the authoritative obligation frontier aborts the durable receipt and refuses all proof
 traffic instead of silently falling back to the older proposal scheduler.
 
 The Foundry route now uses `BehavioralPrimaryScheduler` only as the bounded eligibility
@@ -796,6 +797,64 @@ while the active seam admits only an exact question-to-oracle binding and preser
 rest as explicit unresolved state. That mechanically prevents scheduler drift and the
 common autonomous-testing failure where “the tool ran successfully” becomes “the
 security property was proven.”
+
+### Atomic fresh-owned authorization boundary
+
+`FreshOwnedBoundaryExecutor` turns one exact, symmetric owned lifecycle into terminal
+authorization evidence. It accepts only source and peer inventories whose captured
+operation roles, endpoint templates, authorization envelope, policy instance, ownership
+registry, provenance sink, and runtime contracts agree. Both runtime sequences are
+atomically claimed before traffic. The coordinator then reserves one immutable seven-
+action package: source create, peer create, source-owned baseline read, peer-owned
+baseline read, peer-to-source cross-object read, peer cleanup, and source cleanup.
+Server-issued identifiers are extracted through the previously proven response lineage,
+registered as observed researcher-owned state, and substituted only into the previously
+captured path locators. The existing three-leg BOLA classifier remains the verdict
+oracle; the coordinator does not reinterpret an HTTP 200 as a finding.
+
+Every request crosses the shared `ExecutionPolicy` under an exact bounty-safe budget of
+seven total requests, five per endpoint template, one cross-object read, zero privilege
+mutations, and two creates. DELETE and real-user-data access remain forbidden. Both
+`behavioral_object_authorization` and `behavioral_compiled_owned_sequence` must be
+present in the signed envelope, and both `SENTINELFORGE_BEHAVIOR_PRIMARY` and
+`SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION` must be explicitly enabled. Cleanup runs in
+the package's `finally` path. A failed cleanup is persisted as `cleanup_failed` with
+possible orphaned state; it cannot be hidden by a confirmed vulnerability. The durable
+receipt retains only content-addressed boundary, experiment, lifecycle, obligation, and
+provenance references plus bounded counters. Receipt feedback can therefore close only
+the exact open ownership obligation selected by the frontier.
+
+In plain language, Sentinel can now manufacture Alice's and Bob's disposable test notes,
+verify that each person's own note is readable, ask Bob for Alice's fresh note exactly
+once, and archive both notes afterward. If Bob receives Alice's private marker, the old
+lock-testing machine—not the planner—confirms the bug and Sentinel files that proof
+against the exact question it set out to answer. If the target does not expose a captured,
+safe create/read/archive pattern for both accounts, Sentinel does not improvise one and
+the item remains unresolved.
+
+This slice changes target traffic and execution authority conditionally. With either
+feature flag off, either workflow missing, a non-symmetric peer capture, a changed policy
+contract, or an unavailable exact budget, it adds zero target traffic and grants no new
+authority. With every gate satisfied and the owned experiment ranked first, it replaces
+the previously deferred setup with exactly seven pre-reserved requests. It does not add
+crawling, retries, destructive cleanup, arbitrary writes, real-user-object access, or a
+second frontier dispatch.
+
+The one-of-a-kind property is proof-carrying ephemeral ownership composition. The same
+observed create response that supplies the runtime identifier also becomes the policy's
+ownership evidence, the input to two independent baselines, the constrained cross-
+principal counterfactual, the cleanup target, the redacted durable receipt, and the graph
+disposition. There is no gap where a model can invent an identifier, assert ownership,
+skip the control, broaden the endpoint, or call successful setup a vulnerability. This
+is a closed, deterministic conversion from captured safe behavior to fresh-state bounty
+evidence while preserving the independent security oracle.
+
+Current limitations are intentional. Version 1 supports only an exact two-step
+create/read main sequence plus one reversible low-risk update cleanup whose identifier
+has direct path lineage. Both personas must expose the same lifecycle shape. The package
+does not discover a missing peer lifecycle, infer novel cleanup, exercise mutations as
+the vulnerability, retry uncertain responses, or continue to another obligation after
+its terminal verdict.
 
 ### Gate D: generalized security relations
 

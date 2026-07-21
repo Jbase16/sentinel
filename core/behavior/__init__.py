@@ -18,6 +18,8 @@ Receipt-to-disposition feedback remains explicit-only through
 :mod:`core.behavior.feedback`.
 The one-step obligation resolver remains explicit-only through
 :mod:`core.behavior.resolver`.
+The fresh-owned boundary coordinator remains explicit-only through
+:mod:`core.behavior.boundary`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
