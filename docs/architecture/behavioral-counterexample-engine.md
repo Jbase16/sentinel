@@ -854,7 +854,69 @@ create/read main sequence plus one reversible low-risk update cleanup whose iden
 has direct path lineage. Both personas must expose the same lifecycle shape. The package
 does not discover a missing peer lifecycle, infer novel cleanup, exercise mutations as
 the vulnerability, retry uncertain responses, or continue to another obligation after
-its terminal verdict.
+its terminal verdict unless the separately authorized bounded continuation controller
+below admits one final round.
+
+### Receipt-gated bounded continuation
+
+`BoundedContinuationController` allows the Foundry route to dispatch at most two total
+proof rounds from one captured evidence frontier. It remains transport-free: the
+existing `SingleStepObligationResolver`, controlled authorization executor, fresh-owned
+boundary executor, execution policies, and BOLA oracle retain their responsibilities.
+Before every active round, the route reserves a separate durable fingerprint over the
+root request, round index, shadow run, resolver plan, exact obligation, and exact
+resolution reference. The terminal round receipt is converted into a disposition and
+the shadow graph is derived again with all prior dispositions before another plan can be
+considered.
+
+Continuation requires strict monotonic progress. The selected obligation must disappear
+from the next unresolved set, the remaining unresolved set must be a strict subset of
+the previous set, the graph identity must remain stable, and neither the obligation nor
+its resolution reference may repeat. Sentinel stops immediately on a confirmed finding,
+cleanup uncertainty, an aborted proof, a blocked or conditionally closed frontier,
+missing progress, missing executable work, the second terminal round, or the fixed
+fourteen-request proof allowance. A confirmed finding with failed cleanup is reported
+as `cleanup_uncertain`, preserving the vulnerability while prioritizing the operational
+safety incident. The root receipt stores a strictly redacted, content-addressed transcript
+of both independently durable round receipts.
+
+The authority is separately default-off. `SENTINELFORGE_BEHAVIOR_CONTINUATION=1` has no
+effect unless primary behavioral execution is also enabled and the signed envelope
+explicitly permits `behavioral_bounded_continuation`. The one-click URL route validates
+that workflow before opening or navigating either persona window. When enabled, the
+captured-object policy permits at most two cross-object reads instead of one so two
+distinct three-leg authorization proofs can complete; its existing per-endpoint limit
+still prevents repeating the same endpoint template. A fresh-owned round retains its
+exact seven-request policy and cannot run twice in the same continuation session.
+
+In plain language, Sentinel may now test a second different lock when the first lock held
+and the evidence board proves that a different unanswered lock is next. The first test
+gets filed before the second begins. If the first test finds a real break-in, leaves test
+state behind, produces uncertain evidence, or fails to remove an item from the board,
+Sentinel stops. Even in the cleanest case it gets only two tests—not an open-ended loop.
+
+This slice changes target traffic and execution authority only behind the new flag and
+workflow. Disabled behavior is unchanged. Enabled behavior can add one terminal proof
+round, raising the session ceiling from one round to two and the captured-object
+cross-read ceiling from one to two. It adds no new action classes, origins, personas,
+destructive operations, real-user-data access, retries, crawling, or autonomous time-
+based persistence. Asset resolution and bounded read exploration remain governed by
+their existing independent limits and are not repeated between continuation rounds.
+
+The one-of-a-kind property is receipt-gated monotonic exploitation. Sentinel does not
+continue because a model says another idea looks promising, because time remains, or
+because a checklist has more entries. The cryptographically identified receipt from the
+previous real experiment must alter the exact unresolved security frontier in the
+expected direction before another resolver can receive authority. Reasoning progress,
+execution identity, traffic budget, and durable evidence therefore form one mechanical
+admission condition.
+
+Current limitations are explicit. Version 1 allows one continuation only, uses the same
+captured records and client artifacts for both rounds, and does not generate new targets
+or hypotheses between them. Two fresh-owned rounds are not supported because each fresh
+boundary executor is single-use. A second captured-object proof may still be refused by
+the existing shared endpoint or request budget. The controller does not claim global
+absence when its bounded frontier remains open.
 
 ### Gate D: generalized security relations
 

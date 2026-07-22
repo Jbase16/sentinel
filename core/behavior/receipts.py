@@ -693,8 +693,78 @@ def redacted_fresh_owned_boundary_outcome(
     return output
 
 
+def redacted_continuation_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return a redacted final outcome plus its bounded round transcript."""
+
+    from .continuation import (
+        BOUNDED_CONTINUATION_MODE,
+        BoundedContinuationResult,
+        ContinuationRound,
+    )
+
+    raw = response.get("continuation")
+    if not isinstance(raw, Mapping):
+        raise ReceiptStoreError("behavioral continuation summary is invalid")
+    required = {
+        "schema_version",
+        "session_id",
+        "mode",
+        "root_fingerprint",
+        "initial_shadow_id",
+        "final_shadow_id",
+        "final_closure_id",
+        "rounds",
+        "stop_reason",
+        "total_requests_attempted",
+        "total_requests_sent",
+        "max_rounds",
+        "max_proof_requests",
+        "executable",
+    }
+    if set(raw) != required or raw.get("schema_version") != 1:
+        raise ReceiptStoreError("behavioral continuation fields are invalid")
+    raw_rounds = raw.get("rounds")
+    if not isinstance(raw_rounds, list):
+        raise ReceiptStoreError("behavioral continuation rounds are invalid")
+    round_fields = set(ContinuationRound.__dataclass_fields__)
+    rounds = []
+    try:
+        for item in raw_rounds:
+            if not isinstance(item, Mapping) or set(item) != round_fields:
+                raise ReceiptStoreError("behavioral continuation round fields are invalid")
+            rounds.append(ContinuationRound(**dict(item)))
+        continuation = BoundedContinuationResult(
+            session_id=raw.get("session_id"),
+            root_fingerprint=raw.get("root_fingerprint"),
+            initial_shadow_id=raw.get("initial_shadow_id"),
+            final_shadow_id=raw.get("final_shadow_id"),
+            final_closure_id=raw.get("final_closure_id"),
+            rounds=tuple(rounds),
+            stop_reason=raw.get("stop_reason"),
+            total_requests_attempted=raw.get("total_requests_attempted"),
+            total_requests_sent=raw.get("total_requests_sent"),
+            max_rounds=raw.get("max_rounds"),
+            max_proof_requests=raw.get("max_proof_requests"),
+            mode=raw.get("mode"),
+            executable=raw.get("executable"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ReceiptStoreError("behavioral continuation contract is invalid") from exc
+    if continuation.mode != BOUNDED_CONTINUATION_MODE:
+        raise ReceiptStoreError("behavioral continuation mode is invalid")
+    final_response = dict(response)
+    final_response.pop("continuation", None)
+    final_response.pop("kind", None)
+    output = redacted_outcome(final_response)
+    output["kind"] = "bounded_continuation"
+    output["continuation"] = continuation.to_dict()
+    return output
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    if "continuation" in response:
+        return redacted_continuation_outcome(response)
     execution_value = response.get("execution")
     if isinstance(execution_value, Mapping) and execution_value.get("kind") == (
         "fresh_owned_boundary"
@@ -740,6 +810,8 @@ def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
         return redacted_compiled_outcome(value)
     if value.get("kind") == "fresh_owned_boundary":
         return redacted_fresh_owned_boundary_outcome(value)
+    if value.get("kind") == "bounded_continuation":
+        return redacted_continuation_outcome(value)
     return redacted_outcome(value)
 
 
