@@ -562,6 +562,12 @@ async def run_behavioral_authorization_endpoint(
         OwnedExperimentFactoryDenied,
     )
     from core.behavior.runtime import ControlledSequenceDenied
+    from core.behavior.continuation import (
+        BoundedContinuationConfig,
+        BoundedContinuationController,
+        BoundedContinuationDenied,
+        ContinuationRound,
+    )
     from core.behavior.explorer import BehavioralReadExplorer
     from core.behavior.graphql_catalog import PersistedOperationCatalog
     from core.behavior.receipts import (
@@ -619,6 +625,11 @@ async def run_behavioral_authorization_endpoint(
         )
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
+    continuation_config = BoundedContinuationConfig.from_environment()
+    try:
+        continuation_config.authorize(envelope, target_origin=target_origin)
+    except BoundedContinuationDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     fresh_boundary_config = FreshOwnedBoundaryConfig.from_environment()
     config = PrimaryPlannerConfig(enabled=resolver_config.enabled)
     scheduler = BehavioralPrimaryScheduler(config)
@@ -661,7 +672,9 @@ async def run_behavioral_authorization_endpoint(
             budget=ProofBudget(
                 max_total_requests=40,
                 max_requests_per_endpoint=5,
-                max_cross_object_reads=1,
+                max_cross_object_reads=(
+                    2 if continuation_config.enabled else 1
+                ),
                 max_privilege_mutations=0,
                 max_creates=0,
                 allow_delete=False,
@@ -773,6 +786,7 @@ async def run_behavioral_authorization_endpoint(
                 "execution_profile": {
                     "primary": resolver_config.enabled,
                     "fresh_owned_boundary": fresh_boundary_config.enabled,
+                    "bounded_continuation": continuation_config.enabled,
                 },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
@@ -1061,6 +1075,308 @@ async def run_behavioral_authorization_endpoint(
                 detail="fresh owned boundary preflight failed; execution refused",
             ) from exc
 
+    if continuation_config.enabled:
+        if (
+            shadow_run is None
+            or receipt_store is None
+            or receipt_fingerprint is None
+            or receipt_reservation_token is None
+            or executors is None
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail="bounded continuation preflight is incomplete; execution refused",
+            )
+
+        continuation_controller = BoundedContinuationController(
+            continuation_config
+        )
+        continuation_context = redacted_receipt_context(
+            target_origin=target_origin,
+            envelope_id=req.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+        )
+        graphql_summary = {
+            "catalog": catalog.diagnostics(),
+            "assets": asset_resolution,
+            "source": source_resolution.diagnostics(),
+            "peer": peer_resolution.diagnostics(),
+        }
+        initial_shadow = shadow_run
+        current_shadow = shadow_run
+        current_boundary = fresh_boundary_executor
+        dispositions = []
+        continuation_rounds = []
+        response = None
+        stop_reason = "no_executable_candidate"
+        round_fingerprint = None
+        round_token = None
+
+        def abort_continuation_receipt(
+            fingerprint: str,
+            token: str,
+            reason: str,
+        ) -> None:
+            try:
+                receipt_store.abort(
+                    fingerprint,
+                    reservation_token=token,
+                    reason=reason,
+                )
+            except (OSError, ReceiptStoreError):
+                logger.exception("failed to terminate bounded continuation receipt")
+
+        try:
+            for round_index in range(1, continuation_config.max_rounds + 1):
+                round_controlled_executor = ControlledAuthorizationExecutor(
+                    target_origin=target_origin,
+                    authorization=envelope,
+                    source_persona=source_persona,
+                    peer_persona=peer_persona,
+                    executors=executors,
+                )
+                round_controlled_executor.validate_preflight()
+                plan = obligation_resolver.plan(
+                    current_shadow,
+                    fresh_boundary_executor=current_boundary,
+                )
+                admission = continuation_controller.admit_plan(
+                    continuation_rounds,
+                    plan,
+                )
+                if not admission.continue_execution:
+                    stop_reason = admission.reason
+                    if response is None:
+                        run = await obligation_resolver.run(
+                            current_shadow,
+                            source_records,
+                            peer_records,
+                            controlled_executor=round_controlled_executor,
+                            fresh_boundary_executor=current_boundary,
+                        )
+                        response = run.to_dict()
+                        response["behavioral_shadow"] = current_shadow.to_dict()
+                        response["graphql_resolution"] = graphql_summary
+                        response["read_exploration"] = read_exploration
+                    break
+
+                selected = plan.selected
+                assert selected is not None
+                round_fingerprint = request_fingerprint(
+                    {
+                        "schema_version": 1,
+                        "mode": "behavioral_continuation_round",
+                        "root_fingerprint": receipt_fingerprint,
+                        "round_index": round_index,
+                        "shadow_run_id": current_shadow.run_id,
+                        "plan_id": plan.plan_id,
+                        "obligation_id": selected.obligation_id,
+                        "resolution_kind": selected.resolution_kind,
+                        "resolution_ref": selected.resolution_ref,
+                    }
+                )
+                round_reservation = receipt_store.reserve(
+                    round_fingerprint,
+                    context=continuation_context,
+                )
+                if not round_reservation.created:
+                    raise BoundedContinuationDenied(
+                        "continuation_round_is_already_reserved_or_terminal"
+                    )
+                round_token = round_reservation.reservation_token
+                if round_token is None:
+                    raise BoundedContinuationDenied(
+                        "continuation_round_reservation_token_is_unavailable"
+                    )
+
+                before_shadow = current_shadow
+                run = await obligation_resolver.run(
+                    before_shadow,
+                    source_records,
+                    peer_records,
+                    controlled_executor=round_controlled_executor,
+                    fresh_boundary_executor=current_boundary,
+                )
+                response = run.to_dict()
+                response["behavioral_shadow"] = before_shadow.to_dict()
+                response["graphql_resolution"] = graphql_summary
+                response["read_exploration"] = read_exploration
+                completed_round_receipt = receipt_store.complete(
+                    round_fingerprint,
+                    reservation_token=round_token,
+                    outcome=redacted_outcome(response),
+                )
+                round_token = None
+
+                try:
+                    feedback = ReceiptDispositionAdapter().adapt(
+                        before_shadow.graph,
+                        (completed_round_receipt,),
+                        expected_context=continuation_context,
+                    )
+                    dispositions.extend(feedback.dispositions)
+                    after_shadow = shadow_orchestrator.run(
+                        source_records,
+                        target_origin=target_origin,
+                        world_id=source_persona.persona_id,
+                        peer_records=peer_records,
+                        peer_world_id=peer_persona.persona_id,
+                        artifacts=tuple(shadow_artifacts),
+                        experiment_context=shadow_context,
+                        dispositions=tuple(dispositions),
+                        previous_graph=before_shadow.graph,
+                        derivation_round=round_index + 1,
+                    )
+                    after_shadow_response = after_shadow.to_dict()
+                    after_shadow_response["receipt_feedback"] = feedback.to_dict()
+                except Exception:
+                    logger.exception("bounded continuation receipt feedback failed")
+                    after_shadow = before_shadow
+                    after_shadow_response = before_shadow.to_dict()
+                    after_shadow_response["receipt_feedback"] = {
+                        "schema_version": 1,
+                        "mode": "behavioral_receipt_feedback_v1",
+                        "executable": False,
+                        "status": "error",
+                        "error_code": "receipt_feedback_failed",
+                    }
+
+                response["behavioral_shadow"] = after_shadow_response
+                continuation_round = ContinuationRound.create(
+                    round_index=round_index,
+                    receipt_fingerprint=round_fingerprint,
+                    before=before_shadow,
+                    after=after_shadow,
+                    run=run,
+                )
+                continuation_rounds.append(continuation_round)
+                if selected.resolution_kind == "owned_experiment":
+                    current_boundary = None
+                decision = continuation_controller.after_round(
+                    continuation_rounds,
+                    before=before_shadow,
+                    after=after_shadow,
+                )
+                current_shadow = after_shadow
+                if not decision.continue_execution:
+                    stop_reason = decision.reason
+                    break
+            else:
+                stop_reason = "round_limit_reached"
+        except (
+            ControlledExecutionDenied,
+            ControlledSequenceDenied,
+            FreshOwnedBoundaryDenied,
+            BoundedContinuationDenied,
+        ) as exc:
+            if round_fingerprint is not None and round_token is not None:
+                abort_continuation_receipt(
+                    round_fingerprint,
+                    round_token,
+                    "continuation_execution_denied",
+                )
+            abort_continuation_receipt(
+                receipt_fingerprint,
+                receipt_reservation_token,
+                "continuation_execution_denied",
+            )
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ClosedLoopResolverDenied as exc:
+            if round_fingerprint is not None and round_token is not None:
+                abort_continuation_receipt(
+                    round_fingerprint,
+                    round_token,
+                    "continuation_resolver_error",
+                )
+            abort_continuation_receipt(
+                receipt_fingerprint,
+                receipt_reservation_token,
+                "continuation_resolver_error",
+            )
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except (OSError, ReceiptStoreError) as exc:
+            if round_fingerprint is not None and round_token is not None:
+                abort_continuation_receipt(
+                    round_fingerprint,
+                    round_token,
+                    "continuation_receipt_error",
+                )
+            abort_continuation_receipt(
+                receipt_fingerprint,
+                receipt_reservation_token,
+                "continuation_receipt_error",
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="bounded continuation receipt store unavailable; execution stopped",
+            ) from exc
+        except Exception as exc:
+            if round_fingerprint is not None and round_token is not None:
+                abort_continuation_receipt(
+                    round_fingerprint,
+                    round_token,
+                    "continuation_internal_error",
+                )
+            abort_continuation_receipt(
+                receipt_fingerprint,
+                receipt_reservation_token,
+                "continuation_internal_error",
+            )
+            logger.exception("unexpected bounded continuation failure")
+            raise HTTPException(
+                status_code=500,
+                detail="bounded continuation failed closed",
+            ) from exc
+
+        assert response is not None
+        try:
+            continuation_result = continuation_controller.finish(
+                root_fingerprint=receipt_fingerprint,
+                initial=initial_shadow,
+                final=current_shadow,
+                rounds=continuation_rounds,
+                stop_reason=stop_reason,
+            )
+            response["continuation"] = continuation_result.to_dict()
+            redacted_response = redacted_outcome(response)
+        except (
+            BoundedContinuationDenied,
+            ReceiptStoreError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            abort_continuation_receipt(
+                receipt_fingerprint,
+                receipt_reservation_token,
+                "continuation_result_invalid",
+            )
+            logger.exception("bounded continuation result validation failed")
+            raise HTTPException(
+                status_code=500,
+                detail="bounded continuation result was invalid and execution stopped",
+            ) from exc
+        try:
+            completed_receipt = receipt_store.complete(
+                receipt_fingerprint,
+                reservation_token=receipt_reservation_token,
+                outcome=redacted_response,
+            )
+        except (OSError, ReceiptStoreError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "bounded continuation completed but its root receipt could not "
+                    "be finalized; identical retries remain blocked"
+                ),
+            ) from exc
+        response["receipt"] = {
+            "receipt_id": completed_receipt.receipt_id,
+            "state": completed_receipt.state,
+            "reused": False,
+        }
+        return response
+
     try:
         if shadow_run is None:
             # Disabled mode has no execution authority. Preserve its diagnostic
@@ -1213,6 +1529,10 @@ async def run_behavioral_authorization_from_url_endpoint(
         request_fingerprint,
     )
     from core.behavior.boundary import FreshOwnedBoundaryConfig
+    from core.behavior.continuation import (
+        BoundedContinuationConfig,
+        BoundedContinuationDenied,
+    )
     from core.behavior.scheduler import PrimaryPlannerConfig
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
@@ -1258,6 +1578,11 @@ async def run_behavioral_authorization_from_url_endpoint(
         )
     except ControlledExecutionDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    continuation_config = BoundedContinuationConfig.from_environment()
+    try:
+        continuation_config.authorize(envelope, target_origin=target_origin)
+    except BoundedContinuationDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     try:
         fingerprint = request_fingerprint({
@@ -1268,6 +1593,7 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "fresh_owned_boundary": (
                     FreshOwnedBoundaryConfig.from_environment().enabled
                 ),
+                "bounded_continuation": continuation_config.enabled,
             },
             "target_url": target_url,
             "envelope_id": req.envelope_id,
