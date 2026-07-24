@@ -30,6 +30,10 @@ from .factory import (
 )
 from .lifecycle import LifecycleContractMiner, LifecycleMiningResult
 from .normalize import stable_hash
+from .omission import (
+    MinimizedOmissionCompiler,
+    OmissionCompilationResult,
+)
 from .obligations import OPEN, SecurityObligationGraph, SecurityObligationGraphBuilder
 from .proposals import (
     CROSS_OBJECT_READ,
@@ -47,7 +51,14 @@ BEHAVIORAL_SHADOW_ORCHESTRATOR_MODE = "behavioral_closed_loop_shadow_v1"
 _HASH_REF = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{64}$")
 _SEMANTIC = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _INVENTORY_STATUSES = frozenset({"not_requested", "ready", "no_ready_experiments", "blocked"})
-_RESOLUTION_KINDS = frozenset({"authorization_proposal", "owned_experiment", "unavailable"})
+_RESOLUTION_KINDS = frozenset(
+    {
+        "authorization_proposal",
+        "owned_experiment",
+        "omission_experiment",
+        "unavailable",
+    }
+)
 _GRAPHQL_READ = re.compile(r"^\s*(?:query\b|\{)", re.IGNORECASE)
 _GRAPHQL_WRITE = re.compile(r"\b(?:mutation|subscription)\b", re.IGNORECASE)
 
@@ -66,6 +77,7 @@ def _run_identity_payload(
     proposals: Optional[ProposalBatch],
     affordances: LatentAffordanceResult,
     state_machine: StateMachineLegalityResult,
+    omissions: OmissionCompilationResult,
     experiment_stage: "OwnedExperimentShadowStage",
     graph: SecurityObligationGraph,
     closure: SecurityClosureCertificate,
@@ -82,6 +94,7 @@ def _run_identity_payload(
         "affordance_capture_digest": affordances.capture_digest,
         "affordance_artifact_digest": affordances.artifact_digest,
         "state_machine_result_id": state_machine.result_id,
+        "omission_result_id": omissions.result_id,
         "experiment_stage": experiment_stage.to_dict(),
         "graph_digest": graph.graph_digest,
         "closure_certificate_id": closure.certificate_id,
@@ -171,6 +184,9 @@ class RankedSecurityObligation:
         ) or (
             self.resolution_kind == "owned_experiment"
             and _hash_ref(self.resolution_ref, "owned_experiment")
+        ) or (
+            self.resolution_kind == "omission_experiment"
+            and _hash_ref(self.resolution_ref, "omission_experiment")
         )
         if (
             not _hash_ref(self.obligation_id, "security_obligation")
@@ -182,7 +198,11 @@ class RankedSecurityObligation:
             or not isinstance(self.actionable, bool)
             or self.resolution_kind not in _RESOLUTION_KINDS
             or not resolution_valid
-            or self.actionable != (self.resolution_kind != "unavailable")
+            or self.actionable
+            != (
+                self.resolution_kind
+                in {"authorization_proposal", "owned_experiment"}
+            )
             or tuple(sorted(set(self.signals))) != self.signals
             or any(_SEMANTIC.fullmatch(item) is None for item in self.signals)
         ):
@@ -209,6 +229,7 @@ class BehavioralShadowRun:
     proposals: Optional[ProposalBatch] = field(repr=False, compare=False)
     affordances: LatentAffordanceResult = field(repr=False, compare=False)
     state_machine: StateMachineLegalityResult = field(repr=False, compare=False)
+    omissions: OmissionCompilationResult = field(repr=False, compare=False)
     experiment_stage: OwnedExperimentShadowStage = field(repr=False, compare=False)
     graph: SecurityObligationGraph = field(repr=False, compare=False)
     closure: SecurityClosureCertificate = field(repr=False, compare=False)
@@ -259,6 +280,7 @@ class BehavioralShadowRun:
             proposals=self.proposals,
             affordances=self.affordances,
             state_machine=self.state_machine,
+            omissions=self.omissions,
             experiment_stage=self.experiment_stage,
             graph=self.graph,
             closure=self.closure,
@@ -280,6 +302,7 @@ class BehavioralShadowRun:
             "proposals": self.proposals.to_dict() if self.proposals is not None else None,
             "affordances": self.affordances.to_dict(),
             "state_machine": self.state_machine.to_dict(),
+            "omissions": self.omissions.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
             "obligation_graph": self.graph.to_dict(),
             "closure": self.closure.to_dict(),
@@ -307,6 +330,7 @@ class BehavioralShadowOrchestrator:
         lifecycle_miner: Optional[LifecycleContractMiner] = None,
         affordance_miner: Optional[LatentAffordanceMiner] = None,
         state_machine_miner: Optional[StateMachineLegalityMiner] = None,
+        omission_compiler: Optional[MinimizedOmissionCompiler] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
         graph_builder: Optional[SecurityObligationGraphBuilder] = None,
         closure_evaluator: Optional[SecurityClosureEvaluator] = None,
@@ -319,6 +343,7 @@ class BehavioralShadowOrchestrator:
         self.state_machine_miner = (
             state_machine_miner or StateMachineLegalityMiner()
         )
+        self.omission_compiler = omission_compiler or MinimizedOmissionCompiler()
         self.experiment_factory = experiment_factory or OwnedExperimentFactory()
         self.graph_builder = graph_builder or SecurityObligationGraphBuilder()
         self.closure_evaluator = closure_evaluator or SecurityClosureEvaluator()
@@ -388,7 +413,8 @@ class BehavioralShadowOrchestrator:
         records: Sequence[Mapping[str, Any]],
         proposals: Optional[ProposalBatch],
         experiment_stage: OwnedExperimentShadowStage,
-    ) -> Tuple[Dict[str, str], Dict[str, str]]:
+        omissions: OmissionCompilationResult,
+    ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
         proposal_by_subject: Dict[str, str] = {}
         if proposals is not None:
             for proposal in proposals.proposals:
@@ -421,7 +447,11 @@ class BehavioralShadowOrchestrator:
                     },
                 )
                 experiment_by_subject[subject_ref] = experiment.experiment_id
-        return proposal_by_subject, experiment_by_subject
+        omission_by_subject = {
+            experiment.subject_ref: experiment.experiment_id
+            for experiment in omissions.experiments
+        }
+        return proposal_by_subject, experiment_by_subject, omission_by_subject
 
     def _rank_frontier(
         self,
@@ -432,11 +462,17 @@ class BehavioralShadowOrchestrator:
         dispositions: Sequence[ObligationDisposition],
         proposals: Optional[ProposalBatch],
         experiment_stage: OwnedExperimentShadowStage,
+        omissions: OmissionCompilationResult,
     ) -> Tuple[Tuple[RankedSecurityObligation, ...], int]:
-        proposal_by_subject, experiment_by_subject = self._resolution_maps(
+        (
+            proposal_by_subject,
+            experiment_by_subject,
+            omission_by_subject,
+        ) = self._resolution_maps(
             records=records,
             proposals=proposals,
             experiment_stage=experiment_stage,
+            omissions=omissions,
         )
         disposition_status = {item.obligation_id: item.status for item in dispositions}
         final_status = {
@@ -460,6 +496,9 @@ class BehavioralShadowOrchestrator:
             elif prerequisites_ready and obligation.subject_ref in experiment_by_subject:
                 resolution_kind = "owned_experiment"
                 resolution_ref = experiment_by_subject[obligation.subject_ref]
+            elif prerequisites_ready and obligation.subject_ref in omission_by_subject:
+                resolution_kind = "omission_experiment"
+                resolution_ref = omission_by_subject[obligation.subject_ref]
 
             signals = {"unresolved_frontier"}
             if prerequisites_ready:
@@ -470,10 +509,15 @@ class BehavioralShadowOrchestrator:
                 signals.add("paired_world_proposal_ready")
             elif resolution_kind == "owned_experiment":
                 signals.add("proof_carrying_experiment_ready")
+            elif resolution_kind == "omission_experiment":
+                signals.add("omission_proof_compiled")
             else:
                 signals.add("no_safe_resolution_path")
 
-            actionable = resolution_kind != "unavailable"
+            actionable = resolution_kind in {
+                "authorization_proposal",
+                "owned_experiment",
+            }
             score = (
                 self._KIND_SCORE.get(obligation.kind, 250)
                 + self._RISK_SCORE[obligation.risk_class]
@@ -559,6 +603,12 @@ class BehavioralShadowOrchestrator:
             primary_records,
             world_id=world_id,
         )
+        omissions = self.omission_compiler.compile(
+            primary_records,
+            world_id=world_id,
+            lifecycle=lifecycle,
+            state_machine=state_machine,
+        )
         experiment_stage = self._experiment_stage(
             primary_records,
             target_origin=target_origin,
@@ -571,6 +621,7 @@ class BehavioralShadowOrchestrator:
             proposals=proposals,
             affordances=affordances,
             state_machine=state_machine,
+            omissions=omissions,
         )
         if isinstance(dispositions, (str, bytes)):
             raise TypeError("dispositions must contain ObligationDisposition values")
@@ -590,6 +641,7 @@ class BehavioralShadowOrchestrator:
             dispositions=disposition_values,
             proposals=proposals,
             experiment_stage=experiment_stage,
+            omissions=omissions,
         )
         return BehavioralShadowRun(
             run_id=stable_hash(
@@ -599,6 +651,7 @@ class BehavioralShadowOrchestrator:
                     proposals=proposals,
                     affordances=affordances,
                     state_machine=state_machine,
+                    omissions=omissions,
                     experiment_stage=experiment_stage,
                     graph=graph,
                     closure=closure,
@@ -611,6 +664,7 @@ class BehavioralShadowOrchestrator:
             proposals=proposals,
             affordances=affordances,
             state_machine=state_machine,
+            omissions=omissions,
             experiment_stage=experiment_stage,
             graph=graph,
             closure=closure,

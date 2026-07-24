@@ -979,6 +979,59 @@ rehydration identity all agree. That proof-carrying relation then becomes a dura
 unanswered security obligation instead of remaining an interesting standalone plan or
 a scanner keyword match.
 
+#### Minimized prerequisite-omission compiler
+
+`MinimizedOmissionCompiler` turns the narrow subset of state-machine legality
+questions that are already reproducible on a controlled object into sealed,
+content-addressed comparison experiments. Admission requires all of the following:
+the exact state-machine plan and rehydration recipe must reconstruct from the capture;
+the terminal must be one successful, non-truncated GET with a response-body hash; an
+owned create/read/cleanup lifecycle must cover that terminal in the same world; and
+exactly one non-create prerequisite must produce exactly one sensitive query capability
+consumed by the terminal request. Zero choices, multiple choices, duplicate query
+keys, non-sensitive bindings, missing cleanup, plan drift, recipe drift, and truncated
+baselines are rejected rather than guessed through.
+
+The compiled artifact defines two future legs on two independently fresh controlled
+objects. The baseline leg contains the complete prerequisite sequence and terminal
+read. The omission leg removes exactly one prerequisite operation and the one query
+binding that operation produced, while retaining every other operation in order.
+Compilation refuses a producer whose output also feeds another retained step. The live
+baseline's status and structural state must match the captured reference. The oracle is
+deliberately strict: both terminal legs must succeed without truncation and the
+omission leg must produce the exact same response-body hash as the live baseline. Even
+that match is not yet a finding. The artifact has `finding_authority=false`,
+`executable=false`, and explicit blockers for two-fresh-owned-state replay, the
+unimplemented omission runtime, and absent execution authority. Unknown prerequisite
+writes add a separate safety blocker. The obligation ranker can display the compiled
+path, but marks it non-actionable, so the active resolver cannot select or execute it.
+
+In plain language, Sentinel can now prepare a sealed test card for a very specific
+kind of hidden shortcut. Suppose the observed good route is “create my test workflow,
+approve it to receive an export token, then download the export using that token.”
+Sentinel can prove which exact token traveled from approval into the download URL and
+prepare the comparison “one new workflow using the complete route versus a second new
+workflow that skips approval and removes only the now-unavailable token.” It does not
+yet send either route, and it refuses to choose if two different keys could be removed,
+if the skipped step feeds another retained step, or if it cannot prove how to clean up
+both test workflows.
+
+This slice changes neither target traffic nor execution authority. It imports no
+transport, performs no mutation, reserves no proof budget, writes no receipt, and adds
+no actionable resolver mapping. It also does not yet skip arbitrary state-changing
+operations, construct terminals whose only prerequisite value has never been
+observed, compare semantic response equivalence, or convert a matching response into
+a bounty claim. Those require a separately admitted fresh-owned runtime and an
+independent finding-confirmation phase.
+
+The one-of-a-kind property is omission compilation by proof intersection. The proposed
+negative experiment exists only where the backward plan, chronological recipe, exact
+value lineage, controlled lifecycle, terminal response reference, and one removable
+request capability all agree. That is materially different from deleting parameters
+from a crawler request: Sentinel derives the single omission from the proven
+prerequisite chain and makes every uncertainty an explicit refusal or execution
+blocker.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

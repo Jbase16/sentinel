@@ -198,6 +198,21 @@ class StateMachineLegalityCandidate:
         }
 
 
+def state_machine_subject_ref(candidate: StateMachineLegalityCandidate) -> str:
+    """Return the canonical obligation subject for one legality candidate."""
+
+    if not isinstance(candidate, StateMachineLegalityCandidate):
+        raise TypeError("candidate must be a StateMachineLegalityCandidate")
+    return stable_hash(
+        "security_subject",
+        {
+            "state_machine_candidate_id": candidate.candidate_id,
+            "world_ref": candidate.world_ref,
+            "terminal_operation_id": candidate.terminal_operation_id,
+        },
+    )
+
+
 @dataclass(frozen=True)
 class StateMachineLegalityDiagnostics:
     records: int
@@ -700,4 +715,5 @@ __all__ = [
     "StateMachineLegalityLimits",
     "StateMachineLegalityMiner",
     "StateMachineLegalityResult",
+    "state_machine_subject_ref",
 ]

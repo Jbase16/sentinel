@@ -15,12 +15,14 @@ from urllib.parse import urlsplit
 from .affordances import LatentAffordanceResult
 from .lifecycle import LifecycleMiningResult
 from .normalize import stable_hash
+from .omission import OmissionCompilationResult
 from .proposals import (
     CROSS_OBJECT_READ,
     STATE_MUTATION,
     ProposalBatch,
 )
 from .state_machine import StateMachineLegalityResult
+from .state_machine import state_machine_subject_ref
 
 SECURITY_OBLIGATION_MODE = "behavioral_security_obligation_v1"
 
@@ -190,6 +192,7 @@ class SecurityObligationDiagnostics:
     capability_confinements: int
     state_machine_controls: int
     state_machine_legalities: int
+    omission_experiments: int
     incomplete_relations: int
     duplicate_obligations: int
     dropped_obligations: int
@@ -310,6 +313,7 @@ class SecurityObligationGraphBuilder:
         proposals: Optional[ProposalBatch] = None,
         affordances: Optional[LatentAffordanceResult] = None,
         state_machine: Optional[StateMachineLegalityResult] = None,
+        omissions: Optional[OmissionCompilationResult] = None,
     ) -> SecurityObligationGraph:
         if lifecycle is not None and not isinstance(lifecycle, LifecycleMiningResult):
             raise TypeError("lifecycle must be a LifecycleMiningResult")
@@ -325,6 +329,17 @@ class SecurityObligationGraphBuilder:
             StateMachineLegalityResult,
         ):
             raise TypeError("state_machine must be a StateMachineLegalityResult")
+        if omissions is not None and not isinstance(
+            omissions,
+            OmissionCompilationResult,
+        ):
+            raise TypeError("omissions must be an OmissionCompilationResult")
+        if (
+            omissions is not None
+            and state_machine is not None
+            and omissions.state_machine_result_id != state_machine.result_id
+        ):
+            raise ValueError("omissions do not match state-machine input")
 
         canonical_origin = _canonical_origin(target_origin)
         target_ref = stable_hash("security_obligation_target", canonical_origin)
@@ -344,6 +359,7 @@ class SecurityObligationGraphBuilder:
             "state_machine": (
                 state_machine.to_dict() if state_machine is not None else None
             ),
+            "omissions": omissions.to_dict() if omissions is not None else None,
         }
         input_digest = stable_hash("security_obligation_inputs", input_payload)
         obligations: Dict[str, SecurityObligation] = {}
@@ -355,6 +371,9 @@ class SecurityObligationGraphBuilder:
             "capability_confinements": 0,
             "state_machine_controls": 0,
             "state_machine_legalities": 0,
+            "omission_experiments": (
+                len(omissions.experiments) if omissions is not None else 0
+            ),
         }
         duplicate_obligations = 0
         dropped_obligations = 0
@@ -532,14 +551,7 @@ class SecurityObligationGraphBuilder:
                 incomplete_relations += 1
             incomplete_relations += state_machine.diagnostics.incomplete_work
             for candidate in state_machine.candidates:
-                subject = stable_hash(
-                    "security_subject",
-                    {
-                        "state_machine_candidate_id": candidate.candidate_id,
-                        "world_ref": candidate.world_ref,
-                        "terminal_operation_id": candidate.terminal_operation_id,
-                    },
-                )
+                subject = state_machine_subject_ref(candidate)
                 evidence_refs = (
                     candidate.candidate_id,
                     candidate.plan_id,
@@ -574,6 +586,9 @@ class SecurityObligationGraphBuilder:
                         requires_execution=True,
                         count_key="state_machine_legalities",
                     )
+
+        if omissions is not None:
+            incomplete_relations += omissions.diagnostics.incomplete_work
 
         ordered = tuple(obligations[key] for key in sorted(obligations))
         diagnostics = SecurityObligationDiagnostics(
