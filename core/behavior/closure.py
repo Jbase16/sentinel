@@ -41,6 +41,7 @@ _HARD_BLOCKERS = frozenset(
         "obligation_limit_truncated",
         "dependency_limit_truncated",
         "evidence_limit_truncated",
+        "relation_analysis_incomplete",
         "evidence_blocked",
         "obligation_unreachable",
     }
@@ -510,6 +511,8 @@ class SecurityClosureEvaluator:
             blockers.add("dependency_limit_truncated")
         if diagnostics.dropped_evidence_refs:
             blockers.add("evidence_limit_truncated")
+        if diagnostics.incomplete_relations:
+            blockers.add("relation_analysis_incomplete")
         if ids_by_status[BLOCKED]:
             blockers.add("evidence_blocked")
         if ids_by_status[UNREACHABLE]:

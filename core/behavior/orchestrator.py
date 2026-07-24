@@ -37,6 +37,10 @@ from .proposals import (
     ProposalBatch,
     compile_authorization_proposals,
 )
+from .state_machine import (
+    StateMachineLegalityMiner,
+    StateMachineLegalityResult,
+)
 
 BEHAVIORAL_SHADOW_ORCHESTRATOR_MODE = "behavioral_closed_loop_shadow_v1"
 
@@ -61,6 +65,7 @@ def _run_identity_payload(
     lifecycle: LifecycleMiningResult,
     proposals: Optional[ProposalBatch],
     affordances: LatentAffordanceResult,
+    state_machine: StateMachineLegalityResult,
     experiment_stage: "OwnedExperimentShadowStage",
     graph: SecurityObligationGraph,
     closure: SecurityClosureCertificate,
@@ -76,6 +81,7 @@ def _run_identity_payload(
         ),
         "affordance_capture_digest": affordances.capture_digest,
         "affordance_artifact_digest": affordances.artifact_digest,
+        "state_machine_result_id": state_machine.result_id,
         "experiment_stage": experiment_stage.to_dict(),
         "graph_digest": graph.graph_digest,
         "closure_certificate_id": closure.certificate_id,
@@ -202,6 +208,7 @@ class BehavioralShadowRun:
     lifecycle: LifecycleMiningResult = field(repr=False, compare=False)
     proposals: Optional[ProposalBatch] = field(repr=False, compare=False)
     affordances: LatentAffordanceResult = field(repr=False, compare=False)
+    state_machine: StateMachineLegalityResult = field(repr=False, compare=False)
     experiment_stage: OwnedExperimentShadowStage = field(repr=False, compare=False)
     graph: SecurityObligationGraph = field(repr=False, compare=False)
     closure: SecurityClosureCertificate = field(repr=False, compare=False)
@@ -251,6 +258,7 @@ class BehavioralShadowRun:
             lifecycle=self.lifecycle,
             proposals=self.proposals,
             affordances=self.affordances,
+            state_machine=self.state_machine,
             experiment_stage=self.experiment_stage,
             graph=self.graph,
             closure=self.closure,
@@ -271,6 +279,7 @@ class BehavioralShadowRun:
             "lifecycle": self.lifecycle.to_dict(),
             "proposals": self.proposals.to_dict() if self.proposals is not None else None,
             "affordances": self.affordances.to_dict(),
+            "state_machine": self.state_machine.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
             "obligation_graph": self.graph.to_dict(),
             "closure": self.closure.to_dict(),
@@ -285,6 +294,8 @@ class BehavioralShadowOrchestrator:
         "ownership_boundary": 460,
         "capability_confinement": 440,
         "latent_operation_confirmation": 400,
+        "state_machine_legality": 480,
+        "state_machine_control": 100,
         "owned_control": 100,
     }
     _RISK_SCORE = {"state_mutation": 70, "read": 50, "unknown": 20, "control": 0}
@@ -295,6 +306,7 @@ class BehavioralShadowOrchestrator:
         config: ShadowOrchestratorConfig = ShadowOrchestratorConfig(),
         lifecycle_miner: Optional[LifecycleContractMiner] = None,
         affordance_miner: Optional[LatentAffordanceMiner] = None,
+        state_machine_miner: Optional[StateMachineLegalityMiner] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
         graph_builder: Optional[SecurityObligationGraphBuilder] = None,
         closure_evaluator: Optional[SecurityClosureEvaluator] = None,
@@ -304,6 +316,9 @@ class BehavioralShadowOrchestrator:
         self.config = config
         self.lifecycle_miner = lifecycle_miner or LifecycleContractMiner()
         self.affordance_miner = affordance_miner or LatentAffordanceMiner()
+        self.state_machine_miner = (
+            state_machine_miner or StateMachineLegalityMiner()
+        )
         self.experiment_factory = experiment_factory or OwnedExperimentFactory()
         self.graph_builder = graph_builder or SecurityObligationGraphBuilder()
         self.closure_evaluator = closure_evaluator or SecurityClosureEvaluator()
@@ -540,6 +555,10 @@ class BehavioralShadowOrchestrator:
             target_origin=target_origin,
             world_id=world_id,
         )
+        state_machine = self.state_machine_miner.mine(
+            primary_records,
+            world_id=world_id,
+        )
         experiment_stage = self._experiment_stage(
             primary_records,
             target_origin=target_origin,
@@ -551,6 +570,7 @@ class BehavioralShadowOrchestrator:
             lifecycle=lifecycle,
             proposals=proposals,
             affordances=affordances,
+            state_machine=state_machine,
         )
         if isinstance(dispositions, (str, bytes)):
             raise TypeError("dispositions must contain ObligationDisposition values")
@@ -578,6 +598,7 @@ class BehavioralShadowOrchestrator:
                     lifecycle=lifecycle,
                     proposals=proposals,
                     affordances=affordances,
+                    state_machine=state_machine,
                     experiment_stage=experiment_stage,
                     graph=graph,
                     closure=closure,
@@ -589,6 +610,7 @@ class BehavioralShadowOrchestrator:
             lifecycle=lifecycle,
             proposals=proposals,
             affordances=affordances,
+            state_machine=state_machine,
             experiment_stage=experiment_stage,
             graph=graph,
             closure=closure,

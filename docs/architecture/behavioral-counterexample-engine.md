@@ -925,6 +925,60 @@ freshness, parser agreement, interpreter confinement, and state-machine legality
 No relation may surface a finding without an independent proof oracle and minimized
 replay.
 
+#### State-machine prerequisite legality
+
+`StateMachineLegalityMiner` is the first generalized relation connected to the unified
+shadow frontier. It reuses the existing operation catalog, bounded
+`BackwardExploitCompiler`, `ValueLineageLedger`, and `PlanRehydrator`. High-value
+terminal operations are selected from redacted REST templates and GraphQL operation
+names. The compiler may propose a prerequisite chain, but that semantic plan is not
+enough for admission. Every operation must have exactly one successful observation in
+one captured world, those observations must occur in plan order, and every required
+capability must have one exact producer-to-consumer value-lineage binding. Repeated
+steps, cross-world chains, different concrete values with the same field name,
+ambiguous producers, missing lineage, and out-of-order observations are rejected.
+
+Accepted relations produce two content-addressed graph nodes. An upheld
+`state_machine_control` records the exact observed good path. An open
+`state_machine_legality` obligation depends on that control and asks whether the
+terminal operation actually enforces the prerequisite path. The legality node is
+ranked, but it has no resolution reference and is therefore non-actionable. It cannot
+be selected by the active resolver, receive target traffic, or become a finding merely
+because the terminal operation looks valuable. A later slice must supply an
+independent, minimized proof oracle before the obligation can be resolved.
+
+The miner is bounded to 4,096 records, 64 high-value goals, 64 candidates, 1,024 search
+states per goal, 16 plan steps, and 32 exact lineage bindings per candidate. Invalid
+records, dropped goals, dropped candidates, catalog-limit failures, and relation-limit
+failures enter explicit relation-incompleteness accounting so fixed-point closure cannot
+silently claim complete coverage. Public artifacts retain only hashes, semantic risk, redacted source
+references, exact lineage-binding references, and content-addressed plan/recipe
+identities. Target origins, persona names, identifiers, tokens, request bodies, and
+response bodies are excluded.
+
+In plain language, Sentinel can now observe the legitimate route to a valuable result
+and turn it into a new security question. If the evidence shows “create recovery
+request, complete identity check, download recovery package,” Sentinel records both
+that exact working hallway and the unanswered question “does the download door refuse
+people who skipped the identity-check hallway?” Merely seeing three similarly named
+doors is insufficient: the same exact redacted key must be proven moving from one step
+to the next. Sentinel does not test the shortcut yet and does not call it a
+vulnerability.
+
+This slice changes neither target traffic nor execution authority. It consumes only
+already-captured records, imports no transport, reserves no proof budget, writes no
+receipt, and creates no resolver mapping. Existing active executors and continuation
+limits are unchanged. It also does not infer business intent, prove that a prerequisite
+is mandatory, manufacture unobserved setup steps, support ambiguous or repeated
+captures, or establish a payout-valid bypass.
+
+The one-of-a-kind property is proof-derived backward security accounting. A valuable
+terminal effect is connected to its observed prerequisite state machine only when
+compiler dependencies, chronological observations, exact same-world value lineage, and
+rehydration identity all agree. That proof-carrying relation then becomes a durable
+unanswered security obligation instead of remaining an interesting standalone plan or
+a scanner keyword match.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1
