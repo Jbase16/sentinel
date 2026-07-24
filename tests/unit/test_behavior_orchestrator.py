@@ -11,7 +11,7 @@ import core.behavior.orchestrator as orchestrator_module
 
 from core.behavior.active import CONTROLLED_WORKFLOW
 from core.behavior.affordances import ClientArtifact
-from core.behavior.closure import CONDITIONALLY_CLOSED, ObligationDisposition
+from core.behavior.closure import BLOCKED, CONDITIONALLY_CLOSED, ObligationDisposition
 from core.behavior.obligations import OPEN, UPHELD
 from core.behavior.orchestrator import (
     BehavioralShadowOrchestrator,
@@ -20,6 +20,10 @@ from core.behavior.orchestrator import (
 )
 from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
 from core.behavior.normalize import stable_hash
+from core.behavior.state_machine import (
+    StateMachineLegalityLimits,
+    StateMachineLegalityMiner,
+)
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
 from core.safety.ownership_registry import OwnershipRegistry
@@ -199,6 +203,90 @@ def test_orchestrator_builds_and_ranks_one_unified_frontier_without_traffic():
     ]
     assert calls == []
     assert executor.policy.budget.snapshot()["total_requests"] == 0
+
+
+def test_state_machine_legality_enters_frontier_without_resolution_authority():
+    workflow_id = "workflow_7fa9f13a2b4c5d6e"
+    export_token = "token_4a5b6c7d8e9f0123"
+    records = (
+        {
+            "id": "create-workflow",
+            "persona_id": "alice",
+            "method": "POST",
+            "url": f"{ORIGIN}/api/workflows",
+            "response_status": 201,
+            "response_body": json.dumps({"workflowId": workflow_id}),
+        },
+        {
+            "id": "approve-workflow",
+            "persona_id": "alice",
+            "method": "POST",
+            "url": f"{ORIGIN}/api/workflows/{workflow_id}/approve",
+            "response_status": 200,
+            "response_body": json.dumps({"exportToken": export_token}),
+        },
+        {
+            "id": "export-workflow",
+            "persona_id": "alice",
+            "method": "GET",
+            "url": (
+                f"{ORIGIN}/api/workflows/{workflow_id}/export"
+                f"?exportToken={export_token}"
+            ),
+            "response_status": 200,
+            "response_body": "{}",
+        },
+    )
+
+    result = BehavioralShadowOrchestrator().run(
+        records,
+        target_origin=ORIGIN,
+        world_id="alice",
+    )
+
+    assert result.state_machine.status == "ready"
+    assert len(result.state_machine.candidates) == 1
+    assert result.graph.diagnostics.state_machine_controls == 1
+    assert result.graph.diagnostics.state_machine_legalities == 1
+    control = next(
+        item
+        for item in result.graph.obligations
+        if item.kind == "state_machine_control"
+    )
+    legality = next(
+        item
+        for item in result.graph.obligations
+        if item.kind == "state_machine_legality"
+    )
+    ranked = next(
+        item
+        for item in result.ranked_frontier
+        if item.kind == "state_machine_legality"
+    )
+    assert control.status == UPHELD
+    assert legality.status == OPEN
+    assert legality.prerequisite_ids == (control.obligation_id,)
+    assert ranked.actionable is False
+    assert ranked.resolution_kind == "unavailable"
+    assert result.selected is None
+
+
+def test_state_machine_analysis_truncation_blocks_frontier_closure():
+    result = BehavioralShadowOrchestrator(
+        state_machine_miner=StateMachineLegalityMiner(
+            StateMachineLegalityLimits(max_records=2)
+        )
+    ).run(
+        _source_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+    )
+
+    assert result.state_machine.status == "blocked"
+    assert result.state_machine.blocker == "record_limit_exceeded"
+    assert result.graph.diagnostics.incomplete_relations == 1
+    assert result.closure.status == BLOCKED
+    assert "relation_analysis_incomplete" in result.closure.blockers
 
 
 def test_orchestrator_is_deterministic_and_strictly_redacted():

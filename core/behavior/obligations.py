@@ -20,6 +20,7 @@ from .proposals import (
     STATE_MUTATION,
     ProposalBatch,
 )
+from .state_machine import StateMachineLegalityResult
 
 SECURITY_OBLIGATION_MODE = "behavioral_security_obligation_v1"
 
@@ -187,6 +188,9 @@ class SecurityObligationDiagnostics:
     authorization_counterexamples: int
     latent_confirmations: int
     capability_confinements: int
+    state_machine_controls: int
+    state_machine_legalities: int
+    incomplete_relations: int
     duplicate_obligations: int
     dropped_obligations: int
     dropped_dependencies: int
@@ -305,6 +309,7 @@ class SecurityObligationGraphBuilder:
         lifecycle: Optional[LifecycleMiningResult] = None,
         proposals: Optional[ProposalBatch] = None,
         affordances: Optional[LatentAffordanceResult] = None,
+        state_machine: Optional[StateMachineLegalityResult] = None,
     ) -> SecurityObligationGraph:
         if lifecycle is not None and not isinstance(lifecycle, LifecycleMiningResult):
             raise TypeError("lifecycle must be a LifecycleMiningResult")
@@ -315,6 +320,11 @@ class SecurityObligationGraphBuilder:
             LatentAffordanceResult,
         ):
             raise TypeError("affordances must be a LatentAffordanceResult")
+        if state_machine is not None and not isinstance(
+            state_machine,
+            StateMachineLegalityResult,
+        ):
+            raise TypeError("state_machine must be a StateMachineLegalityResult")
 
         canonical_origin = _canonical_origin(target_origin)
         target_ref = stable_hash("security_obligation_target", canonical_origin)
@@ -331,6 +341,9 @@ class SecurityObligationGraphBuilder:
             "lifecycle": lifecycle.to_dict() if lifecycle is not None else None,
             "proposals": proposals.to_dict() if proposals is not None else None,
             "affordances": affordances.to_dict() if affordances is not None else None,
+            "state_machine": (
+                state_machine.to_dict() if state_machine is not None else None
+            ),
         }
         input_digest = stable_hash("security_obligation_inputs", input_payload)
         obligations: Dict[str, SecurityObligation] = {}
@@ -340,11 +353,14 @@ class SecurityObligationGraphBuilder:
             "authorization_counterexamples": 0,
             "latent_confirmations": 0,
             "capability_confinements": 0,
+            "state_machine_controls": 0,
+            "state_machine_legalities": 0,
         }
         duplicate_obligations = 0
         dropped_obligations = 0
         dropped_dependencies = 0
         dropped_evidence_refs = 0
+        incomplete_relations = 0
         dependency_count = 0
 
         def add(
@@ -511,9 +527,58 @@ class SecurityObligationGraphBuilder:
                         count_key="capability_confinements",
                     )
 
+        if state_machine is not None:
+            if state_machine.status == "blocked":
+                incomplete_relations += 1
+            incomplete_relations += state_machine.diagnostics.incomplete_work
+            for candidate in state_machine.candidates:
+                subject = stable_hash(
+                    "security_subject",
+                    {
+                        "state_machine_candidate_id": candidate.candidate_id,
+                        "world_ref": candidate.world_ref,
+                        "terminal_operation_id": candidate.terminal_operation_id,
+                    },
+                )
+                evidence_refs = (
+                    candidate.candidate_id,
+                    candidate.plan_id,
+                    candidate.catalog_digest,
+                    candidate.recipe_id,
+                    candidate.evidence_digest,
+                    *candidate.source_refs,
+                    *candidate.lineage_binding_ids,
+                )
+                control_id = add(
+                    kind="state_machine_control",
+                    property_kind="observed_prerequisite_chain",
+                    subject_ref=subject,
+                    status=UPHELD,
+                    prerequisite_ids=(),
+                    evidence_refs=evidence_refs,
+                    source_kind="state_machine_relation",
+                    risk_class="control",
+                    requires_execution=False,
+                    count_key="state_machine_controls",
+                )
+                if control_id is not None:
+                    add(
+                        kind="state_machine_legality",
+                        property_kind="state_machine_prerequisite_enforcement",
+                        subject_ref=subject,
+                        status=OPEN,
+                        prerequisite_ids=(control_id,),
+                        evidence_refs=evidence_refs,
+                        source_kind="state_machine_relation",
+                        risk_class=candidate.risk_class,
+                        requires_execution=True,
+                        count_key="state_machine_legalities",
+                    )
+
         ordered = tuple(obligations[key] for key in sorted(obligations))
         diagnostics = SecurityObligationDiagnostics(
             **counts,
+            incomplete_relations=incomplete_relations,
             duplicate_obligations=duplicate_obligations,
             dropped_obligations=dropped_obligations,
             dropped_dependencies=dropped_dependencies,

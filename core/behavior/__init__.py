@@ -22,6 +22,8 @@ The fresh-owned boundary coordinator remains explicit-only through
 :mod:`core.behavior.boundary`.
 The bounded continuation controller remains explicit-only through
 :mod:`core.behavior.continuation`.
+Generalized state-machine legality mining remains analysis-only through
+:mod:`core.behavior.state_machine`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
