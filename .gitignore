@@ -61,6 +61,26 @@ graphify-out/
 /plan_review*.md
 /fix_recipes.py
 /test_file_create.py
+/js_analysis/
+/js_bundles/
+
+# Root-only capture/debug harnesses (supported tests belong under tests/)
+/check_sourcemaps.py
+/cookie_test_server.py
+/extract_gql.py
+/get_ua.swift
+/harvest_cookies.swift
+/run_capture.py
+/run_lldb.sh
+/run_test.py
+/send_cmd.py
+/test_graphql.py
+/test_graphql_cookies.py
+/test_scope.py
+/test_snd.patch
+/test_ws.py
+/test_ws.swift
+/wait_test.py
 
 # Local model weights — multi-GB; never commit (live in Ollama / on disk)
 *.gguf
