@@ -1,0 +1,149 @@
+"""
+CAL Parser (core/cal/parser.py)
+
+PURPOSE:
+Parses the Collaborative Agent Logic (CAL) DSL into executable policy objects.
+
+SYNTAX:
+Law <Name> {
+    Claim: "<String>"
+    When: <Expression>
+    And:  <Expression>
+    Then: <Action> "<Reason>"
+}
+"""
+
+import re
+import logging
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field
+
+from core.cal.safe_eval import safe_eval, UnsafeExpression
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class Condition:
+    raw_expression: str
+
+    def evaluate(self, context: Any, tool: Dict) -> bool:
+        """
+        Evaluate the condition against the context.
+        Security Note: Uses a strict, non-executing AST evaluator.
+        """
+        # Operators map for custom CAL syntax "IS NOT EMPTY" etc.
+        expr = self.raw_expression
+        # Regex to handle "IS NOT EMPTY" and "IS EMPTY" on attributes
+        # e.g. "tool.gates IS NOT EMPTY" -> "tool.gates"
+        #      "tool.gates IS EMPTY"     -> "not (tool.gates)"
+        expr = re.sub(r'(\S+)\s+IS\s+NOT\s+EMPTY', r'(\1)', expr)
+        expr = re.sub(r'(\S+)\s+IS\s+EMPTY', r'not (\1)', expr)
+        expr = expr.replace("NOT IN", "not in") # Pythonic  
+        # 'IN' is already pythonic
+        
+        try:
+            return bool(safe_eval(expr, context, tool))
+        except UnsafeExpression as e:
+            logger.error(f"[CAL] Unsafe expression rejected for '{expr}': {e}")
+            return False
+        except Exception as e:
+            logger.error(f"[CAL] Eval failed for '{expr}': {e}")
+            return False
+
+class _DictWrapper:
+    """Helper to allow dot notation for dicts (tool.phase instead of tool['phase'])."""
+    def __init__(self, data):
+        self._data = data
+    def __getattr__(self, item):
+        val = self._data.get(item)
+        if val is None:
+            # Return 0 for missing numeric fields to prevent CAL eval crashes
+            if item in ["resource_cost", "active_tools", "max_concurrent"]:
+                return 0
+            # Return empty list for tags/gates
+            if item in ["tags", "gates", "knowledge"]:
+                return []
+            return None
+        if isinstance(val, dict):
+            return _DictWrapper(val)
+        # Ensure lists are converted to tuples if they might be used in 'in set' checks
+        # Actually, it's safer to just return as is and let the expr handle it,
+        # but the CAL error was 'list as set element'.
+        if isinstance(val, list):
+            return tuple(val)
+        return val
+    def __iter__(self):
+        return iter(self._data)
+    def __contains__(self, item):
+        return item in self._data
+
+@dataclass
+class Action:
+    verb: str # ALLOW, DENY
+    reason_template: str
+
+@dataclass
+class Law:
+    name: str
+    claim: str
+    conditions: List[Condition] = field(default_factory=list)
+    action: Optional[Action] = None
+    priority: int = 50  # Default priority (0-100, higher = evaluated first)
+
+class CALParser:
+    def parse_file(self, path: str) -> List[Law]:
+        with open(path, "r") as f:
+            content = f.read()
+        return self.parse_string(content)
+
+    def parse_string(self, content: str) -> List[Law]:
+        laws = []
+        current_law = None
+        
+        lines = content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            
+            # Match: Law Name {
+            m_law_start = re.match(r"Law\s+(\w+)\s*\{", line)
+            if m_law_start:
+                current_law = Law(name=m_law_start.group(1), claim="")
+                continue
+                
+            # Match: }
+            if line == "}":
+                if current_law:
+                    laws.append(current_law)
+                    current_law = None
+                continue
+            
+            if not current_law:
+                continue
+                
+            # Directives
+            if line.startswith("Claim:"):
+                current_law.claim = line.split(":", 1)[1].strip().strip('"')
+            elif line.startswith("Priority:"):
+                try:
+                    priority_str = line.split(":", 1)[1].strip()
+                    current_law.priority = int(priority_str)
+                except ValueError:
+                    logger.warning(f"[CAL] Invalid priority value: {line}")
+            elif line.startswith("When:") or line.startswith("REQUIRE:"):
+                # When: and REQUIRE: are equivalent (REQUIRE is shorthand)
+                expr = line.split(":", 1)[1].strip()
+                current_law.conditions.append(Condition(expr))
+            elif line.startswith("And:") or line.startswith("IF:"):
+                # And: and IF: are equivalent (IF for readability)
+                expr = line.split(":", 1)[1].strip()
+                current_law.conditions.append(Condition(expr))
+            elif line.startswith("Then:"):
+                # Support ALLOW, DENY, and MODIFY verbs
+                parts = line.split(":", 1)[1].strip().split(" ", 1)
+                verb = parts[0]
+                reason = parts[1].strip('"') if len(parts) > 1 else ""
+                current_law.action = Action(verb, reason)
+
+        return laws

@@ -1,0 +1,66 @@
+rules:
+  - id: OUTDATED_CMS
+    title: Outdated Public CMS
+    severity: MEDIUM
+    base_score: 6.5
+    description: "Detected Content Management System (WordPress, Joomla, etc.) is running an outdated version with known vulnerabilities."
+    impact: "Old versions often have public exploits ranging from XSS to RCE (Remote Code Execution)."
+    remediation: "Upgrade the CMS to the latest stable release patch."
+    tags: ["cms", "patching", "supply-chain"]
+    families: ["patching", "supply-chain"]
+    matcher_func: "_match_outdated_cms"
+
+  - id: EXPOSED_ADMIN
+    title: Exposed Administrative Interface
+    severity: HIGH
+    base_score: 8.0
+    description: "Administrative login panel (e.g., /wp-admin, /admin, /console) is exposed to the public internet."
+    impact: "Attackers can attempt brute-force attacks, password spraying, or exploit panel-specific vulnerabilities to gain full control."
+    remediation: "Restrict access to trusted IP ranges (VPN/Allowlist) or enable MFA."
+    tags: ["admin-exposure", "auth"]
+    families: ["misconfiguration", "auth"]
+    matcher_func: "_match_admin_interfaces"
+
+  - id: WEAK_SSL_LOGIN
+    title: Weak Crypto on Login Form
+    severity: HIGH
+    base_score: 7.5
+    description: "Login or authentication endpoint is using weak SSL/TLS configurations (SSLv3, TLS 1.0, RC4) or plaintext HTTP."
+    impact: "Credential harvesting via MitM (Man-in-the-Middle) attacks."
+    remediation: "Enforce TLS 1.2+ and strong cipher suites. Redirect all HTTP traffic to HTTPS."
+    tags: ["crypto", "login"]
+    families: ["crypto", "auth"]
+    matcher_func: "_match_weak_ssl_on_login"
+
+  - id: MANAGEMENT_SURFACE
+    title: Exposed Management Service
+    severity: HIGH
+    base_score: 8.5
+    description: "High-risk management service (SSH, RDP, SMB, VNC) is reachable from the public internet."
+    impact: "Enables direct brute-force attacks and exploit attempts against system-level services."
+    remediation: "Firewall these ports to restrict access to trusted source IPs only."
+    tags: ["management-surface", "exposure"]
+    families: ["exposure", "misconfiguration"]
+    matcher_func: "_match_management_ports"
+    
+  - id: API_UNAUTH
+    title: Unauthenticated API Exposure
+    severity: MEDIUM
+    base_score: 5.0
+    description: "API endpoint detected without apparent authentication mechanisms."
+    impact: "May allow unauthorized access to backend logic or data."
+    remediation: "Audit API for necessary authentication tokens or keys."
+    tags: ["api-exposure", "auth"]
+    families: ["auth", "api"]
+    matcher_func: "_match_api_exposure"
+
+  - id: CLOUD_METADATA
+    title: Cloud Metadata Exposure
+    severity: CRITICAL
+    base_score: 9.0
+    description: "Cloud instance metadata service (AWS, GCP, Azure) is reachable via SSRF or direct request."
+    impact: "Can leak temporary credentials allowing full control of the cloud environment."
+    remediation: "Block access to 169.254.169.254 via local firewall or use IMDSv2."
+    tags: ["cloud", "ssrf"]
+    families: ["cloud", "misconfiguration"]
+    matcher_func: "_match_metadata"

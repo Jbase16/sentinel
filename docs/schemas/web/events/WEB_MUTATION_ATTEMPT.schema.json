@@ -1,0 +1,173 @@
+{
+  "$defs": {
+    "ParamLocation": {
+      "enum": [
+        "query",
+        "path",
+        "json",
+        "form",
+        "header"
+      ],
+      "title": "ParamLocation",
+      "type": "string"
+    },
+    "ParamSpec": {
+      "properties": {
+        "example_value": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Example Value"
+        },
+        "location": {
+          "$ref": "#/$defs/ParamLocation"
+        },
+        "name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "reflection_hint": {
+          "default": false,
+          "title": "Reflection Hint",
+          "type": "boolean"
+        },
+        "type_guess": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Guess"
+        }
+      },
+      "required": [
+        "name",
+        "location"
+      ],
+      "title": "ParamSpec",
+      "type": "object"
+    },
+    "RequestId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "RequestId",
+      "type": "object"
+    },
+    "VulnerabilityClass": {
+      "enum": [
+        "reflection",
+        "sqli",
+        "idor",
+        "ssrf",
+        "general"
+      ],
+      "title": "VulnerabilityClass",
+      "type": "string"
+    },
+    "WebMethod": {
+      "enum": [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "title": "WebMethod",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "baseline_request_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RequestId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "budget_index": {
+      "maximum": 10000000,
+      "minimum": 0,
+      "title": "Budget Index",
+      "type": "integer"
+    },
+    "method": {
+      "$ref": "#/$defs/WebMethod"
+    },
+    "mutated_request_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RequestId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "mutation_label": {
+      "description": "e.g. canary_reflect, sqli_error_1, idor_pid_swap",
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Mutation Label",
+      "type": "string"
+    },
+    "param": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "target_url": {
+      "format": "uri",
+      "maxLength": 2083,
+      "minLength": 1,
+      "title": "Target Url",
+      "type": "string"
+    },
+    "vuln_class": {
+      "$ref": "#/$defs/VulnerabilityClass"
+    }
+  },
+  "required": [
+    "vuln_class",
+    "target_url",
+    "method",
+    "mutation_label",
+    "budget_index"
+  ],
+  "title": "WebMutationAttemptPayload",
+  "type": "object"
+}

@@ -1,0 +1,75 @@
+# Bandit security scanner configuration for Sentinel
+# This configures what Bandit considers "critical" for this project
+
+[bandit]
+# Scan these directories
+targets = core/
+
+# Exclude test files and third-party code
+exclude_dirs =
+    /tests/
+    /venv/
+    /.venv/
+    /build/
+    /dist/
+
+# Tests to run (all by default, but we prioritize certain ones)
+tests =
+    # Command injection (CRITICAL for Sentinel)
+    B602,  # shell=True in subprocess
+    B604,  # shell=True in Popen
+    B605,  # shell command from string
+    B607,  # partial path for command
+
+    # Code injection
+    B307,  # eval usage
+    B102,  # exec usage
+    B103,  # bad file permissions
+
+    # Hardcoded secrets
+    B105,  # hardcoded password
+    B106,  # hardcoded password (funcarg)
+    B107,  # hardcoded password (default)
+
+    # Unsafe deserialization
+    B301,  # pickle
+    B302,  # marshal
+    B303,  # MD5/SHA1 insecure hash
+    B304,  # insecure cipher
+    B305,  # insecure cipher mode
+    B306,  # insecure mktemp
+
+    # SQL injection
+    B608,  # SQL injection (string format)
+
+    # Path traversal
+    B108,  # hardcoded /tmp usage
+
+    # Cryptography issues
+    B311,  # random instead of secrets
+    B324,  # hashlib without usedforsecurity
+    B501,  # request without cert validation
+    B502,  # SSL/TLS version
+    B503,  # SSL/TLS insecure
+    B504,  # SSL/TLS default None
+    B505,  # weak cryptographic key
+    B506,  # yaml.load
+    B507,  # SSH no host key verification
+
+# Severity level
+# Will fail CI on MEDIUM and above
+severity = MEDIUM
+
+# Confidence level
+# Will fail CI on MEDIUM and above
+confidence = MEDIUM
+
+# Exclude specific test IDs if they cause false positives
+# (Add IDs here as you discover false positives)
+skips =
+    # Example: B101  # Skip assert_used (we use asserts in tests)
+
+[bandit.formatters]
+# Output format
+format = json
+output = bandit-report.json

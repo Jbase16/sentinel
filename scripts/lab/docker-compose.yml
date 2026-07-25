@@ -1,0 +1,35 @@
+# SentinelForge Phase 1 Calibration Lab
+#
+# A self-contained, deliberately-vulnerable web app you can scan to verify
+# Sentinel works end-to-end BEFORE pointing it at a real bounty target.
+#
+# Usage:
+#   cd scripts/lab && docker compose up -d
+#   # ... run Sentinel against http://127.0.0.1:3000 ...
+#   docker compose down
+#
+# Safety notes:
+#   - The bind is explicitly 127.0.0.1, NOT 0.0.0.0. Nobody else on your
+#     network can reach this. Juice Shop is intentionally broken and would
+#     trivially be owned if exposed.
+#   - The image is pinned to a specific tag (not :latest) so reruns produce
+#     identical results. Bump deliberately when you want to update.
+#   - Resources are capped so a runaway Sentinel scan can't OOM your machine.
+
+services:
+  juice-shop:
+    image: bkimminich/juice-shop:v17.2.0
+    container_name: sentinel-lab-juice-shop
+    ports:
+      # Bind loopback ONLY. Do not change this to 0.0.0.0 — Juice Shop is
+      # designed to be vulnerable and must never face an untrusted network.
+      - "127.0.0.1:3000:3000"
+    restart: "no"
+    mem_limit: 1g
+    cpus: 1.0
+    # Healthcheck intentionally omitted: Juice Shop v17.2.0 ships a distroless
+    # image with no /bin/sh, so CMD-SHELL healthchecks always fail even when
+    # the app is up. Verify liveness from outside the container instead:
+    #     curl -fsS http://127.0.0.1:3000/ -o /dev/null && echo "Juice Shop up"
+    environment:
+      - NODE_ENV=unsafe

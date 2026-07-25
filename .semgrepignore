@@ -1,0 +1,33 @@
+# Semgrep ignore file for Sentinel
+# Exclude directories that shouldn't be scanned
+
+# Dependencies
+venv/
+.venv/
+node_modules/
+.env/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Tests (we want to scan tests too, but not fixtures)
+tests/fixtures/
+
+# Git
+.git/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# CI/CD artifacts
+.github/

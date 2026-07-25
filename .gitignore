@@ -1,0 +1,101 @@
+# OS / editor
+.DS_Store
+.vscode/
+.zencoder/
+.claude/
+
+# Python env / caches
+.venv/
+venv/
+.analysis-venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+sentinelforge.egg-info/
+
+# Build artifacts
+build/
+dist/
+ui/.build/
+ui/Tests/.build/
+ui/build/
+ui/.swiftpm/
+DerivedData/
+ui/.xcodeDerivedData/
+xcuserdata/
+ui/SentinelForge.xcodeproj/xcuserdata/
+*.xcuserstate
+
+# Logs / runtime output
+*.log
+*.out
+/logs/
+/client_log
+/srv_log
+/test_out_log
+/output.txt
+/tracked_files.txt
+/test_output.txt
+/conflict.log
+/ollama.log
+/server.log
+/backend.log
+/diff_output.txt
+/replay_log
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+/data/graphql_capture*.jsonl
+/archive_stage/
+/artifacts/
+/reports/
+graphify-out/
+*/graphify-out/
+
+# Local capture/review scratch
+/plan_review*.md
+/fix_recipes.py
+/test_file_create.py
+
+# Local model weights — multi-GB; never commit (live in Ollama / on disk)
+*.gguf
+/models/*.gguf
+
+# Local/private project files
+/live_fuzz_campaign.py
+/CLAUDE.md
+/sentinel.code-workspace
+/work.md
+/sentinel-update.md
+/MoreTODO.md
+/TODO.md
+/TODO_*.md
+/COMPLETED_TODOS_SUMMARY*
+/TRIAD.md
+/WARP.md
+/GITHUB_ACTIONS_SETUP.md
+/CODE_REVIEW_*.md
+/AGENTS.md
+/amp/AGENTS.md
+
+# Root-only ad-hoc scripts
+/verify_*.py
+
+# Tests intentionally excluded from commits
+/tests/test_aegis_phase1.py
+/tests/test_thanatos_phase1.py
+/tests/test_thanatos_phase2.py
+
+# Archived binaries
+/docs/archive/audits/*.docx
+/SentinelForge_*.docx
+
+# Misc
+*.tmp
+*.zip
+/sentinel/

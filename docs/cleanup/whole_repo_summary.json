@@ -1,0 +1,71 @@
+{
+  "tracked_files": 803,
+  "repo_category_counts": {
+    "other-tracked": 21,
+    "root-config-doc": 3,
+    "core-python": 388,
+    "docs": 92,
+    "scripts": 23,
+    "python-tests": 193,
+    "tools": 12,
+    "ui-swift": 59,
+    "ui-app-config": 4,
+    "ui-project-config": 3,
+    "ui-metal": 2,
+    "ui-resource-or-doc": 1,
+    "ui-generated-or-build": 1,
+    "ui-tests": 1
+  },
+  "ui_tracked_files": 71,
+  "ui_non_generated_tracked_files": 70,
+  "ui_tracked_generated_files": 1,
+  "ui_ignored_generated_files_present": 3629,
+  "ui_verdict_counts": {
+    "UI_ORPHAN_REVIEW": 1,
+    "UI_DUPLICATE_CLUSTER": 3,
+    "UI_CONFIG_RESOURCE_REVIEW": 2,
+    "UI_CONFIG_LIVE": 5,
+    "UI_LIVE": 52,
+    "UI_LIVE_RESOURCE": 2,
+    "UI_REVIEW": 1,
+    "TEST_HARNESS_REVIEW": 4
+  },
+  "ui_duplicate_basenames": {
+    "AuditFeedView.swift": [
+      "ui/Audit/AuditFeedView.swift",
+      "ui/Sources/Views/Audit/AuditFeedView.swift"
+    ],
+    "BackendState.swift": [
+      "ui/BackendState.swift",
+      "ui/Sources/Core/BackendState.swift"
+    ],
+    "ErrorClassifier.swift": [
+      "ui/ErrorClassifier.swift",
+      "ui/Sources/Core/ErrorClassifier.swift"
+    ],
+    "RetryBackoff.swift": [
+      "ui/RetryBackoff.swift",
+      "ui/Sources/Core/RetryBackoff.swift"
+    ]
+  },
+  "ui_identical_duplicate_clusters": [
+    [
+      "ui/BackendState.swift",
+      "ui/Sources/Core/BackendState.swift"
+    ],
+    [
+      "ui/ErrorClassifier.swift",
+      "ui/Sources/Core/ErrorClassifier.swift"
+    ],
+    [
+      "ui/RetryBackoff.swift",
+      "ui/Sources/Core/RetryBackoff.swift"
+    ]
+  ],
+  "ui_roots": [
+    "ui/Sources/SentinelForgeApp.swift",
+    "ui/Tests/Sources/TestRunner/main.swift"
+  ],
+  "swiftpm_test_manifest_exists": "True",
+  "ui_package_swift_exists": "False"
+}

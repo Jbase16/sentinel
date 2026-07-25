@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "FindingId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "FindingId",
+      "type": "object"
+    },
+    "MissionId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "MissionId",
+      "type": "object"
+    },
+    "PrincipalId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "PrincipalId",
+      "type": "object"
+    },
+    "RequestId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "RequestId",
+      "type": "object"
+    },
+    "ScanId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "ScanId",
+      "type": "object"
+    },
+    "SessionId": {
+      "properties": {
+        "value": {
+          "description": "Opaque identifier",
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "SessionId",
+      "type": "object"
+    }
+  },
+  "description": "Canonical event envelope. Every event is (envelope + payload).\n\nIMPORTANT: The Agent must not invent envelope fields.",
+  "properties": {
+    "event_type": {
+      "maxLength": 128,
+      "minLength": 3,
+      "title": "Event Type",
+      "type": "string"
+    },
+    "finding_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FindingId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "mission_id": {
+      "$ref": "#/$defs/MissionId"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "principal_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PrincipalId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RequestId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "scan_id": {
+      "$ref": "#/$defs/ScanId"
+    },
+    "session_id": {
+      "$ref": "#/$defs/SessionId"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Tags",
+      "type": "array"
+    }
+  },
+  "required": [
+    "event_type",
+    "mission_id",
+    "scan_id",
+    "session_id"
+  ],
+  "title": "EventEnvelope",
+  "type": "object"
+}
