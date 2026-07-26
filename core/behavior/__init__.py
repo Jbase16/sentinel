@@ -26,6 +26,8 @@ Generalized state-machine legality mining remains analysis-only through
 :mod:`core.behavior.state_machine`.
 Minimized prerequisite-omission compilation remains analysis-only and explicit-only
 through :mod:`core.behavior.omission`.
+Fresh-state omission execution and durable admission remain default-off and
+explicit-only through :mod:`core.behavior.omission_boundary`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

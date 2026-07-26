@@ -47,7 +47,6 @@ _BASELINE_REQUIREMENT = "captured_state_match"
 _REQUIRED_BLOCKERS = frozenset(
     {
         "analysis_only_no_execution_authority",
-        "omission_runtime_not_implemented",
         "requires_two_fresh_owned_states",
     }
 )

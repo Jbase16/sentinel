@@ -44,9 +44,11 @@ _VALID_LEGACY_VERDICTS = frozenset(
 )
 _PROPOSAL_REF = re.compile(r"^authorization_proposal:[0-9a-f]{64}$")
 _OWNED_EXPERIMENT_REF = re.compile(r"^owned_experiment:[0-9a-f]{64}$")
+_OMISSION_EXPERIMENT_REF = re.compile(r"^omission_experiment:[0-9a-f]{64}$")
 _OWNED_LIFECYCLE_REF = re.compile(r"^owned_lifecycle:[0-9a-f]{64}$")
 _ACTION_REF = re.compile(r"^action:[0-9a-f]{64}$")
 _FRESH_BOUNDARY_REF = re.compile(r"^fresh_owned_boundary:[0-9a-f]{64}$")
+_FRESH_OMISSION_BOUNDARY_REF = re.compile(r"^fresh_omission_boundary:[0-9a-f]{64}$")
 _SECURITY_OBLIGATION_REF = re.compile(r"^security_obligation:[0-9a-f]{64}$")
 _COMPILED_SEQUENCE_REF = re.compile(r"^controlled_runtime_sequence:[0-9a-f]{64}$")
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
@@ -109,6 +111,37 @@ _COMPILED_ERROR_CODES = frozenset(
         "runtime_step_returned_non_2xx",
         "runtime_substitution_changed_endpoint_budget_key",
         "runtime_transport_error",
+    }
+)
+_FRESH_OMISSION_ERROR_CODES = frozenset(
+    {
+        "fresh_omission_baseline_reference_mismatch",
+        "fresh_omission_binding_changed_endpoint",
+        "fresh_omission_cleanup_binding_failed",
+        "fresh_omission_cleanup_endpoint_changed",
+        "fresh_omission_cleanup_failed",
+        "fresh_omission_create_identifier_is_ambiguous",
+        "fresh_omission_dependency_value_is_unavailable",
+        "fresh_omission_execution_aborted",
+        "fresh_omission_identifiers_are_not_distinct",
+        "fresh_omission_leg_did_not_reach_terminal",
+        "fresh_omission_owned_object_is_unavailable",
+        "fresh_omission_ownership_registration_failed",
+        "fresh_omission_policy_denied",
+        "fresh_omission_runtime_binding_failed",
+        "fresh_omission_runtime_value_is_unavailable",
+        "fresh_omission_setup_step_returned_non_2xx",
+        "fresh_omission_transport_error",
+        "fresh_omission_unexpected_execution_error",
+    }
+)
+_FRESH_OMISSION_COMPARISONS = frozenset(
+    {
+        "not_completed",
+        "exact_match",
+        "response_mismatch",
+        "omission_rejected",
+        "inconclusive_truncated",
     }
 )
 _ABORT_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -693,6 +726,160 @@ def redacted_fresh_owned_boundary_outcome(
     return output
 
 
+def redacted_fresh_omission_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Return the evidence-only fresh omission fields permitted in a receipt."""
+
+    refs = {
+        "boundary_id": (
+            value.get("boundary_id"),
+            _FRESH_OMISSION_BOUNDARY_REF,
+        ),
+        "experiment_id": (
+            value.get("experiment_id"),
+            _OMISSION_EXPERIMENT_REF,
+        ),
+        "lifecycle_id": (
+            value.get("lifecycle_id"),
+            _OWNED_LIFECYCLE_REF,
+        ),
+        "terminal_operation_id": (
+            value.get("terminal_operation_id"),
+            _ACTION_REF,
+        ),
+    }
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item, pattern in refs.values()
+    ):
+        raise ReceiptStoreError("fresh omission receipt identity is invalid")
+    status = value.get("status")
+    comparison = value.get("comparison_status")
+    if (
+        status not in _VALID_COMPILED_STATUSES
+        or comparison not in _FRESH_OMISSION_COMPARISONS
+        or value.get("finding_authority") is not False
+        or value.get("finding") is not None
+    ):
+        raise ReceiptStoreError("fresh omission receipt outcome is invalid")
+    evidence_fields = (
+        "baseline_reference_match",
+        "baseline_terminal_success",
+        "omission_terminal_success",
+        "baseline_terminal_truncated",
+        "omission_terminal_truncated",
+        "terminal_body_match",
+    )
+    evidence = {}
+    for field_name in evidence_fields:
+        field_value = value.get(field_name)
+        if not isinstance(field_value, bool):
+            raise ReceiptStoreError(f"fresh omission receipt {field_name} is invalid")
+        evidence[field_name] = field_value
+    counters = {
+        key: _nonnegative_int(
+            value.get(key),
+            field_name=f"fresh_omission.{key}",
+        )
+        for key in (
+            "requests_attempted",
+            "requests_sent",
+            "baseline_steps_attempted",
+            "baseline_steps_completed",
+            "omission_steps_attempted",
+            "omission_steps_completed",
+            "creates_attempted",
+            "creates_completed",
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "policy_denials",
+        )
+    }
+    if (
+        counters["requests_sent"] > counters["requests_attempted"]
+        or counters["requests_attempted"]
+        != counters["baseline_steps_attempted"]
+        + counters["omission_steps_attempted"]
+        + counters["cleanup_steps_attempted"]
+        or counters["baseline_steps_completed"] > counters["baseline_steps_attempted"]
+        or counters["omission_steps_completed"] > counters["omission_steps_attempted"]
+        or counters["creates_completed"] > counters["creates_attempted"]
+        or counters["creates_attempted"] > 2
+        or counters["cleanup_steps_completed"] > counters["cleanup_steps_attempted"]
+        or counters["cleanup_steps_attempted"] > 2
+    ):
+        raise ReceiptStoreError("fresh omission receipt counters are inconsistent")
+    orphaned = value.get("orphaned_owned_state_possible")
+    if not isinstance(orphaned, bool):
+        raise ReceiptStoreError("fresh omission orphan state is invalid")
+    error_code = value.get("error_code")
+    if error_code is not None and error_code not in _FRESH_OMISSION_ERROR_CODES:
+        raise ReceiptStoreError("fresh omission receipt error code is invalid")
+    if status == "completed" and (
+        error_code is not None
+        or orphaned
+        or not evidence["baseline_reference_match"]
+        or counters["creates_completed"] != 2
+        or counters["cleanup_steps_completed"] != 2
+        or comparison == "not_completed"
+    ):
+        raise ReceiptStoreError("fresh omission completed state is inconsistent")
+    if status == "aborted" and error_code is None:
+        raise ReceiptStoreError("fresh omission aborted state requires an error")
+    if status == "cleanup_failed" and (
+        error_code != "fresh_omission_cleanup_failed"
+        or not orphaned
+        or counters["cleanup_steps_completed"] == counters["cleanup_steps_attempted"]
+    ):
+        raise ReceiptStoreError("fresh omission cleanup failure is inconsistent")
+    if comparison == "exact_match" and (
+        not evidence["baseline_reference_match"]
+        or not evidence["baseline_terminal_success"]
+        or not evidence["omission_terminal_success"]
+        or evidence["baseline_terminal_truncated"]
+        or evidence["omission_terminal_truncated"]
+        or not evidence["terminal_body_match"]
+    ):
+        raise ReceiptStoreError("fresh omission exact comparison is inconsistent")
+    provenance_root = value.get("provenance_root")
+    if not isinstance(provenance_root, str) or not re_full_sha256(provenance_root):
+        raise ReceiptStoreError("fresh omission provenance root is invalid")
+    budget = _count_section(
+        value.get("budget_snapshot"),
+        (
+            "total_requests",
+            "cross_object_reads",
+            "privilege_mutations",
+            "creates",
+            "endpoints_touched",
+        ),
+        section="fresh_omission.budget_snapshot",
+    )
+    if (
+        budget["total_requests"] != counters["requests_sent"]
+        or budget["cross_object_reads"] != 0
+        or budget["privilege_mutations"] != 0
+        or budget["creates"] > 2
+        or budget["endpoints_touched"] > budget["total_requests"]
+    ):
+        raise ReceiptStoreError("fresh omission receipt budget is inconsistent")
+    return {
+        "kind": "fresh_omission_boundary",
+        **{key: item for key, (item, _pattern) in refs.items()},
+        "status": status,
+        "comparison_status": comparison,
+        **evidence,
+        **counters,
+        "orphaned_owned_state_possible": orphaned,
+        "provenance_root": provenance_root,
+        "budget_snapshot": budget,
+        "error_code": error_code,
+        "finding_authority": False,
+        "finding": None,
+    }
+
+
 def redacted_continuation_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return a redacted final outcome plus its bounded round transcript."""
 
@@ -810,6 +997,8 @@ def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
         return redacted_compiled_outcome(value)
     if value.get("kind") == "fresh_owned_boundary":
         return redacted_fresh_owned_boundary_outcome(value)
+    if value.get("kind") == "fresh_omission_boundary":
+        return redacted_fresh_omission_outcome(value)
     if value.get("kind") == "bounded_continuation":
         return redacted_continuation_outcome(value)
     return redacted_outcome(value)

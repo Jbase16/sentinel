@@ -997,14 +997,14 @@ objects. The baseline leg contains the complete prerequisite sequence and termin
 read. The omission leg removes exactly one prerequisite operation and the one query
 binding that operation produced, while retaining every other operation in order.
 Compilation refuses a producer whose output also feeds another retained step. The live
-baseline's status and structural state must match the captured reference. The oracle is
+baseline's status and exact body hash must match the captured reference. The oracle is
 deliberately strict: both terminal legs must succeed without truncation and the
 omission leg must produce the exact same response-body hash as the live baseline. Even
 that match is not yet a finding. The artifact has `finding_authority=false`,
-`executable=false`, and explicit blockers for two-fresh-owned-state replay, the
-unimplemented omission runtime, and absent execution authority. Unknown prerequisite
-writes add a separate safety blocker. The obligation ranker can display the compiled
-path, but marks it non-actionable, so the active resolver cannot select or execute it.
+`executable=false`, and explicit blockers for two-fresh-owned-state replay and absent
+execution authority. Unknown prerequisite writes add a separate safety blocker. The
+obligation ranker can display the compiled path, but marks it non-actionable, so the
+active resolver cannot select or execute it.
 
 In plain language, Sentinel can now prepare a sealed test card for a very specific
 kind of hidden shortcut. Suppose the observed good route is “create my test workflow,
@@ -1031,6 +1031,75 @@ request capability all agree. That is materially different from deleting paramet
 from a crawler request: Sentinel derives the single omission from the proven
 prerequisite chain and makes every uncertainty an explicit refusal or execution
 blocker.
+
+#### Controlled fresh-state omission boundary
+
+`FreshOmissionBoundaryExecutor` is the separate, default-off runtime for the narrow
+compiled subset whose non-create prerequisite operations are all proven read-only. It
+reconstructs the exact lifecycle, state-machine plan, rehydration recipe, omission
+experiment, and lineage binding from the current captures before it can reserve or send
+anything. The baseline and omission legs run against two independently fresh objects
+created by the same controlled persona. The baseline executes the complete plan. The
+omission leg removes exactly the compiled prerequisite and its one sensitive query
+binding while retaining every other operation in order. Captured identifiers and
+capabilities are never replayed: server-issued values are extracted independently for
+each fresh object and substituted only through the previously proven locators.
+
+The boundary accepts only one safe owned create, read-only prerequisite and terminal
+operations, and one proven reversible `PATCH` or `PUT` cleanup. A state-changing
+prerequisite retains `prerequisite_execution_safety_unproven` and is refused before
+traffic. Every live action crosses one shared bounty-safe `PolicyExecutor` under a
+computed exact budget: two creates, zero cross-object reads, zero privilege mutations,
+no deletes, no real-user-data access, and no capacity beyond the sealed action
+sequence. Both `behavioral_compiled_owned_sequence` and
+`behavioral_state_machine_omission` must appear in the signed authorization envelope.
+Environment admission additionally requires the primary, compiled-execution, and
+omission-execution flags.
+
+`FreshOmissionAdmission` fingerprints the exact experiment, reconstructed boundary,
+authorization, actor, target, and policy; it reserves a durable receipt before target
+traffic. A completed receipt is reusable and suppresses duplicate traffic. The stored
+outcome contains only content-addressed identities, bounded counters, comparison
+booleans, the provenance root, and the budget summary. Raw origins, persona names,
+object identifiers, capability values, request or response bodies, and headers are
+excluded. Both fresh objects enter cleanup in the `finally` path, and cleanup
+uncertainty overrides an otherwise exact comparison.
+
+The evidence-only comparison requires the fresh baseline to reproduce the captured
+successful status and exact body hash without truncation. The omission terminal is then
+classified as rejected, different, truncated, or an exact successful body match. An
+exact match remains `finding_authority=false`: this pass proves that the controlled
+comparison ran and what it returned, not that the omitted prerequisite was a mandatory
+security control. The boundary is explicit-only and is not yet exported from
+`core.behavior`, wired to the obligation resolver, reachable through Foundry or ordinary
+scans, or eligible for bounded continuation.
+
+In plain language, Sentinel can now create two disposable workflows using one research
+account. It follows the full captured route on the first workflow. On the second, it
+skips one proven read-only capability-fetch step and removes only the capability that
+step would have supplied. It compares the final controlled result and archives both
+workflows automatically. If the ordinary route changed, the skipped step was a write,
+the target moved out of scope, the exact traffic budget is unavailable, or either
+cleanup becomes uncertain, Sentinel stops instead of improvising. Even when both final
+responses match exactly, Sentinel records a strong counterexample candidate rather than
+claiming a bounty.
+
+This slice conditionally changes target traffic and execution authority. With any
+required flag off, either signed workflow missing, an unsafe prerequisite, changed
+capture identity, non-exact policy budget, missing ownership or provenance seam, or a
+failed durable receipt reservation, it adds zero target traffic. With every gate
+satisfied and the boundary explicitly invoked, it may send exactly the pre-reserved
+two-object comparison and cleanup sequence. It adds no arbitrary writes, cross-persona
+reads, real-user-object access, retries, crawling, resolver selection, continuation, or
+finding authority.
+
+The one-of-a-kind property is evidence-locked negative replay over independently fresh
+owned state. The absence experiment is not made by deleting a convenient parameter from
+an old request. Sentinel must reconstruct the backward plan, chronological recipe,
+exact producer-to-consumer capability, owned lifecycle, fresh server identifiers,
+policy budget, and cleanup lineage into one atomic execution identity. The negative
+request exists only as the precise complement of a proven positive path, while its
+result remains mechanically separated from vulnerability promotion.
 
 ## Current baseline debt
 

@@ -114,7 +114,6 @@ def test_compiler_seals_one_exact_query_omission_without_authority():
     assert experiment.oracle.finding_authority is False
     assert set(experiment.execution_blockers) >= {
         "analysis_only_no_execution_authority",
-        "omission_runtime_not_implemented",
         "prerequisite_execution_safety_unproven",
         "requires_two_fresh_owned_states",
     }
