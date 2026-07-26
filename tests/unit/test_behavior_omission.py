@@ -202,7 +202,7 @@ def test_truncated_baseline_cannot_define_the_comparison_oracle():
     assert result.diagnostics.invalid_baselines == 1
 
 
-def test_orchestrator_attaches_compiled_omission_as_non_actionable_resolution():
+def test_orchestrator_attaches_compiled_omission_as_confirmation_eligible():
     result = BehavioralShadowOrchestrator().run(
         _records(),
         target_origin=ORIGIN,
@@ -216,9 +216,10 @@ def test_orchestrator_attaches_compiled_omission_as_non_actionable_resolution():
     )
     assert ranked.resolution_kind == "omission_experiment"
     assert ranked.resolution_ref == result.omissions.experiments[0].experiment_id
-    assert ranked.actionable is False
+    assert ranked.actionable is True
     assert "omission_proof_compiled" in ranked.signals
-    assert result.selected is None
+    assert "omission_confirmation_eligible" in ranked.signals
+    assert result.selected == ranked
 
 
 def test_omission_module_has_no_transport_or_execution_surface():

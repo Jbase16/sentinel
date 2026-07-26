@@ -6,6 +6,7 @@ import ast
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -17,6 +18,15 @@ from core.behavior.orchestrator import (
     OwnedExperimentShadowContext,
     ShadowOrchestratorConfig,
 )
+from core.behavior.omission_confirmation import (
+    FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+    FreshOmissionConfirmationAdmission,
+    FreshOmissionConfirmationAdmissionResult,
+    FreshOmissionConfirmationConfig,
+    FreshOmissionConfirmationExecutor,
+)
+from core.behavior.omission_boundary import FRESH_OMISSION_WORKFLOW
+from core.behavior.receipts import BehavioralReceiptStore
 from core.behavior.resolver import (
     ClosedLoopResolverConfig,
     ClosedLoopResolverDenied,
@@ -33,6 +43,13 @@ ORIGIN = "https://api.example.test"
 NOTE_ID = "note_7fa9f13a2b4c5d6e"
 SOURCE_DOCUMENT_ID = "doc_source_7fa9f13a2b4c"
 PEER_DOCUMENT_ID = "doc_peer_4a5b6c7d8e9f0"
+CAPTURED_WORKFLOW_ID = "workflow_7fa9f13a2b4c5d6e"
+CAPTURED_TOKEN = "token_4a5b6c7d8e9f0123"
+BASELINE_WORKFLOW_ID = "workflow_fresh_baseline_8b9c0d1e2f3a"
+OMISSION_WORKFLOW_ID = "workflow_fresh_omission_5b6c7d8e9f0a"
+CONTROL_WORKFLOW_ID = "workflow_fresh_control_2c3d4e5f6a7b"
+BASELINE_TOKEN = "token_fresh_baseline_12345678"
+REFERENCE_BODY = {"status": "ready", "artifact": "controlled"}
 
 
 def _source_records():
@@ -79,6 +96,135 @@ def _peer_records():
             "response_status": 200,
             "response_body": '{"owner":"bob-private"}',
         },
+    )
+
+
+def _omission_records():
+    return (
+        {
+            "persona_id": "alice",
+            "method": "POST",
+            "url": f"{ORIGIN}/api/workflows",
+            "request_headers": {"x-csrf-token": "csrf-alice"},
+            "request_body": '{"label":"controlled"}',
+            "response_status": 201,
+            "response_body": json.dumps({"workflowId": CAPTURED_WORKFLOW_ID}),
+        },
+        {
+            "persona_id": "alice",
+            "method": "GET",
+            "url": (f"{ORIGIN}/api/workflows/{CAPTURED_WORKFLOW_ID}/export-token"),
+            "request_headers": {"x-csrf-token": "csrf-alice"},
+            "response_status": 200,
+            "response_body": json.dumps({"exportToken": CAPTURED_TOKEN}),
+        },
+        {
+            "persona_id": "alice",
+            "method": "GET",
+            "url": (
+                f"{ORIGIN}/api/workflows/{CAPTURED_WORKFLOW_ID}/export"
+                f"?format=json&exportToken={CAPTURED_TOKEN}"
+            ),
+            "request_headers": {"x-csrf-token": "csrf-alice"},
+            "response_status": 200,
+            "response_body": json.dumps(REFERENCE_BODY),
+        },
+        {
+            "persona_id": "alice",
+            "method": "PATCH",
+            "url": f"{ORIGIN}/api/workflows/{CAPTURED_WORKFLOW_ID}",
+            "request_headers": {"x-csrf-token": "csrf-alice"},
+            "request_body": '{"archived":true}',
+            "response_status": 200,
+            "response_body": '{"archived":true}',
+        },
+    )
+
+
+def _omission_shadow():
+    return BehavioralShadowOrchestrator().run(
+        _omission_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+    )
+
+
+def _confirmation_admission(shadow, tmp_path, *, enabled=True):
+    calls = []
+    creates = iter(
+        (
+            BASELINE_WORKFLOW_ID,
+            OMISSION_WORKFLOW_ID,
+            CONTROL_WORKFLOW_ID,
+        )
+    )
+
+    async def raw(method, url, body=None, **kwargs):
+        calls.append((method, url, body, kwargs))
+        path = urlsplit(url).path
+        if method == "POST":
+            return 201, {"workflowId": next(creates)}
+        if method == "PATCH":
+            return 200, {"archived": True}
+        if path.endswith("/export-token"):
+            return 200, {"exportToken": BASELINE_TOKEN}
+        if CONTROL_WORKFLOW_ID in url:
+            return 403, {"error": "wrong workflow"}
+        return 200, dict(REFERENCE_BODY)
+
+    envelope = AuthorizationEnvelope(
+        envelope_id="resolver-omission-confirmation-envelope",
+        researcher_identity="researcher",
+        target_handle="example",
+        authorized_origins=[ORIGIN],
+        authorization_basis="authorized resolver omission test",
+        disclosure_attestation=True,
+        allowed_workflows=[
+            CONTROLLED_SEQUENCE_WORKFLOW,
+            FRESH_OMISSION_WORKFLOW,
+            FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        ],
+        created_at=1_780_000_000.0,
+        expires_at=1_900_000_000.0,
+    )
+    envelope.sign()
+    policy = ExecutionPolicy(
+        "bounty_safe",
+        scope_filter=lambda url: url.startswith(ORIGIN),
+        budget=ProofBudget(
+            max_total_requests=10,
+            max_requests_per_endpoint=3,
+            max_cross_object_reads=0,
+            max_privilege_mutations=0,
+            max_creates=3,
+            allow_delete=False,
+            allow_real_user_data_access=False,
+        ),
+        ownership_registry=OwnershipRegistry(),
+    )
+    provenance = ProvenanceSink()
+    provenance.record_context(
+        target=ORIGIN,
+        proof_mode="bounty_safe",
+        policy_digest=policy.digest(),
+    )
+    experiment = shadow.omissions.experiments[0]
+    boundary = FreshOmissionConfirmationExecutor(
+        _omission_records(),
+        world_id="alice",
+        target_origin=ORIGIN,
+        authorization=envelope,
+        actor_persona_id="alice",
+        executor=PolicyExecutor(raw, policy, provenance=provenance),
+        experiment=experiment,
+        config=FreshOmissionConfirmationConfig(enabled=enabled),
+    )
+    return (
+        FreshOmissionConfirmationAdmission(
+            boundary,
+            receipt_store=BehavioralReceiptStore(tmp_path),
+        ),
+        calls,
     )
 
 
@@ -195,6 +341,119 @@ def test_disabled_resolver_plans_exact_proposal_without_requiring_executor():
     assert result.status == "disabled"
     assert result.plan.selected is not None
     assert result.execution is None
+    assert calls == []
+
+
+def test_omission_confirmation_is_deferred_without_exact_admission():
+    shadow = _omission_shadow()
+    ranked = next(
+        item
+        for item in shadow.ranked_frontier
+        if item.resolution_kind == "omission_experiment"
+    )
+    assert ranked.actionable is True
+
+    plan = SingleStepObligationResolver().plan(shadow)
+
+    assert plan.selected is None
+    assert plan.diagnostics.actionable_items == 1
+    assert plan.diagnostics.outcome_bearing_items == 0
+    assert plan.diagnostics.deferred_preparatory_items == 1
+    assert plan.dispatchable_resolution_refs == ()
+
+
+@pytest.mark.asyncio
+async def test_disabled_resolver_selects_bound_omission_without_traffic(
+    tmp_path,
+):
+    shadow = _omission_shadow()
+    admission, calls = _confirmation_admission(shadow, tmp_path)
+    resolver = SingleStepObligationResolver(ClosedLoopResolverConfig(enabled=False))
+
+    result = await resolver.run(
+        shadow,
+        _omission_records(),
+        (),
+        omission_confirmation_admission=admission,
+    )
+
+    assert result.status == "disabled"
+    assert result.execution is None
+    assert result.plan.selected is not None
+    assert result.plan.selected.resolution_kind == "omission_experiment"
+    assert result.plan.selected.resolution_ref == (
+        shadow.omissions.experiments[0].experiment_id
+    )
+    assert result.plan.selected.confirmation_id is not None
+    assert result.plan.selected.admission_fingerprint is not None
+    assert result.plan.dispatchable_resolution_refs == (
+        shadow.omissions.experiments[0].experiment_id,
+    )
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_enabled_resolver_dispatches_omission_through_durable_admission(
+    tmp_path,
+):
+    shadow = _omission_shadow()
+    admission, calls = _confirmation_admission(shadow, tmp_path)
+    resolver = SingleStepObligationResolver(ClosedLoopResolverConfig(enabled=True))
+
+    result = await resolver.run(
+        shadow,
+        _omission_records(),
+        (),
+        omission_confirmation_admission=admission,
+    )
+
+    assert result.status == "completed"
+    assert result.plan.selected is not None
+    assert result.plan.selected.resolution_kind == "omission_experiment"
+    assert isinstance(
+        result.execution,
+        FreshOmissionConfirmationAdmissionResult,
+    )
+    assert result.execution is not None
+    assert result.execution.execution["kind"] == ("fresh_omission_confirmation")
+    assert result.execution.execution["confirmation_status"] == ("confirmed_fail_open")
+    assert result.execution.execution["finding_authority"] is True
+    assert len(calls) == 10
+
+    duplicate_admission, duplicate_calls = _confirmation_admission(
+        shadow,
+        tmp_path,
+    )
+    duplicate = await resolver.run(
+        shadow,
+        _omission_records(),
+        (),
+        omission_confirmation_admission=duplicate_admission,
+    )
+
+    assert duplicate.status == "already_executed"
+    assert duplicate.execution is not None
+    assert duplicate.execution.reused is True
+    assert duplicate_calls == []
+
+
+def test_invalid_omission_admission_fails_before_traffic(tmp_path):
+    shadow = _omission_shadow()
+    admission, calls = _confirmation_admission(
+        shadow,
+        tmp_path,
+        enabled=False,
+    )
+
+    with pytest.raises(
+        ClosedLoopResolverDenied,
+        match="omission_confirmation_preflight_denied",
+    ):
+        SingleStepObligationResolver().plan(
+            shadow,
+            omission_confirmation_admission=admission,
+        )
+
     assert calls == []
 
 

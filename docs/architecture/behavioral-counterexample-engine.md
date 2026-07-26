@@ -1135,7 +1135,7 @@ data. A durable confirmation receipt stores only content-addressed identities, p
 booleans, counters, the rejection status, provenance root, budget summary, and finding
 reference. It excludes the capability, object identifiers, target origin, headers,
 and request or response bodies. The boundary remains absent from package exports,
-Foundry, the resolver, normal scans, UI, and continuation.
+Foundry, normal scans, UI, and continuation.
 
 In plain language, Sentinel now asks a third question before calling the shortcut a
 real bug. First, a new workflow receives its genuine export token and successfully
@@ -1160,6 +1160,41 @@ its server-assigned object in the same sealed run. Its rejection against a diffe
 fresh object proves object binding, while the exact missing-capability success proves
 the fail-open. This converts a parameter-deletion coincidence into a reproducible,
 policy-gated security claim without needing unsafe state-changing setup.
+
+#### Resolver-selectable omission confirmation
+
+The shadow orchestrator now marks a compiled omission resolution actionable once its
+obligation prerequisites are upheld. This is eligibility, not traffic authority. The
+single-step resolver will dispatch that item only when it receives one
+`FreshOmissionConfirmationAdmission` whose experiment identifier, reconstructed
+confirmation identifier, and durable admission fingerprint all bind to the exact
+ranked resolution. A missing or differently bound admission defers the actionable item
+without traffic. An invalid supplied admission fails the resolver plan closed.
+
+When enabled, the resolver revalidates the three-part binding immediately before
+execution and calls the durable admission coordinator rather than the confirmation
+executor. Receipt reservation and duplicate suppression therefore remain in front of
+all target traffic. The resolver returns the redacted admission result as its terminal
+execution. It does not yet translate that receipt into a graph disposition or report
+finding; that is a separate receipt-binding phase.
+
+In plain language, Sentinel's decision-making brain can now choose this hidden-shortcut
+experiment when it is the best unanswered security question. The choice alone does
+nothing. Sentinel runs it only if the exact sealed test machine for that question is
+attached, authorized, and ready. It cannot substitute a similar-looking experiment or
+bypass the receipt system.
+
+This slice conditionally exposes the already bounded three-object sequence through the
+behavioral resolver. It introduces no new target requests or broader execution
+authority. Resolver disablement, a missing admission, an experiment mismatch, changed
+preflight identity, or any existing confirmation gate produces zero new traffic. The
+integration remains outside Foundry, ordinary scans, UI, and bounded continuation.
+
+The one-of-a-kind property is obligation-first negative-experiment dispatch with a
+content-addressed runtime binding. Sentinel does not merely rank a parameter mutation
+and hand it to a generic transport. The ranked security question, compiled omission,
+fresh-state confirmation boundary, signed authority, exact policy, and durable receipt
+must resolve to one immutable selection before the existing proof can run.
 
 ## Current baseline debt
 

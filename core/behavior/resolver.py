@@ -19,6 +19,12 @@ from .active import ControlledAuthorizationExecutor, ControlledExecutionResult
 from .boundary import FreshOwnedBoundaryExecutor, FreshOwnedBoundaryResult
 from .factory import PreparedOwnedExperiment
 from .normalize import stable_hash
+from .omission import MinimizedOmissionExperiment
+from .omission_confirmation import (
+    FreshOmissionConfirmationAdmission,
+    FreshOmissionConfirmationAdmissionResult,
+)
+from .omission_boundary import FreshOmissionDenied
 from .orchestrator import BehavioralShadowRun, RankedSecurityObligation
 from .proposals import AuthorizationExperimentProposal
 
@@ -86,6 +92,11 @@ class ClosedLoopResolverSelection:
         repr=False,
         compare=False,
     )
+    confirmation_id: Optional[str] = None
+    admission_fingerprint: Optional[str] = field(
+        default=None,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -99,7 +110,11 @@ class ClosedLoopResolverSelection:
             or not isinstance(self.rank_score, int)
             or self.rank_score < 0
             or self.resolution_kind
-            not in {"authorization_proposal", "owned_experiment"}
+            not in {
+                "authorization_proposal",
+                "owned_experiment",
+                "omission_experiment",
+            }
             or (
                 self.resolution_kind == "authorization_proposal"
                 and (
@@ -113,6 +128,33 @@ class ClosedLoopResolverSelection:
                 and (
                     self.proposal is not None
                     or not self.resolution_ref.startswith("owned_experiment:")
+                    or self.confirmation_id is not None
+                    or self.admission_fingerprint is not None
+                )
+            )
+            or (
+                self.resolution_kind == "omission_experiment"
+                and (
+                    self.proposal is not None
+                    or not self.resolution_ref.startswith("omission_experiment:")
+                    or not isinstance(self.confirmation_id, str)
+                    or not self.confirmation_id.startswith(
+                        "fresh_omission_confirmation:"
+                    )
+                    or _HASH_REF.fullmatch(self.confirmation_id) is None
+                    or not isinstance(self.admission_fingerprint, str)
+                    or len(self.admission_fingerprint) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in self.admission_fingerprint
+                    )
+                )
+            )
+            or (
+                self.resolution_kind == "authorization_proposal"
+                and (
+                    self.confirmation_id is not None
+                    or self.admission_fingerprint is not None
                 )
             )
         ):
@@ -125,13 +167,17 @@ class ClosedLoopResolverSelection:
         return None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        output = {
             "obligation_id": self.obligation_id,
             "resolution_kind": self.resolution_kind,
             "resolution_ref": self.resolution_ref,
             "frontier_index": self.frontier_index,
             "rank_score": self.rank_score,
         }
+        if self.resolution_kind == "omission_experiment":
+            output["confirmation_id"] = self.confirmation_id
+            output["admission_fingerprint"] = self.admission_fingerprint
+        return output
 
 
 def _plan_payload(
@@ -226,7 +272,7 @@ class ClosedLoopResolverPlan:
 
     def to_dict(self) -> Dict[str, Any]:
         selected = self.selected
-        return {
+        output = {
             "schema_version": 1,
             "plan_id": self.plan_id,
             **_plan_payload(
@@ -246,13 +292,21 @@ class ClosedLoopResolverPlan:
             ),
             "selected_obligation_id": selected.obligation_id if selected else None,
         }
+        if selected is not None and selected.resolution_kind == "omission_experiment":
+            output["selected_omission_experiment_id"] = selected.resolution_ref
+            output["selected_confirmation_id"] = selected.confirmation_id
+        return output
 
 
 @dataclass(frozen=True)
 class ClosedLoopResolverRun:
     status: str
     plan: ClosedLoopResolverPlan
-    execution: Optional[ControlledExecutionResult | FreshOwnedBoundaryResult] = None
+    execution: Optional[
+        ControlledExecutionResult
+        | FreshOwnedBoundaryResult
+        | FreshOmissionConfirmationAdmissionResult
+    ] = None
 
     def __post_init__(self) -> None:
         if self.execution is None:
@@ -260,11 +314,12 @@ class ClosedLoopResolverRun:
                 raise ValueError("closed-loop resolver inactive status is invalid")
         else:
             selected = self.plan.selected
-            execution_ref = (
-                self.execution.proposal_id
-                if isinstance(self.execution, ControlledExecutionResult)
-                else self.execution.experiment_id
-            )
+            if isinstance(self.execution, ControlledExecutionResult):
+                execution_ref = self.execution.proposal_id
+            elif isinstance(self.execution, FreshOwnedBoundaryResult):
+                execution_ref = self.execution.experiment_id
+            else:
+                execution_ref = self.execution.execution.get("experiment_id")
             if (
                 selected is None
                 or execution_ref != selected.resolution_ref
@@ -277,11 +332,23 @@ class ClosedLoopResolverRun:
                     selected.resolution_kind == "owned_experiment"
                     and not isinstance(self.execution, FreshOwnedBoundaryResult)
                 )
+                or (
+                    selected.resolution_kind == "omission_experiment"
+                    and not isinstance(
+                        self.execution,
+                        FreshOmissionConfirmationAdmissionResult,
+                    )
+                )
             ):
                 raise ValueError("closed-loop resolver execution is inconsistent")
 
     @property
     def finding(self) -> Optional[Dict[str, Any]]:
+        if isinstance(
+            self.execution,
+            FreshOmissionConfirmationAdmissionResult,
+        ):
+            return None
         if self.execution is None or self.execution.finding is None:
             return None
         finding = copy.deepcopy(self.execution.finding.to_finding())
@@ -371,11 +438,39 @@ class SingleStepObligationResolver:
             experiments[experiment.experiment_id] = experiment
         return experiments
 
+    @staticmethod
+    def _omissions_by_id(
+        shadow_run: BehavioralShadowRun,
+    ) -> Mapping[str, MinimizedOmissionExperiment]:
+        experiments: Dict[str, MinimizedOmissionExperiment] = {}
+        for experiment in shadow_run.omissions.experiments:
+            if experiment.experiment_id in experiments:
+                raise ClosedLoopResolverDenied("shadow_omission_identity_is_ambiguous")
+            experiments[experiment.experiment_id] = experiment
+        return experiments
+
+    @staticmethod
+    def _confirmation_binding(
+        admission: FreshOmissionConfirmationAdmission,
+    ) -> Tuple[str, str, str]:
+        try:
+            confirmation_id = admission.boundary.validate_preflight()
+            admission_fingerprint = admission.validate_preflight()
+        except FreshOmissionDenied as exc:
+            raise ClosedLoopResolverDenied(
+                "omission_confirmation_preflight_denied"
+            ) from exc
+        experiment_id = admission.boundary.experiment.experiment_id
+        return experiment_id, confirmation_id, admission_fingerprint
+
     def plan(
         self,
         shadow_run: BehavioralShadowRun,
         *,
         fresh_boundary_executor: Optional[FreshOwnedBoundaryExecutor] = None,
+        omission_confirmation_admission: Optional[
+            FreshOmissionConfirmationAdmission
+        ] = None,
     ) -> ClosedLoopResolverPlan:
         if not isinstance(shadow_run, BehavioralShadowRun):
             raise TypeError("shadow_run must be a BehavioralShadowRun")
@@ -386,12 +481,26 @@ class SingleStepObligationResolver:
             raise TypeError(
                 "fresh_boundary_executor must be a FreshOwnedBoundaryExecutor"
             )
+        if omission_confirmation_admission is not None and not isinstance(
+            omission_confirmation_admission,
+            FreshOmissionConfirmationAdmission,
+        ):
+            raise TypeError(
+                "omission_confirmation_admission must be a "
+                "FreshOmissionConfirmationAdmission"
+            )
         proposals = self._proposals_by_id(shadow_run)
         experiments = self._experiments_by_id(shadow_run)
+        omissions = self._omissions_by_id(shadow_run)
         boundary_refs = (
             frozenset(fresh_boundary_executor.supported_experiment_ids())
             if fresh_boundary_executor is not None
             else frozenset()
+        )
+        confirmation_binding = (
+            self._confirmation_binding(omission_confirmation_admission)
+            if omission_confirmation_admission is not None
+            else None
         )
         selected = None
         dispatchable_refs = []
@@ -407,9 +516,7 @@ class SingleStepObligationResolver:
             if item.resolution_kind == "owned_experiment":
                 experiment = experiments.get(str(item.resolution_ref))
                 if experiment is None:
-                    raise ClosedLoopResolverDenied(
-                        "frontier_experiment_ref_is_unbound"
-                    )
+                    raise ClosedLoopResolverDenied("frontier_experiment_ref_is_unbound")
                 if experiment.experiment_id not in boundary_refs:
                     deferred += 1
                     continue
@@ -422,6 +529,29 @@ class SingleStepObligationResolver:
                         resolution_ref=experiment.experiment_id,
                         frontier_index=index,
                         rank_score=item.score,
+                    )
+                continue
+            if item.resolution_kind == "omission_experiment":
+                experiment = omissions.get(str(item.resolution_ref))
+                if experiment is None:
+                    raise ClosedLoopResolverDenied("frontier_omission_ref_is_unbound")
+                if (
+                    confirmation_binding is None
+                    or confirmation_binding[0] != experiment.experiment_id
+                ):
+                    deferred += 1
+                    continue
+                outcome_bearing += 1
+                dispatchable_refs.append(experiment.experiment_id)
+                if selected is None:
+                    selected = ClosedLoopResolverSelection(
+                        obligation_id=item.obligation_id,
+                        resolution_kind="omission_experiment",
+                        resolution_ref=experiment.experiment_id,
+                        frontier_index=index,
+                        rank_score=item.score,
+                        confirmation_id=confirmation_binding[1],
+                        admission_fingerprint=confirmation_binding[2],
                     )
                 continue
             if item.resolution_kind != "authorization_proposal":
@@ -479,10 +609,14 @@ class SingleStepObligationResolver:
         *,
         controlled_executor: Optional[ControlledAuthorizationExecutor] = None,
         fresh_boundary_executor: Optional[FreshOwnedBoundaryExecutor] = None,
+        omission_confirmation_admission: Optional[
+            FreshOmissionConfirmationAdmission
+        ] = None,
     ) -> ClosedLoopResolverRun:
         plan = self.plan(
             shadow_run,
             fresh_boundary_executor=fresh_boundary_executor,
+            omission_confirmation_admission=(omission_confirmation_admission),
         )
         if not self.config.enabled:
             return ClosedLoopResolverRun("disabled", plan)
@@ -496,6 +630,24 @@ class SingleStepObligationResolver:
             execution = await fresh_boundary_executor.execute(
                 plan.selected.resolution_ref
             )
+        elif plan.selected.resolution_kind == "omission_experiment":
+            if not isinstance(
+                omission_confirmation_admission,
+                FreshOmissionConfirmationAdmission,
+            ):
+                raise ClosedLoopResolverDenied(
+                    "enabled_omission_resolution_requires_confirmation_admission"
+                )
+            binding = self._confirmation_binding(omission_confirmation_admission)
+            if (
+                binding[0] != plan.selected.resolution_ref
+                or binding[1] != plan.selected.confirmation_id
+                or binding[2] != plan.selected.admission_fingerprint
+            ):
+                raise ClosedLoopResolverDenied(
+                    "omission_confirmation_binding_changed_after_selection"
+                )
+            execution = await omission_confirmation_admission.execute()
         else:
             if not isinstance(controlled_executor, ControlledAuthorizationExecutor):
                 raise ClosedLoopResolverDenied(

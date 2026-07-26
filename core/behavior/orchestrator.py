@@ -201,7 +201,11 @@ class RankedSecurityObligation:
             or self.actionable
             != (
                 self.resolution_kind
-                in {"authorization_proposal", "owned_experiment"}
+                in {
+                    "authorization_proposal",
+                    "owned_experiment",
+                    "omission_experiment",
+                }
             )
             or tuple(sorted(set(self.signals))) != self.signals
             or any(_SEMANTIC.fullmatch(item) is None for item in self.signals)
@@ -511,12 +515,14 @@ class BehavioralShadowOrchestrator:
                 signals.add("proof_carrying_experiment_ready")
             elif resolution_kind == "omission_experiment":
                 signals.add("omission_proof_compiled")
+                signals.add("omission_confirmation_eligible")
             else:
                 signals.add("no_safe_resolution_path")
 
             actionable = resolution_kind in {
                 "authorization_proposal",
                 "owned_experiment",
+                "omission_experiment",
             }
             score = (
                 self._KIND_SCORE.get(obligation.kind, 250)
