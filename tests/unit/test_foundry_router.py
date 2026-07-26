@@ -40,6 +40,14 @@ def _isolate(monkeypatch, tmp_path):
         "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
         raising=False,
     )
+    monkeypatch.delenv(
+        "SENTINELFORGE_BEHAVIOR_OMISSION_EXECUTION",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION",
+        raising=False,
+    )
     monkeypatch.delenv("SENTINELFORGE_BEHAVIOR_CONTINUATION", raising=False)
     _reset_bus_for_tests()
     yield
@@ -208,6 +216,106 @@ class TestBehavioralAuthorizationEndpoint:
             peer_persona,
         )
 
+    def _omission_request(self):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.omission_confirmation import (
+            FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        )
+        from core.behavior.omission_boundary import FRESH_OMISSION_WORKFLOW
+        from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
+        from core.foundry.authorization import create_envelope
+        from core.foundry.vault import PersonaVault
+        from core.server.routers.foundry import RunBehavioralAuthorizationRequest
+
+        vault = PersonaVault()
+        source_persona = vault.add_persona(
+            label="source",
+            email="source-omission@research.example",
+        )
+        peer_persona = vault.add_persona(
+            label="peer",
+            email="peer-omission@research.example",
+        )
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[
+                CONTROLLED_WORKFLOW,
+                CONTROLLED_SEQUENCE_WORKFLOW,
+                FRESH_OMISSION_WORKFLOW,
+                FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+            ],
+            disclosure_attestation=True,
+        )
+        captured_id = "workflow_7fa9f13a2b4c5d6e"
+        captured_token = "token_4a5b6c7d8e9f0123"
+        headers = {"x-csrf-token": f"csrf-{source_persona.persona_id}"}
+        source_records = [
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "POST",
+                "url": f"{self.ORIGIN}/api/workflows",
+                "request_headers": headers,
+                "request_body": '{"label":"controlled"}',
+                "response_status": 201,
+                "response_body": json.dumps({"workflowId": captured_id}),
+            },
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "GET",
+                "url": (
+                    f"{self.ORIGIN}/api/workflows/{captured_id}/export-token"
+                ),
+                "request_headers": headers,
+                "response_status": 200,
+                "response_body": json.dumps(
+                    {"exportToken": captured_token}
+                ),
+            },
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "GET",
+                "url": (
+                    f"{self.ORIGIN}/api/workflows/{captured_id}/export"
+                    f"?format=json&exportToken={captured_token}"
+                ),
+                "request_headers": headers,
+                "response_status": 200,
+                "response_body": json.dumps(
+                    {"status": "ready", "artifact": "controlled"}
+                ),
+            },
+            {
+                "persona_id": source_persona.persona_id,
+                "method": "PATCH",
+                "url": f"{self.ORIGIN}/api/workflows/{captured_id}",
+                "request_headers": headers,
+                "request_body": '{"archived":true}',
+                "response_status": 200,
+                "response_body": '{"archived":true}',
+            },
+        ]
+        peer_records = [
+            {
+                "persona_id": peer_persona.persona_id,
+                "method": "GET",
+                "url": f"{self.ORIGIN}/api/status",
+                "response_status": 200,
+                "response_body": '{"status":"ok"}',
+            }
+        ]
+        request = RunBehavioralAuthorizationRequest(
+            target_origin=self.ORIGIN,
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+            source_records=source_records,
+            peer_records=peer_records,
+        )
+        return request, source_persona, peer_persona
+
     def test_disabled_endpoint_returns_plan_without_constructing_live_traffic(self, monkeypatch):
         from core.server.routers.foundry import run_behavioral_authorization_endpoint
         from core.wraith.bola_replay import SNDReplayTransport
@@ -293,6 +401,247 @@ class TestBehavioralAuthorizationEndpoint:
         assert calls[0][1].headers["x-csrf-token"] == f"csrf-{peer_persona.persona_id}"
         assert calls[1][1].headers["x-csrf-token"] == f"csrf-{source_persona.persona_id}"
         assert all(call[1].max_response_chars == 2 * 1024 * 1024 for call in calls)
+
+    def test_foundry_executes_reports_and_deduplicates_exact_omission_proof(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from urllib.parse import urlsplit
+
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, peer_persona = self._omission_request()
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        baseline_id = "workflow_fresh_baseline_8b9c0d1e2f3a"
+        omission_id = "workflow_fresh_omission_5b6c7d8e9f0a"
+        control_id = "workflow_fresh_control_2c3d4e5f6a7b"
+        baseline_token = "token_fresh_baseline_12345678"
+        fresh_ids = iter((baseline_id, omission_id, control_id))
+        calls = []
+
+        async def fake_send(_transport, persona, replay_request):
+            calls.append((persona, replay_request))
+            assert persona == source_persona.persona_id
+            path = urlsplit(replay_request.url).path
+            if replay_request.method == "POST":
+                return ReplayResponse(
+                    201,
+                    json.dumps({"workflowId": next(fresh_ids)}),
+                )
+            if replay_request.method == "PATCH":
+                return ReplayResponse(200, '{"archived":true}')
+            if path.endswith("/export-token"):
+                return ReplayResponse(
+                    200,
+                    json.dumps({"exportToken": baseline_token}),
+                )
+            if control_id in path:
+                return ReplayResponse(403, '{"error":"wrong workflow"}')
+            return ReplayResponse(
+                200,
+                '{"status":"ready","artifact":"controlled"}',
+            )
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+        duplicate = _run(
+            run_behavioral_authorization_endpoint(request, _=True)
+        )
+
+        assert result["status"] == "completed"
+        assert result["plan"]["selected"]["resolution_kind"] == (
+            "omission_experiment"
+        )
+        assert result["execution"]["reused"] is False
+        proof = result["execution"]["execution"]
+        assert proof["kind"] == "fresh_omission_confirmation"
+        assert proof["confirmation_status"] == "confirmed_fail_open"
+        assert proof["requests_sent"] == 10
+        assert proof["creates_completed"] == 3
+        assert proof["cleanup_steps_completed"] == 3
+        assert proof["finding_authority"] is True
+        assert result["finding"]["id"] == proof["finding_ref"]
+        assert result["finding"]["metadata"]["subtype"] == (
+            "prerequisite_omission_fail_open"
+        )
+        assert result["behavioral_shadow"]["status"] == "finding"
+        assert result["behavioral_shadow"]["receipt_feedback"]["status"] == (
+            "ready"
+        )
+        assert result["behavioral_shadow"]["receipt_feedback"]["diagnostics"] == {
+            "receipts_seen": 1,
+            "dispositions_created": 1,
+            "unbound_receipts": 0,
+            "unsupported_receipts": 0,
+        }
+        assert duplicate["status"] == "already_executed"
+        assert duplicate["kind"] == "fresh_omission_confirmation"
+        assert duplicate["finding_ref"] == proof["finding_ref"]
+        assert len(calls) == 10
+
+        receipts = list(
+            (tmp_path / "behavioral_receipts").glob("behavioral-*.json")
+        )
+        assert len(receipts) == 2
+        persisted = "".join(path.read_text() for path in receipts)
+        for raw in (
+            self.ORIGIN,
+            "workflow_7fa9f13a2b4c5d6e",
+            "token_4a5b6c7d8e9f0123",
+            baseline_id,
+            omission_id,
+            control_id,
+            baseline_token,
+            source_persona.persona_id,
+            peer_persona.persona_id,
+            "controlled",
+        ):
+            assert raw not in persisted
+
+    def test_foundry_defers_omission_when_confirmation_gates_are_off(
+        self,
+        monkeypatch,
+    ):
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _source_persona, _peer_persona = self._omission_request()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError(
+                "disabled omission confirmation must not reach transport"
+            )
+
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "no_executable_candidate"
+        assert result["execution"] is None
+        omission = next(
+            item
+            for item in result["plan"]["ranked"]
+            if item["resolution_kind"] == "omission_experiment"
+        )
+        assert omission["actionable"] is True
+        assert result["plan"]["selected"] is None
+
+    def test_foundry_omission_requires_signed_workflow_before_traffic(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.omission_confirmation import (
+            FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        )
+        from core.behavior.omission_boundary import FRESH_OMISSION_WORKFLOW
+        from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
+        from core.foundry.authorization import create_envelope
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _source_persona, _peer_persona = self._omission_request()
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[
+                CONTROLLED_WORKFLOW,
+                CONTROLLED_SEQUENCE_WORKFLOW,
+                FRESH_OMISSION_WORKFLOW,
+            ],
+            disclosure_attestation=True,
+        )
+        request.envelope_id = envelope.envelope_id
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("missing workflow must block target traffic")
+
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert error.value.status_code == 409
+        assert FRESH_OMISSION_CONFIRMATION_WORKFLOW not in (
+            envelope.allowed_workflows
+        )
+        assert not (tmp_path / "behavioral_receipts").exists()
+
+    def test_foundry_revalidates_omission_binding_before_transport(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        from core.behavior.omission_confirmation import (
+            FreshOmissionConfirmationAdmission,
+        )
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _source_persona, _peer_persona = self._omission_request()
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION",
+        ):
+            monkeypatch.setenv(name, "1")
+        fingerprints = iter(("a" * 64, "a" * 64, "b" * 64))
+
+        def changed_binding(_admission):
+            return next(fingerprints)
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("changed binding must block target traffic")
+
+        monkeypatch.setattr(
+            FreshOmissionConfirmationAdmission,
+            "validate_preflight",
+            changed_binding,
+        )
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert error.value.status_code == 500
+        assert "binding_changed_after_selection" in error.value.detail
+        receipts = list(
+            (tmp_path / "behavioral_receipts").glob("behavioral-*.json")
+        )
+        assert len(receipts) == 1
+        stored = json.loads(receipts[0].read_text())
+        assert stored["state"] == "aborted"
+        assert stored["abort_reason"] == "closed_loop_resolver_error"
 
     def test_bounded_continuation_runs_second_progressing_obligation_and_stops(
         self,
@@ -1017,6 +1366,46 @@ class TestBehavioralAuthorizationEndpoint:
 
         assert error.value.status_code == 409
         assert "bounded_continuation_authorization_denied" in error.value.detail
+        assert not (tmp_path / "behavioral_receipts").exists()
+
+    def test_one_click_omission_workflow_denial_precedes_native_capture(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+
+        request, _, _, _ = self._one_click_request()
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError(
+                "missing omission workflows must block native capture"
+            )
+
+        monkeypatch.setattr(driver, "ensure_capture_available", forbidden)
+        monkeypatch.setattr(driver, "validate_persona_windows", forbidden)
+        with pytest.raises(HTTPException) as error:
+            _run(
+                run_behavioral_authorization_from_url_endpoint(
+                    request,
+                    _=True,
+                )
+            )
+
+        assert error.value.status_code == 409
+        assert "missing signed workflows" in error.value.detail
         assert not (tmp_path / "behavioral_receipts").exists()
         assert not (tmp_path / "captures").exists()
 

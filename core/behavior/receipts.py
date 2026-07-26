@@ -1236,7 +1236,18 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
     if "continuation" in response:
         return redacted_continuation_outcome(response)
+    if response.get("kind") == "fresh_omission_confirmation":
+        return redacted_fresh_omission_confirmation_outcome(response)
     execution_value = response.get("execution")
+    if isinstance(execution_value, Mapping):
+        admission_execution = execution_value.get("execution")
+        if (
+            isinstance(admission_execution, Mapping)
+            and admission_execution.get("kind") == "fresh_omission_confirmation"
+        ):
+            return redacted_fresh_omission_confirmation_outcome(
+                admission_execution
+            )
     if isinstance(execution_value, Mapping) and execution_value.get("kind") == (
         "fresh_owned_boundary"
     ):

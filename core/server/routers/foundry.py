@@ -557,11 +557,24 @@ async def run_behavioral_authorization_endpoint(
         FreshOwnedBoundaryDenied,
         FreshOwnedBoundaryExecutor,
     )
+    from core.behavior.omission_confirmation import (
+        FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        FreshOmissionConfirmationAdmission,
+        FreshOmissionConfirmationConfig,
+        FreshOmissionConfirmationExecutor,
+    )
+    from core.behavior.omission_boundary import (
+        FRESH_OMISSION_WORKFLOW,
+        FreshOmissionDenied,
+    )
     from core.behavior.factory import (
         OwnedExperimentFactory,
         OwnedExperimentFactoryDenied,
     )
-    from core.behavior.runtime import ControlledSequenceDenied
+    from core.behavior.runtime import (
+        CONTROLLED_SEQUENCE_WORKFLOW,
+        ControlledSequenceDenied,
+    )
     from core.behavior.continuation import (
         BoundedContinuationConfig,
         BoundedContinuationController,
@@ -631,6 +644,26 @@ async def run_behavioral_authorization_endpoint(
     except BoundedContinuationDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     fresh_boundary_config = FreshOwnedBoundaryConfig.from_environment()
+    omission_confirmation_config = (
+        FreshOmissionConfirmationConfig.from_environment()
+    )
+    if omission_confirmation_config.enabled:
+        missing_workflows = sorted(
+            {
+                CONTROLLED_SEQUENCE_WORKFLOW,
+                FRESH_OMISSION_WORKFLOW,
+                FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+            }
+            - set(envelope.allowed_workflows)
+        )
+        if missing_workflows:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "omission confirmation authorization denied; "
+                    f"missing signed workflows: {', '.join(missing_workflows)}"
+                ),
+            )
     config = PrimaryPlannerConfig(enabled=resolver_config.enabled)
     scheduler = BehavioralPrimaryScheduler(config)
     obligation_resolver = SingleStepObligationResolver(resolver_config)
@@ -646,6 +679,7 @@ async def run_behavioral_authorization_endpoint(
     shadow_artifacts = []
     controlled_executor = None
     fresh_boundary_executor = None
+    omission_confirmation_admission = None
     executors = None
     boundary_executors = None
     receipt_store = None
@@ -786,6 +820,9 @@ async def run_behavioral_authorization_endpoint(
                 "execution_profile": {
                     "primary": resolver_config.enabled,
                     "fresh_owned_boundary": fresh_boundary_config.enabled,
+                    "fresh_omission_confirmation": (
+                        omission_confirmation_config.enabled
+                    ),
                     "bounded_continuation": continuation_config.enabled,
                 },
                 "target_origin": target_origin,
@@ -1074,6 +1111,144 @@ async def run_behavioral_authorization_endpoint(
                 status_code=500,
                 detail="fresh owned boundary preflight failed; execution refused",
             ) from exc
+
+    if (
+        shadow_run is not None
+        and omission_confirmation_config.enabled
+        and not continuation_config.enabled
+        and receipt_store is not None
+    ):
+        boundary_refs = (
+            frozenset(fresh_boundary_executor.supported_experiment_ids())
+            if fresh_boundary_executor is not None
+            else frozenset()
+        )
+        selected_omission = None
+        omissions_by_id = {
+            experiment.experiment_id: experiment
+            for experiment in shadow_run.omissions.experiments
+        }
+        for item in shadow_run.ranked_frontier:
+            if not item.actionable:
+                continue
+            if item.resolution_kind == "owned_experiment":
+                if item.resolution_ref in boundary_refs:
+                    break
+                continue
+            if item.resolution_kind == "authorization_proposal":
+                break
+            if item.resolution_kind == "omission_experiment":
+                selected_omission = omissions_by_id.get(
+                    str(item.resolution_ref)
+                )
+                if selected_omission is None:
+                    if (
+                        receipt_fingerprint is not None
+                        and receipt_reservation_token is not None
+                    ):
+                        try:
+                            receipt_store.abort(
+                                receipt_fingerprint,
+                                reservation_token=receipt_reservation_token,
+                                reason="omission_confirmation_binding_error",
+                            )
+                        except (OSError, ReceiptStoreError):
+                            logger.exception(
+                                "failed to terminate unbound omission receipt"
+                            )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=(
+                            "omission confirmation frontier binding is invalid; "
+                            "execution refused"
+                        ),
+                    )
+                break
+
+        if selected_omission is not None:
+            omission_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=(
+                        len(selected_omission.baseline_operation_ids)
+                        + 2 * len(selected_omission.omission_operation_ids)
+                        + 3
+                    ),
+                    max_requests_per_endpoint=3,
+                    max_cross_object_reads=0,
+                    max_privilege_mutations=0,
+                    max_creates=3,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+                ownership_registry=OwnershipRegistry(),
+            )
+            omission_provenance = ProvenanceSink()
+            omission_provenance.record_context(
+                target=target_origin,
+                proof_mode="bounty_safe",
+                policy_digest=omission_policy.digest(),
+            )
+            omission_executor = make_executor(
+                source_persona.persona_id,
+                omission_policy,
+                omission_provenance,
+            )
+            try:
+                candidate_confirmation = FreshOmissionConfirmationExecutor(
+                    source_records,
+                    world_id=source_persona.persona_id,
+                    target_origin=target_origin,
+                    authorization=envelope,
+                    actor_persona_id=source_persona.persona_id,
+                    executor=omission_executor,
+                    experiment=selected_omission,
+                    config=omission_confirmation_config,
+                )
+                omission_confirmation_admission = (
+                    FreshOmissionConfirmationAdmission(
+                        candidate_confirmation,
+                        receipt_store=receipt_store,
+                    )
+                )
+                omission_confirmation_admission.validate_preflight()
+            except FreshOmissionDenied as exc:
+                if (
+                    receipt_fingerprint is not None
+                    and receipt_reservation_token is not None
+                ):
+                    try:
+                        receipt_store.abort(
+                            receipt_fingerprint,
+                            reservation_token=receipt_reservation_token,
+                            reason="omission_confirmation_preflight_denied",
+                        )
+                    except (OSError, ReceiptStoreError):
+                        logger.exception(
+                            "failed to terminate denied omission receipt"
+                        )
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except Exception as exc:
+                if (
+                    receipt_fingerprint is not None
+                    and receipt_reservation_token is not None
+                ):
+                    try:
+                        receipt_store.abort(
+                            receipt_fingerprint,
+                            reservation_token=receipt_reservation_token,
+                            reason="omission_confirmation_preflight_error",
+                        )
+                    except (OSError, ReceiptStoreError):
+                        logger.exception(
+                            "failed to terminate errored omission receipt"
+                        )
+                logger.exception("omission confirmation preflight failed")
+                raise HTTPException(
+                    status_code=500,
+                    detail="omission confirmation preflight failed; execution refused",
+                ) from exc
 
     if continuation_config.enabled:
         if (
@@ -1394,11 +1569,15 @@ async def run_behavioral_authorization_endpoint(
                 peer_records,
                 controlled_executor=controlled_executor,
                 fresh_boundary_executor=fresh_boundary_executor,
+                omission_confirmation_admission=(
+                    omission_confirmation_admission
+                ),
             )
     except (
         ControlledExecutionDenied,
         ControlledSequenceDenied,
         FreshOwnedBoundaryDenied,
+        FreshOmissionDenied,
     ) as exc:
         if (
             receipt_store is not None
@@ -1529,6 +1708,12 @@ async def run_behavioral_authorization_from_url_endpoint(
         request_fingerprint,
     )
     from core.behavior.boundary import FreshOwnedBoundaryConfig
+    from core.behavior.omission_confirmation import (
+        FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        FreshOmissionConfirmationConfig,
+    )
+    from core.behavior.omission_boundary import FRESH_OMISSION_WORKFLOW
+    from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
     from core.behavior.continuation import (
         BoundedContinuationConfig,
         BoundedContinuationDenied,
@@ -1583,6 +1768,26 @@ async def run_behavioral_authorization_from_url_endpoint(
         continuation_config.authorize(envelope, target_origin=target_origin)
     except BoundedContinuationDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    omission_confirmation_config = (
+        FreshOmissionConfirmationConfig.from_environment()
+    )
+    if omission_confirmation_config.enabled:
+        missing_workflows = sorted(
+            {
+                CONTROLLED_SEQUENCE_WORKFLOW,
+                FRESH_OMISSION_WORKFLOW,
+                FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+            }
+            - set(envelope.allowed_workflows)
+        )
+        if missing_workflows:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "one-click omission confirmation authorization denied; "
+                    f"missing signed workflows: {', '.join(missing_workflows)}"
+                ),
+            )
 
     try:
         fingerprint = request_fingerprint({
@@ -1592,6 +1797,9 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "primary": True,
                 "fresh_owned_boundary": (
                     FreshOwnedBoundaryConfig.from_environment().enabled
+                ),
+                "fresh_omission_confirmation": (
+                    omission_confirmation_config.enabled
                 ),
                 "bounded_continuation": continuation_config.enabled,
             },
@@ -1727,6 +1935,22 @@ async def run_behavioral_authorization_from_url_endpoint(
             "cleanup_failed",
         }:
             receiptable_response["status"] = execution["status"]
+        elif (
+            execution is None
+            and receiptable_response.get("kind")
+            == "fresh_omission_confirmation"
+        ):
+            error_code = receiptable_response.get("error_code")
+            receiptable_response["status"] = (
+                "completed"
+                if error_code is None
+                else (
+                    "cleanup_failed"
+                    if error_code
+                    == "fresh_omission_confirmation_cleanup_failed"
+                    else "aborted"
+                )
+            )
         elif execution is None:
             receiptable_response["status"] = "no_executable_candidate"
     try:

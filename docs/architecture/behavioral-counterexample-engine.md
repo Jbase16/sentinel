@@ -1225,14 +1225,60 @@ uncertain, Sentinel says “blocked,” not “safe.”
 This slice is entirely passive. It sends no target traffic, reserves no proof budget,
 and grants no execution authority. It only consumes a terminal receipt produced by
 the separately gated confirmation boundary. It does not wire omission confirmation
-into Foundry, ordinary scans, UI, bounded continuation, submission, or payout
-automation; those remain separate integration steps.
+into UI, bounded continuation, submission, or payout automation; those remain
+separate integration steps.
 
 The one-of-a-kind property is a cryptographically exact evidence return path for a
 model-selected negative experiment. The security question, compiled counterfactual,
 three-fresh-object proof, durable receipt, graph violation, and report artifact share
 the same content-addressed identities, so a plausible but differently bound result
 cannot be promoted into a finding.
+
+#### Controlled Foundry omission integration
+
+The Foundry behavioral-authorization route now recognizes when the first safely
+dispatchable ranked obligation is an omission experiment. It constructs one
+source-persona `FreshOmissionConfirmationExecutor` with an isolated ownership
+registry, zero cross-object reads, zero privilege mutations, three owned creates,
+no deletes, no real-user data, and the request count derived from the exact compiled
+baseline and omission plans. It wraps that executor in
+`FreshOmissionConfirmationAdmission`, validates the durable identity before resolver
+selection, passes only that admission into the resolver, and revalidates the binding
+immediately before target traffic.
+
+The integration remains default-off behind all four existing environment gates and
+the three signed workflows required by the confirmation boundary. The Foundry root
+receipt fingerprints the omission execution profile independently, while the nested
+admission reserves its own confirmation identity. The outer receipt redactor accepts
+only the validator-approved nested confirmation summary. A retry reuses the completed
+root receipt before transport. A missing signed workflow is refused before receipt
+reservation or target traffic; a changed admission binding terminates the root
+reservation and fails closed. The terminal root receipt is fed back into the exact
+obligation graph, so the first response can contain both the report-facing finding
+and the graph violation.
+
+In plain language, the normal Sentinel scan doorway can now hand the behavioral
+engine the sealed hidden-lock test machine. When Sentinel decides that removing an
+object-specific prerequisite is the best unanswered question, one authorized scan
+can manufacture three disposable owned objects, prove whether the missing lock fails
+open, clean them up, and return the finding. Repeating the same scan does not repeat
+the ten proof requests. If any switch, signed permission, identity binding, or cleanup
+condition is wrong, Sentinel refuses to run or refuses to call the result a finding.
+
+This slice conditionally changes target traffic and execution authority. With every
+gate enabled, all required workflows signed, and the omission ranked ahead of another
+dispatchable proof, Foundry may invoke the existing bounded confirmation sequence.
+It introduces no new operation type and does not broaden that boundary: current
+traffic remains owned create, read-only prerequisite and terminal operations, and
+owned reversible cleanup under the exact proof budget. With the integration disabled
+or unbound, it adds zero omission-confirmation traffic. Omission experiments remain
+excluded from bounded continuation, and no UI or submission authority is added.
+
+The one-of-a-kind property is that a primary scan can move from passive
+backward-chained hypothesis to controlled counterfactual proof and back into the
+obligation graph without a generic exploit runner ever receiving ambient authority.
+Selection, policy, receipt reservation, proof, finding, and graph disposition must
+all agree on the same content-addressed experiment.
 
 ## Current baseline debt
 
