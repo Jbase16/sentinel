@@ -49,6 +49,12 @@ _OWNED_LIFECYCLE_REF = re.compile(r"^owned_lifecycle:[0-9a-f]{64}$")
 _ACTION_REF = re.compile(r"^action:[0-9a-f]{64}$")
 _FRESH_BOUNDARY_REF = re.compile(r"^fresh_owned_boundary:[0-9a-f]{64}$")
 _FRESH_OMISSION_BOUNDARY_REF = re.compile(r"^fresh_omission_boundary:[0-9a-f]{64}$")
+_FRESH_OMISSION_CONFIRMATION_REF = re.compile(
+    r"^fresh_omission_confirmation:[0-9a-f]{64}$"
+)
+_OMISSION_CAPABILITY_FINDING_REF = re.compile(
+    r"^omission_capability_finding:[0-9a-f]{64}$"
+)
 _SECURITY_OBLIGATION_REF = re.compile(r"^security_obligation:[0-9a-f]{64}$")
 _COMPILED_SEQUENCE_REF = re.compile(r"^controlled_runtime_sequence:[0-9a-f]{64}$")
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
@@ -143,6 +149,30 @@ _FRESH_OMISSION_COMPARISONS = frozenset(
         "omission_rejected",
         "inconclusive_truncated",
     }
+)
+_FRESH_OMISSION_CONFIRMATION_STATUSES = frozenset(
+    {
+        "not_completed",
+        "confirmed_fail_open",
+        "omission_rejected",
+        "response_mismatch",
+        "inconclusive_truncated",
+        "control_accepted",
+        "control_inconclusive",
+        "inconclusive_cleanup_failed",
+    }
+)
+_FRESH_OMISSION_CONFIRMATION_ERROR_CODES = (
+    _FRESH_OMISSION_ERROR_CODES
+    | frozenset(
+        {
+            "fresh_omission_confirmation_aborted",
+            "fresh_omission_confirmation_binding_is_missing",
+            "fresh_omission_confirmation_capability_is_invalid",
+            "fresh_omission_confirmation_cleanup_failed",
+            "fresh_omission_confirmation_unexpected_execution_error",
+        }
+    )
 )
 _ABORT_REASON = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _CONTEXT_PREFIXES = {
@@ -880,6 +910,260 @@ def redacted_fresh_omission_outcome(
     }
 
 
+def redacted_fresh_omission_confirmation_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Return only bounded proof facts from a capability-binding confirmation."""
+
+    refs = {
+        "confirmation_id": (
+            value.get("confirmation_id"),
+            _FRESH_OMISSION_CONFIRMATION_REF,
+        ),
+        "experiment_id": (
+            value.get("experiment_id"),
+            _OMISSION_EXPERIMENT_REF,
+        ),
+        "lifecycle_id": (
+            value.get("lifecycle_id"),
+            _OWNED_LIFECYCLE_REF,
+        ),
+        "terminal_operation_id": (
+            value.get("terminal_operation_id"),
+            _ACTION_REF,
+        ),
+    }
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item, pattern in refs.values()
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation identity is invalid"
+        )
+    status = value.get("status")
+    confirmation = value.get("confirmation_status")
+    finding_authority = value.get("finding_authority")
+    if (
+        status not in _VALID_COMPILED_STATUSES
+        or confirmation not in _FRESH_OMISSION_CONFIRMATION_STATUSES
+        or not isinstance(finding_authority, bool)
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation outcome is invalid"
+        )
+
+    evidence_fields = (
+        "baseline_reference_match",
+        "baseline_terminal_success",
+        "omission_terminal_success",
+        "control_terminal_success",
+        "baseline_terminal_truncated",
+        "omission_terminal_truncated",
+        "control_terminal_truncated",
+        "terminal_body_match",
+        "capability_object_binding_proven",
+    )
+    evidence: Dict[str, bool] = {}
+    for field_name in evidence_fields:
+        field_value = value.get(field_name)
+        if not isinstance(field_value, bool):
+            raise ReceiptStoreError(
+                f"fresh omission confirmation {field_name} is invalid"
+            )
+        evidence[field_name] = field_value
+
+    control_status = value.get("control_response_status")
+    if control_status is not None and (
+        isinstance(control_status, bool)
+        or not isinstance(control_status, int)
+        or not 100 <= control_status <= 599
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation control status is invalid"
+        )
+    counters = {
+        key: _nonnegative_int(
+            value.get(key),
+            field_name=f"fresh_omission_confirmation.{key}",
+        )
+        for key in (
+            "requests_attempted",
+            "requests_sent",
+            "baseline_steps_attempted",
+            "baseline_steps_completed",
+            "omission_steps_attempted",
+            "omission_steps_completed",
+            "control_steps_attempted",
+            "control_steps_completed",
+            "creates_attempted",
+            "creates_completed",
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "policy_denials",
+        )
+    }
+    if (
+        counters["requests_sent"] > counters["requests_attempted"]
+        or counters["requests_attempted"]
+        != counters["baseline_steps_attempted"]
+        + counters["omission_steps_attempted"]
+        + counters["control_steps_attempted"]
+        + counters["cleanup_steps_attempted"]
+        or counters["baseline_steps_completed"]
+        > counters["baseline_steps_attempted"]
+        or counters["omission_steps_completed"]
+        > counters["omission_steps_attempted"]
+        or counters["control_steps_completed"]
+        > counters["control_steps_attempted"]
+        or counters["creates_completed"] > counters["creates_attempted"]
+        or counters["creates_attempted"] > 3
+        or counters["cleanup_steps_completed"]
+        > counters["cleanup_steps_attempted"]
+        or counters["cleanup_steps_attempted"] > 3
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation counters are inconsistent"
+        )
+    orphaned = value.get("orphaned_owned_state_possible")
+    if not isinstance(orphaned, bool):
+        raise ReceiptStoreError(
+            "fresh omission confirmation orphan state is invalid"
+        )
+    error_code = value.get("error_code")
+    if (
+        error_code is not None
+        and error_code not in _FRESH_OMISSION_CONFIRMATION_ERROR_CODES
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation error code is invalid"
+        )
+
+    finding_ref = value.get("finding_ref")
+    finding = value.get("finding")
+    if finding_authority:
+        if isinstance(finding, Mapping):
+            finding_ref = finding.get("finding_id")
+            if (
+                finding.get("confirmation_id") != refs["confirmation_id"][0]
+                or finding.get("experiment_id") != refs["experiment_id"][0]
+                or finding.get("lifecycle_id") != refs["lifecycle_id"][0]
+                or finding.get("terminal_operation_id")
+                != refs["terminal_operation_id"][0]
+                or finding.get("finding_authority") is not True
+                or finding.get("proof_kind")
+                != "known_valid_wrong_object_capability_rejected"
+            ):
+                raise ReceiptStoreError(
+                    "fresh omission confirmation finding binding is invalid"
+                )
+        if (
+            not isinstance(finding_ref, str)
+            or _OMISSION_CAPABILITY_FINDING_REF.fullmatch(finding_ref) is None
+        ):
+            raise ReceiptStoreError(
+                "fresh omission confirmation finding reference is invalid"
+            )
+    elif finding is not None or finding_ref is not None:
+        raise ReceiptStoreError(
+            "unconfirmed omission receipt cannot contain a finding"
+        )
+
+    if status == "completed" and (
+        error_code is not None
+        or orphaned
+        or not evidence["baseline_reference_match"]
+        or counters["creates_completed"] < 2
+        or counters["cleanup_steps_completed"] != counters["creates_completed"]
+        or confirmation == "not_completed"
+    ):
+        raise ReceiptStoreError(
+            "completed omission confirmation is inconsistent"
+        )
+    if status == "aborted" and error_code is None:
+        raise ReceiptStoreError(
+            "aborted omission confirmation requires an error"
+        )
+    if status == "cleanup_failed" and (
+        error_code != "fresh_omission_confirmation_cleanup_failed"
+        or not orphaned
+        or finding_authority
+    ):
+        raise ReceiptStoreError(
+            "omission confirmation cleanup failure is inconsistent"
+        )
+    if confirmation == "confirmed_fail_open" and (
+        status != "completed"
+        or not evidence["baseline_reference_match"]
+        or not evidence["baseline_terminal_success"]
+        or not evidence["omission_terminal_success"]
+        or evidence["control_terminal_success"]
+        or evidence["baseline_terminal_truncated"]
+        or evidence["omission_terminal_truncated"]
+        or evidence["control_terminal_truncated"]
+        or not evidence["terminal_body_match"]
+        or not evidence["capability_object_binding_proven"]
+        or control_status not in {400, 401, 403, 422}
+        or counters["creates_completed"] != 3
+        or counters["cleanup_steps_completed"] != 3
+        or not finding_authority
+    ):
+        raise ReceiptStoreError(
+            "confirmed omission receipt is inconsistent"
+        )
+    if confirmation != "confirmed_fail_open" and (
+        evidence["capability_object_binding_proven"] or finding_authority
+    ):
+        raise ReceiptStoreError(
+            "unconfirmed omission receipt has finding authority"
+        )
+
+    provenance_root = value.get("provenance_root")
+    if (
+        not isinstance(provenance_root, str)
+        or not re_full_sha256(provenance_root)
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation provenance root is invalid"
+        )
+    budget = _count_section(
+        value.get("budget_snapshot"),
+        (
+            "total_requests",
+            "cross_object_reads",
+            "privilege_mutations",
+            "creates",
+            "endpoints_touched",
+        ),
+        section="fresh_omission_confirmation.budget_snapshot",
+    )
+    if (
+        budget["total_requests"] != counters["requests_sent"]
+        or budget["cross_object_reads"] != 0
+        or budget["privilege_mutations"] != 0
+        or budget["creates"] > 3
+        or budget["endpoints_touched"] > budget["total_requests"]
+    ):
+        raise ReceiptStoreError(
+            "fresh omission confirmation budget is inconsistent"
+        )
+    return {
+        "kind": "fresh_omission_confirmation",
+        **{key: item for key, (item, _pattern) in refs.items()},
+        "status": status,
+        "confirmation_status": confirmation,
+        **evidence,
+        "control_response_status": control_status,
+        **counters,
+        "orphaned_owned_state_possible": orphaned,
+        "provenance_root": provenance_root,
+        "budget_snapshot": budget,
+        "error_code": error_code,
+        "finding_authority": finding_authority,
+        "finding_ref": finding_ref,
+        "finding": None,
+    }
+
+
 def redacted_continuation_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return a redacted final outcome plus its bounded round transcript."""
 
@@ -999,6 +1283,8 @@ def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
         return redacted_fresh_owned_boundary_outcome(value)
     if value.get("kind") == "fresh_omission_boundary":
         return redacted_fresh_omission_outcome(value)
+    if value.get("kind") == "fresh_omission_confirmation":
+        return redacted_fresh_omission_confirmation_outcome(value)
     if value.get("kind") == "bounded_continuation":
         return redacted_continuation_outcome(value)
     return redacted_outcome(value)

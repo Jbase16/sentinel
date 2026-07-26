@@ -1101,6 +1101,66 @@ policy budget, and cleanup lineage into one atomic execution identity. The negat
 request exists only as the precise complement of a proven positive path, while its
 result remains mechanically separated from vulnerability promotion.
 
+#### Known-valid capability-binding confirmation
+
+`FreshOmissionConfirmationExecutor` is a separate, default-off confirmation boundary
+for an exact fresh omission comparison. It reconstructs the same compiler, lifecycle,
+lineage, policy, and cleanup contracts, then adds one independent control leg on a
+third fresh object owned by the same controlled persona. The control leg does not
+invent an invalid token: it reuses the live capability that the server issued for the
+baseline object and binds it to the third object's terminal request through the exact
+compiled query locator. This proves that the capability is real and accepted for its
+own object before testing whether the server rejects that same capability for a
+different fresh object.
+
+Finding authority requires the complete three-leg conjunction. The live baseline must
+still match the captured successful status and exact body hash; the second object's
+missing-capability terminal must succeed with the exact baseline body hash; and the
+third object's known-valid-but-wrong-object capability must receive a bounded client
+rejection (`400`, `401`, `403`, or `422`). A successful
+control means the capability may be irrelevant and produces no finding. A `5xx`,
+redirect, truncation, response mismatch, transport error, duplicate object identifier,
+or cleanup uncertainty is inconclusive. Only three distinct fresh identifiers and
+three successful cleanups can produce `OmissionCapabilityFinding` with
+`finding_authority=true`.
+
+The boundary requires the additional signed workflow
+`behavioral_state_machine_omission_confirmation` and the additional environment gate
+`SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION`, on top of all prior omission gates.
+Its exact policy budget is derived from the reconstructed plan. For the minimal
+create/capability/terminal lifecycle this is ten requests: the three-step baseline,
+two-step omission, two-step wrong-object control, and three cleanups. The policy still
+allows zero cross-object reads, zero privilege mutations, no deletes, and no real-user
+data. A durable confirmation receipt stores only content-addressed identities, proof
+booleans, counters, the rejection status, provenance root, budget summary, and finding
+reference. It excludes the capability, object identifiers, target origin, headers,
+and request or response bodies. The boundary remains absent from package exports,
+Foundry, the resolver, normal scans, UI, and continuation.
+
+In plain language, Sentinel now asks a third question before calling the shortcut a
+real bug. First, a new workflow receives its genuine export token and successfully
+exports. Second, another new workflow exports the same result with no token at all.
+Third, Sentinel gives the first workflow's genuine token to a third new workflow. If
+the server rejects that token because it belongs to the wrong workflow, Sentinel has
+shown that the token is a real object-specific lock—but the server leaves the door
+open when the lock is missing. If the wrong-workflow token also works, the token may
+simply be decorative, so Sentinel refuses to claim a vulnerability.
+
+This slice conditionally changes target traffic and execution authority. With every
+gate satisfied and the confirmation boundary explicitly invoked, it may create one
+additional fresh controlled object, send one additional read-only terminal request,
+and clean up that object. It does not authorize arbitrary approval or privilege
+changes, cross-persona access, real-user objects, retries, crawling, normal scan
+traffic, or automatic submission. With the confirmation flag or signed workflow
+missing, it adds zero traffic.
+
+The one-of-a-kind property is a known-valid counterfactual witness rather than a
+scanner-generated invalid value. The control capability has already succeeded against
+its server-assigned object in the same sealed run. Its rejection against a different
+fresh object proves object binding, while the exact missing-capability success proves
+the fail-open. This converts a parameter-deletion coincidence into a reproducible,
+policy-gated security claim without needing unsafe state-changing setup.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

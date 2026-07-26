@@ -298,9 +298,14 @@ class ReceiptDispositionAdapter:
             if validated.state != COMPLETED or validated.outcome is None:
                 raise ReceiptFeedbackDenied("receipt_feedback_terminal_state_is_invalid")
             outcome = validated.outcome
-            if outcome.get("kind") == "compiled_sequence":
+            if outcome.get("kind") in {
+                "compiled_sequence",
+                "fresh_omission_boundary",
+                "fresh_omission_confirmation",
+            }:
                 # A setup sequence can prove that owned state was manufactured and
-                # cleaned up.  It cannot prove a cross-principal boundary verdict.
+                # cleaned up. Omission receipts are separately bound evidence and
+                # cannot resolve the existing cross-principal obligation shapes.
                 unsupported += 1
                 continue
             plan = outcome.get("plan")

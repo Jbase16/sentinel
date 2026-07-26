@@ -346,6 +346,7 @@ class _LegProgress:
     completed: int = 0
     create_attempted: bool = False
     create_completed: bool = False
+    omitted_capability: Optional[Any] = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -430,6 +431,11 @@ class _ReservationCursor:
 def _validate_authorization(
     envelope: AuthorizationEnvelope,
     target_origin: str,
+    *,
+    workflows: Sequence[str] = (
+        CONTROLLED_SEQUENCE_WORKFLOW,
+        FRESH_OMISSION_WORKFLOW,
+    ),
 ) -> None:
     if not envelope.attestation_signature:
         raise FreshOmissionDenied("fresh_omission_authorization_is_unsigned")
@@ -437,14 +443,11 @@ def _validate_authorization(
     if not hmac.compare_digest(envelope.attestation_signature, expected):
         raise FreshOmissionDenied("fresh_omission_authorization_signature_mismatch")
     try:
-        envelope.authorize_action(
-            target_origin=target_origin,
-            workflow=CONTROLLED_SEQUENCE_WORKFLOW,
-        )
-        envelope.authorize_action(
-            target_origin=target_origin,
-            workflow=FRESH_OMISSION_WORKFLOW,
-        )
+        for workflow in workflows:
+            envelope.authorize_action(
+                target_origin=target_origin,
+                workflow=workflow,
+            )
     except Exception as exc:
         raise FreshOmissionDenied("fresh_omission_authorization_denied") from exc
 
@@ -537,6 +540,16 @@ def _terminal_evidence(
 class FreshOmissionBoundaryExecutor:
     """Execute one safe two-object baseline-versus-omission comparison."""
 
+    boundary_mode = FRESH_OMISSION_MODE
+    boundary_hash_prefix = "fresh_omission_boundary"
+    required_workflows = (
+        CONTROLLED_SEQUENCE_WORKFLOW,
+        FRESH_OMISSION_WORKFLOW,
+    )
+    expected_creates = 2
+    proof_goal = "fresh_state_prerequisite_omission"
+    cleanup_proof_goal = "cleanup_fresh_state_prerequisite_omission"
+
     def __init__(
         self,
         records: Sequence[Mapping[str, Any]],
@@ -583,7 +596,7 @@ class FreshOmissionBoundaryExecutor:
             or budget.max_requests_per_endpoint != expected_per_endpoint
             or budget.max_cross_object_reads != 0
             or budget.max_privilege_mutations != 0
-            or budget.max_creates != 2
+            or budget.max_creates != self.expected_creates
             or budget.allow_delete
             or budget.allow_real_user_data_access
             or any(budget.snapshot().values())
@@ -591,6 +604,22 @@ class FreshOmissionBoundaryExecutor:
             raise FreshOmissionDenied(
                 "fresh_omission_requires_exact_unused_bounty_safe_policy"
             )
+
+    def _reserved_actions(
+        self,
+        *,
+        baseline_actions: Sequence[Tuple[str, str]],
+        omission_actions: Sequence[Tuple[str, str]],
+        cleanup_action: Tuple[str, str],
+    ) -> Tuple[Tuple[str, str], ...]:
+        """Return the exact two-leg reservation sequence for this boundary."""
+
+        return (
+            *baseline_actions,
+            *omission_actions,
+            cleanup_action,
+            cleanup_action,
+        )
 
     def _preflight(self) -> _OmissionPreflight:
         if not self.config.enabled:
@@ -601,7 +630,11 @@ class FreshOmissionBoundaryExecutor:
             raise FreshOmissionDenied("fresh_omission_actor_world_mismatch")
         if len(self.records) > MAX_STATE_MACHINE_RECORDS:
             raise FreshOmissionDenied("fresh_omission_record_bound_exceeded")
-        _validate_authorization(self.authorization, self.target_origin)
+        _validate_authorization(
+            self.authorization,
+            self.target_origin,
+            workflows=self.required_workflows,
+        )
         if set(self.experiment.execution_blockers) != _SAFE_EXECUTION_BLOCKERS:
             raise FreshOmissionDenied(
                 "fresh_omission_experiment_has_unsafe_execution_blockers"
@@ -839,11 +872,15 @@ class FreshOmissionBoundaryExecutor:
             )
             for operation_id in self.experiment.omission_operation_ids
         )
-        cleanup_actions = (
-            (OWNED_UPDATE_LOW_RISK, endpoint_key(cleanup_request.url)),
-            (OWNED_UPDATE_LOW_RISK, endpoint_key(cleanup_request.url)),
+        cleanup_action = (
+            OWNED_UPDATE_LOW_RISK,
+            endpoint_key(cleanup_request.url),
         )
-        reserved_actions = (*baseline_actions, *omission_actions, *cleanup_actions)
+        reserved_actions = self._reserved_actions(
+            baseline_actions=baseline_actions,
+            omission_actions=omission_actions,
+            cleanup_action=cleanup_action,
+        )
         self._validate_policy(reserved_actions)
 
         for action_class, operation_id in (
@@ -879,7 +916,7 @@ class FreshOmissionBoundaryExecutor:
                         if action_class == OWNED_CREATE
                         else "none"
                     ),
-                    proof_goal="fresh_state_prerequisite_omission",
+                    proof_goal=self.proof_goal,
                 )
             )
             if not decision.allowed:
@@ -896,7 +933,7 @@ class FreshOmissionBoundaryExecutor:
                 target_owner_persona_id=self.actor_persona_id,
                 target_is_researcher_owned=True,
                 expected_side_effect="cleanup_owned_test_object",
-                proof_goal="cleanup_fresh_state_prerequisite_omission",
+                proof_goal=self.cleanup_proof_goal,
             )
         )
         if not cleanup_decision.allowed:
@@ -906,7 +943,7 @@ class FreshOmissionBoundaryExecutor:
             )
 
         payload = {
-            "mode": FRESH_OMISSION_MODE,
+            "mode": self.boundary_mode,
             "experiment_id": self.experiment.experiment_id,
             "lifecycle_id": lifecycle.lifecycle_id,
             "plan_id": plan.plan_id,
@@ -941,7 +978,7 @@ class FreshOmissionBoundaryExecutor:
             ],
         }
         return _OmissionPreflight(
-            boundary_id=stable_hash("fresh_omission_boundary", payload),
+            boundary_id=stable_hash(self.boundary_hash_prefix, payload),
             experiment=self.experiment,
             lifecycle=lifecycle,
             recipe=recipe,
@@ -979,7 +1016,8 @@ class FreshOmissionBoundaryExecutor:
         *,
         omit_binding: bool,
         progress: _LegProgress,
-        disallowed_object_value: Optional[str] = None,
+        disallowed_object_values: Sequence[str] = (),
+        binding_overrides: Optional[Mapping[str, Any]] = None,
     ) -> None:
         bindings_by_consumer: Dict[str, list[LineageBinding]] = {}
         bindings_by_producer: Dict[str, list[LineageBinding]] = {}
@@ -993,6 +1031,7 @@ class FreshOmissionBoundaryExecutor:
                 [],
             ).append(binding)
         values: Dict[str, Any] = {}
+        overrides = dict(binding_overrides or {})
         for operation_id in operation_ids:
             request = preflight.requests[operation_id]
             is_create = operation_id == preflight.lifecycle.create_operation_id
@@ -1004,7 +1043,11 @@ class FreshOmissionBoundaryExecutor:
                 ):
                     request = _remove_query_binding(request, binding)
                     continue
-                if binding.binding_id not in values:
+                if binding.binding_id in overrides:
+                    value = overrides[binding.binding_id]
+                elif binding.binding_id in values:
+                    value = values[binding.binding_id]
+                else:
                     raise _OmissionAbort(
                         "fresh_omission_dependency_value_is_unavailable",
                         orphan_possible=progress.owned_object is not None,
@@ -1013,7 +1056,7 @@ class FreshOmissionBoundaryExecutor:
                     request = _apply_binding(
                         request,
                         binding,
-                        values[binding.binding_id],
+                        value,
                     )
                 except ControlledSequenceDenied as exc:
                     raise _OmissionAbort(
@@ -1049,7 +1092,7 @@ class FreshOmissionBoundaryExecutor:
                         expected_side_effect=(
                             "create_owned_test_object" if is_create else "none"
                         ),
-                        proof_goal="fresh_state_prerequisite_omission",
+                        proof_goal=self.proof_goal,
                         budget_reservation_id=cursor.reservation_id,
                     ),
                     headers=dict(request.headers),
@@ -1083,6 +1126,8 @@ class FreshOmissionBoundaryExecutor:
                             progress.owned_object is not None or is_create
                         ),
                     ) from exc
+                if binding.binding_id == preflight.experiment.omitted_binding_id:
+                    progress.omitted_capability = values[binding.binding_id]
             if is_create:
                 path_values = {
                     str(values[item.binding_id])
@@ -1133,9 +1178,9 @@ class FreshOmissionBoundaryExecutor:
                     cleanup_request=cleanup,
                 )
                 progress.create_completed = True
-                if (
-                    disallowed_object_value is not None
-                    and hmac.compare_digest(value, disallowed_object_value)
+                if any(
+                    hmac.compare_digest(value, disallowed)
+                    for disallowed in disallowed_object_values
                 ):
                     raise _OmissionAbort(
                         "fresh_omission_identifiers_are_not_distinct",
@@ -1179,7 +1224,7 @@ class FreshOmissionBoundaryExecutor:
                     target_owner_persona_id=self.actor_persona_id,
                     target_is_researcher_owned=True,
                     expected_side_effect="cleanup_owned_test_object",
-                    proof_goal="cleanup_fresh_state_prerequisite_omission",
+                    proof_goal=self.cleanup_proof_goal,
                     budget_reservation_id=cursor.reservation_id,
                 ),
                 headers=dict(request.headers),
@@ -1252,10 +1297,10 @@ class FreshOmissionBoundaryExecutor:
                     preflight.experiment.omission_operation_ids,
                     omit_binding=True,
                     progress=omission,
-                    disallowed_object_value=(
-                        baseline.owned_object.value
+                    disallowed_object_values=(
+                        (baseline.owned_object.value,)
                         if baseline.owned_object is not None
-                        else None
+                        else ()
                     ),
                 )
                 omission_evidence = omission.terminal_evidence

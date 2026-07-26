@@ -28,6 +28,8 @@ Minimized prerequisite-omission compilation remains analysis-only and explicit-o
 through :mod:`core.behavior.omission`.
 Fresh-state omission execution and durable admission remain default-off and
 explicit-only through :mod:`core.behavior.omission_boundary`.
+Known-valid wrong-object capability confirmation remains separately gated and
+explicit-only through :mod:`core.behavior.omission_confirmation`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult
