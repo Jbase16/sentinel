@@ -11,9 +11,14 @@ import pytest
 
 import core.behavior as behavior_package
 import core.behavior.omission_confirmation as confirmation_module
-from core.behavior.feedback import ReceiptDispositionAdapter
+from core.behavior.feedback import ReceiptDispositionAdapter, ReceiptFeedbackDenied
 from core.behavior.lifecycle import LifecycleContractMiner
-from core.behavior.obligations import SecurityObligationGraphBuilder
+from core.behavior.obligations import (
+    BLOCKED,
+    UPHELD,
+    VIOLATED,
+    SecurityObligationGraphBuilder,
+)
 from core.behavior.omission import MinimizedOmissionCompiler
 from core.behavior.omission_confirmation import (
     FRESH_OMISSION_CONFIRMATION_ENV,
@@ -106,6 +111,27 @@ def _experiment():
     )
     assert len(result.experiments) == 1
     return result.experiments[0]
+
+
+def _graph():
+    records = _records()
+    lifecycle = LifecycleContractMiner().mine(records, world_id="alice")
+    state_machine = StateMachineLegalityMiner().mine(
+        records,
+        world_id="alice",
+    )
+    omissions = MinimizedOmissionCompiler().compile(
+        records,
+        world_id="alice",
+        lifecycle=lifecycle,
+        state_machine=state_machine,
+    )
+    return SecurityObligationGraphBuilder().build(
+        target_origin=ORIGIN,
+        lifecycle=lifecycle,
+        state_machine=state_machine,
+        omissions=omissions,
+    )
 
 
 def _authorization(*, include_confirmation: bool = True):
@@ -390,14 +416,108 @@ async def test_admission_receipt_is_redacted_and_suppresses_duplicate_traffic(
     assert len(calls) == 10
     receipt = store.load(first.receipt_id.removeprefix("behavioral-"))
     assert receipt is not None
-    graph = SecurityObligationGraphBuilder().build(target_origin=ORIGIN)
+    graph = _graph()
     feedback = ReceiptDispositionAdapter().adapt(
         graph,
         (receipt,),
         expected_context=receipt.context,
     )
-    assert feedback.status == "no_dispositions"
-    assert feedback.diagnostics.unsupported_receipts == 1
+    assert feedback.status == "ready"
+    assert feedback.diagnostics.dispositions_created == 1
+    disposition = feedback.dispositions[0]
+    assert disposition.status == VIOLATED
+    assert disposition.reason_code == "omission_capability_fail_open_confirmed"
+    assert disposition.evidence_refs == tuple(
+        sorted(
+            (
+                f"behavioral_receipt:{receipt.fingerprint}",
+                first.execution["finding_ref"],
+            )
+        )
+    )
+
+    assert receipt.outcome is not None
+    original_experiment_id = receipt.outcome["experiment_id"]
+    receipt.outcome["experiment_id"] = "omission_experiment:" + "9" * 64
+    with pytest.raises(
+        ReceiptFeedbackDenied,
+        match="no_exact_open_omission_obligation",
+    ):
+        ReceiptDispositionAdapter().adapt(
+            graph,
+            (receipt,),
+            expected_context=receipt.context,
+        )
+    receipt.outcome["experiment_id"] = original_experiment_id
+
+    receipt.outcome.update(
+        {
+            "confirmation_status": "omission_rejected",
+            "omission_terminal_success": False,
+            "control_terminal_success": False,
+            "terminal_body_match": False,
+            "capability_object_binding_proven": False,
+            "control_response_status": None,
+            "requests_attempted": 7,
+            "requests_sent": 7,
+            "control_steps_attempted": 0,
+            "control_steps_completed": 0,
+            "creates_attempted": 2,
+            "creates_completed": 2,
+            "cleanup_steps_attempted": 2,
+            "cleanup_steps_completed": 2,
+            "budget_snapshot": {
+                "total_requests": 7,
+                "cross_object_reads": 0,
+                "privilege_mutations": 0,
+                "creates": 2,
+                "endpoints_touched": 4,
+            },
+            "finding_authority": False,
+            "finding_ref": None,
+        }
+    )
+    upheld = ReceiptDispositionAdapter().adapt(
+        graph,
+        (receipt,),
+        expected_context=receipt.context,
+    )
+    assert upheld.dispositions[0].status == UPHELD
+    assert upheld.dispositions[0].reason_code == "omission_prerequisite_enforced"
+
+    receipt.outcome.update(
+        {
+            "confirmation_status": "control_accepted",
+            "omission_terminal_success": True,
+            "control_terminal_success": True,
+            "terminal_body_match": True,
+            "control_response_status": 200,
+            "requests_attempted": 10,
+            "requests_sent": 10,
+            "control_steps_attempted": 2,
+            "control_steps_completed": 2,
+            "creates_attempted": 3,
+            "creates_completed": 3,
+            "cleanup_steps_attempted": 3,
+            "cleanup_steps_completed": 3,
+            "budget_snapshot": {
+                "total_requests": 10,
+                "cross_object_reads": 0,
+                "privilege_mutations": 0,
+                "creates": 3,
+                "endpoints_touched": 4,
+            },
+        }
+    )
+    blocked = ReceiptDispositionAdapter().adapt(
+        graph,
+        (receipt,),
+        expected_context=receipt.context,
+    )
+    assert blocked.dispositions[0].status == BLOCKED
+    assert blocked.dispositions[0].reason_code == (
+        "omission_capability_control_accepted"
+    )
 
     async def forbidden(*_args, **_kwargs):
         raise AssertionError("completed receipt must suppress duplicate traffic")

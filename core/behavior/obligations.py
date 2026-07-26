@@ -546,6 +546,37 @@ class SecurityObligationGraphBuilder:
                         count_key="capability_confinements",
                     )
 
+        omission_by_candidate = {}
+        if omissions is not None:
+            if state_machine is None and omissions.experiments:
+                raise ValueError("omissions require state-machine input")
+            candidates_by_id = (
+                {
+                    candidate.candidate_id: candidate
+                    for candidate in state_machine.candidates
+                }
+                if state_machine is not None
+                else {}
+            )
+            for experiment in omissions.experiments:
+                candidate = candidates_by_id.get(experiment.state_machine_candidate_id)
+                if (
+                    candidate is None
+                    or experiment.state_machine_candidate_id in omission_by_candidate
+                    or experiment.subject_ref != state_machine_subject_ref(candidate)
+                    or experiment.terminal_operation_id
+                    != candidate.terminal_operation_id
+                    or experiment.plan_id != candidate.plan_id
+                    or experiment.recipe_id != candidate.recipe_id
+                ):
+                    raise ValueError(
+                        "omission experiment does not bind one exact "
+                        "state-machine candidate"
+                    )
+                omission_by_candidate[experiment.state_machine_candidate_id] = (
+                    experiment
+                )
+
         if state_machine is not None:
             if state_machine.status == "blocked":
                 incomplete_relations += 1
@@ -574,13 +605,24 @@ class SecurityObligationGraphBuilder:
                     count_key="state_machine_controls",
                 )
                 if control_id is not None:
+                    experiment = omission_by_candidate.get(candidate.candidate_id)
+                    legality_evidence_refs = (
+                        (
+                            *evidence_refs,
+                            experiment.experiment_id,
+                            experiment.lifecycle_id,
+                            experiment.terminal_operation_id,
+                        )
+                        if experiment is not None
+                        else evidence_refs
+                    )
                     add(
                         kind="state_machine_legality",
                         property_kind="state_machine_prerequisite_enforcement",
                         subject_ref=subject,
                         status=OPEN,
                         prerequisite_ids=(control_id,),
-                        evidence_refs=evidence_refs,
+                        evidence_refs=legality_evidence_refs,
                         source_kind="state_machine_relation",
                         risk_class=candidate.risk_class,
                         requires_execution=True,

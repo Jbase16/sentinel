@@ -23,6 +23,7 @@ from .omission import MinimizedOmissionExperiment
 from .omission_confirmation import (
     FreshOmissionConfirmationAdmission,
     FreshOmissionConfirmationAdmissionResult,
+    OmissionCapabilityFinding,
 )
 from .omission_boundary import FreshOmissionDenied
 from .orchestrator import BehavioralShadowRun, RankedSecurityObligation
@@ -348,7 +349,59 @@ class ClosedLoopResolverRun:
             self.execution,
             FreshOmissionConfirmationAdmissionResult,
         ):
-            return None
+            outcome = self.execution.execution
+            if (
+                outcome.get("status") != "completed"
+                or outcome.get("confirmation_status") != "confirmed_fail_open"
+                or outcome.get("finding_authority") is not True
+            ):
+                return None
+            finding = OmissionCapabilityFinding(
+                finding_id=outcome.get("finding_ref"),
+                confirmation_id=outcome.get("confirmation_id"),
+                experiment_id=outcome.get("experiment_id"),
+                terminal_operation_id=outcome.get("terminal_operation_id"),
+                lifecycle_id=outcome.get("lifecycle_id"),
+                provenance_root=outcome.get("provenance_root"),
+            ).to_finding()
+            metadata = finding["metadata"]
+            selected = self.plan.selected
+            assert selected is not None
+            metadata["behavioral_closed_loop_resolver"] = {
+                "mode": self.plan.mode,
+                "plan_id": self.plan.plan_id,
+                "shadow_run_id": self.plan.shadow_run_id,
+                "obligation_id": selected.obligation_id,
+                "resolution_kind": selected.resolution_kind,
+                "resolution_ref": selected.resolution_ref,
+                "frontier_index": selected.frontier_index,
+                "rank_score": selected.rank_score,
+                "authoritative_verdict_engine": ("fresh_omission_confirmation"),
+            }
+            metadata["behavioral_fresh_omission_confirmation"] = {
+                "confirmation_id": outcome["confirmation_id"],
+                "confirmation_status": outcome["confirmation_status"],
+                "finding_ref": outcome["finding_ref"],
+                "control_response_status": outcome["control_response_status"],
+                "baseline_reference_match": outcome["baseline_reference_match"],
+                "terminal_body_match": outcome["terminal_body_match"],
+                "capability_object_binding_proven": outcome[
+                    "capability_object_binding_proven"
+                ],
+            }
+            metadata["proof_mode"] = "bounty_safe"
+            metadata["restraint"] = {
+                "owned_test_accounts_only": True,
+                "fresh_owned_objects_created": outcome["creates_completed"],
+                "fresh_owned_objects_cleaned": outcome["cleanup_steps_completed"],
+                "cross_object_reads": outcome["budget_snapshot"]["cross_object_reads"],
+                "privilege_mutations": outcome["budget_snapshot"][
+                    "privilege_mutations"
+                ],
+                "finding_authority": True,
+            }
+            metadata["sentinel_provenance_root"] = outcome["provenance_root"]
+            return finding
         if self.execution is None or self.execution.finding is None:
             return None
         finding = copy.deepcopy(self.execution.finding.to_finding())

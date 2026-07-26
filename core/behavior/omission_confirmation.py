@@ -176,6 +176,49 @@ class OmissionCapabilityFinding:
             "finding_authority": self.finding_authority,
         }
 
+    def to_finding(self) -> Dict[str, Any]:
+        return {
+            "id": self.finding_id,
+            "type": "State-machine prerequisite enforcement failure",
+            "severity": "MEDIUM",
+            "tool": "behavioral_omission_confirmation",
+            "target": self.terminal_operation_id,
+            "message": (
+                "A fresh owned operation reproduced the captured successful "
+                "response after an object-bound prerequisite capability was "
+                "omitted; an independently fresh wrong-object control rejected "
+                "the same known-valid capability."
+            ),
+            "tags": [
+                "verified",
+                "business_logic",
+                "state_machine",
+                "prerequisite_omission",
+            ],
+            "families": ["confirmed_vuln"],
+            "metadata": {
+                "vuln_class": "business_logic",
+                "subtype": "prerequisite_omission_fail_open",
+                "finding_id": self.finding_id,
+                "confirmation_id": self.confirmation_id,
+                "experiment_id": self.experiment_id,
+                "terminal_operation_id": self.terminal_operation_id,
+                "lifecycle_id": self.lifecycle_id,
+                "proof_kind": self.proof_kind,
+                "finding_authority": self.finding_authority,
+                "intended_invariant": (
+                    "The terminal operation must reject a request that omits "
+                    "its required object-bound capability."
+                ),
+                "observed_violation": (
+                    "The omission reproduced the successful baseline while a "
+                    "known-valid capability from another fresh object was "
+                    "rejected as object-bound."
+                ),
+                "evidence": self.to_dict(),
+            },
+        }
+
 
 @dataclass(frozen=True)
 class FreshOmissionConfirmationResult:

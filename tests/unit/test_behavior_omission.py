@@ -220,6 +220,15 @@ def test_orchestrator_attaches_compiled_omission_as_confirmation_eligible():
     assert "omission_proof_compiled" in ranked.signals
     assert "omission_confirmation_eligible" in ranked.signals
     assert result.selected == ranked
+    experiment = result.omissions.experiments[0]
+    obligation = next(
+        item
+        for item in result.graph.obligations
+        if item.obligation_id == ranked.obligation_id
+    )
+    assert experiment.experiment_id in obligation.evidence_refs
+    assert experiment.lifecycle_id in obligation.evidence_refs
+    assert experiment.terminal_operation_id in obligation.evidence_refs
 
 
 def test_omission_module_has_no_transport_or_execution_surface():

@@ -1,9 +1,9 @@
 """Passive conversion of terminal behavioral receipts into graph dispositions.
 
 The adapter recognizes the established captured-object authorization proof and
-the fresh-owned-state boundary proof. A compiled setup sequence alone is never
-treated as evidence that an authorization boundary held. The adapter has no
-transport, cannot reserve budget, and cannot execute or promote an experiment.
+the fresh-owned-state and prerequisite-omission proofs. A compiled setup sequence
+alone is never treated as evidence that a security boundary held. The adapter has
+no transport, cannot reserve budget, and cannot execute or promote an experiment.
 """
 
 from __future__ import annotations
@@ -98,7 +98,9 @@ class ReceiptDispositionBatch:
         expected_status = (
             "empty"
             if self.diagnostics.receipts_seen == 0
-            else "ready" if self.dispositions else "no_dispositions"
+            else "ready"
+            if self.dispositions
+            else "no_dispositions"
         )
         obligation_ids = tuple(item.obligation_id for item in self.dispositions)
         if (
@@ -189,6 +191,38 @@ def _fresh_boundary_disposition_status(
     raise ReceiptFeedbackDenied("receipt_fresh_boundary_verdict_is_unknown")
 
 
+def _fresh_omission_disposition_status(
+    outcome: Dict[str, Any],
+) -> Tuple[str, str]:
+    status = outcome.get("status")
+    confirmation = outcome.get("confirmation_status")
+    if status == "cleanup_failed":
+        return BLOCKED, "omission_confirmation_cleanup_failed"
+    if status == "aborted":
+        return BLOCKED, "omission_confirmation_execution_aborted"
+    if status != "completed":
+        raise ReceiptFeedbackDenied("receipt_omission_confirmation_status_is_unknown")
+    if confirmation == "confirmed_fail_open":
+        if outcome.get("finding_authority") is not True:
+            raise ReceiptFeedbackDenied(
+                "receipt_omission_confirmation_finding_authority_is_missing"
+            )
+        return VIOLATED, "omission_capability_fail_open_confirmed"
+    if confirmation == "omission_rejected":
+        return UPHELD, "omission_prerequisite_enforced"
+    if confirmation == "response_mismatch":
+        return BLOCKED, "omission_response_mismatch"
+    if confirmation == "inconclusive_truncated":
+        return BLOCKED, "omission_confirmation_truncated"
+    if confirmation == "control_accepted":
+        return BLOCKED, "omission_capability_control_accepted"
+    if confirmation == "control_inconclusive":
+        return BLOCKED, "omission_capability_control_inconclusive"
+    if confirmation == "inconclusive_cleanup_failed":
+        return BLOCKED, "omission_confirmation_cleanup_failed"
+    raise ReceiptFeedbackDenied("receipt_omission_confirmation_verdict_is_unknown")
+
+
 class ReceiptDispositionAdapter:
     """Bind terminal authorization receipts to exact open graph obligations."""
 
@@ -250,6 +284,32 @@ class ReceiptDispositionAdapter:
             )
         return matches[0]
 
+    @staticmethod
+    def _omission_obligation(
+        graph: SecurityObligationGraph,
+        *,
+        experiment_id: str,
+        lifecycle_id: str,
+        terminal_operation_id: str,
+    ):
+        matches = tuple(
+            item
+            for item in graph.obligations
+            if item.status == OPEN
+            and item.kind == "state_machine_legality"
+            and item.property_kind == "state_machine_prerequisite_enforcement"
+            and item.source_kind == "state_machine_relation"
+            and item.requires_execution
+            and experiment_id in item.evidence_refs
+            and lifecycle_id in item.evidence_refs
+            and terminal_operation_id in item.evidence_refs
+        )
+        if len(matches) != 1:
+            raise ReceiptFeedbackDenied(
+                "receipt_experiment_has_no_exact_open_omission_obligation"
+            )
+        return matches[0]
+
     def adapt(
         self,
         graph: SecurityObligationGraph,
@@ -264,7 +324,9 @@ class ReceiptDispositionAdapter:
         receipt_values = tuple(islice(receipts, self.max_receipts + 1))
         if len(receipt_values) > self.max_receipts:
             raise ReceiptFeedbackDenied("receipt_feedback_limit_exceeded")
-        if receipt_values and not isinstance(expected_context, BehavioralReceiptContext):
+        if receipt_values and not isinstance(
+            expected_context, BehavioralReceiptContext
+        ):
             raise ReceiptFeedbackDenied("receipt_feedback_context_is_required")
 
         receipt_refs = []
@@ -296,57 +358,93 @@ class ReceiptDispositionAdapter:
                 unbound += 1
                 continue
             if validated.state != COMPLETED or validated.outcome is None:
-                raise ReceiptFeedbackDenied("receipt_feedback_terminal_state_is_invalid")
+                raise ReceiptFeedbackDenied(
+                    "receipt_feedback_terminal_state_is_invalid"
+                )
             outcome = validated.outcome
             if outcome.get("kind") in {
                 "compiled_sequence",
                 "fresh_omission_boundary",
-                "fresh_omission_confirmation",
             }:
                 # A setup sequence can prove that owned state was manufactured and
-                # cleaned up. Omission receipts are separately bound evidence and
-                # cannot resolve the existing cross-principal obligation shapes.
+                # cleaned up. The evidence-only omission comparison cannot resolve
+                # an obligation without its independent capability-binding control.
                 unsupported += 1
                 continue
-            plan = outcome.get("plan")
-            if not isinstance(plan, dict):
-                raise ReceiptFeedbackDenied("receipt_plan_summary_is_missing")
-            if outcome.get("kind") == "fresh_owned_boundary":
-                execution = outcome.get("execution")
-                if not isinstance(execution, dict):
-                    raise ReceiptFeedbackDenied("receipt_execution_summary_is_missing")
-                experiment_id = plan.get("selected_experiment_id")
-                obligation_id = plan.get("selected_obligation_id")
-                lifecycle_id = execution.get("lifecycle_id")
-                terminal_operation_id = execution.get("terminal_operation_id")
-                if (
-                    not isinstance(experiment_id, str)
-                    or experiment_id != execution.get("experiment_id")
-                    or not isinstance(obligation_id, str)
-                    or not isinstance(lifecycle_id, str)
-                    or not isinstance(terminal_operation_id, str)
+            if outcome.get("kind") == "fresh_omission_confirmation":
+                experiment_id = outcome.get("experiment_id")
+                lifecycle_id = outcome.get("lifecycle_id")
+                terminal_operation_id = outcome.get("terminal_operation_id")
+                if not all(
+                    isinstance(item, str)
+                    for item in (
+                        experiment_id,
+                        lifecycle_id,
+                        terminal_operation_id,
+                    )
                 ):
                     raise ReceiptFeedbackDenied(
-                        "receipt_fresh_boundary_binding_is_invalid"
+                        "receipt_omission_confirmation_binding_is_invalid"
                     )
-                obligation = self._ownership_obligation(
+                obligation = self._omission_obligation(
                     graph,
-                    obligation_id=obligation_id,
+                    experiment_id=experiment_id,
                     lifecycle_id=lifecycle_id,
                     terminal_operation_id=terminal_operation_id,
                 )
-                status, reason_code = _fresh_boundary_disposition_status(outcome)
+                status, reason_code = _fresh_omission_disposition_status(outcome)
+                finding_ref = outcome.get("finding_ref")
+                evidence_refs = (
+                    (receipt_ref, finding_ref)
+                    if status == VIOLATED and isinstance(finding_ref, str)
+                    else (receipt_ref,)
+                )
             else:
-                proposal_id = plan.get("selected_proposal_id")
-                if proposal_id is None:
-                    unbound += 1
-                    continue
-                if not isinstance(proposal_id, str):
-                    raise ReceiptFeedbackDenied(
-                        "receipt_proposal_reference_is_invalid"
+                plan = outcome.get("plan")
+                if not isinstance(plan, dict):
+                    raise ReceiptFeedbackDenied("receipt_plan_summary_is_missing")
+                if outcome.get("kind") == "fresh_owned_boundary":
+                    execution = outcome.get("execution")
+                    if not isinstance(execution, dict):
+                        raise ReceiptFeedbackDenied(
+                            "receipt_execution_summary_is_missing"
+                        )
+                    experiment_id = plan.get("selected_experiment_id")
+                    obligation_id = plan.get("selected_obligation_id")
+                    lifecycle_id = execution.get("lifecycle_id")
+                    terminal_operation_id = execution.get("terminal_operation_id")
+                    if (
+                        not isinstance(experiment_id, str)
+                        or experiment_id != execution.get("experiment_id")
+                        or not isinstance(obligation_id, str)
+                        or not isinstance(lifecycle_id, str)
+                        or not isinstance(terminal_operation_id, str)
+                    ):
+                        raise ReceiptFeedbackDenied(
+                            "receipt_fresh_boundary_binding_is_invalid"
+                        )
+                    obligation = self._ownership_obligation(
+                        graph,
+                        obligation_id=obligation_id,
+                        lifecycle_id=lifecycle_id,
+                        terminal_operation_id=terminal_operation_id,
                     )
-                obligation = self._authorization_obligation(graph, proposal_id)
-                status, reason_code = _disposition_status(outcome)
+                    status, reason_code = _fresh_boundary_disposition_status(outcome)
+                else:
+                    proposal_id = plan.get("selected_proposal_id")
+                    if proposal_id is None:
+                        unbound += 1
+                        continue
+                    if not isinstance(proposal_id, str):
+                        raise ReceiptFeedbackDenied(
+                            "receipt_proposal_reference_is_invalid"
+                        )
+                    obligation = self._authorization_obligation(
+                        graph,
+                        proposal_id,
+                    )
+                    status, reason_code = _disposition_status(outcome)
+                evidence_refs = (receipt_ref,)
             if obligation.obligation_id in disposition_obligations:
                 raise ReceiptFeedbackDenied("multiple_receipts_resolve_one_obligation")
             disposition_obligations.add(obligation.obligation_id)
@@ -354,7 +452,7 @@ class ReceiptDispositionAdapter:
                 ObligationDisposition.create(
                     obligation_id=obligation.obligation_id,
                     status=status,
-                    evidence_refs=(receipt_ref,),
+                    evidence_refs=evidence_refs,
                     reason_code=reason_code,
                 )
             )
@@ -372,7 +470,9 @@ class ReceiptDispositionAdapter:
         status = (
             "empty"
             if not receipt_values
-            else "ready" if ordered_dispositions else "no_dispositions"
+            else "ready"
+            if ordered_dispositions
+            else "no_dispositions"
         )
         payload = _batch_payload(
             status=status,

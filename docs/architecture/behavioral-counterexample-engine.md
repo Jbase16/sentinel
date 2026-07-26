@@ -1175,8 +1175,7 @@ When enabled, the resolver revalidates the three-part binding immediately before
 execution and calls the durable admission coordinator rather than the confirmation
 executor. Receipt reservation and duplicate suppression therefore remain in front of
 all target traffic. The resolver returns the redacted admission result as its terminal
-execution. It does not yet translate that receipt into a graph disposition or report
-finding; that is a separate receipt-binding phase.
+execution.
 
 In plain language, Sentinel's decision-making brain can now choose this hidden-shortcut
 experiment when it is the best unanswered security question. The choice alone does
@@ -1195,6 +1194,45 @@ content-addressed runtime binding. Sentinel does not merely rank a parameter mut
 and hand it to a generic transport. The ranked security question, compiled omission,
 fresh-state confirmation boundary, signed authority, exact policy, and durable receipt
 must resolve to one immutable selection before the existing proof can run.
+
+#### Exact omission receipt feedback
+
+The obligation graph now commits the omission experiment identifier, owned lifecycle
+identifier, and terminal operation identifier into the exact
+`state_machine_legality` obligation derived from the matching state-machine candidate.
+The graph builder rejects an omission artifact that is absent from, ambiguous within,
+or inconsistent with that state-machine result. The receipt adapter accepts only a
+terminal `fresh_omission_confirmation` receipt whose three identifiers all occur on
+one exact open prerequisite-enforcement obligation.
+
+A completed `confirmed_fail_open` receipt creates a `VIOLATED` disposition carrying
+both the durable receipt reference and the content-addressed
+`OmissionCapabilityFinding` reference. A completed `omission_rejected` result creates
+an `UPHELD` disposition. Response mismatch, truncation, a control that succeeds or is
+inconclusive, execution abort, and cleanup uncertainty become `BLOCKED`; none is
+misreported as safety. The resolver reconstructs the report-facing finding only from
+the validator-approved redacted receipt fields and attaches the exact resolver,
+confirmation, restraint, and provenance references. Cached receipts reproduce the
+same finding without traffic.
+
+In plain language, Sentinel can now carry the result of the hidden-shortcut test back
+to the exact question that caused it to run. If the test proves that removing the lock
+works while a real lock from the wrong object is rejected, Sentinel marks that exact
+door as broken and produces a durable finding. If the server blocks the missing-lock
+request, Sentinel marks that question answered. If the result is messy or cleanup is
+uncertain, Sentinel says “blocked,” not “safe.”
+
+This slice is entirely passive. It sends no target traffic, reserves no proof budget,
+and grants no execution authority. It only consumes a terminal receipt produced by
+the separately gated confirmation boundary. It does not wire omission confirmation
+into Foundry, ordinary scans, UI, bounded continuation, submission, or payout
+automation; those remain separate integration steps.
+
+The one-of-a-kind property is a cryptographically exact evidence return path for a
+model-selected negative experiment. The security question, compiled counterfactual,
+three-fresh-object proof, durable receipt, graph violation, and report artifact share
+the same content-addressed identities, so a plausible but differently bound result
+cannot be promoted into a finding.
 
 ## Current baseline debt
 

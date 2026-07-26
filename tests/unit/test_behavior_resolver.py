@@ -418,6 +418,25 @@ async def test_enabled_resolver_dispatches_omission_through_durable_admission(
     assert result.execution.execution["kind"] == ("fresh_omission_confirmation")
     assert result.execution.execution["confirmation_status"] == ("confirmed_fail_open")
     assert result.execution.execution["finding_authority"] is True
+    assert result.finding is not None
+    assert result.finding["id"] == result.execution.execution["finding_ref"]
+    assert (
+        result.finding["target"]
+        == (result.execution.execution["terminal_operation_id"])
+    )
+    finding_metadata = result.finding["metadata"]
+    assert finding_metadata["subtype"] == "prerequisite_omission_fail_open"
+    assert finding_metadata["proof_mode"] == "bounty_safe"
+    assert (
+        finding_metadata["behavioral_closed_loop_resolver"]["obligation_id"]
+        == result.plan.selected.obligation_id
+    )
+    assert (
+        finding_metadata["behavioral_fresh_omission_confirmation"][
+            "capability_object_binding_proven"
+        ]
+        is True
+    )
     assert len(calls) == 10
 
     duplicate_admission, duplicate_calls = _confirmation_admission(
@@ -434,6 +453,7 @@ async def test_enabled_resolver_dispatches_omission_through_durable_admission(
     assert duplicate.status == "already_executed"
     assert duplicate.execution is not None
     assert duplicate.execution.reused is True
+    assert duplicate.finding == result.finding
     assert duplicate_calls == []
 
 
