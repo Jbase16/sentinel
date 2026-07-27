@@ -1,5 +1,8 @@
 # Behavioral Counterexample Engine
 
+Forward implementation plan:
+[Sentinel One-Click Bounty Roadmap](ONE_CLICK_BOUNTY_ROADMAP.md).
+
 ## Objective
 
 Turn Sentinel's existing observations into a coverage-guided black-box behavioral
