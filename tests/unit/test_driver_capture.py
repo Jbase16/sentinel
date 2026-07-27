@@ -14,6 +14,31 @@ SOURCE_PERSONA_ID = "a" * 32
 PEER_PERSONA_ID = "b" * 32
 
 
+def _interaction_control(index: int):
+    return {
+        "tag": "a",
+        "role": "link",
+        "input_type": "",
+        "form_method": "none",
+        "destination": "same_origin",
+        "locator": [
+            {"tag": "html", "sibling_index": 1},
+            {"tag": "body", "sibling_index": 1},
+            {"tag": "a", "sibling_index": index},
+        ],
+        "locator_truncated": False,
+        "visible": True,
+        "disabled": False,
+        "content_editable": False,
+        "aria_expanded": False,
+        "aria_haspopup": False,
+        "sensitive_form": False,
+        "download": False,
+        "scripted_handler": False,
+        "submitter": False,
+    }
+
+
 class _Request:
     def __init__(self, body):
         self.body = body
@@ -83,6 +108,50 @@ async def test_node_command_timeout_is_typed_and_clears_pending_response():
         )
 
     assert manager.pending_responses == {}
+
+
+@pytest.mark.asyncio
+async def test_interaction_navigation_resolver_reads_both_catalogs_without_activation(
+    monkeypatch,
+):
+    calls = []
+
+    async def send_command(payload, timeout=30.0):
+        calls.append((payload, timeout))
+        command = payload["command"]
+        persona = payload["args"]["persona"]
+        if command == "interaction_controls":
+            if persona == SOURCE_PERSONA_ID:
+                return [_interaction_control(1), _interaction_control(3)]
+            return [_interaction_control(2)]
+        if command == "current_url":
+            return "https://example.test/app"
+        if command == "resolve_interaction_navigation":
+            return {
+                "current_url": "https://example.test/app",
+                "destination_url": "https://example.test/details",
+                "control": _interaction_control(1),
+            }
+        raise AssertionError(f"unexpected command {command}")
+
+    monkeypatch.setattr(driver.node_manager, "send_command", send_command)
+
+    result = await driver.resolve_interaction_navigation(
+        SOURCE_PERSONA_ID,
+        _interaction_control(1)["locator"],
+        PEER_PERSONA_ID,
+    )
+
+    assert result["destination_url"] == "https://example.test/details"
+    assert len(result["catalog_controls"]) == 2
+    assert len(result["peer_catalog_controls"]) == 1
+    assert [payload["command"] for payload, _timeout in calls] == [
+        "interaction_controls",
+        "interaction_controls",
+        "current_url",
+        "resolve_interaction_navigation",
+    ]
+    assert all("click" not in payload["command"] for payload, _timeout in calls)
 
 
 def test_capture_events_are_ignored_without_active_capture(monkeypatch):
@@ -462,6 +531,8 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
                 "text": "must-not-cross-the-bridge",
                 "value": "must-not-cross-the-bridge",
             }]
+        if command == "current_url":
+            return "https://api.example.test/app"
         return "ok"
 
     monkeypatch.setattr(driver.node_manager, "send_command", send_command)
@@ -483,10 +554,12 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
         "navigate",
         "stop_network_capture",
         "interaction_controls",
+        "current_url",
         "start_network_capture",
         "navigate",
         "stop_network_capture",
         "interaction_controls",
+        "current_url",
         "script_resource_urls",
     ]
     capture_sessions = [
@@ -503,6 +576,7 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
     assert SOURCE_PERSONA_ID not in peer.records[0]["response_body"]
     assert source.controls[0]["destination"] == "same_origin"
     assert peer.controls[0]["destination"] == "same_origin"
+    assert source.page_url == peer.page_url == "https://api.example.test/app"
     assert "text" not in source.controls[0]
     assert "value" not in source.controls[0]
     assert stat.S_IMODE(Path(source.path).stat().st_mode) == 0o600

@@ -72,6 +72,11 @@ class ReplayRequest:
     body: Optional[str] = None
     headers: Dict[str, str] = field(default_factory=dict)
     max_response_chars: Optional[int] = None
+    redirect_mode: str = "follow"
+
+    def __post_init__(self) -> None:
+        if self.redirect_mode not in {"follow", "manual"}:
+            raise ValueError("replay redirect mode must be follow or manual")
 
 
 @dataclass
@@ -528,7 +533,8 @@ class SNDReplayTransport:
             "command": "replay",
             "args": {"persona": persona, "method": req.method, "url": req.url,
                      "headers": req.headers, "body": req.body,
-                     "max_response_chars": req.max_response_chars},
+                     "max_response_chars": req.max_response_chars,
+                     "redirect_mode": req.redirect_mode},
         }, timeout=self.timeout) or {}
         return ReplayResponse(
             status=int(result.get("status", 0) or 0),

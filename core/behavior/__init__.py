@@ -34,6 +34,8 @@ Passive DOM interaction-intent cataloging remains analysis-only and explicit-onl
 through :mod:`core.behavior.interactions`.
 Obligation-directed interaction admission remains analysis-only and explicit-only
 through :mod:`core.behavior.interaction_admission`.
+Controlled interaction read acquisition remains default-off and explicit-only
+through :mod:`core.behavior.interaction_boundary`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

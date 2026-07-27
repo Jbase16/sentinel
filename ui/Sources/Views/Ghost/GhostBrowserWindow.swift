@@ -943,6 +943,126 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         let value = try await webView.evaluateJavaScript(js)
         return value as? [[String: Any]] ?? []
     }
+
+    public func resolveInteractionNavigation(
+        locator: [[String: Any]]
+    ) async throws -> [String: Any] {
+        let js = """
+        return (() => {
+            const path = locator;
+            const MAX_LOCATOR_DEPTH = 12;
+            const allowedRoles = new Set([
+                'button', 'checkbox', 'combobox', 'link', 'menuitem',
+                'option', 'radio', 'searchbox', 'switch', 'tab', 'textbox'
+            ]);
+            const semanticTags = new Set([
+                'a', 'button', 'input', 'option', 'select', 'summary', 'textarea'
+            ]);
+            if (!Array.isArray(path)
+                || path.length < 1
+                || path.length > MAX_LOCATOR_DEPTH) {
+                throw new Error('structural locator is invalid');
+            }
+
+            function siblingIndex(element) {
+                let index = 1;
+                let sibling = element.previousElementSibling;
+                while (sibling) {
+                    index += 1;
+                    sibling = sibling.previousElementSibling;
+                }
+                return index;
+            }
+
+            let element = document.documentElement;
+            for (let depth = 0; depth < path.length; depth += 1) {
+                const segment = path[depth];
+                if (!segment
+                    || typeof segment.tag !== 'string'
+                    || !Number.isInteger(segment.sibling_index)
+                    || segment.sibling_index < 1
+                    || segment.sibling_index > 4096) {
+                    throw new Error('structural locator segment is invalid');
+                }
+                if (depth > 0) {
+                    element = element && element.children
+                        ? element.children[segment.sibling_index - 1]
+                        : null;
+                }
+                if (!element
+                    || String(element.tagName || '').toLowerCase() !== segment.tag
+                    || siblingIndex(element) !== segment.sibling_index) {
+                    throw new Error('structural locator no longer resolves');
+                }
+            }
+
+            const rawTag = String(element.tagName || '').toLowerCase();
+            if (rawTag !== 'a') {
+                throw new Error('resolved control is not a navigation anchor');
+            }
+            const rawHref = element.getAttribute('href');
+            if (!rawHref) {
+                throw new Error('resolved navigation has no destination');
+            }
+            const destination = new URL(rawHref, document.baseURI);
+            if (!['http:', 'https:'].includes(destination.protocol)
+                || destination.origin !== window.location.origin) {
+                throw new Error('resolved navigation destination is not same-origin HTTP');
+            }
+
+            const style = window.getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            const visible = style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && style.opacity !== '0'
+                && rect.width > 0 && rect.height > 0;
+            const rawRole = String(element.getAttribute('role') || '').toLowerCase();
+            const role = allowedRoles.has(rawRole) ? rawRole : '';
+            const tag = semanticTags.has(rawTag) ? rawTag : 'other';
+            const control = {
+                tag: tag,
+                role: role,
+                input_type: '',
+                form_method: 'none',
+                destination: 'same_origin',
+                locator: path,
+                locator_truncated: false,
+                visible: visible,
+                disabled: Boolean(element.disabled)
+                    || element.getAttribute('aria-disabled') === 'true',
+                content_editable: element.isContentEditable === true,
+                aria_expanded: element.getAttribute('aria-expanded') === 'true',
+                aria_haspopup: Boolean(element.getAttribute('aria-haspopup'))
+                    && element.getAttribute('aria-haspopup') !== 'false',
+                sensitive_form: false,
+                download: element.hasAttribute('download'),
+                scripted_handler: element.hasAttribute('onclick'),
+                submitter: false
+            };
+            return {
+                current_url: window.location.href,
+                destination_url: destination.href,
+                control: control
+            };
+        })()
+        """
+        let value = try await callAsyncJavaScript(
+            js,
+            arguments: ["locator": locator],
+            in: .page
+        )
+        guard let resolved = value as? [String: Any] else {
+            throw NSError(
+                domain: "SND",
+                code: 409,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "structural navigation could not be resolved"
+                ]
+            )
+        }
+        return resolved
+    }
     
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "sndRecordingBridge", let dict = message.body as? [String: Any] {

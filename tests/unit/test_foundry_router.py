@@ -1706,6 +1706,8 @@ class TestBehavioralAuthorizationEndpoint:
                 return []
             if payload["command"] == "interaction_controls":
                 return []
+            if payload["command"] == "current_url":
+                return request.target_url
             return "ok"
 
         async def fake_send(_transport, persona, replay_request):
@@ -1734,10 +1736,12 @@ class TestBehavioralAuthorizationEndpoint:
             "navigate",
             "stop_network_capture",
             "interaction_controls",
+            "current_url",
             "start_network_capture",
             "navigate",
             "stop_network_capture",
             "interaction_controls",
+            "current_url",
             "script_resource_urls",
         ]
         assert len(traffic) == 5

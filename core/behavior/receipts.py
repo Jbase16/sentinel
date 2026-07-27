@@ -57,6 +57,18 @@ _OMISSION_CAPABILITY_FINDING_REF = re.compile(
 )
 _SECURITY_OBLIGATION_REF = re.compile(r"^security_obligation:[0-9a-f]{64}$")
 _COMPILED_SEQUENCE_REF = re.compile(r"^controlled_runtime_sequence:[0-9a-f]{64}$")
+_INTERACTION_ACQUISITION_REF = re.compile(
+    r"^interaction_read_acquisition:[0-9a-f]{64}$"
+)
+_INTERACTION_ADMISSION_REF = re.compile(
+    r"^interaction_intent_admission:[0-9a-f]{64}$"
+)
+_INTERACTION_REQUEST_REF = re.compile(
+    r"^interaction_acquisition_request:[0-9a-f]{64}$"
+)
+_INTERACTION_RESPONSE_REF = re.compile(
+    r"^interaction_acquisition_response:[0-9a-f]{64}$"
+)
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
     {
         "fresh_boundary_baseline_is_not_usable",
@@ -512,6 +524,172 @@ def _redacted_read_exploration(value: Any) -> Dict[str, Any]:
     }
 
 
+def redacted_interaction_acquisition_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Return only redacted conduct facts for one acquired navigation response."""
+
+    refs = {
+        "acquisition_id": (
+            value.get("acquisition_id"),
+            _INTERACTION_ACQUISITION_REF,
+        ),
+        "admission_id": (
+            value.get("admission_id"),
+            _INTERACTION_ADMISSION_REF,
+        ),
+        "obligation_id": (
+            value.get("obligation_id"),
+            _SECURITY_OBLIGATION_REF,
+        ),
+        "request_ref": (
+            value.get("request_ref"),
+            _INTERACTION_REQUEST_REF,
+        ),
+        "response_ref": (
+            value.get("response_ref"),
+            _INTERACTION_RESPONSE_REF,
+        ),
+    }
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item, pattern in refs.values()
+    ):
+        raise ReceiptStoreError("interaction acquisition identity is invalid")
+    response_status = value.get("response_status")
+    response_truncated = value.get("response_truncated")
+    counters = {
+        key: _nonnegative_int(
+            value.get(key),
+            field_name=f"interaction_acquisition.{key}",
+        )
+        for key in (
+            "requests_attempted",
+            "requests_sent",
+            "policy_denials",
+        )
+    }
+    provenance_root = value.get("provenance_root")
+    if (
+        value.get("kind") != "interaction_read_acquisition"
+        or value.get("mode") != "behavioral_interaction_read_acquisition_v1"
+        or value.get("status") != "completed"
+        or isinstance(response_status, bool)
+        or not isinstance(response_status, int)
+        or not 100 <= response_status <= 599
+        or not isinstance(response_truncated, bool)
+        or counters
+        != {
+            "requests_attempted": 1,
+            "requests_sent": 1,
+            "policy_denials": 0,
+        }
+        or not isinstance(provenance_root, str)
+        or not re_full_sha256(provenance_root)
+    ):
+        raise ReceiptStoreError("interaction acquisition outcome is invalid")
+    budget = _count_section(
+        value.get("budget_snapshot"),
+        (
+            "total_requests",
+            "cross_object_reads",
+            "privilege_mutations",
+            "creates",
+            "endpoints_touched",
+        ),
+        section="interaction_acquisition.budget_snapshot",
+    )
+    if (
+        budget["total_requests"] < 1
+        or budget["cross_object_reads"] != 0
+        or budget["privilege_mutations"] != 0
+        or budget["creates"] != 0
+        or not 1 <= budget["endpoints_touched"] <= budget["total_requests"]
+    ):
+        raise ReceiptStoreError("interaction acquisition budget is inconsistent")
+    return {
+        "kind": "interaction_read_acquisition",
+        "mode": "behavioral_interaction_read_acquisition_v1",
+        "status": "completed",
+        **{key: item for key, (item, _pattern) in refs.items()},
+        "response_status": response_status,
+        "response_truncated": response_truncated,
+        **counters,
+        "provenance_root": provenance_root,
+        "budget_snapshot": budget,
+    }
+
+
+def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("interaction acquisition summary is invalid")
+    if (
+        value.get("schema_version") != 1
+        or value.get("mode") != "behavioral_interaction_read_acquisition_v1"
+    ):
+        raise ReceiptStoreError("interaction acquisition summary contract is invalid")
+    status = value.get("status")
+    requests_sent = _nonnegative_int(
+        value.get("target_requests_sent"),
+        field_name="interaction_acquisition.target_requests_sent",
+    )
+    if status in {"disabled", "not_needed"}:
+        if requests_sent != 0:
+            raise ReceiptStoreError("inactive interaction acquisition sent traffic")
+        return {
+            "schema_version": 1,
+            "mode": "behavioral_interaction_read_acquisition_v1",
+            "status": status,
+            "target_requests_sent": 0,
+        }
+    if status in {"denied", "failed"}:
+        error_code = value.get("error_code")
+        request_uncertain = value.get(
+            "target_request_may_have_been_sent",
+            False,
+        )
+        if (
+            requests_sent != 0
+            or not isinstance(error_code, str)
+            or _ABORT_REASON.fullmatch(error_code) is None
+            or not isinstance(request_uncertain, bool)
+            or request_uncertain != (status == "failed")
+        ):
+            raise ReceiptStoreError("failed interaction acquisition is invalid")
+        return {
+            "schema_version": 1,
+            "mode": "behavioral_interaction_read_acquisition_v1",
+            "status": status,
+            "error_code": error_code,
+            "target_requests_sent": 0,
+            "target_request_may_have_been_sent": request_uncertain,
+        }
+    if status not in {"completed", "already_executed"}:
+        raise ReceiptStoreError("interaction acquisition summary status is invalid")
+    receipt = value.get("receipt")
+    execution = value.get("execution")
+    if (
+        not isinstance(receipt, Mapping)
+        or set(receipt) != {"receipt_id", "state", "reused"}
+        or receipt.get("state") != COMPLETED
+        or not isinstance(receipt.get("receipt_id"), str)
+        or not receipt["receipt_id"].startswith("behavioral-")
+        or not re_full_sha256(receipt["receipt_id"][len("behavioral-") :])
+        or receipt.get("reused") != (status == "already_executed")
+        or requests_sent != (0 if status == "already_executed" else 1)
+        or not isinstance(execution, Mapping)
+    ):
+        raise ReceiptStoreError("interaction acquisition receipt summary is invalid")
+    return {
+        "schema_version": 1,
+        "mode": "behavioral_interaction_read_acquisition_v1",
+        "status": status,
+        "receipt": dict(receipt),
+        "execution": redacted_interaction_acquisition_outcome(execution),
+        "target_requests_sent": requests_sent,
+    }
+
+
 def redacted_compiled_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only compiled-runtime fields permitted in a durable receipt."""
 
@@ -752,6 +930,12 @@ def redacted_fresh_owned_boundary_outcome(
     if "read_exploration" in response:
         output["read_exploration"] = _redacted_read_exploration(
             response.get("read_exploration")
+        )
+    if "interaction_acquisition" in response:
+        output["interaction_acquisition"] = (
+            _redacted_interaction_acquisition_summary(
+                response.get("interaction_acquisition")
+            )
         )
     return output
 
@@ -1284,10 +1468,18 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
         output["read_exploration"] = _redacted_read_exploration(
             response.get("read_exploration")
         )
+    if "interaction_acquisition" in response:
+        output["interaction_acquisition"] = (
+            _redacted_interaction_acquisition_summary(
+                response.get("interaction_acquisition")
+            )
+        )
     return output
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "interaction_read_acquisition":
+        return redacted_interaction_acquisition_outcome(value)
     if value.get("kind") == "compiled_sequence":
         return redacted_compiled_outcome(value)
     if value.get("kind") == "fresh_owned_boundary":

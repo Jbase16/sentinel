@@ -1368,10 +1368,10 @@ security-obligation frontier. It ignores obligations that already have an action
 proof path and deterministically selects the highest-ranked unresolved obligation
 that currently has no safe resolution. Within the authorized actor's world, it
 admits only non-scripted, enabled, unambiguous, complete-locator read intents whose
-only blocker is that the catalog itself is passive. Native reveal controls rank
-ahead of same-origin navigation; filters, mutations, external destinations,
-downloads, destructive operations, unknown effects, peer-world controls, and
-scripted links are excluded. Same-origin navigation ranks ahead of native reveal
+only blocker is that the catalog itself is passive. Same-origin navigation controls
+rank ahead of native reveal; filters, mutations, external destinations, downloads,
+destructive operations, unknown effects, peer-world controls, and scripted links are
+excluded. Same-origin navigation ranks first
 because the next active boundary can reduce it to one exact policy-gated GET without
 running a DOM event handler.
 
@@ -1400,6 +1400,49 @@ Sentinel binds one redacted structural control to the exact unanswered security
 question and exact safety state that justified choosing it. Any changed page,
 catalog, persona, frontier, policy, or budget produces a different binding that a
 future boundary must reject.
+
+#### Controlled interaction read acquisition
+
+`InteractionReadAcquisitionBoundary` is a separately default-off active seam for the
+sealed navigation admission. The native driver first re-reads both persona control
+catalogs and the actor's exact structural anchor without activating it. The boundary
+rebuilds the paired catalog and intent, rechecks the current page, origin, world,
+locator, destination, policy digest, proof-budget snapshot, signed authorization
+workflow, and one-action limit, and creates a durable request identity. After receipt
+reservation it repeats the entire local resolution and requires an identical
+resolution ID immediately before transport.
+
+Only an exact same-origin `GET` is compiled. It crosses `PolicyExecutor` under an
+atomic one-request `SAFE_READ` reservation and uses the existing authenticated
+persona replay transport with manual redirect handling and a 2 MiB response cap.
+The result stores only
+content-addressed request/response references, status, truncation, counters, budget,
+and provenance root in its terminal receipt. The raw URL and body remain ephemeral
+and are added to the in-memory source-world records for a new behavioral shadow
+round. A completed receipt is reusable without target traffic.
+
+Ordinary one-click URL scans can invoke this seam only when
+`SENTINELFORGE_BEHAVIOR_PRIMARY=1`,
+`SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION=1`, and the signed envelope includes
+`behavioral_interaction_read_acquisition`. Acquisition is skipped if the current
+frontier already has any actionable proof path. A missing, stale, changed,
+out-of-scope, unbudgeted, unsafe, or cached admission adds zero requests.
+
+In plain language, Sentinel can now open one already-approved internal doorway
+without pressing the page's button. It checks the door map twice, retrieves exactly
+one page through Alice's authenticated session, and gives what it learned back to
+the reasoning engine. It still cannot click arbitrary controls, run scripts, submit
+forms, make purchases, send messages, change data, or follow a chain of links.
+
+This slice conditionally changes target traffic and execution authority. When every
+separate gate is enabled and still matches, it can send one same-origin authenticated
+GET. It grants no DOM click, form, write, external-navigation, or multi-step
+exploration authority. Disabled and invalid paths remain zero-traffic.
+
+The one-of-a-kind property is obligation-directed, double-sealed acquisition. The
+system does not browse because a link looks interesting: it binds one structural
+door to one exact unanswered security question, makes the binding durable, checks it
+again at the last possible moment, and admits only a policy-verifiable read.
 
 ## Current baseline debt
 

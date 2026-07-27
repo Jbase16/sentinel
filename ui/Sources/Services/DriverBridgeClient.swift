@@ -153,7 +153,9 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                 case "screenshot":
                     result = try await screenshot()
                 case "current_url":
-                    result = try await currentUrl()
+                    result = try await currentUrl(
+                        personaId: args["persona"] as? String
+                    )
                 case "start_recording":
                     result = try await startRecording()
                 case "start_network_capture":
@@ -193,6 +195,21 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                 case "interaction_controls":
                     result = try await interactionControls(
                         personaId: args["persona"] as? String
+                    )
+                case "resolve_interaction_navigation":
+                    guard let locator = args["locator"] as? [[String: Any]] else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "locator must be a structural segment array"
+                            ]
+                        )
+                    }
+                    result = try await resolveInteractionNavigation(
+                        personaId: args["persona"] as? String,
+                        locator: locator
                     )
                 case "wait_for_close":
                     result = try await waitForClose()
@@ -321,8 +338,8 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return try await b.screenshotBase64()
     }
     
-    @MainActor private func currentUrl() async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func currentUrl(personaId: String? = nil) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         return try await b.currentUrl()
     }
     
@@ -392,6 +409,15 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         let b = try getBrowser(personaId: personaId)
         return try await b.interactionControlSnapshot()
     }
+
+    @MainActor
+    private func resolveInteractionNavigation(
+        personaId: String?,
+        locator: [[String: Any]]
+    ) async throws -> [String: Any] {
+        let b = try getBrowser(personaId: personaId)
+        return try await b.resolveInteractionNavigation(locator: locator)
+    }
     
     @MainActor private func waitForClose() async throws -> String {
         let b = try getBrowser()
@@ -432,6 +458,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             "headers": args["headers"] as? [String: String] ?? [:],
             "body":    args["body"]    as? String as Any,
             "maxResponseChars": args["max_response_chars"] as? Int as Any,
+            "redirectMode": args["redirect_mode"] as? String ?? "follow",
         ]
         
         let js = """
@@ -439,7 +466,8 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         const resp = await fetch(p.url, {
             method: p.method, headers: p.headers,
             body: (p.method === 'GET' || p.method === 'HEAD') ? undefined : p.body,
-            credentials: 'include'
+            credentials: 'include',
+            redirect: p.redirectMode === 'manual' ? 'manual' : 'follow'
         });
         const cap = Number.isInteger(p.maxResponseChars) && p.maxResponseChars > 0
             ? p.maxResponseChars : 2097152;

@@ -148,6 +148,7 @@ _CAPTURE_MAX_SETTLE_SECONDS = 5.0
 _MAX_CAPTURE_INFLIGHT = 10_000
 _MAX_INTERACTION_CONTROLS = 256
 _MAX_INTERACTION_LOCATOR_DEPTH = 12
+_INTERACTION_LOCATOR_TAG = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _PAIR_CAPTURE_LOCK = asyncio.Lock()
 
 
@@ -159,6 +160,7 @@ class PersonaCaptureArtifact:
     captured_bytes: int
     limit_reached: bool
     controls: Tuple[Dict[str, Any], ...] = ()
+    page_url: str = ""
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -707,6 +709,18 @@ async def _persona_script_urls(persona_id: str) -> Tuple[str, ...]:
     return tuple(str(value) for value in result[:64] if isinstance(value, str))
 
 
+async def _persona_current_url(persona_id: str) -> str:
+    result = await node_manager.send_command(
+        {
+            "request_id": uuid.uuid4().hex,
+            "command": "current_url",
+            "args": {"persona": persona_id},
+        },
+        timeout=10.0,
+    )
+    return validate_capture_url(result)
+
+
 def _sanitized_interaction_controls(value: Any) -> Tuple[Dict[str, Any], ...]:
     if not isinstance(value, list):
         return ()
@@ -785,6 +799,136 @@ async def _persona_interaction_controls(
     return _sanitized_interaction_controls(result)
 
 
+async def resolve_interaction_navigation(
+    persona_id: str,
+    locator: Sequence[Dict[str, Any]],
+    peer_persona_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve one structural anchor locally without activating page behavior."""
+
+    validated_persona = _validated_persona_id(persona_id) or ""
+    validated_peer = (
+        _validated_persona_id(peer_persona_id)
+        if peer_persona_id is not None
+        else None
+    )
+    if validated_peer == validated_persona:
+        raise ValueError("interaction peer persona must be distinct")
+    if (
+        isinstance(locator, (str, bytes))
+        or not 1 <= len(locator) <= _MAX_INTERACTION_LOCATOR_DEPTH
+    ):
+        raise ValueError("interaction locator is invalid")
+    normalized_locator = []
+    for segment in locator:
+        if not isinstance(segment, dict) or set(segment) != {
+            "tag",
+            "sibling_index",
+        }:
+            raise ValueError("interaction locator segment fields are invalid")
+        tag = segment.get("tag")
+        sibling_index = segment.get("sibling_index")
+        if (
+            not isinstance(tag, str)
+            or _INTERACTION_LOCATOR_TAG.fullmatch(tag) is None
+            or isinstance(sibling_index, bool)
+            or not isinstance(sibling_index, int)
+            or not 1 <= sibling_index <= 4096
+        ):
+            raise ValueError("interaction locator segment is invalid")
+        normalized_locator.append(
+            {"tag": tag, "sibling_index": sibling_index}
+        )
+
+    await _wait_for_node()
+    controls_value = await node_manager.send_command(
+        {
+            "request_id": uuid.uuid4().hex,
+            "command": "interaction_controls",
+            "args": {"persona": validated_persona},
+        },
+        timeout=10.0,
+    )
+    catalog_controls = _sanitized_interaction_controls(controls_value)
+    if not catalog_controls:
+        raise DriverCommandError("node returned no current interaction catalog")
+    peer_controls: Tuple[Dict[str, Any], ...] = ()
+    peer_url: Optional[str] = None
+    if validated_peer is not None:
+        peer_controls_value = await node_manager.send_command(
+            {
+                "request_id": uuid.uuid4().hex,
+                "command": "interaction_controls",
+                "args": {"persona": validated_peer},
+            },
+            timeout=10.0,
+        )
+        peer_controls = _sanitized_interaction_controls(peer_controls_value)
+        if not peer_controls:
+            raise DriverCommandError(
+                "node returned no current peer interaction catalog"
+            )
+        peer_url_value = await node_manager.send_command(
+            {
+                "request_id": uuid.uuid4().hex,
+                "command": "current_url",
+                "args": {"persona": validated_peer},
+            },
+            timeout=10.0,
+        )
+        peer_url = validate_capture_url(peer_url_value)
+    result = await node_manager.send_command(
+        {
+            "request_id": uuid.uuid4().hex,
+            "command": "resolve_interaction_navigation",
+            "args": {
+                "persona": validated_persona,
+                "locator": normalized_locator,
+            },
+        },
+        timeout=10.0,
+    )
+    if not isinstance(result, dict) or set(result) != {
+        "current_url",
+        "destination_url",
+        "control",
+    }:
+        raise DriverCommandError("node returned an invalid interaction resolution")
+    current_url = validate_capture_url(result.get("current_url"))
+    destination_url = validate_capture_url(result.get("destination_url"))
+    if peer_url is not None and urlsplit(peer_url)._replace(
+        query="", fragment=""
+    ) != urlsplit(current_url)._replace(query="", fragment=""):
+        raise DriverCommandError("interaction persona pages no longer match")
+    if urlsplit(current_url)._replace(path="", query="", fragment="") != urlsplit(
+        destination_url
+    )._replace(path="", query="", fragment=""):
+        raise DriverCommandError("resolved navigation destination changed origin")
+    resolved_controls = _sanitized_interaction_controls([result.get("control")])
+    if (
+        len(resolved_controls) != 1
+        or list(resolved_controls[0]["locator"]) != normalized_locator
+    ):
+        raise DriverCommandError("resolved interaction control is invalid")
+    control = resolved_controls[0]
+    if (
+        control["tag"] != "a"
+        or control["destination"] != "same_origin"
+        or not control["visible"]
+        or control["disabled"]
+        or control["download"]
+        or control["scripted_handler"]
+    ):
+        raise DriverCommandError("resolved interaction is not an eligible navigation")
+    return {
+        "current_url": current_url,
+        "destination_url": destination_url,
+        "control": control,
+        "catalog_controls": catalog_controls,
+        "peer_catalog_controls": peer_controls,
+    }
+
+
 async def capture_persona_pair(
     *, target_url: str, source_persona_id: str, peer_persona_id: str
 ) -> Tuple[PersonaCaptureArtifact, PersonaCaptureArtifact, Tuple[str, ...]]:
@@ -812,6 +956,21 @@ async def capture_persona_pair(
                 )
                 records = _load_capture_records(path, persona_id=persona_id)
                 controls = await _persona_interaction_controls(persona_id)
+                page_url = await _persona_current_url(persona_id)
+                target_parts = urlsplit(target_url)
+                page_parts = urlsplit(page_url)
+                if (
+                    target_parts.scheme.lower(),
+                    (target_parts.hostname or "").lower(),
+                    target_parts.port,
+                ) != (
+                    page_parts.scheme.lower(),
+                    (page_parts.hostname or "").lower(),
+                    page_parts.port,
+                ):
+                    raise RuntimeError(
+                        "persona capture redirected outside the target origin"
+                    )
                 artifacts.append(PersonaCaptureArtifact(
                     persona_id=persona_id,
                     path=path,
@@ -819,6 +978,7 @@ async def capture_persona_pair(
                     captured_bytes=int(summary["bytes"]),
                     limit_reached=bool(summary["limit_reached"]),
                     controls=controls,
+                    page_url=page_url,
                 ))
             script_urls = await _persona_script_urls(source_persona_id)
         finally:
@@ -830,6 +990,10 @@ async def capture_persona_pair(
             _release_capture_owner(owner_id)
     if len(artifacts) != 2:
         raise RuntimeError("paired capture did not produce two isolated artifacts")
+    if urlsplit(artifacts[0].page_url)._replace(
+        query="", fragment=""
+    ) != urlsplit(artifacts[1].page_url)._replace(query="", fragment=""):
+        raise RuntimeError("persona captures resolved to different pages")
     return artifacts[0], artifacts[1], script_urls
 
 

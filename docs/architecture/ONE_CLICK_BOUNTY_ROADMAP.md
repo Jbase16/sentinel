@@ -655,27 +655,29 @@ resolved into one exact gated GET without executing page event handlers.
 Target traffic and execution authority remain unchanged. The selector has no driver,
 transport, receipt, reservation, or execution dependency.
 
-## Immediate next slice
+### Controlled interaction read acquisition
 
-The next implementation slice begins the controlled acquisition boundary:
+The controlled acquisition boundary is now implemented and connected to ordinary
+one-click URL scans behind
+`SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION=1`.
 
-> Resolve one still-fresh admitted same-origin navigation intent into an exact GET and
-> execute it through the existing policy-gated authenticated transport.
-
-Technical scope:
+Technical implementation:
 
 - Add a local-only driver resolver that re-reads the admitted locator without
   activating it and returns one exact current same-origin navigation destination.
 - Rebuild the structural snapshot and reject changed page, world, locator, catalog,
   destination class, or admission identity.
 - Compile only an authenticated GET candidate; do not click the DOM, submit a form,
-  execute page event handlers, or grant general browser control.
+  execute page event handlers, follow redirects, or grant general browser control.
 - Send that one GET through `PolicyExecutor` and the existing persona-bound transport
   under a pre-reserved one-request budget.
 - Persist a redacted receipt and feed the new response record back into behavioral
   analysis. Retry must reuse the terminal receipt without traffic.
+- Require the separate signed
+  `behavioral_interaction_read_acquisition` workflow and skip acquisition whenever
+  the current obligation frontier already has an actionable proof path.
 
-Non-technical scope:
+Non-technical result:
 
 - Sentinel rechecks that its chosen door is still the same safe internal doorway,
   then retrieves exactly what is behind that doorway using the correct researcher
@@ -697,3 +699,45 @@ Exit gate:
 - No DOM event handler or form submission can run.
 - The response becomes bounded evidence for the next shadow round.
 - With the feature disabled or any binding invalid, target traffic remains zero.
+
+The one-of-a-kind property is a double-sealed evidence-acquisition boundary. Sentinel
+chooses the door because of a named unanswered security obligation, binds that choice
+to the exact paired-world catalog and safety state, and then re-reads the binding
+after durable reservation immediately before a single transport request. It acquires
+new evidence without giving a model ambient click authority or trusting the page's
+event handlers.
+
+## Immediate next slice
+
+The next slice begins the bounded browser-state explorer:
+
+> Turn each admitted navigation response into a content-addressed state transition
+> and continue only when it adds new target behavior or resolves a named blocker.
+
+Technical scope:
+
+- Define a redacted browser-state identity from page, structural controls, acquired
+  network coverage, world, and policy state.
+- Record the exact before-state, admitted intent, response evidence, and after-state
+  as one transition.
+- Rank the next safe transition by obligation relevance and novelty rather than DOM
+  order.
+- Stop on duplicate state, no new operation, unchanged blocker set, unsafe control,
+  or bounded state/transition/depth limits.
+- Keep every transition receipt-backed and at one same-origin read interaction; do
+  not add forms, arbitrary clicks, writes, or multi-step wandering yet.
+
+Non-technical scope:
+
+- Sentinel will remember which safe room it just inspected and will only try another
+  door if the last one revealed something new or helped answer the security question
+  it was pursuing.
+- It still will not press arbitrary buttons, fill forms, make changes, or roam without
+  a hard purpose and limit.
+
+Target traffic and execution authority:
+
+- Conditional change: once separately enabled, the explorer can repeat the existing
+  one-GET acquisition boundary across a small receipt-backed state frontier. This
+  next slice will define the state/transition contract first; until then, the current
+  implementation remains capped at one acquired GET per scan.
