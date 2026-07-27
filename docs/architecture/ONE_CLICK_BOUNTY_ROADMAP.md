@@ -707,37 +707,100 @@ after durable reservation immediately before a single transport request. It acqu
 new evidence without giving a model ambient click authority or trusting the page's
 event handlers.
 
-## Immediate next slice
+### Content-addressed browser-state transition contract
 
-The next slice begins the bounded browser-state explorer:
+The first Phase 2B slice now turns the existing one-GET acquisition result into a
+redacted, content-addressed before/after state transition.
 
-> Turn each admitted navigation response into a content-addressed state transition
-> and continue only when it adds new target behavior or resolves a named blocker.
+Technical implementation:
 
-Technical scope:
+- Define a browser behavior identity from target, owned world, normalized page,
+  structural interaction catalog, and bounded normalized operation coverage.
+- Bind the complete state identity to the current policy and proof-budget state
+  without including raw URLs, identifiers, DOM text, response bodies, or credentials.
+- Record the exact admitted intent, named security obligation, acquisition receipt,
+  request/response evidence references, newly exposed operation references, blocker
+  progress, and before/after states as one deterministic transition.
+- Make transition replay strict: the persisted redacted artifact is reconstructed and
+  revalidated, and its receipt and acquisition identities must match the acquisition
+  summary that contains it.
+- Preserve pre-upgrade acquisition receipts as zero-traffic reusable evidence; because
+  they lack the new state references, replay marks the transition explicitly
+  unavailable instead of corrupting the receipt or inventing state.
+- Apply hard bounds of eight states, seven transitions, four levels of depth, 512
+  operation references, and 512 obligation references.
+- Stop on duplicate behavior, no operation-or-blocker progress, an unobserved control
+  surface, no next state-bound admission, or any state/transition/depth limit.
+- A next admission is eligible only when it is bound to the exact after-state page,
+  catalog, world, policy, budget, and still-open obligation.
 
-- Define a redacted browser-state identity from page, structural controls, acquired
-  network coverage, world, and policy state.
-- Record the exact before-state, admitted intent, response evidence, and after-state
-  as one transition.
-- Rank the next safe transition by obligation relevance and novelty rather than DOM
-  order.
-- Stop on duplicate state, no new operation, unchanged blocker set, unsafe control,
-  or bounded state/transition/depth limits.
-- Keep every transition receipt-backed and at one same-origin read interaction; do
-  not add forms, arbitrary clicks, writes, or multi-step wandering yet.
+Non-technical result:
 
-Non-technical scope:
-
-- Sentinel will remember which safe room it just inspected and will only try another
-  door if the last one revealed something new or helped answer the security question
-  it was pursuing.
-- It still will not press arbitrary buttons, fill forms, make changes, or roam without
-  a hard purpose and limit.
+- Sentinel now writes a tamper-evident map entry saying which room it started in,
+  which approved door it inspected, what new kind of target behavior appeared, and
+  why it stopped.
+- For example, if one safe link exposes a previously unseen `/documents/{id}` read
+  operation, Sentinel records that as real progress. Because the current GET did not
+  render that destination in the browser, it honestly marks the new room's controls
+  as unseen and refuses to choose another door from invented page state.
+- It still cannot walk through multiple rooms, click arbitrary controls, submit
+  forms, or claim a new page was rendered when only its response was acquired.
 
 Target traffic and execution authority:
 
-- Conditional change: once separately enabled, the explorer can repeat the existing
-  one-GET acquisition boundary across a small receipt-backed state frontier. This
-  next slice will define the state/transition contract first; until then, the current
-  implementation remains capped at one acquired GET per scan.
+- Unchanged in this slice. State and transition evaluation runs only after the
+  existing separately authorized acquisition. It cannot call the driver or
+  transport and does not permit a second GET.
+- The ordinary one-click implementation remains capped at one interaction-acquisition
+  GET per scan.
+
+Exit gate:
+
+- Identical redacted inputs produce identical state and transition identities.
+- Dynamic identifiers are reduced into normalized operation references.
+- A transition cannot be replayed under a different receipt, acquisition, page,
+  world, policy, budget, or obligation binding.
+- An unrendered destination is always ineligible for another interaction.
+- Focused state, acquisition, receipt, orchestrator, and one-click router tests pass.
+
+The one-of-a-kind property is an evidence-bearing exploration halt. Sentinel does not
+merely remember that a URL was fetched: it proves which security obligation justified
+the door, which sealed acquisition crossed it, which behavior was actually new, and
+why another action is or is not presently defensible. The map cannot silently turn a
+transport response into imaginary browser authority.
+
+## Immediate next slice
+
+The next slice continues the bounded browser-state explorer:
+
+> Add one controlled browser render observation for the acquired same-origin
+> destination so Sentinel can build a truthful after-state control catalog and
+> consider—but not yet automatically execute—the next state-bound admission.
+
+Technical scope:
+
+- Extend the native boundary with a local, actor-world render observation for the
+  exact already-acquired destination, without activating page controls.
+- Recheck final origin, page identity, structural catalog, response bounds, persona
+  ownership, and acquisition receipt binding.
+- Construct an observed after-state only from the actual rendered destination and
+  the network operations generated by that render.
+- Run obligation-directed admission against that new state, then let the transition
+  contract rank the exact state-bound candidate by blocker relevance and measured
+  novelty.
+- Keep automatic execution capped at the existing one GET; the newly ranked second
+  transition remains a non-executable manifest in this next slice.
+
+Non-technical scope:
+
+- Sentinel will load the room it already safely retrieved, look at the actual doors
+  visible there, and prepare one defensible next choice only if the room contained a
+  new clue.
+- It still will not open that second door, press buttons, fill forms, make changes,
+  or roam.
+
+Target traffic and execution authority:
+
+- The render may produce ordinary browser subresource traffic for the exact
+  same-origin destination, so it requires explicit authority and new traffic
+  accounting. It will not authorize a second interaction transition.

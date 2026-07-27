@@ -36,6 +36,8 @@ Obligation-directed interaction admission remains analysis-only and explicit-onl
 through :mod:`core.behavior.interaction_admission`.
 Controlled interaction read acquisition remains default-off and explicit-only
 through :mod:`core.behavior.interaction_boundary`.
+Content-addressed browser state and transition evaluation remains analysis-only and
+explicit-only through :mod:`core.behavior.interaction_state`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

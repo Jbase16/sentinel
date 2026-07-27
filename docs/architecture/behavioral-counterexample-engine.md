@@ -1444,6 +1444,44 @@ system does not browse because a link looks interesting: it binds one structural
 door to one exact unanswered security question, makes the binding durable, checks it
 again at the last possible moment, and admits only a policy-verifiable read.
 
+#### Content-addressed browser-state transition
+
+The first bounded browser-state explorer contract converts the completed
+interaction acquisition into deterministic before-state, after-state, and transition
+artifacts. A state binds a redacted browser-behavior identity—target, owned world,
+normalized page, structural interaction catalog, and bounded normalized operation
+coverage—to the exact policy and proof-budget state. The transition binds those
+states to the admitted intent, named security obligation, durable acquisition
+receipt, request/response evidence references, newly exposed operations, blocker
+progress, and bounded traversal depth.
+
+The evaluator has no driver, transport, or receipt-mutation dependency. It admits a
+future candidate only when the previous transition added a new operation or resolved
+the exact named blocker, the after-state is not a duplicate, all state/transition/
+depth limits remain open, and the next interaction admission matches the exact
+after-state page, control catalog, world, policy, budget, and open obligation. The
+current acquisition is a transport GET rather than a browser navigation, so its
+after-state deliberately declares the control surface `unobserved` and stops. It
+never reuses the original page controls as though they came from the destination.
+Pre-upgrade acquisition receipts remain reusable without traffic; their missing
+state references produce an explicit unavailable transition rather than receipt
+corruption or inferred state.
+
+In plain language, Sentinel now creates a tamper-evident map entry after inspecting
+one approved door. It can say what kind of target behavior was genuinely new and why
+it is stopping. If it retrieved a new page response but did not actually render that
+page, it refuses to pretend it saw the next set of doors.
+
+This slice does not change target traffic or execution authority. It analyzes the
+existing one-GET acquisition result and cannot issue a second request, activate a DOM
+control, submit a form, or authorize a write. The next slice must explicitly account
+for any browser render and subresource traffic before an observed after-state can
+present a second, still non-executable transition.
+
+The one-of-a-kind property is an evidence-bearing exploration halt: novelty,
+obligation progress, durable conduct, state freshness, and authority are one
+falsifiable identity chain rather than separate crawler heuristics.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

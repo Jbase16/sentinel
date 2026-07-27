@@ -16,7 +16,10 @@ from core.behavior.interaction_boundary import (
 )
 from core.behavior.interactions import InteractionIntentMiner
 from core.behavior.normalize import stable_hash
-from core.behavior.receipts import BehavioralReceiptStore
+from core.behavior.receipts import (
+    BehavioralReceiptStore,
+    redacted_interaction_acquisition_outcome,
+)
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
 from core.safety.proof_budget import ProofBudget
@@ -208,6 +211,17 @@ async def test_boundary_resolves_twice_sends_one_get_and_persists_only_redacted_
     stored = json.loads(receipt_text)
     assert stored["outcome"]["kind"] == "interaction_read_acquisition"
     assert stored["outcome"]["requests_sent"] == 1
+    assert stored["outcome"]["destination_page_ref"].startswith(
+        "interaction_page:"
+    )
+    assert stored["outcome"]["operation_ref"].startswith("action:")
+    legacy_outcome = dict(stored["outcome"])
+    legacy_outcome.pop("destination_page_ref")
+    legacy_outcome.pop("operation_ref")
+    assert (
+        redacted_interaction_acquisition_outcome(legacy_outcome)
+        == legacy_outcome
+    )
 
 
 @pytest.mark.asyncio

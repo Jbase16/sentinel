@@ -633,6 +633,10 @@ async def run_behavioral_authorization_endpoint(
         InteractionReadAcquisitionAdmission,
         InteractionReadAcquisitionBoundary,
     )
+    from core.behavior.interaction_state import (
+        BROWSER_STATE_EXPLORER_MODE,
+        build_acquisition_transition,
+    )
     from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
@@ -1171,6 +1175,9 @@ async def run_behavioral_authorization_endpoint(
         and shadow_run.interaction_admission.admission is not None
         and not any(item.actionable for item in shadow_run.ranked_frontier)
     ):
+        initial_shadow = shadow_run
+        admitted_interaction = shadow_run.interaction_admission.admission
+        assert admitted_interaction is not None
         acquisition_executor = make_executor(
             source_persona.persona_id,
             shadow_policy,
@@ -1178,7 +1185,7 @@ async def run_behavioral_authorization_endpoint(
         )
         try:
             acquisition_boundary = InteractionReadAcquisitionBoundary(
-                admission=shadow_run.interaction_admission.admission,
+                admission=admitted_interaction,
                 target_origin=target_origin,
                 authorization=envelope,
                 actor_persona_id=source_persona.persona_id,
@@ -1200,7 +1207,6 @@ async def run_behavioral_authorization_endpoint(
             )
             if acquisition_result.record is not None:
                 source_records.append(acquisition_result.record)
-                previous_shadow = shadow_run
                 shadow_run = shadow_orchestrator.run(
                     source_records,
                     target_origin=target_origin,
@@ -1212,13 +1218,68 @@ async def run_behavioral_authorization_endpoint(
                     peer_controls=peer_controls,
                     interaction_page_url=req.interaction_page_url,
                     experiment_context=shadow_context,
-                    previous_graph=previous_shadow.graph,
+                    previous_graph=initial_shadow.graph,
                     derivation_round=2,
                 )
                 shadow_response = shadow_run.to_dict()
                 shadow_response["interaction_acquisition_ref"] = (
                     acquisition_result.execution.get("acquisition_id")
                 )
+            state_refs = {
+                "destination_page_ref",
+                "operation_ref",
+            }
+            if not state_refs.issubset(acquisition_result.execution):
+                interaction_acquisition["state_transition"] = {
+                    "schema_version": 1,
+                    "mode": BROWSER_STATE_EXPLORER_MODE,
+                    "status": "unavailable",
+                    "reason_code": (
+                        "legacy_acquisition_receipt_missing_state_refs"
+                    ),
+                    "executable": False,
+                }
+            else:
+                try:
+                    transition_result = build_acquisition_transition(
+                        target_origin=target_origin,
+                        world_id=source_persona.persona_id,
+                        before_records=(
+                            source_records[:-1]
+                            if acquisition_result.record is not None
+                            else source_records
+                        ),
+                        admission=admitted_interaction,
+                        acquisition=acquisition_result.execution,
+                        receipt_id=acquisition_result.receipt_id,
+                        policy_digest=shadow_policy.digest(),
+                        max_total_requests=(
+                            shadow_policy.budget.max_total_requests
+                        ),
+                        before_frontier=tuple(
+                            item.to_dict()
+                            for item in initial_shadow.ranked_frontier
+                        ),
+                        after_frontier=tuple(
+                            item.to_dict()
+                            for item in shadow_run.ranked_frontier
+                        ),
+                    )
+                    interaction_acquisition["state_transition"] = {
+                        "status": "completed",
+                        "result": transition_result.to_dict(),
+                    }
+                except (TypeError, ValueError, KeyError):
+                    logger.exception(
+                        "interaction state transition analysis failed"
+                    )
+                    interaction_acquisition["state_transition"] = {
+                        "schema_version": 1,
+                        "mode": BROWSER_STATE_EXPLORER_MODE,
+                        "status": "error",
+                        "error_code": "state_transition_analysis_failed",
+                        "executable": False,
+                    }
         except InteractionAcquisitionDenied as exc:
             interaction_acquisition = {
                 "schema_version": 1,

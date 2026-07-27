@@ -26,7 +26,7 @@ from .interaction_admission import (
     InteractionIntentAdmission,
 )
 from .interactions import InteractionIntentMiner
-from .normalize import stable_hash
+from .normalize import normalize_exchange, stable_hash
 from .receipts import (
     COMPLETED,
     BehavioralReceiptContext,
@@ -90,6 +90,8 @@ class InteractionAcquisitionResult:
     acquisition_id: str
     admission_id: str
     obligation_id: str
+    destination_page_ref: str
+    operation_ref: str
     request_ref: str
     response_ref: str
     response_status: int
@@ -118,6 +120,8 @@ class InteractionAcquisitionResult:
             "acquisition_id": self.acquisition_id,
             "admission_id": self.admission_id,
             "obligation_id": self.obligation_id,
+            "destination_page_ref": self.destination_page_ref,
+            "operation_ref": self.operation_ref,
             "request_ref": self.request_ref,
             "response_ref": self.response_ref,
             "response_status": self.response_status,
@@ -458,15 +462,6 @@ class InteractionReadAcquisitionBoundary:
                 "truncated": response_truncated,
             },
         )
-        acquisition_id = stable_hash(
-            "interaction_read_acquisition",
-            {
-                "admission_id": self.admission.admission_id,
-                "resolution_id": resolved.resolution_id,
-                "request_ref": request_ref,
-                "response_ref": response_ref,
-            },
-        )
         sink = self.executor.provenance
         record = {
             "action": "interaction_acquisition",
@@ -481,10 +476,35 @@ class InteractionReadAcquisitionBoundary:
             "request_truncated": False,
             "response_truncated": response_truncated,
         }
+        normalized = normalize_exchange(
+            record,
+            world_id=self.actor_persona_id,
+        )
+        destination_page_ref = stable_hash(
+            "interaction_page",
+            {
+                "origin": normalized.origin,
+                "path_template": normalized.path_template,
+            },
+        )
+        operation_ref = normalized.action_id
+        acquisition_id = stable_hash(
+            "interaction_read_acquisition",
+            {
+                "admission_id": self.admission.admission_id,
+                "resolution_id": resolved.resolution_id,
+                "destination_page_ref": destination_page_ref,
+                "operation_ref": operation_ref,
+                "request_ref": request_ref,
+                "response_ref": response_ref,
+            },
+        )
         return InteractionAcquisitionResult(
             acquisition_id=acquisition_id,
             admission_id=self.admission.admission_id,
             obligation_id=self.admission.obligation_id,
+            destination_page_ref=destination_page_ref,
+            operation_ref=operation_ref,
             request_ref=request_ref,
             response_ref=response_ref,
             response_status=status,

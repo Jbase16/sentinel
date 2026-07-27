@@ -69,6 +69,7 @@ _INTERACTION_REQUEST_REF = re.compile(
 _INTERACTION_RESPONSE_REF = re.compile(
     r"^interaction_acquisition_response:[0-9a-f]{64}$"
 )
+_INTERACTION_PAGE_REF = re.compile(r"^interaction_page:[0-9a-f]{64}$")
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
     {
         "fresh_boundary_baseline_is_not_usable",
@@ -556,6 +557,29 @@ def redacted_interaction_acquisition_outcome(
         for item, pattern in refs.values()
     ):
         raise ReceiptStoreError("interaction acquisition identity is invalid")
+    state_refs = {
+        "destination_page_ref": (
+            value.get("destination_page_ref"),
+            _INTERACTION_PAGE_REF,
+        ),
+        "operation_ref": (
+            value.get("operation_ref"),
+            _ACTION_REF,
+        ),
+    }
+    state_ref_presence = tuple(
+        item is not None for item, _pattern in state_refs.values()
+    )
+    if any(state_ref_presence) and (
+        not all(state_ref_presence)
+        or any(
+            not isinstance(item, str) or pattern.fullmatch(item) is None
+            for item, pattern in state_refs.values()
+        )
+    ):
+        raise ReceiptStoreError(
+            "interaction acquisition state identity is invalid"
+        )
     response_status = value.get("response_status")
     response_truncated = value.get("response_truncated")
     counters = {
@@ -607,7 +631,7 @@ def redacted_interaction_acquisition_outcome(
         or not 1 <= budget["endpoints_touched"] <= budget["total_requests"]
     ):
         raise ReceiptStoreError("interaction acquisition budget is inconsistent")
-    return {
+    output = {
         "kind": "interaction_read_acquisition",
         "mode": "behavioral_interaction_read_acquisition_v1",
         "status": "completed",
@@ -618,6 +642,71 @@ def redacted_interaction_acquisition_outcome(
         "provenance_root": provenance_root,
         "budget_snapshot": budget,
     }
+    if all(state_ref_presence):
+        output.update(
+            {
+                key: item
+                for key, (item, _pattern) in state_refs.items()
+            }
+        )
+    return output
+
+
+def _redacted_browser_transition_summary(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("browser state transition summary is invalid")
+    status = value.get("status")
+    if status == "unavailable":
+        if (
+            set(value)
+            != {
+                "schema_version",
+                "mode",
+                "status",
+                "reason_code",
+                "executable",
+            }
+            or value.get("schema_version") != 1
+            or value.get("mode") != "behavioral_browser_state_explorer_v1"
+            or value.get("reason_code")
+            != "legacy_acquisition_receipt_missing_state_refs"
+            or value.get("executable") is not False
+        ):
+            raise ReceiptStoreError(
+                "unavailable browser state transition is invalid"
+            )
+        return dict(value)
+    if status == "error":
+        if (
+            set(value)
+            != {
+                "schema_version",
+                "mode",
+                "status",
+                "error_code",
+                "executable",
+            }
+            or value.get("schema_version") != 1
+            or value.get("mode") != "behavioral_browser_state_explorer_v1"
+            or value.get("error_code") != "state_transition_analysis_failed"
+            or value.get("executable") is not False
+        ):
+            raise ReceiptStoreError("failed browser state transition is invalid")
+        return dict(value)
+    if status != "completed" or set(value) != {"status", "result"}:
+        raise ReceiptStoreError("browser state transition summary is invalid")
+    result = value.get("result")
+    if not isinstance(result, Mapping):
+        raise ReceiptStoreError("browser state transition result is invalid")
+    try:
+        from .interaction_state import BrowserTransitionResult
+
+        normalized = BrowserTransitionResult.from_dict(result).to_dict()
+    except (TypeError, ValueError) as exc:
+        raise ReceiptStoreError(
+            "browser state transition result is invalid"
+        ) from exc
+    return {"status": "completed", "result": normalized}
 
 
 def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
@@ -680,7 +769,7 @@ def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
         or not isinstance(execution, Mapping)
     ):
         raise ReceiptStoreError("interaction acquisition receipt summary is invalid")
-    return {
+    output = {
         "schema_version": 1,
         "mode": "behavioral_interaction_read_acquisition_v1",
         "status": status,
@@ -688,6 +777,31 @@ def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
         "execution": redacted_interaction_acquisition_outcome(execution),
         "target_requests_sent": requests_sent,
     }
+    if "state_transition" in value:
+        transition_summary = _redacted_browser_transition_summary(
+            value.get("state_transition")
+        )
+        if transition_summary["status"] == "completed":
+            transition = transition_summary["result"]["transition"]
+            redacted_execution = output["execution"]
+            if (
+                transition["receipt_id"] != receipt["receipt_id"]
+                or transition["admission_id"]
+                != redacted_execution["admission_id"]
+                or transition["obligation_id"]
+                != redacted_execution["obligation_id"]
+                or transition["acquisition_id"]
+                != redacted_execution["acquisition_id"]
+                or transition["request_ref"]
+                != redacted_execution["request_ref"]
+                or transition["response_ref"]
+                != redacted_execution["response_ref"]
+            ):
+                raise ReceiptStoreError(
+                    "browser state transition acquisition binding is invalid"
+                )
+        output["state_transition"] = transition_summary
+    return output
 
 
 def redacted_compiled_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
