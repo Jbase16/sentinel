@@ -253,6 +253,24 @@ def test_orchestrator_attaches_page_bound_passive_interactions_without_traffic()
     assert result.interactions.status == "ready"
     assert result.interactions.executable is False
     assert result.interactions.intents[0].risk_class == "read_interaction"
+    assert result.interaction_admission.status == "ready_for_active_boundary"
+    assert result.interaction_admission.executable is False
+    assert result.interaction_admission.admission is not None
+    assert result.interaction_admission.admission.obligation_id == next(
+        item.obligation_id for item in result.ranked_frontier if not item.actionable
+    )
+    assert (
+        result.interaction_admission.admission.catalog_id
+        == result.interactions.catalog_id
+    )
+    assert (
+        result.interaction_admission.admission.page_ref
+        == result.interactions.intents[0].page_ref
+    )
+    assert (
+        result.interaction_admission.result_id
+        != other_page.interaction_admission.result_id
+    )
     assert result.run_id != other_page.run_id
     assert calls == []
     assert executor.policy.budget.snapshot()["total_requests"] == 0
@@ -297,6 +315,8 @@ def test_state_machine_legality_enters_frontier_without_resolution_authority():
         world_id="alice",
     )
 
+    assert result.interaction_admission.status == "policy_unavailable"
+    assert result.interaction_admission.admission is None
     assert result.state_machine.status == "ready"
     assert len(result.state_machine.candidates) == 1
     assert result.graph.diagnostics.state_machine_controls == 1

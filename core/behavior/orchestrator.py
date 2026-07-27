@@ -28,8 +28,13 @@ from .factory import (
     OwnedExperimentFactoryDenied,
     OwnedExperimentInventory,
 )
-from .lifecycle import LifecycleContractMiner, LifecycleMiningResult
+from .interaction_admission import (
+    InteractionAdmissionResult,
+    InteractionIntentSelector,
+    interaction_frontier_ref,
+)
 from .interactions import InteractionIntentCatalog, InteractionIntentMiner
+from .lifecycle import LifecycleContractMiner, LifecycleMiningResult
 from .normalize import stable_hash
 from .omission import (
     MinimizedOmissionCompiler,
@@ -80,6 +85,7 @@ def _run_identity_payload(
     state_machine: StateMachineLegalityResult,
     omissions: OmissionCompilationResult,
     interactions: InteractionIntentCatalog,
+    interaction_admission: InteractionAdmissionResult,
     experiment_stage: "OwnedExperimentShadowStage",
     graph: SecurityObligationGraph,
     closure: SecurityClosureCertificate,
@@ -98,6 +104,7 @@ def _run_identity_payload(
         "state_machine_result_id": state_machine.result_id,
         "omission_result_id": omissions.result_id,
         "interaction_catalog_id": interactions.catalog_id,
+        "interaction_admission_result_id": interaction_admission.result_id,
         "experiment_stage": experiment_stage.to_dict(),
         "graph_digest": graph.graph_digest,
         "closure_certificate_id": closure.certificate_id,
@@ -238,6 +245,10 @@ class BehavioralShadowRun:
     state_machine: StateMachineLegalityResult = field(repr=False, compare=False)
     omissions: OmissionCompilationResult = field(repr=False, compare=False)
     interactions: InteractionIntentCatalog = field(repr=False, compare=False)
+    interaction_admission: InteractionAdmissionResult = field(
+        repr=False,
+        compare=False,
+    )
     experiment_stage: OwnedExperimentShadowStage = field(repr=False, compare=False)
     graph: SecurityObligationGraph = field(repr=False, compare=False)
     closure: SecurityClosureCertificate = field(repr=False, compare=False)
@@ -249,12 +260,29 @@ class BehavioralShadowRun:
     def __post_init__(self) -> None:
         payload = self._identity_payload()
         ranked_ids = [item.obligation_id for item in self.ranked_frontier]
+        interaction_intent_ids = {
+            item.intent_id for item in self.interactions.intents
+        }
+        admitted_interaction = self.interaction_admission.admission
         if (
             self.run_id != stable_hash("behavioral_shadow_run", payload)
             or self.status != self.closure.status
             or self.mode != BEHAVIORAL_SHADOW_ORCHESTRATOR_MODE
             or self.executable
             or self.graph.target_ref != self.closure.target_ref
+            or self.interaction_admission.catalog_id
+            != self.interactions.catalog_id
+            or self.interaction_admission.frontier_ref
+            != interaction_frontier_ref(
+                [item.to_dict() for item in self.ranked_frontier]
+            )
+            or (
+                admitted_interaction is not None
+                and (
+                    admitted_interaction.intent_id not in interaction_intent_ids
+                    or admitted_interaction.obligation_id not in ranked_ids
+                )
+            )
             or len(ranked_ids) != len(set(ranked_ids))
             or isinstance(self.ranked_dropped, bool)
             or not isinstance(self.ranked_dropped, int)
@@ -290,6 +318,7 @@ class BehavioralShadowRun:
             state_machine=self.state_machine,
             omissions=self.omissions,
             interactions=self.interactions,
+            interaction_admission=self.interaction_admission,
             experiment_stage=self.experiment_stage,
             graph=self.graph,
             closure=self.closure,
@@ -313,6 +342,7 @@ class BehavioralShadowRun:
             "state_machine": self.state_machine.to_dict(),
             "omissions": self.omissions.to_dict(),
             "interactions": self.interactions.to_dict(),
+            "interaction_admission": self.interaction_admission.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
             "obligation_graph": self.graph.to_dict(),
             "closure": self.closure.to_dict(),
@@ -342,6 +372,7 @@ class BehavioralShadowOrchestrator:
         state_machine_miner: Optional[StateMachineLegalityMiner] = None,
         omission_compiler: Optional[MinimizedOmissionCompiler] = None,
         interaction_miner: Optional[InteractionIntentMiner] = None,
+        interaction_selector: Optional[InteractionIntentSelector] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
         graph_builder: Optional[SecurityObligationGraphBuilder] = None,
         closure_evaluator: Optional[SecurityClosureEvaluator] = None,
@@ -356,6 +387,9 @@ class BehavioralShadowOrchestrator:
         )
         self.omission_compiler = omission_compiler or MinimizedOmissionCompiler()
         self.interaction_miner = interaction_miner or InteractionIntentMiner()
+        self.interaction_selector = (
+            interaction_selector or InteractionIntentSelector()
+        )
         self.experiment_factory = experiment_factory or OwnedExperimentFactory()
         self.graph_builder = graph_builder or SecurityObligationGraphBuilder()
         self.closure_evaluator = closure_evaluator or SecurityClosureEvaluator()
@@ -672,6 +706,31 @@ class BehavioralShadowOrchestrator:
             experiment_stage=experiment_stage,
             omissions=omissions,
         )
+        interaction_policy = (
+            experiment_context.executor.policy
+            if experiment_context is not None
+            else None
+        )
+        interaction_admission = self.interaction_selector.select(
+            interactions,
+            tuple(item.to_dict() for item in ranked),
+            world_id=world_id,
+            policy_digest=(
+                interaction_policy.digest()
+                if interaction_policy is not None
+                else None
+            ),
+            budget_snapshot=(
+                interaction_policy.budget.snapshot()
+                if interaction_policy is not None
+                else None
+            ),
+            max_total_requests=(
+                interaction_policy.budget.max_total_requests
+                if interaction_policy is not None
+                else None
+            ),
+        )
         return BehavioralShadowRun(
             run_id=stable_hash(
                 "behavioral_shadow_run",
@@ -682,6 +741,7 @@ class BehavioralShadowOrchestrator:
                     state_machine=state_machine,
                     omissions=omissions,
                     interactions=interactions,
+                    interaction_admission=interaction_admission,
                     experiment_stage=experiment_stage,
                     graph=graph,
                     closure=closure,
@@ -696,6 +756,7 @@ class BehavioralShadowOrchestrator:
             state_machine=state_machine,
             omissions=omissions,
             interactions=interactions,
+            interaction_admission=interaction_admission,
             experiment_stage=experiment_stage,
             graph=graph,
             closure=closure,

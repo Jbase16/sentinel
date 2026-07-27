@@ -32,6 +32,8 @@ Known-valid wrong-object capability confirmation remains separately gated and
 explicit-only through :mod:`core.behavior.omission_confirmation`.
 Passive DOM interaction-intent cataloging remains analysis-only and explicit-only
 through :mod:`core.behavior.interactions`.
+Obligation-directed interaction admission remains analysis-only and explicit-only
+through :mod:`core.behavior.interaction_admission`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

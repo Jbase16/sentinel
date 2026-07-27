@@ -48,7 +48,8 @@ The important current limitations are:
 
 - The macOS ordinary Scan screen does not yet send the explicit behavioral profile.
 - A single URL load exposes only behavior naturally produced by that navigation.
-- Browser interaction is not yet driven by the obligation frontier.
+- The obligation frontier can select and seal one safe acquisition intent, but no
+  active boundary resolves or executes it yet.
 - Acquisition and proof continuation do not form one adaptive multi-round loop.
 - Fresh-owned execution supports narrow captured lifecycle shapes.
 - Omission confirmation supports one exact capability-linked lifecycle shape.
@@ -625,7 +626,9 @@ The roadmap should be adjusted after each milestone using measured calibration d
 Phases should not be declared complete because their classes exist; completion means
 their exit gates pass end-to-end.
 
-## Completed slice: passive interaction-intent catalog
+## Completed Phase 2A slices
+
+### Passive interaction-intent catalog
 
 The first Phase 2A slice now converts visible controls from each already-loaded owned
 browser world into a bounded, redacted, content-addressed, risk-classified catalog.
@@ -638,37 +641,59 @@ Target traffic and execution authority remain unchanged. The capture path reads 
 DOM structure after navigation but performs no interaction and sends no new target
 request. Snapshot failure degrades to an empty catalog.
 
+### Obligation-directed interaction admission
+
+The behavioral shadow now compares the exact ranked obligation frontier with the
+passive catalog and seals at most one eligible read intent for the authorized actor
+world. It ignores obligations that already have proof paths and rejects peer-world,
+scripted, ambiguous, disabled, truncated, state-changing, external, destructive, and
+unknown controls. The manifest binds the exact catalog, page, locator, world,
+unresolved obligation, scope, policy digest, current budget state, and a one-action
+limit. Same-origin navigation ranks ahead of native reveal because it can later be
+resolved into one exact gated GET without executing page event handlers.
+
+Target traffic and execution authority remain unchanged. The selector has no driver,
+transport, receipt, reservation, or execution dependency.
+
 ## Immediate next slice
 
-The next implementation slice remains within Phase 2A:
+The next implementation slice begins the controlled acquisition boundary:
 
-> Introduce an `InteractionIntentAdmission` and deterministic selector that can choose
-> one exact read-like acquisition candidate while remaining incapable of clicking it.
+> Resolve one still-fresh admitted same-origin navigation intent into an exact GET and
+> execute it through the existing policy-gated authenticated transport.
 
 Technical scope:
 
-- Rank only cataloged read interactions against the open obligation frontier.
-- Bind selection to the exact catalog, intent, page, world, scope, policy, and action
-  budget.
-- Reject stale, ambiguous, externally consequential, state-changing, destructive,
-  disabled, truncated, or unknown controls.
-- Produce a content-addressed admission manifest for a later browser boundary.
-- Do not add a driver command that can click or submit.
+- Add a local-only driver resolver that re-reads the admitted locator without
+  activating it and returns one exact current same-origin navigation destination.
+- Rebuild the structural snapshot and reject changed page, world, locator, catalog,
+  destination class, or admission identity.
+- Compile only an authenticated GET candidate; do not click the DOM, submit a form,
+  execute page event handlers, or grant general browser control.
+- Send that one GET through `PolicyExecutor` and the existing persona-bound transport
+  under a pre-reserved one-request budget.
+- Persist a redacted receipt and feed the new response record back into behavioral
+  analysis. Retry must reuse the terminal receipt without traffic.
 
 Non-technical scope:
 
-- Sentinel can choose which safe-looking door would reveal the most useful new
-  evidence instead of wandering through every link.
-- It still cannot open the door in this slice.
+- Sentinel rechecks that its chosen door is still the same safe internal doorway,
+  then retrieves exactly what is behind that doorway using the correct researcher
+  account.
+- It still cannot press arbitrary buttons, run forms, make purchases, send messages,
+  or wander through multiple links.
 
 Target traffic and execution authority:
 
-- Zero change. Selection is passive and creates no browser execution authority.
+- Conditional change: when separately enabled and fully bound, this slice may send
+  one same-origin authenticated GET. It grants no click or form authority. Missing,
+  stale, changed, out-of-scope, unbudgeted, or cached admission adds zero traffic.
 
 Exit gate:
 
-- Equivalent evidence frontiers select the same exact intent.
-- A changed catalog, page, world, or policy invalidates admission.
-- Only unblocked read interactions can be selected.
-- No driver, browser interaction, or target transport dependency enters the selector.
-- Selection failure cannot affect existing capture or scan behavior.
+- Exact freshness and admission binding are checked immediately before transport.
+- Every request crosses scope, policy, budget reservation, and provenance gates.
+- A retry cannot send the GET twice.
+- No DOM event handler or form submission can run.
+- The response becomes bounded evidence for the next shadow round.
+- With the feature disabled or any binding invalid, target traffic remains zero.

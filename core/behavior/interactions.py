@@ -446,6 +446,8 @@ def _classify(control: _NormalizedControl) -> Tuple[str, str, str, Tuple[str, ..
         blockers.add("control_disabled")
     if control.locator_truncated:
         blockers.add("locator_truncated")
+    if control.scripted_handler:
+        blockers.add("script_effect_unproven")
     if control.destination in {"external_origin", "non_http", "invalid"}:
         blockers.add("destination_not_admitted")
         return (
@@ -536,8 +538,6 @@ def _classify(control: _NormalizedControl) -> Tuple[str, str, str, Tuple[str, ..
         )
     if control.content_editable or control.tag in {"input", "textarea"}:
         blockers.add("user_input_required")
-    if control.scripted_handler:
-        blockers.add("script_effect_unproven")
     return (
         "unknown",
         "unknown",

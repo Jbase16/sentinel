@@ -356,6 +356,11 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["behavioral_shadow"]["executable"] is False
         assert result["behavioral_shadow"]["interactions"]["status"] == "ready"
         assert result["behavioral_shadow"]["interactions"]["executable"] is False
+        assert result["behavioral_shadow"]["interaction_admission"]["status"] == (
+            "no_open_acquisition_obligation"
+        )
+        assert result["behavioral_shadow"]["interaction_admission"]["admission"] is None
+        assert result["behavioral_shadow"]["interaction_admission"]["executable"] is False
         assert "must-not-be-retained" not in str(
             result["behavioral_shadow"]["interactions"]
         )

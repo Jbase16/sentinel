@@ -1361,6 +1361,46 @@ instructions. The model can eventually reason over stable intent identities, whi
 separate admission boundary can reject any proposed action whose exact page, world,
 locator, risk class, or authority no longer matches.
 
+#### Obligation-directed interaction admission
+
+`InteractionIntentSelector` now compares the passive catalog with the exact ranked
+security-obligation frontier. It ignores obligations that already have an actionable
+proof path and deterministically selects the highest-ranked unresolved obligation
+that currently has no safe resolution. Within the authorized actor's world, it
+admits only non-scripted, enabled, unambiguous, complete-locator read intents whose
+only blocker is that the catalog itself is passive. Native reveal controls rank
+ahead of same-origin navigation; filters, mutations, external destinations,
+downloads, destructive operations, unknown effects, peer-world controls, and
+scripted links are excluded. Same-origin navigation ranks ahead of native reveal
+because the next active boundary can reduce it to one exact policy-gated GET without
+running a DOM event handler.
+
+The resulting `InteractionIntentAdmission` binds one action to the exact catalog,
+intent, normalized page, structural locator, actor world, unresolved frontier,
+target scope, policy digest, current proof-budget state, and a hard one-action
+limit. The binding is content-addressed and included in the behavioral shadow run
+identity. Missing policy context, exhausted request budget, a fully actionable
+frontier, or no eligible control produces an explicit non-ready result. The module
+has no driver, transport, receipt, reservation, or execution dependency.
+
+In plain language, Sentinel can now look at its unanswered security questions and
+choose one safe-looking door to investigate next. If it already knows how to test
+the important question, it does not wander. If the door belongs to the other
+persona, has uncertain machinery, is dangerous, or no longer matches the page,
+Sentinel refuses to prepare it. The prepared choice still cannot open the door.
+
+This slice changes neither target traffic nor execution authority. It sends no
+request, performs no click, reserves no budget, and cannot call the driver. The
+one-action budget is a sealed upper bound for a future active boundary, not a
+reservation or permission to execute.
+
+The one-of-a-kind property is obligation-first acquisition with a falsifiable
+identity chain. Instead of letting a model issue free-form browser instructions,
+Sentinel binds one redacted structural control to the exact unanswered security
+question and exact safety state that justified choosing it. Any changed page,
+catalog, persona, frontier, policy, or budget produces a different binding that a
+future boundary must reject.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1
