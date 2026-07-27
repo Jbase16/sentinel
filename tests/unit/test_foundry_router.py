@@ -322,6 +322,26 @@ class TestBehavioralAuthorizationEndpoint:
 
         request, _, _ = self._setup()
         request.script_urls = [f"{self.ORIGIN}/assets/app.js"]
+        request.interaction_page_url = f"{self.ORIGIN}/app"
+        request.source_controls = [{
+            "tag": "a",
+            "role": "link",
+            "input_type": "",
+            "form_method": "none",
+            "destination": "same_origin",
+            "locator": [{"tag": "a", "sibling_index": 1}],
+            "locator_truncated": False,
+            "visible": True,
+            "disabled": False,
+            "content_editable": False,
+            "aria_expanded": False,
+            "aria_haspopup": False,
+            "sensitive_form": False,
+            "download": False,
+            "scripted_handler": False,
+            "submitter": False,
+            "text": "must-not-be-retained",
+        }]
 
         async def forbidden(*_args, **_kwargs):
             raise AssertionError("disabled primary planner must not reach SND")
@@ -334,6 +354,11 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["execution"] is None
         assert result["behavioral_shadow"]["status"] == "open"
         assert result["behavioral_shadow"]["executable"] is False
+        assert result["behavioral_shadow"]["interactions"]["status"] == "ready"
+        assert result["behavioral_shadow"]["interactions"]["executable"] is False
+        assert "must-not-be-retained" not in str(
+            result["behavioral_shadow"]["interactions"]
+        )
         assert result["behavioral_shadow"]["selected"]["resolution_kind"] == (
             "authorization_proposal"
         )
@@ -1674,6 +1699,8 @@ class TestBehavioralAuthorizationEndpoint:
                 )
             if payload["command"] == "script_resource_urls":
                 return []
+            if payload["command"] == "interaction_controls":
+                return []
             return "ok"
 
         async def fake_send(_transport, persona, replay_request):
@@ -1701,9 +1728,11 @@ class TestBehavioralAuthorizationEndpoint:
             "start_network_capture",
             "navigate",
             "stop_network_capture",
+            "interaction_controls",
             "start_network_capture",
             "navigate",
             "stop_network_capture",
+            "interaction_controls",
             "script_resource_urls",
         ]
         assert len(traffic) == 5

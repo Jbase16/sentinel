@@ -40,6 +40,7 @@ Sentinel already has substantial pieces of this system:
 - Exact state-machine prerequisite-omission confirmation.
 - Receipt-to-graph feedback and report-facing findings.
 - An optional `behavioral_one_click` profile on ordinary bounty scan requests.
+- A passive, page-bound `InteractionIntent` catalog for visible browser controls.
 - Existing finding storage, verification sessions, sanitized reproduction rendering,
   bounty reports, and an operator-confirmed HackerOne submission client.
 
@@ -624,36 +625,50 @@ The roadmap should be adjusted after each milestone using measured calibration d
 Phases should not be declared complete because their classes exist; completion means
 their exit gates pass end-to-end.
 
+## Completed slice: passive interaction-intent catalog
+
+The first Phase 2A slice now converts visible controls from each already-loaded owned
+browser world into a bounded, redacted, content-addressed, risk-classified catalog.
+The catalog is bound to the origin, normalized page path, world, and structural
+locator. It is included in behavioral shadow and request identity but remains
+non-executable. Browser labels, identifiers, values, destination strings, and form
+data are discarded before they cross the driver bridge.
+
+Target traffic and execution authority remain unchanged. The capture path reads local
+DOM structure after navigation but performs no interaction and sends no new target
+request. Snapshot failure degrades to an empty catalog.
+
 ## Immediate next slice
 
-The next implementation slice is Phase 2A, not final UI polish:
+The next implementation slice remains within Phase 2A:
 
-> Introduce a passive `InteractionIntent` catalog that converts captured DOM controls
-> into redacted, content-addressed, risk-classified candidate actions without
-> executing them.
+> Introduce an `InteractionIntentAdmission` and deterministic selector that can choose
+> one exact read-like acquisition candidate while remaining incapable of clicking it.
 
 Technical scope:
 
-- Add the intent model, structural locator, side-effect class, world binding, origin
-  binding, safety blockers, bounds, and deterministic snapshot.
-- Feed it from already captured browser state.
-- Add it to the behavioral shadow artifact and obligation diagnostics.
-- Do not expose browser execution or target transport.
+- Rank only cataloged read interactions against the open obligation frontier.
+- Bind selection to the exact catalog, intent, page, world, scope, policy, and action
+  budget.
+- Reject stale, ambiguous, externally consequential, state-changing, destructive,
+  disabled, truncated, or unknown controls.
+- Produce a content-addressed admission manifest for a later browser boundary.
+- Do not add a driver command that can click or submit.
 
 Non-technical scope:
 
-- Sentinel begins learning which visible controls are safe doors, dangerous switches,
-  or unknown machinery.
-- It still does not click anything.
+- Sentinel can choose which safe-looking door would reveal the most useful new
+  evidence instead of wandering through every link.
+- It still cannot open the door in this slice.
 
 Target traffic and execution authority:
 
-- Zero change. This slice is passive and creates no browser execution authority.
+- Zero change. Selection is passive and creates no browser execution authority.
 
 Exit gate:
 
-- Equivalent pages produce identical redacted intent catalogs.
-- Secret and user-provided values never enter snapshots.
-- Adversarially large pages remain bounded.
-- Shadow failure cannot affect capture or scans.
-- Dangerous and unknown controls cannot be marked executable.
+- Equivalent evidence frontiers select the same exact intent.
+- A changed catalog, page, world, or policy invalidates admission.
+- Only unblocked read interactions can be selected.
+- No driver, browser interaction, or target transport dependency enters the selector.
+- Selection failure cannot affect existing capture or scan behavior.

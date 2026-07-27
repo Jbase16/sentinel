@@ -438,6 +438,30 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
             )
         if command == "script_resource_urls":
             return ["https://api.example.test/assets/app.js"]
+        if command == "interaction_controls":
+            return [{
+                "tag": "a",
+                "role": "link",
+                "input_type": "",
+                "form_method": "none",
+                "destination": "same_origin",
+                "locator": [
+                    {"tag": "html", "sibling_index": 1},
+                    {"tag": "a", "sibling_index": 2},
+                ],
+                "locator_truncated": False,
+                "visible": True,
+                "disabled": False,
+                "content_editable": False,
+                "aria_expanded": False,
+                "aria_haspopup": False,
+                "sensitive_form": False,
+                "download": False,
+                "scripted_handler": False,
+                "submitter": False,
+                "text": "must-not-cross-the-bridge",
+                "value": "must-not-cross-the-bridge",
+            }]
         return "ok"
 
     monkeypatch.setattr(driver.node_manager, "send_command", send_command)
@@ -458,9 +482,11 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
         "start_network_capture",
         "navigate",
         "stop_network_capture",
+        "interaction_controls",
         "start_network_capture",
         "navigate",
         "stop_network_capture",
+        "interaction_controls",
         "script_resource_urls",
     ]
     capture_sessions = [
@@ -475,10 +501,28 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
     assert peer.records[0]["persona_id"] == PEER_PERSONA_ID
     assert PEER_PERSONA_ID not in source.records[0]["response_body"]
     assert SOURCE_PERSONA_ID not in peer.records[0]["response_body"]
+    assert source.controls[0]["destination"] == "same_origin"
+    assert peer.controls[0]["destination"] == "same_origin"
+    assert "text" not in source.controls[0]
+    assert "value" not in source.controls[0]
     assert stat.S_IMODE(Path(source.path).stat().st_mode) == 0o600
     assert stat.S_IMODE(Path(peer.path).stat().st_mode) == 0o600
     assert script_urls == ("https://api.example.test/assets/app.js",)
     assert driver.ACTIVE_CAPTURE_OWNER_ID is None
+
+
+@pytest.mark.asyncio
+async def test_passive_interaction_snapshot_failure_degrades_to_empty(
+    monkeypatch,
+):
+    async def unavailable(_payload, timeout=30.0):
+        raise driver.DriverBridgeError("older driver has no snapshot command")
+
+    monkeypatch.setattr(driver.node_manager, "send_command", unavailable)
+
+    controls = await driver._persona_interaction_controls(SOURCE_PERSONA_ID)
+
+    assert controls == ()
 
 
 @pytest.mark.asyncio

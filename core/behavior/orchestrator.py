@@ -29,6 +29,7 @@ from .factory import (
     OwnedExperimentInventory,
 )
 from .lifecycle import LifecycleContractMiner, LifecycleMiningResult
+from .interactions import InteractionIntentCatalog, InteractionIntentMiner
 from .normalize import stable_hash
 from .omission import (
     MinimizedOmissionCompiler,
@@ -78,6 +79,7 @@ def _run_identity_payload(
     affordances: LatentAffordanceResult,
     state_machine: StateMachineLegalityResult,
     omissions: OmissionCompilationResult,
+    interactions: InteractionIntentCatalog,
     experiment_stage: "OwnedExperimentShadowStage",
     graph: SecurityObligationGraph,
     closure: SecurityClosureCertificate,
@@ -95,6 +97,7 @@ def _run_identity_payload(
         "affordance_artifact_digest": affordances.artifact_digest,
         "state_machine_result_id": state_machine.result_id,
         "omission_result_id": omissions.result_id,
+        "interaction_catalog_id": interactions.catalog_id,
         "experiment_stage": experiment_stage.to_dict(),
         "graph_digest": graph.graph_digest,
         "closure_certificate_id": closure.certificate_id,
@@ -234,6 +237,7 @@ class BehavioralShadowRun:
     affordances: LatentAffordanceResult = field(repr=False, compare=False)
     state_machine: StateMachineLegalityResult = field(repr=False, compare=False)
     omissions: OmissionCompilationResult = field(repr=False, compare=False)
+    interactions: InteractionIntentCatalog = field(repr=False, compare=False)
     experiment_stage: OwnedExperimentShadowStage = field(repr=False, compare=False)
     graph: SecurityObligationGraph = field(repr=False, compare=False)
     closure: SecurityClosureCertificate = field(repr=False, compare=False)
@@ -285,6 +289,7 @@ class BehavioralShadowRun:
             affordances=self.affordances,
             state_machine=self.state_machine,
             omissions=self.omissions,
+            interactions=self.interactions,
             experiment_stage=self.experiment_stage,
             graph=self.graph,
             closure=self.closure,
@@ -307,6 +312,7 @@ class BehavioralShadowRun:
             "affordances": self.affordances.to_dict(),
             "state_machine": self.state_machine.to_dict(),
             "omissions": self.omissions.to_dict(),
+            "interactions": self.interactions.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
             "obligation_graph": self.graph.to_dict(),
             "closure": self.closure.to_dict(),
@@ -335,6 +341,7 @@ class BehavioralShadowOrchestrator:
         affordance_miner: Optional[LatentAffordanceMiner] = None,
         state_machine_miner: Optional[StateMachineLegalityMiner] = None,
         omission_compiler: Optional[MinimizedOmissionCompiler] = None,
+        interaction_miner: Optional[InteractionIntentMiner] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
         graph_builder: Optional[SecurityObligationGraphBuilder] = None,
         closure_evaluator: Optional[SecurityClosureEvaluator] = None,
@@ -348,6 +355,7 @@ class BehavioralShadowOrchestrator:
             state_machine_miner or StateMachineLegalityMiner()
         )
         self.omission_compiler = omission_compiler or MinimizedOmissionCompiler()
+        self.interaction_miner = interaction_miner or InteractionIntentMiner()
         self.experiment_factory = experiment_factory or OwnedExperimentFactory()
         self.graph_builder = graph_builder or SecurityObligationGraphBuilder()
         self.closure_evaluator = closure_evaluator or SecurityClosureEvaluator()
@@ -563,6 +571,9 @@ class BehavioralShadowOrchestrator:
         peer_records: Sequence[Mapping[str, Any]] = (),
         peer_world_id: str = "peer",
         artifacts: Sequence[ClientArtifact] = (),
+        controls: Sequence[Mapping[str, Any]] = (),
+        peer_controls: Sequence[Mapping[str, Any]] = (),
+        interaction_page_url: Optional[str] = None,
         experiment_context: Optional[OwnedExperimentShadowContext] = None,
         dispositions: Iterable[ObligationDisposition] = (),
         previous_graph: Optional[SecurityObligationGraph] = None,
@@ -572,6 +583,10 @@ class BehavioralShadowOrchestrator:
             raise TypeError("behavioral shadow records must be sequences of mappings")
         if any(not isinstance(item, Mapping) for item in (*records, *peer_records)):
             raise TypeError("behavioral shadow records must contain mappings")
+        if isinstance(controls, (str, bytes)) or isinstance(
+            peer_controls, (str, bytes)
+        ):
+            raise TypeError("behavioral shadow controls must be sequences")
         if len(records) > self.config.max_records_per_world or len(peer_records) > self.config.max_records_per_world:
             raise ValueError("behavioral shadow records exceed per-world limit")
         if not isinstance(world_id, str) or not world_id:
@@ -614,6 +629,14 @@ class BehavioralShadowOrchestrator:
             world_id=world_id,
             lifecycle=lifecycle,
             state_machine=state_machine,
+        )
+        interactions = self.interaction_miner.mine(
+            controls,
+            target_origin=target_origin,
+            world_id=world_id,
+            peer_controls=peer_controls,
+            peer_world_id=peer_world_id,
+            page_url=interaction_page_url,
         )
         experiment_stage = self._experiment_stage(
             primary_records,
@@ -658,6 +681,7 @@ class BehavioralShadowOrchestrator:
                     affordances=affordances,
                     state_machine=state_machine,
                     omissions=omissions,
+                    interactions=interactions,
                     experiment_stage=experiment_stage,
                     graph=graph,
                     closure=closure,
@@ -671,6 +695,7 @@ class BehavioralShadowOrchestrator:
             affordances=affordances,
             state_machine=state_machine,
             omissions=omissions,
+            interactions=interactions,
             experiment_stage=experiment_stage,
             graph=graph,
             closure=closure,

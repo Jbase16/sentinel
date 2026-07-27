@@ -30,6 +30,8 @@ Fresh-state omission execution and durable admission remain default-off and
 explicit-only through :mod:`core.behavior.omission_boundary`.
 Known-valid wrong-object capability confirmation remains separately gated and
 explicit-only through :mod:`core.behavior.omission_confirmation`.
+Passive DOM interaction-intent cataloging remains analysis-only and explicit-only
+through :mod:`core.behavior.interactions`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

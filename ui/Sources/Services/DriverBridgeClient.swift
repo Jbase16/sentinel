@@ -190,6 +190,10 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     result = try await scriptResourceURLs(
                         personaId: args["persona"] as? String
                     )
+                case "interaction_controls":
+                    result = try await interactionControls(
+                        personaId: args["persona"] as? String
+                    )
                 case "wait_for_close":
                     result = try await waitForClose()
                 case "close":
@@ -379,6 +383,14 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     private func scriptResourceURLs(personaId: String?) async throws -> [String] {
         let b = try getBrowser(personaId: personaId)
         return try await b.scriptResourceURLs()
+    }
+
+    @MainActor
+    private func interactionControls(
+        personaId: String?
+    ) async throws -> [[String: Any]] {
+        let b = try getBrowser(personaId: personaId)
+        return try await b.interactionControlSnapshot()
     }
     
     @MainActor private func waitForClose() async throws -> String {

@@ -791,6 +791,158 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         let value = try await webView.evaluateJavaScript(js)
         return value as? [String] ?? []
     }
+
+    public func interactionControlSnapshot() async throws -> [[String: Any]] {
+        let js = """
+        (() => {
+            const MAX_SCANNED = 4096;
+            const MAX_CONTROLS = 256;
+            const MAX_LOCATOR_DEPTH = 12;
+            const allowedRoles = new Set([
+                'button', 'checkbox', 'combobox', 'link', 'menuitem',
+                'option', 'radio', 'searchbox', 'switch', 'tab', 'textbox'
+            ]);
+            const semanticTags = new Set([
+                'a', 'button', 'input', 'option', 'select', 'summary', 'textarea'
+            ]);
+            const selector = [
+                'a[href]', 'button', 'input:not([type="hidden"])',
+                'select', 'textarea', 'summary',
+                '[role="button"]', '[role="checkbox"]', '[role="combobox"]',
+                '[role="link"]', '[role="menuitem"]', '[role="option"]',
+                '[role="radio"]', '[role="searchbox"]', '[role="switch"]',
+                '[role="tab"]', '[role="textbox"]', '[contenteditable="true"]'
+            ].join(',');
+
+            function structuralLocator(element) {
+                const reversed = [];
+                let current = element;
+                while (current && current.nodeType === Node.ELEMENT_NODE
+                       && reversed.length < MAX_LOCATOR_DEPTH) {
+                    let siblingIndex = 1;
+                    let sibling = current.previousElementSibling;
+                    while (sibling) {
+                        siblingIndex += 1;
+                        sibling = sibling.previousElementSibling;
+                    }
+                    reversed.push({
+                        tag: String(current.tagName || 'div').toLowerCase().slice(0, 32),
+                        sibling_index: Math.min(siblingIndex, 4096)
+                    });
+                    if (current === document.documentElement) {
+                        current = null;
+                        break;
+                    }
+                    current = current.parentElement;
+                }
+                return {
+                    segments: reversed.reverse(),
+                    truncated: current !== null
+                };
+            }
+
+            function isVisible(element) {
+                const style = window.getComputedStyle(element);
+                const rect = element.getBoundingClientRect();
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && style.opacity !== '0'
+                    && rect.width > 0 && rect.height > 0;
+            }
+
+            function destinationKind(raw) {
+                if (!raw) return 'none';
+                try {
+                    const parsed = new URL(raw, document.baseURI);
+                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                        return 'non_http';
+                    }
+                    return parsed.origin === window.location.origin
+                        ? 'same_origin' : 'external_origin';
+                } catch (_) {
+                    return 'invalid';
+                }
+            }
+
+            function formMethodClass(form) {
+                if (!form) return 'none';
+                const elements = Array.from(form.elements || []).slice(0, 128);
+                const override = elements.find(element =>
+                    String(element.name || '').toLowerCase() === '_method'
+                );
+                const overrideValue = String(override && override.value || '').toLowerCase();
+                if (['delete', 'patch', 'put'].includes(overrideValue)) {
+                    return 'destructive_override';
+                }
+                const method = String(form.method || 'get').toLowerCase();
+                if (method === 'get' || method === 'post') return method;
+                return 'unknown';
+            }
+
+            function sensitiveForm(form) {
+                if (!form) return false;
+                return Array.from(form.elements || []).slice(0, 128).some(element => {
+                    const type = String(element.type || '').toLowerCase();
+                    const autocomplete = String(
+                        element.autocomplete || ''
+                    ).toLowerCase();
+                    return type === 'file' || type === 'password'
+                        || autocomplete.startsWith('cc-')
+                        || autocomplete === 'one-time-code';
+                });
+            }
+
+            const controls = [];
+            const nodes = document.querySelectorAll(selector);
+            const scanCount = Math.min(nodes.length, MAX_SCANNED);
+            for (let index = 0; index < scanCount; index += 1) {
+                if (controls.length >= MAX_CONTROLS) break;
+                const element = nodes[index];
+                const rawTag = String(element.tagName || '').toLowerCase();
+                const tag = semanticTags.has(rawTag) ? rawTag : 'other';
+                const rawRole = String(element.getAttribute('role') || '').toLowerCase();
+                const role = allowedRoles.has(rawRole) ? rawRole : '';
+                const inputType = rawTag === 'input'
+                    ? String(element.type || 'text').toLowerCase() : '';
+                const form = element.form || element.closest('form');
+                const isSubmitter = (
+                    rawTag === 'button'
+                    && String(element.type || 'submit').toLowerCase() === 'submit'
+                ) || (
+                    rawTag === 'input'
+                    && ['image', 'submit'].includes(inputType)
+                );
+                const rawDestination = rawTag === 'a'
+                    ? element.getAttribute('href')
+                    : (form ? form.getAttribute('action') || document.URL : null);
+                const locator = structuralLocator(element);
+                controls.push({
+                    tag: tag,
+                    role: role,
+                    input_type: inputType,
+                    form_method: formMethodClass(form),
+                    destination: destinationKind(rawDestination),
+                    locator: locator.segments,
+                    locator_truncated: locator.truncated,
+                    visible: isVisible(element),
+                    disabled: Boolean(element.disabled)
+                        || element.getAttribute('aria-disabled') === 'true',
+                    content_editable: element.isContentEditable === true,
+                    aria_expanded: element.getAttribute('aria-expanded') === 'true',
+                    aria_haspopup: Boolean(element.getAttribute('aria-haspopup'))
+                        && element.getAttribute('aria-haspopup') !== 'false',
+                    sensitive_form: sensitiveForm(form),
+                    download: rawTag === 'a' && element.hasAttribute('download'),
+                    scripted_handler: element.hasAttribute('onclick'),
+                    submitter: isSubmitter
+                });
+            }
+            return controls;
+        })();
+        """
+        let value = try await webView.evaluateJavaScript(js)
+        return value as? [[String: Any]] ?? []
+    }
     
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "sndRecordingBridge", let dict = message.body as? [String: Any] {

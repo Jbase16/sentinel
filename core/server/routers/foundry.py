@@ -123,6 +123,19 @@ class RunBehavioralAuthorizationRequest(BaseModel):
     source_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
     peer_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
     script_urls: List[str] = Field(default_factory=list, max_length=64)
+    source_controls: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    peer_controls: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    interaction_page_url: Optional[str] = Field(
+        default=None,
+        min_length=8,
+        max_length=4096,
+    )
 
 
 class RunBehavioralAuthorizationFromURLRequest(BaseModel):
@@ -477,6 +490,7 @@ async def envelope_proof_endpoint(
 
 
 _MAX_BEHAVIORAL_CAPTURE_BYTES = 16 * 1024 * 1024
+_MAX_BEHAVIORAL_CONTROL_BYTES = 2 * 1024 * 1024
 _MAX_BEHAVIORAL_RESPONSE_CHARS = 2 * 1024 * 1024
 
 
@@ -516,6 +530,21 @@ def _behavioral_capture_bytes(*record_sets: List[Dict[str, Any]]) -> int:
         )
         for records in record_sets
         for record in records
+    )
+
+
+def _behavioral_control_bytes(*control_sets: List[Dict[str, Any]]) -> int:
+    return sum(
+        len(
+            json.dumps(
+                control,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+        for controls in control_sets
+        for control in controls
     )
 
 
@@ -595,6 +624,7 @@ async def run_behavioral_authorization_endpoint(
         BehavioralShadowOrchestrator,
         OwnedExperimentShadowContext,
     )
+    from core.behavior.interactions import InteractionIntentMiner
     from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
@@ -613,13 +643,38 @@ async def run_behavioral_authorization_endpoint(
             > _MAX_BEHAVIORAL_CAPTURE_BYTES
         ):
             raise ValueError("paired capture exceeds the 16 MiB execution limit")
+        if (
+            _behavioral_control_bytes(
+                req.source_controls,
+                req.peer_controls,
+            )
+            > _MAX_BEHAVIORAL_CONTROL_BYTES
+        ):
+            raise ValueError(
+                "paired interaction controls exceed the 2 MiB analysis limit"
+            )
         source_records = _bounded_in_scope_records(req.source_records, scope_filter)
         peer_records = _bounded_in_scope_records(req.peer_records, scope_filter)
         script_urls = _bounded_script_urls(req.script_urls, scope_filter)
+        if req.interaction_page_url and not scope_filter(req.interaction_page_url):
+            raise ValueError("interaction page is outside the target origin")
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not source_records or not peer_records:
         raise HTTPException(status_code=400, detail="paired captures have no in-scope records")
+    source_controls = tuple(req.source_controls)
+    peer_controls = tuple(req.peer_controls)
+    try:
+        interaction_preview = InteractionIntentMiner().mine(
+            source_controls,
+            target_origin=target_origin,
+            world_id=req.source_persona_id,
+            peer_controls=peer_controls,
+            peer_world_id=req.peer_persona_id,
+            page_url=req.interaction_page_url,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     vault = PersonaVault()
     source_persona = vault.get_persona(req.source_persona_id)
@@ -832,6 +887,7 @@ async def run_behavioral_authorization_endpoint(
                 "source_records": source_records,
                 "peer_records": peer_records,
                 "script_urls": script_urls,
+                "interaction_catalog_id": interaction_preview.catalog_id,
             })
         except (TypeError, ValueError) as exc:
             raise HTTPException(
@@ -1025,6 +1081,9 @@ async def run_behavioral_authorization_endpoint(
             peer_records=peer_records,
             peer_world_id=peer_persona.persona_id,
             artifacts=tuple(shadow_artifacts),
+            controls=source_controls,
+            peer_controls=peer_controls,
+            interaction_page_url=req.interaction_page_url,
             experiment_context=shadow_context,
         )
         shadow_response = shadow_run.to_dict()
@@ -1398,6 +1457,9 @@ async def run_behavioral_authorization_endpoint(
                         peer_records=peer_records,
                         peer_world_id=peer_persona.persona_id,
                         artifacts=tuple(shadow_artifacts),
+                        controls=source_controls,
+                        peer_controls=peer_controls,
+                        interaction_page_url=req.interaction_page_url,
                         experiment_context=shadow_context,
                         dispositions=tuple(dispositions),
                         previous_graph=before_shadow.graph,
@@ -1660,6 +1722,9 @@ async def run_behavioral_authorization_endpoint(
                     peer_records=peer_records,
                     peer_world_id=peer_persona.persona_id,
                     artifacts=tuple(shadow_artifacts),
+                    controls=source_controls,
+                    peer_controls=peer_controls,
+                    interaction_page_url=req.interaction_page_url,
                     experiment_context=shadow_context,
                     dispositions=feedback.dispositions,
                     previous_graph=shadow_run.graph,
@@ -1906,6 +1971,9 @@ async def run_behavioral_authorization_from_url_endpoint(
                 source_records=list(source_capture.records),
                 peer_records=list(peer_capture.records),
                 script_urls=list(script_urls),
+                source_controls=list(source_capture.controls),
+                peer_controls=list(peer_capture.controls),
+                interaction_page_url=target_url,
             ),
             _=True,
         )

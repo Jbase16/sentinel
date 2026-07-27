@@ -205,6 +205,59 @@ def test_orchestrator_builds_and_ranks_one_unified_frontier_without_traffic():
     assert executor.policy.budget.snapshot()["total_requests"] == 0
 
 
+def test_orchestrator_attaches_page_bound_passive_interactions_without_traffic():
+    context, calls, executor = _context()
+    control = {
+        "tag": "a",
+        "role": "link",
+        "input_type": "",
+        "form_method": "none",
+        "destination": "same_origin",
+        "locator": [
+            {"tag": "html", "sibling_index": 1},
+            {"tag": "body", "sibling_index": 1},
+            {"tag": "a", "sibling_index": 2},
+        ],
+        "locator_truncated": False,
+        "visible": True,
+        "disabled": False,
+        "content_editable": False,
+        "aria_expanded": False,
+        "aria_haspopup": False,
+        "sensitive_form": False,
+        "download": False,
+        "scripted_handler": False,
+        "submitter": False,
+    }
+    result = BehavioralShadowOrchestrator().run(
+        _source_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+        peer_records=_peer_records(),
+        peer_world_id="bob",
+        controls=(control,),
+        interaction_page_url=f"{ORIGIN}/app",
+        experiment_context=context,
+    )
+    other_page = BehavioralShadowOrchestrator().run(
+        _source_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+        peer_records=_peer_records(),
+        peer_world_id="bob",
+        controls=(control,),
+        interaction_page_url=f"{ORIGIN}/admin",
+        experiment_context=context,
+    )
+
+    assert result.interactions.status == "ready"
+    assert result.interactions.executable is False
+    assert result.interactions.intents[0].risk_class == "read_interaction"
+    assert result.run_id != other_page.run_id
+    assert calls == []
+    assert executor.policy.budget.snapshot()["total_requests"] == 0
+
+
 def test_state_machine_legality_enters_frontier_without_resolution_authority():
     workflow_id = "workflow_7fa9f13a2b4c5d6e"
     export_token = "token_4a5b6c7d8e9f0123"

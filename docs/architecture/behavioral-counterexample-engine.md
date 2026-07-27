@@ -1322,6 +1322,45 @@ into a content-addressed behavioral proof without ambient identity selection. Th
 ordinary scan can gain the behavioral engine's strongest evidence, but only by naming
 the exact pre-authorized worlds that the existing boundary independently revalidates.
 
+#### Passive interaction-intent catalog
+
+The paired URL-capture boundary now asks each already-loaded owned browser world for
+one bounded structural snapshot of visible controls after network capture finishes.
+The browser returns at most 256 controls per world and only allowlisted structural
+facts: tag, role, input class, origin relationship, coarse form method, boolean risk
+signals, and a tag-plus-sibling-index locator. Labels, text, identifiers, names,
+values, destinations, and form data never cross the bridge. The server sanitizes the
+snapshot a second time before attaching it to the capture artifact.
+
+`InteractionIntentMiner` converts those observations into deterministic,
+content-addressed candidate intents bound to the normalized origin, templated page
+path, owned world, and structural locator. It distinguishes read interactions,
+state mutations, external consequences, destructive operations, and unknown effects.
+Every intent remains non-executable and carries `passive_catalog_only`; additional
+blockers identify disabled controls, truncated locators, sensitive inputs, downloads,
+external destinations, destructive method overrides, and unproven script or form
+effects. The catalog becomes part of the behavioral shadow run identity and the root
+execution fingerprint, but it is not imported through the passive package facade as
+an execution surface.
+
+In plain language, after Sentinel loads the URL it can now make a safe map of the
+doors, menus, forms, and dangerous switches it can see. For example, it can recognize
+that an internal link is probably a read-like doorway while a password form or
+external download is consequential. It records no button wording or typed values and
+does not touch any control yet.
+
+This slice changes neither target traffic nor execution authority. It evaluates local
+DOM state only after the page is already loaded, spends zero proof requests, performs
+no clicks, submits no forms, and cannot authorize a later action. If the optional DOM
+snapshot is unavailable, paired capture continues with an empty catalog. Page size,
+locator depth, and serialized control bytes are bounded.
+
+The one-of-a-kind property is that the future acquisition engine receives a
+page-bound, world-bound safety vocabulary rather than raw DOM or model-authored click
+instructions. The model can eventually reason over stable intent identities, while a
+separate admission boundary can reject any proposed action whose exact page, world,
+locator, risk class, or authority no longer matches.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

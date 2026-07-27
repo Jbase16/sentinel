@@ -146,6 +146,8 @@ _CAPTURE_QUIET_SECONDS = 0.75
 _CAPTURE_MIN_SETTLE_SECONDS = 0.5
 _CAPTURE_MAX_SETTLE_SECONDS = 5.0
 _MAX_CAPTURE_INFLIGHT = 10_000
+_MAX_INTERACTION_CONTROLS = 256
+_MAX_INTERACTION_LOCATOR_DEPTH = 12
 _PAIR_CAPTURE_LOCK = asyncio.Lock()
 
 
@@ -156,6 +158,7 @@ class PersonaCaptureArtifact:
     records: Tuple[Dict[str, Any], ...]
     captured_bytes: int
     limit_reached: bool
+    controls: Tuple[Dict[str, Any], ...] = ()
 
     def summary(self) -> Dict[str, Any]:
         return {
@@ -704,6 +707,84 @@ async def _persona_script_urls(persona_id: str) -> Tuple[str, ...]:
     return tuple(str(value) for value in result[:64] if isinstance(value, str))
 
 
+def _sanitized_interaction_controls(value: Any) -> Tuple[Dict[str, Any], ...]:
+    if not isinstance(value, list):
+        return ()
+    controls = []
+    string_fields = (
+        "tag",
+        "role",
+        "input_type",
+        "form_method",
+        "destination",
+    )
+    boolean_fields = (
+        "locator_truncated",
+        "visible",
+        "disabled",
+        "content_editable",
+        "aria_expanded",
+        "aria_haspopup",
+        "sensitive_form",
+        "download",
+        "scripted_handler",
+        "submitter",
+    )
+    for raw in value[:_MAX_INTERACTION_CONTROLS]:
+        if not isinstance(raw, dict) or any(
+            not isinstance(raw.get(field), bool) for field in boolean_fields
+        ):
+            continue
+        locator_value = raw.get("locator")
+        if (
+            not isinstance(locator_value, list)
+            or not 1 <= len(locator_value) <= _MAX_INTERACTION_LOCATOR_DEPTH
+        ):
+            continue
+        locator = []
+        valid_locator = True
+        for raw_segment in locator_value:
+            if (
+                not isinstance(raw_segment, dict)
+                or not isinstance(raw_segment.get("tag"), str)
+                or not isinstance(raw_segment.get("sibling_index"), int)
+                or isinstance(raw_segment.get("sibling_index"), bool)
+            ):
+                valid_locator = False
+                break
+            locator.append({
+                "tag": raw_segment["tag"][:32],
+                "sibling_index": raw_segment["sibling_index"],
+            })
+        if not valid_locator:
+            continue
+        control = {
+            field: str(raw.get(field) or "")[:64]
+            for field in string_fields
+        }
+        control.update({field: raw[field] for field in boolean_fields})
+        control["locator"] = locator
+        controls.append(control)
+    return tuple(controls)
+
+
+async def _persona_interaction_controls(
+    persona_id: str,
+) -> Tuple[Dict[str, Any], ...]:
+    try:
+        result = await node_manager.send_command({
+            "request_id": uuid.uuid4().hex,
+            "command": "interaction_controls",
+            "args": {"persona": persona_id},
+        }, timeout=10.0)
+    except (DriverBridgeError, RuntimeError):
+        logger.exception(
+            "[snd-bridge] passive interaction snapshot unavailable for persona"
+        )
+        return ()
+    return _sanitized_interaction_controls(result)
+
+
 async def capture_persona_pair(
     *, target_url: str, source_persona_id: str, peer_persona_id: str
 ) -> Tuple[PersonaCaptureArtifact, PersonaCaptureArtifact, Tuple[str, ...]]:
@@ -730,12 +811,14 @@ async def capture_persona_pair(
                     release_owner=False,
                 )
                 records = _load_capture_records(path, persona_id=persona_id)
+                controls = await _persona_interaction_controls(persona_id)
                 artifacts.append(PersonaCaptureArtifact(
                     persona_id=persona_id,
                     path=path,
                     records=records,
                     captured_bytes=int(summary["bytes"]),
                     limit_reached=bool(summary["limit_reached"]),
+                    controls=controls,
                 ))
             script_urls = await _persona_script_urls(source_persona_id)
         finally:
