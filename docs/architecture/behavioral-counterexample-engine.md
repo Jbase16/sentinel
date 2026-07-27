@@ -1280,6 +1280,45 @@ obligation graph without a generic exploit runner ever receiving ambient authori
 Selection, policy, receipt reservation, proof, finding, and graph disposition must
 all agree on the same content-addressed experiment.
 
+#### Ordinary scan behavioral bridge
+
+The ordinary `POST /v1/scans/start` contract now accepts an optional
+`behavioral_one_click` profile containing one exact authorization-envelope identifier
+and two distinct Persona Vault identifiers. The profile is valid only in
+`bug_bounty` mode. The scan runner passes the request target and those immutable
+identities into the existing Foundry URL-capture boundary before it dispatches any
+ordinary scanner tool. It never discovers, ranks, or substitutes envelopes or
+personas.
+
+A refused Foundry preflight becomes a structured scan failure and ordinary scan
+traffic does not start. A confirmed report-facing finding is validated by the
+existing boundary and inserted into the same scan session through the normal
+`FindingsStore` persistence path. When the Foundry orchestration receipt is already
+complete, the bridge reconstructs an omission finding only from the strict redacted
+receipt fields and revalidates its content-addressed identity before adding it to the
+new session. Requests without the optional profile follow the unchanged scan path.
+
+In plain language, the main scan doorway can now be told exactly which sealed
+permission slip and which two researcher-controlled browser identities belong to this
+URL. Sentinel runs the hidden-lock investigation first, then continues the ordinary
+scan, and any confirmed result appears with that scan's other findings. If the
+permission slip, browser identities, open windows, signed workflows, or proof gates
+are wrong, Sentinel stops before the ordinary scanner begins sending requests. It
+does not silently pick a permission slip or two accounts for the operator.
+
+This slice conditionally changes target traffic and execution authority. Supplying
+the explicit profile in `bug_bounty` mode can invoke the existing one-click capture
+and whichever already-authorized single behavioral proof the resolver selects,
+including the bounded ten-request omission confirmation. It adds no new proof
+operation or budget and grants no authority beyond the referenced signed envelope.
+Omitting the profile adds zero behavioral traffic and leaves ordinary scans
+unchanged. Automatic macOS UI profile selection is not included in this slice.
+
+The one-of-a-kind property is a fail-closed bridge from a general-purpose bounty scan
+into a content-addressed behavioral proof without ambient identity selection. The
+ordinary scan can gain the behavioral engine's strongest evidence, but only by naming
+the exact pre-authorized worlds that the existing boundary independently revalidates.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

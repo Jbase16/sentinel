@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from core.server.state import get_state
 from core.server.routers.auth import verify_sensitive_token, verify_token
@@ -18,6 +18,21 @@ from core.data.db import Database
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+
+
+class BehavioralOneClickProfile(BaseModel):
+    """Exact pre-authorized browser identities for one behavioral URL phase."""
+
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    source_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+
+    @model_validator(mode="after")
+    def validate_distinct_personas(self) -> "BehavioralOneClickProfile":
+        if self.source_persona_id == self.peer_persona_id:
+            raise ValueError("behavioral one-click personas must be distinct")
+        return self
+
 
 class ScanRequest(BaseModel):
     target: str = Field(..., min_length=1, max_length=2048)
@@ -62,6 +77,10 @@ class ScanRequest(BaseModel):
     # Operators set this via ``pysentinel --restrictions <path>``; the CLI
     # reads the file and passes the parsed dict in the request body.
     restrictions: Optional[Dict[str, Any]] = None
+
+    # Explicit opt-in bridge to the controlled behavioral URL phase. The
+    # ordinary scan path never guesses an envelope or persona identity.
+    behavioral_one_click: Optional[BehavioralOneClickProfile] = None
 
     @field_validator("target")
     @classmethod
@@ -177,6 +196,107 @@ class ScanRequest(BaseModel):
                 continue  # silently drop blank lines / comments
             cleaned.append(entry)
         return cleaned or None
+
+    @model_validator(mode="after")
+    def validate_behavioral_one_click_mode(self) -> "ScanRequest":
+        if self.behavioral_one_click is not None and self.mode != "bug_bounty":
+            raise ValueError(
+                "behavioral_one_click requires bug_bounty scan mode"
+            )
+        return self
+
+
+async def _run_behavioral_one_click_phase(
+    req: ScanRequest,
+    *,
+    session: Any,
+) -> Optional[Dict[str, Any]]:
+    """Run the exact Foundry URL boundary before ordinary scan traffic."""
+
+    profile = req.behavioral_one_click
+    if profile is None:
+        return None
+
+    from core.server.routers.foundry import (
+        RunBehavioralAuthorizationFromURLRequest,
+        run_behavioral_authorization_from_url_endpoint,
+    )
+
+    session.log(
+        "[behavior] Running the pre-authorized one-click URL phase before "
+        "ordinary scan traffic."
+    )
+    try:
+        result = await run_behavioral_authorization_from_url_endpoint(
+            RunBehavioralAuthorizationFromURLRequest(
+                target_url=req.target,
+                envelope_id=profile.envelope_id,
+                source_persona_id=profile.source_persona_id,
+                peer_persona_id=profile.peer_persona_id,
+            ),
+            _=True,
+        )
+    except HTTPException as exc:
+        error_code = (
+            ErrorCode.AUTH_PERMISSION_DENIED
+            if exc.status_code in {401, 403, 404, 409}
+            else ErrorCode.SCAN_INITIALIZATION_ERROR
+        )
+        raise SentinelError(
+            error_code,
+            "Behavioral one-click phase was refused before ordinary scan traffic",
+            details={
+                "phase": "behavioral_one_click",
+                "status_code": exc.status_code,
+                "reason": str(exc.detail)[:512],
+            },
+        ) from exc
+
+    if not isinstance(result, dict):
+        raise SentinelError(
+            ErrorCode.SCAN_INITIALIZATION_ERROR,
+            "Behavioral one-click phase returned an invalid result",
+            details={"phase": "behavioral_one_click"},
+        )
+
+    finding = result.get("finding")
+    if (
+        not isinstance(finding, dict)
+        and result.get("kind") == "fresh_omission_confirmation"
+        and result.get("finding_authority") is True
+    ):
+        from core.behavior.omission_confirmation import (
+            OmissionCapabilityFinding,
+        )
+
+        try:
+            finding = OmissionCapabilityFinding(
+                finding_id=result.get("finding_ref"),
+                confirmation_id=result.get("confirmation_id"),
+                experiment_id=result.get("experiment_id"),
+                terminal_operation_id=result.get("terminal_operation_id"),
+                lifecycle_id=result.get("lifecycle_id"),
+                provenance_root=result.get("provenance_root"),
+            ).to_finding()
+        except (TypeError, ValueError) as exc:
+            raise SentinelError(
+                ErrorCode.SCAN_INITIALIZATION_ERROR,
+                "Cached behavioral finding failed validation",
+                details={"phase": "behavioral_one_click"},
+            ) from exc
+
+    if isinstance(finding, dict):
+        await session.findings.add_finding_async(finding, persist=True)
+        session.log(
+            "[behavior] Added the confirmed behavioral finding to this scan "
+            f"session ({finding.get('id', 'unknown')})."
+        )
+    else:
+        session.log(
+            "[behavior] One-click URL phase completed without a confirmed finding "
+            f"(status={result.get('status', 'unknown')})."
+        )
+    return result
 
 def _log_sink_sync(msg: str) -> None:
     state = get_state()
@@ -600,13 +720,20 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     error=tool_error,
                 )
 
-        _action_dispatcher.action_approved.connect(_on_action_approved)
-        logger.info("[ActionBridge] Wired action_approved → tool execution for session %s", session.id)
-
         async def _runner() -> None:
             start_time = time.time()
             tool_outcomes = {"attempted": 0, "succeeded": 0, "failed": 0}
             try:
+                await _run_behavioral_one_click_phase(req, session=session)
+                _action_dispatcher.action_approved.connect(
+                    _on_action_approved
+                )
+                logger.info(
+                    "[ActionBridge] Wired action_approved → tool execution "
+                    "for session %s",
+                    session.id,
+                )
+
                 async def dispatch_tool(tool: str) -> List[Dict]:
                     findings = []
                     exit_code = 0
@@ -688,7 +815,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # Store dispatch_tool on state for external callers
                 state.scan_state["_dispatch_tool"] = dispatch_tool
 
-                mission = await reasoning_engine.start_scan(
+                await reasoning_engine.start_scan(
                     target=req.target,
                     available_tools=allowed_tools,
                     mode=req.mode,
