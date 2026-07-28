@@ -884,21 +884,9 @@ async def inspect_interaction_response(
     }
 
 
-async def resolve_interaction_navigation(
-    persona_id: str,
+def _normalized_interaction_locator(
     locator: Sequence[Dict[str, Any]],
-    peer_persona_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Resolve one structural anchor locally without activating page behavior."""
-
-    validated_persona = _validated_persona_id(persona_id) or ""
-    validated_peer = (
-        _validated_persona_id(peer_persona_id)
-        if peer_persona_id is not None
-        else None
-    )
-    if validated_peer == validated_persona:
-        raise ValueError("interaction peer persona must be distinct")
+) -> List[Dict[str, Any]]:
     if (
         isinstance(locator, (str, bytes))
         or not 1 <= len(locator) <= _MAX_INTERACTION_LOCATOR_DEPTH
@@ -924,6 +912,107 @@ async def resolve_interaction_navigation(
         normalized_locator.append(
             {"tag": tag, "sibling_index": sibling_index}
         )
+    return normalized_locator
+
+
+async def resolve_interaction_response_navigation(
+    persona_id: str,
+    locator: Sequence[Dict[str, Any]],
+    *,
+    base_url: str,
+    html: str,
+) -> Dict[str, Any]:
+    """Resolve one anchor from inert response bytes without target traffic."""
+
+    validated_persona = _validated_persona_id(persona_id) or ""
+    validated_url = validate_capture_url(base_url)
+    if not isinstance(html, str):
+        raise ValueError("interaction response body must be text")
+    if len(html.encode("utf-8", errors="replace")) > _MAX_INTERACTION_RESPONSE_BYTES:
+        raise ValueError("interaction response body exceeds the observation limit")
+    normalized_locator = _normalized_interaction_locator(locator)
+    await _wait_for_node()
+    result = await node_manager.send_command(
+        {
+            "request_id": uuid.uuid4().hex,
+            "command": "resolve_interaction_response_navigation",
+            "args": {
+                "persona": validated_persona,
+                "base_url": validated_url,
+                "html": html,
+                "locator": normalized_locator,
+            },
+        },
+        timeout=15.0,
+    )
+    if not isinstance(result, dict) or set(result) != {
+        "base_url",
+        "destination_url",
+        "locator",
+        "controls",
+        "scanned_nodes",
+        "controls_truncated",
+    }:
+        raise DriverCommandError(
+            "node returned an invalid interaction response resolution"
+        )
+    observed_url = validate_capture_url(result.get("base_url"))
+    destination_url = validate_capture_url(result.get("destination_url"))
+    returned_locator = result.get("locator")
+    scanned_nodes = result.get("scanned_nodes")
+    raw_controls = result.get("controls")
+    controls = _sanitized_interaction_controls(raw_controls)
+    if (
+        _capture_url_identity(observed_url) != _capture_url_identity(validated_url)
+        or _capture_url_identity(destination_url)[:3]
+        != _capture_url_identity(validated_url)[:3]
+        or returned_locator != normalized_locator
+        or isinstance(scanned_nodes, bool)
+        or not isinstance(scanned_nodes, int)
+        or not 0 <= scanned_nodes <= _MAX_INTERACTION_SCANNED_NODES
+        or result.get("controls_truncated") is not False
+        or not isinstance(raw_controls, list)
+        or len(raw_controls) > _MAX_INTERACTION_CONTROLS
+        or len(controls) != len(raw_controls)
+        or scanned_nodes < len(raw_controls)
+    ):
+        raise DriverCommandError(
+            "interaction response resolution binding is invalid"
+        )
+    matches = tuple(
+        control
+        for control in controls
+        if control.get("locator") == normalized_locator
+    )
+    if len(matches) != 1:
+        raise DriverCommandError(
+            "interaction response resolution locator is not unique"
+        )
+    return {
+        "current_url": observed_url,
+        "destination_url": destination_url,
+        "control": matches[0],
+        "catalog_controls": controls,
+        "peer_catalog_controls": (),
+    }
+
+
+async def resolve_interaction_navigation(
+    persona_id: str,
+    locator: Sequence[Dict[str, Any]],
+    peer_persona_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Resolve one structural anchor locally without activating page behavior."""
+
+    validated_persona = _validated_persona_id(persona_id) or ""
+    validated_peer = (
+        _validated_persona_id(peer_persona_id)
+        if peer_persona_id is not None
+        else None
+    )
+    if validated_peer == validated_persona:
+        raise ValueError("interaction peer persona must be distinct")
+    normalized_locator = _normalized_interaction_locator(locator)
 
     await _wait_for_node()
     controls_value = await node_manager.send_command(

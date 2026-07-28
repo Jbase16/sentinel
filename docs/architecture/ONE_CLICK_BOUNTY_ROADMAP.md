@@ -48,9 +48,8 @@ The important current limitations are:
 
 - The macOS ordinary Scan screen does not yet send the explicit behavioral profile.
 - A single URL load exposes only behavior naturally produced by that navigation.
-- The obligation frontier can execute one sealed safe acquisition intent and
-  inertly observe the exact returned destination, but it cannot execute the prepared
-  second transition yet.
+- The obligation frontier can execute two receipt-chained sealed safe-read intents,
+  but the mechanism is not yet generalized into the bounded adaptive loop.
 - Acquisition and proof continuation do not form one adaptive multi-round loop.
 - Fresh-owned execution supports narrow captured lifecycle shapes.
 - Omission confirmation supports one exact capability-linked lifecycle shape.
@@ -752,8 +751,9 @@ Target traffic and execution authority:
 - Unchanged in this slice. State and transition evaluation runs only after the
   existing separately authorized acquisition. It cannot call the driver or
   transport and does not permit a second GET.
-- The ordinary one-click implementation remains capped at one interaction-acquisition
-  GET per scan.
+- At this slice checkpoint, ordinary one-click remained capped at one
+  interaction-acquisition GET per scan; the later receipt-chained slice raises the
+  current cap to two.
 
 Exit gate:
 
@@ -810,9 +810,9 @@ Non-technical result:
 
 Target traffic and execution authority:
 
-- Unchanged. This observation sends zero additional requests beyond the existing
-  maximum-one acquisition GET and grants no navigation, click, script, form, write,
-  external-origin, or second-transition authority.
+- Unchanged by observation itself. It sends zero additional requests beyond the
+  acquisition that produced its source response and grants no navigation, click,
+  script, form, write, external-origin, or second-transition authority.
 
 Exit gate:
 
@@ -831,39 +831,104 @@ controls or parse HTML without connecting it to the exact authorized persona act
 policy, proof budget, and durable response evidence. Sentinel makes that connection
 falsifiable while keeping the next action inert.
 
-## Immediate next slice
+### Receipt-chained second safe-read transition
 
-The next slice continues the bounded browser-state explorer:
+The third Phase 2B slice now executes exactly one second interaction when the first
+completed transition sealed an eligible next admission.
 
-> Execute one receipt-chained second safe-read transition from the prepared
-> destination admission, while retaining the same exact-binding, one-request,
-> zero-ambient-browser-authority rules.
+Technical implementation:
 
-Technical scope:
+- Require
+  `SENTINELFORGE_BEHAVIOR_INTERACTION_SECOND_TRANSITION=1`, all earlier interaction
+  gates, and the separately signed
+  `behavioral_interaction_second_read_transition` workflow.
+- Accept only the admission ID and intent ID already committed to the first
+  transition's `eligible_for_next_transition` decision.
+- Revalidate the parent receipt, transition, after-state, observation, page, catalog,
+  actor world, policy, remaining budget, obligation, and response body before local
+  resolution.
+- Re-parse the same authenticated response in WebKit's isolated client world and
+  resolve the admitted structural locator twice. Target code is not run and the live
+  page is not consulted.
+- Require both local resolutions to produce the same exact same-origin HTTP
+  destination, then delegate one GET to the existing policy-gated acquisition
+  boundary with manual redirects and a 2 MiB response cap.
+- Reserve a distinct durable child receipt whose identity includes the parent
+  receipt, transition, after-state, observation, admission, policy, depth, and an
+  implementation transition ceiling of two.
+- Feed the child response through inert observation and a second content-addressed
+  state transition. Hard-stop at transition two even when another safe intent could
+  be prepared.
+- Reject child receipts transplanted onto another parent and prevent retries from
+  repeating the second GET.
 
-- Add a second-transition admission boundary that accepts only the next admission
-  already sealed into the completed first transition.
-- Re-parse the same receipt-bound acquired response locally and resolve the admitted
-  structural locator twice, without running target scripts or trusting a live page.
-- Require the same destination identity on both resolutions, then compile only one
-  same-origin authenticated GET through `PolicyExecutor`.
-- Reserve a distinct durable child receipt bound to the parent transition, remaining
-  budget, depth, state count, and transition count.
-- Feed the second response back into the same inert observation and state-transition
-  machinery, but enforce an implementation cap of exactly two total interaction
-  GETs for this slice.
+Non-technical result:
 
-Non-technical scope:
-
-- Sentinel will be able to open the one second door it already chose from the
-  authenticated blueprint, inspect what came back, and stop with another
-  tamper-evident map entry.
-- It still will not press buttons, submit forms, change data, leave scope, or wander
-  indefinitely.
+- Sentinel can now open the exact second door it chose from the first authenticated
+  blueprint, inspect the returned blueprint safely, and add a second tamper-evident
+  map entry.
+- For example, an initial account page may expose a safe link to an audit index; the
+  audit index may expose a safe link to one audit detail. Sentinel can retrieve both
+  in order when each step answers a named security question.
+- It still cannot choose an unrelated door, press buttons, submit forms, run target
+  JavaScript, make changes, leave scope, or continue to a third door.
 
 Target traffic and execution authority:
 
-- Conditional change: a separately authorized scan may send one additional
-  same-origin authenticated GET, for a maximum of two interaction GETs in this
-  implementation slice. It grants no DOM, script, form, write, or external-origin
-  authority.
+- Conditional change: this slice may add one same-origin authenticated GET, raising
+  the interaction maximum from one to exactly two.
+- It grants no DOM, script, form, write, redirect-following, external-origin, or
+  open-ended browsing authority. Disabled, stale, changed, cached-parent, denied, or
+  non-progress paths add zero second-transition traffic.
+
+Exit gate:
+
+- The structural destination is resolved twice from the same receipt-bound response
+  and must remain byte-for-byte identical before transport.
+- The child receipt is distinct, parent-bound, redacted, terminal, and replay-safe.
+- Changed resolution after reservation sends nothing and aborts the child receipt.
+- The second response becomes bounded evidence and an exact depth-two state
+  transition.
+- Transition two stops deterministically at the implementation ceiling.
+
+The one-of-a-kind property is parent-provenance-as-execution-authority. The second
+request is not authorized because a crawler found another link; it is authorized
+only because the exact first receipt, resulting state, security obligation, inert
+response evidence, and sealed next admission all still agree immediately before the
+request.
+
+## Immediate next slice
+
+The next slice generalizes the fixed two-step controller:
+
+> Turn the proven parent-child mechanism into a bounded adaptive safe-read loop that
+> may continue only while each receipt-backed transition produces measurable new
+> behavior or resolves a named security blocker.
+
+Technical scope:
+
+- Extract the two-transition orchestration into a reusable controller over the
+  existing state, depth, transition, operation, obligation, policy, and proof-budget
+  limits.
+- Make each child receipt point to its immediate parent so the complete exploration
+  chain can be reconstructed and replay-validated.
+- Repeat inert observation, shadow derivation, obligation ranking, admission, double
+  resolution, acquisition, and transition evaluation without introducing a
+  free-form browser loop.
+- Stop on duplicate behavior, no catalog/operation/blocker progress, unavailable raw
+  response evidence, policy or budget exhaustion, receipt reuse without ephemeral
+  evidence, or any hard state/depth/transition limit.
+- Keep the initial implementation read-only and same-origin.
+
+Non-technical scope:
+
+- Sentinel will be able to keep opening only the next justified safe door while each
+  room reveals genuinely new evidence, then stop for a concrete recorded reason.
+- It still will not press buttons, fill forms, make changes, or treat persistence
+  alone as permission to continue.
+
+Target traffic and execution authority:
+
+- Conditional change: the controller may authorize more than two same-origin GETs,
+  but never beyond the existing hard state, transition, depth, endpoint, and total
+  request budgets. No mutation or ambient browser authority is introduced.

@@ -1158,6 +1158,141 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         return result
     }
 
+    public func resolveInteractionResponseNavigation(
+        html: String,
+        baseURL: String,
+        locator: [[String: Any]]
+    ) async throws -> [String: Any] {
+        guard locator.count >= 1, locator.count <= 12 else {
+            throw NSError(
+                domain: "SND",
+                code: 400,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Interaction response locator is invalid"
+                ]
+            )
+        }
+        let observation = try await inspectInteractionResponse(
+            html: html,
+            baseURL: baseURL
+        )
+        guard observation["controls_truncated"] as? Bool == false else {
+            throw NSError(
+                domain: "SND",
+                code: 409,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Interaction response control catalog is incomplete"
+                ]
+            )
+        }
+        let script = """
+        const source = args.html;
+        const baseURL = args.baseURL;
+        const path = args.locator;
+        if (typeof source !== 'string' || source.length > 2097152
+            || !Array.isArray(path) || path.length < 1 || path.length > 12) {
+            throw new Error('interaction response resolution input is invalid');
+        }
+        const parsedBase = new URL(baseURL);
+        if (!['http:', 'https:'].includes(parsedBase.protocol)) {
+            throw new Error('interaction response base URL is invalid');
+        }
+        const observed = new DOMParser().parseFromString(source, 'text/html');
+        const baseElement = observed.querySelector('base[href]');
+        let effectiveBase = parsedBase;
+        if (baseElement) {
+            try {
+                effectiveBase = new URL(
+                    baseElement.getAttribute('href'),
+                    parsedBase.href
+                );
+            } catch (_) {
+                effectiveBase = parsedBase;
+            }
+        }
+
+        function siblingIndex(element) {
+            let index = 1;
+            let sibling = element.previousElementSibling;
+            while (sibling) {
+                index += 1;
+                sibling = sibling.previousElementSibling;
+            }
+            return index;
+        }
+
+        let element = observed.documentElement;
+        for (let depth = 0; depth < path.length; depth += 1) {
+            const segment = path[depth];
+            if (!segment || typeof segment.tag !== 'string'
+                || !Number.isInteger(segment.sibling_index)
+                || segment.sibling_index < 1
+                || segment.sibling_index > 4096) {
+                throw new Error('structural locator segment is invalid');
+            }
+            if (depth > 0) {
+                element = element && element.children
+                    ? element.children[segment.sibling_index - 1]
+                    : null;
+            }
+            if (!element
+                || String(element.tagName || '').toLowerCase() !== segment.tag
+                || siblingIndex(element) !== segment.sibling_index) {
+                throw new Error('structural locator no longer resolves');
+            }
+        }
+
+        if (String(element.tagName || '').toLowerCase() !== 'a') {
+            throw new Error('resolved control is not a navigation anchor');
+        }
+        const rawHref = element.getAttribute('href');
+        if (!rawHref) {
+            throw new Error('resolved navigation has no destination');
+        }
+        const destination = new URL(rawHref, effectiveBase.href);
+        if (!['http:', 'https:'].includes(destination.protocol)
+            || destination.origin !== parsedBase.origin) {
+            throw new Error(
+                'resolved navigation destination is not same-origin HTTP'
+            );
+        }
+        return {
+            base_url: parsedBase.href,
+            destination_url: destination.href,
+            locator: path
+        };
+        """
+        let resolvedValue = try await callAsyncJavaScript(
+            script,
+            arguments: [
+                "args": [
+                    "html": html,
+                    "baseURL": baseURL,
+                    "locator": locator,
+                ]
+            ],
+            in: .defaultClient
+        )
+        guard var resolved = resolvedValue as? [String: Any],
+              let controls = observation["controls"] as? [[String: Any]],
+              let scannedNodes = observation["scanned_nodes"] as? Int else {
+            throw NSError(
+                domain: "SND",
+                code: 500,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Interaction response resolution returned no result"
+                ]
+            )
+        }
+        resolved["controls"] = controls
+        resolved["scanned_nodes"] = scannedNodes
+        resolved["controls_truncated"] = false
+        return resolved
+    }
+
     public func resolveInteractionNavigation(
         locator: [[String: Any]]
     ) async throws -> [String: Any] {

@@ -283,7 +283,9 @@ class InteractionRenderObservationBoundary:
         self.observer = observer
         self.config = config or InteractionRenderConfig.from_environment()
 
-    def _validated_source(self) -> tuple[str, str]:
+    def validated_source(self) -> tuple[str, str]:
+        """Return the exact locally revalidated response URL and body."""
+
         if not self.config.enabled:
             raise InteractionRenderDenied("interaction_render_is_disabled")
         _verify_authorization(
@@ -373,7 +375,7 @@ class InteractionRenderObservationBoundary:
         return url, body
 
     async def execute(self) -> InteractionRenderObservation:
-        url, body = self._validated_source()
+        url, body = self.validated_source()
         try:
             observed = await self.observer(
                 self.actor_persona_id,

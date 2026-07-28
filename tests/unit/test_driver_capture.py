@@ -221,6 +221,76 @@ async def test_interaction_response_observation_rejects_dropped_controls(
         )
 
 
+@pytest.mark.asyncio
+async def test_inert_response_navigation_resolution_sends_no_target_command(
+    monkeypatch,
+):
+    calls = []
+
+    async def send_command(payload, timeout=30.0):
+        calls.append((payload, timeout))
+        assert payload["command"] == (
+            "resolve_interaction_response_navigation"
+        )
+        return {
+            "base_url": "https://example.test/details",
+            "destination_url": "https://example.test/next",
+            "locator": _interaction_control(1)["locator"],
+            "controls": [_interaction_control(1)],
+            "scanned_nodes": 1,
+            "controls_truncated": False,
+        }
+
+    monkeypatch.setattr(driver.node_manager, "send_command", send_command)
+
+    result = await driver.resolve_interaction_response_navigation(
+        SOURCE_PERSONA_ID,
+        _interaction_control(1)["locator"],
+        base_url="https://example.test/details",
+        html='<a href="/next">Next</a>',
+    )
+
+    assert result["current_url"] == "https://example.test/details"
+    assert result["destination_url"] == "https://example.test/next"
+    assert result["control"] == _interaction_control(1)
+    assert result["peer_catalog_controls"] == ()
+    assert [payload["command"] for payload, _timeout in calls] == [
+        "resolve_interaction_response_navigation"
+    ]
+    assert all(
+        payload["command"] not in {"navigate", "click", "replay"}
+        for payload, _timeout in calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_inert_response_navigation_rejects_external_destination(
+    monkeypatch,
+):
+    async def send_command(_payload, timeout=30.0):
+        return {
+            "base_url": "https://example.test/details",
+            "destination_url": "https://outside.test/next",
+            "locator": _interaction_control(1)["locator"],
+            "controls": [_interaction_control(1)],
+            "scanned_nodes": 1,
+            "controls_truncated": False,
+        }
+
+    monkeypatch.setattr(driver.node_manager, "send_command", send_command)
+
+    with pytest.raises(
+        driver.DriverCommandError,
+        match="binding is invalid",
+    ):
+        await driver.resolve_interaction_response_navigation(
+            SOURCE_PERSONA_ID,
+            _interaction_control(1)["locator"],
+            base_url="https://example.test/details",
+            html='<a href="https://outside.test/next">Next</a>',
+        )
+
+
 def test_capture_events_are_ignored_without_active_capture(monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("inactive capture must not open a file")

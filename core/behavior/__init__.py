@@ -40,6 +40,8 @@ Content-addressed browser state and transition evaluation remains analysis-only 
 explicit-only through :mod:`core.behavior.interaction_state`.
 Receipt-bound inert destination observation remains default-off and explicit-only
 through :mod:`core.behavior.interaction_render`.
+Receipt-chained second safe-read execution remains separately default-off and
+explicit-only through :mod:`core.behavior.interaction_second_transition`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

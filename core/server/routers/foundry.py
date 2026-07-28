@@ -635,7 +635,9 @@ async def run_behavioral_authorization_endpoint(
     )
     from core.behavior.interaction_state import (
         BROWSER_STATE_EXPLORER_MODE,
+        BrowserStateLimits,
         build_acquisition_transition,
+        build_chained_acquisition_transition,
     )
     from core.behavior.interaction_render import (
         INTERACTION_RENDER_MODE,
@@ -643,6 +645,14 @@ async def run_behavioral_authorization_endpoint(
         InteractionRenderConfig,
         InteractionRenderDenied,
         InteractionRenderObservationBoundary,
+    )
+    from core.behavior.interaction_second_transition import (
+        INTERACTION_SECOND_TRANSITION_MODE,
+        INTERACTION_SECOND_TRANSITION_WORKFLOW,
+        InteractionSecondReadAdmission,
+        InteractionSecondReadBoundary,
+        InteractionSecondTransitionConfig,
+        InteractionSecondTransitionDenied,
     )
     from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
@@ -657,6 +667,7 @@ async def run_behavioral_authorization_endpoint(
     from core.server.routers.driver import (
         inspect_interaction_response,
         resolve_interaction_navigation,
+        resolve_interaction_response_navigation,
     )
 
     try:
@@ -720,6 +731,9 @@ async def run_behavioral_authorization_endpoint(
         InteractionAcquisitionConfig.from_environment()
     )
     interaction_render_config = InteractionRenderConfig.from_environment()
+    interaction_second_config = (
+        InteractionSecondTransitionConfig.from_environment()
+    )
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
         raise HTTPException(
             status_code=409,
@@ -737,6 +751,14 @@ async def run_behavioral_authorization_endpoint(
             detail=(
                 "interaction response observation requires "
                 "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION=1"
+            ),
+        )
+    if interaction_second_config.enabled and not interaction_render_config.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "interaction second transition requires "
+                "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1"
             ),
         )
     if (
@@ -759,6 +781,18 @@ async def run_behavioral_authorization_endpoint(
             detail=(
                 "authorization envelope does not permit "
                 f"{INTERACTION_RENDER_WORKFLOW!r}"
+            ),
+        )
+    if (
+        interaction_second_config.enabled
+        and INTERACTION_SECOND_TRANSITION_WORKFLOW
+        not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "authorization envelope does not permit "
+                f"{INTERACTION_SECOND_TRANSITION_WORKFLOW!r}"
             ),
         )
     continuation_config = BoundedContinuationConfig.from_environment()
@@ -835,6 +869,14 @@ async def run_behavioral_authorization_endpoint(
         interaction_acquisition["render_observation"] = {
             "schema_version": 1,
             "mode": INTERACTION_RENDER_MODE,
+            "status": "not_needed",
+            "target_requests_sent": 0,
+            "executable": False,
+        }
+    if interaction_second_config.enabled:
+        interaction_acquisition["second_transition"] = {
+            "schema_version": 1,
+            "mode": INTERACTION_SECOND_TRANSITION_MODE,
             "status": "not_needed",
             "target_requests_sent": 0,
             "executable": False,
@@ -968,6 +1010,9 @@ async def run_behavioral_authorization_endpoint(
                         interaction_acquisition_config.enabled
                     ),
                     "interaction_render": interaction_render_config.enabled,
+                    "interaction_second_transition": (
+                        interaction_second_config.enabled
+                    ),
                     "fresh_owned_boundary": fresh_boundary_config.enabled,
                     "fresh_omission_confirmation": (
                         omission_confirmation_config.enabled
@@ -1247,7 +1292,16 @@ async def run_behavioral_authorization_endpoint(
             interaction_acquisition["target_requests_sent"] = (
                 0 if acquisition_result.reused else 1
             )
+            if interaction_second_config.enabled:
+                interaction_acquisition["second_transition"] = {
+                    "schema_version": 1,
+                    "mode": INTERACTION_SECOND_TRANSITION_MODE,
+                    "status": "not_needed",
+                    "target_requests_sent": 0,
+                    "executable": False,
+                }
             render_observation = None
+            render_boundary = None
             if acquisition_result.record is not None:
                 source_records.append(acquisition_result.record)
                 if interaction_render_config.enabled:
@@ -1404,6 +1458,294 @@ async def run_behavioral_authorization_endpoint(
                         "status": "completed",
                         "result": transition_result.to_dict(),
                     }
+                    next_interaction = (
+                        shadow_run.interaction_admission.admission
+                    )
+                    if (
+                        interaction_second_config.enabled
+                        and render_boundary is not None
+                        and render_observation is not None
+                        and render_observation.complete
+                        and transition_result.transition.decision
+                        == "eligible_for_next_transition"
+                        and next_interaction is not None
+                    ):
+                        second_parent_shadow = shadow_run
+                        try:
+                            second_boundary = InteractionSecondReadBoundary(
+                                admission=next_interaction,
+                                parent_transition=transition_result,
+                                source_boundary=render_boundary,
+                                observation=render_observation,
+                                target_origin=target_origin,
+                                authorization=envelope,
+                                actor_persona_id=(
+                                    source_persona.persona_id
+                                ),
+                                peer_persona_id=peer_persona.persona_id,
+                                executor=acquisition_executor,
+                                resolver=(
+                                    resolve_interaction_response_navigation
+                                ),
+                                config=interaction_second_config,
+                            )
+                            second_result = await (
+                                InteractionSecondReadAdmission(
+                                    second_boundary,
+                                    receipt_store=receipt_store,
+                                ).execute()
+                            )
+                            second_summary = second_result.to_dict()
+                            second_summary.update(
+                                {
+                                    "schema_version": 1,
+                                    "mode": (
+                                        INTERACTION_SECOND_TRANSITION_MODE
+                                    ),
+                                    "parent_receipt_id": (
+                                        transition_result.transition.receipt_id
+                                    ),
+                                    "parent_transition_id": (
+                                        transition_result.transition.transition_id
+                                    ),
+                                    "parent_after_state_id": (
+                                        transition_result.after_state.state_id
+                                    ),
+                                    "observation_id": (
+                                        render_observation.observation_id
+                                    ),
+                                    "target_requests_sent": (
+                                        0 if second_result.reused else 1
+                                    ),
+                                    "executable": False,
+                                }
+                            )
+                            second_observation = None
+                            if second_result.record is not None:
+                                source_records.append(second_result.record)
+                                try:
+                                    second_render_boundary = (
+                                        InteractionRenderObservationBoundary(
+                                            admission=next_interaction,
+                                            acquisition=(
+                                                second_result.execution
+                                            ),
+                                            acquisition_receipt_id=(
+                                                second_result.receipt_id
+                                            ),
+                                            record=second_result.record,
+                                            target_origin=target_origin,
+                                            authorization=envelope,
+                                            actor_persona_id=(
+                                                source_persona.persona_id
+                                            ),
+                                            peer_persona_id=(
+                                                peer_persona.persona_id
+                                            ),
+                                            observer=(
+                                                inspect_interaction_response
+                                            ),
+                                            config=interaction_render_config,
+                                        )
+                                    )
+                                    second_observation = await (
+                                        second_render_boundary.execute()
+                                    )
+                                    second_summary[
+                                        "render_observation"
+                                    ] = second_observation.to_dict()
+                                except InteractionRenderDenied as exc:
+                                    second_summary[
+                                        "render_observation"
+                                    ] = {
+                                        "schema_version": 1,
+                                        "mode": INTERACTION_RENDER_MODE,
+                                        "status": "denied",
+                                        "error_code": str(exc).split(
+                                            ":",
+                                            1,
+                                        )[0],
+                                        "target_requests_sent": 0,
+                                        "executable": False,
+                                    }
+                                except Exception:
+                                    logger.exception(
+                                        "second interaction response "
+                                        "observation failed"
+                                    )
+                                    second_summary[
+                                        "render_observation"
+                                    ] = {
+                                        "schema_version": 1,
+                                        "mode": INTERACTION_RENDER_MODE,
+                                        "status": "error",
+                                        "error_code": (
+                                            "interaction_render_internal_error"
+                                        ),
+                                        "target_requests_sent": 0,
+                                        "executable": False,
+                                    }
+                            else:
+                                second_summary["render_observation"] = {
+                                    "schema_version": 1,
+                                    "mode": INTERACTION_RENDER_MODE,
+                                    "status": "unavailable",
+                                    "reason_code": (
+                                        "acquisition_response_not_available_for_observation"
+                                    ),
+                                    "target_requests_sent": 0,
+                                    "executable": False,
+                                }
+                            second_observed = (
+                                second_observation is not None
+                                and second_observation.complete
+                            )
+                            shadow_run = shadow_orchestrator.run(
+                                source_records,
+                                target_origin=target_origin,
+                                world_id=source_persona.persona_id,
+                                peer_records=peer_records,
+                                peer_world_id=peer_persona.persona_id,
+                                artifacts=tuple(shadow_artifacts),
+                                controls=(
+                                    second_observation.controls
+                                    if second_observed
+                                    else render_observation.controls
+                                ),
+                                peer_controls=(),
+                                interaction_page_url=(
+                                    second_result.record["url"]
+                                    if second_observed
+                                    and second_result.record is not None
+                                    else (
+                                        acquisition_result.record["url"]
+                                        if acquisition_result.record
+                                        is not None
+                                        else req.interaction_page_url
+                                    )
+                                ),
+                                experiment_context=shadow_context,
+                                previous_graph=second_parent_shadow.graph,
+                                derivation_round=3,
+                            )
+                            if (
+                                second_observed
+                                and shadow_run.interactions.catalog_id
+                                != second_observation.catalog_id
+                            ):
+                                raise ValueError(
+                                    "second observed interaction catalog "
+                                    "changed during planning"
+                                )
+                            shadow_response = shadow_run.to_dict()
+                            shadow_response[
+                                "interaction_acquisition_ref"
+                            ] = second_result.execution.get(
+                                "acquisition_id"
+                            )
+                            try:
+                                second_transition = (
+                                    build_chained_acquisition_transition(
+                                        parent=transition_result,
+                                        world_id=(
+                                            source_persona.persona_id
+                                        ),
+                                        admission=next_interaction,
+                                        acquisition=(
+                                            second_result.execution
+                                        ),
+                                        receipt_id=(
+                                            second_result.receipt_id
+                                        ),
+                                        policy_digest=(
+                                            shadow_policy.digest()
+                                        ),
+                                        max_total_requests=(
+                                            shadow_policy.budget.max_total_requests
+                                        ),
+                                        before_frontier=tuple(
+                                            item.to_dict()
+                                            for item in second_parent_shadow.ranked_frontier
+                                        ),
+                                        after_frontier=tuple(
+                                            item.to_dict()
+                                            for item in shadow_run.ranked_frontier
+                                        ),
+                                        after_control_surface=(
+                                            "observed"
+                                            if second_observed
+                                            else "unobserved"
+                                        ),
+                                        after_catalog_id=(
+                                            second_observation.catalog_id
+                                            if second_observed
+                                            else None
+                                        ),
+                                        limits=BrowserStateLimits(
+                                            max_transitions=2
+                                        ),
+                                    )
+                                )
+                                second_summary["state_transition"] = {
+                                    "status": "completed",
+                                    "result": second_transition.to_dict(),
+                                }
+                            except (TypeError, ValueError, KeyError):
+                                logger.exception(
+                                    "second interaction state transition "
+                                    "analysis failed"
+                                )
+                                second_summary["state_transition"] = {
+                                    "schema_version": 1,
+                                    "mode": BROWSER_STATE_EXPLORER_MODE,
+                                    "status": "error",
+                                    "error_code": (
+                                        "state_transition_analysis_failed"
+                                    ),
+                                    "executable": False,
+                                }
+                            interaction_acquisition[
+                                "second_transition"
+                            ] = second_summary
+                        except InteractionSecondTransitionDenied as exc:
+                            interaction_acquisition[
+                                "second_transition"
+                            ] = {
+                                "schema_version": 1,
+                                "mode": (
+                                    INTERACTION_SECOND_TRANSITION_MODE
+                                ),
+                                "status": (
+                                    "failed"
+                                    if exc.target_request_possible
+                                    else "denied"
+                                ),
+                                "error_code": str(exc).split(":", 1)[0],
+                                "target_requests_sent": 0,
+                                "target_request_may_have_been_sent": (
+                                    exc.target_request_possible
+                                ),
+                                "executable": False,
+                            }
+                        except Exception:
+                            logger.exception(
+                                "interaction second transition failed"
+                            )
+                            interaction_acquisition[
+                                "second_transition"
+                            ] = {
+                                "schema_version": 1,
+                                "mode": (
+                                    INTERACTION_SECOND_TRANSITION_MODE
+                                ),
+                                "status": "failed",
+                                "error_code": (
+                                    "interaction_second_transition_internal_error"
+                                ),
+                                "target_requests_sent": 0,
+                                "target_request_may_have_been_sent": True,
+                                "executable": False,
+                            }
                 except (TypeError, ValueError, KeyError):
                     logger.exception(
                         "interaction state transition analysis failed"
@@ -2114,6 +2456,10 @@ async def run_behavioral_authorization_from_url_endpoint(
         INTERACTION_RENDER_WORKFLOW,
         InteractionRenderConfig,
     )
+    from core.behavior.interaction_second_transition import (
+        INTERACTION_SECOND_TRANSITION_WORKFLOW,
+        InteractionSecondTransitionConfig,
+    )
     from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
     from core.behavior.continuation import (
         BoundedContinuationConfig,
@@ -2176,6 +2522,9 @@ async def run_behavioral_authorization_from_url_endpoint(
         InteractionAcquisitionConfig.from_environment()
     )
     interaction_render_config = InteractionRenderConfig.from_environment()
+    interaction_second_config = (
+        InteractionSecondTransitionConfig.from_environment()
+    )
     if (
         interaction_render_config.enabled
         and not interaction_acquisition_config.enabled
@@ -2185,6 +2534,14 @@ async def run_behavioral_authorization_from_url_endpoint(
             detail=(
                 "one-click interaction response observation requires "
                 "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION=1"
+            ),
+        )
+    if interaction_second_config.enabled and not interaction_render_config.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click interaction second transition requires "
+                "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1"
             ),
         )
     if (
@@ -2208,6 +2565,19 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "one-click interaction response observation authorization "
                 "denied; missing signed workflow: "
                 f"{INTERACTION_RENDER_WORKFLOW}"
+            ),
+        )
+    if (
+        interaction_second_config.enabled
+        and INTERACTION_SECOND_TRANSITION_WORKFLOW
+        not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click interaction second transition authorization "
+                "denied; missing signed workflow: "
+                f"{INTERACTION_SECOND_TRANSITION_WORKFLOW}"
             ),
         )
     if omission_confirmation_config.enabled:
@@ -2238,6 +2608,9 @@ async def run_behavioral_authorization_from_url_endpoint(
                     interaction_acquisition_config.enabled
                 ),
                 "interaction_render": interaction_render_config.enabled,
+                "interaction_second_transition": (
+                    interaction_second_config.enabled
+                ),
                 "fresh_owned_boundary": (
                     FreshOwnedBoundaryConfig.from_environment().enabled
                 ),

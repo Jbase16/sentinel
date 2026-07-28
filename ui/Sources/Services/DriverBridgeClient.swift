@@ -213,6 +213,25 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                         html: html,
                         baseURL: baseURL
                     )
+                case "resolve_interaction_response_navigation":
+                    guard let html = args["html"] as? String,
+                          let baseURL = args["base_url"] as? String,
+                          let locator = args["locator"] as? [[String: Any]] else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "html, base_url, and locator are required"
+                            ]
+                        )
+                    }
+                    result = try await resolveInteractionResponseNavigation(
+                        personaId: args["persona"] as? String,
+                        html: html,
+                        baseURL: baseURL,
+                        locator: locator
+                    )
                 case "resolve_interaction_navigation":
                     guard let locator = args["locator"] as? [[String: Any]] else {
                         throw NSError(
@@ -437,6 +456,21 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return try await b.inspectInteractionResponse(
             html: html,
             baseURL: baseURL
+        )
+    }
+
+    @MainActor
+    private func resolveInteractionResponseNavigation(
+        personaId: String?,
+        html: String,
+        baseURL: String,
+        locator: [[String: Any]]
+    ) async throws -> [String: Any] {
+        let b = try getBrowser(personaId: personaId)
+        return try await b.resolveInteractionResponseNavigation(
+            html: html,
+            baseURL: baseURL,
+            locator: locator
         )
     }
 

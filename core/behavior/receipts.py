@@ -81,6 +81,10 @@ _INTERACTION_CATALOG_REF = re.compile(
 _INTERACTION_INTENT_SET_REF = re.compile(
     r"^interaction_intent_set:[0-9a-f]{64}$"
 )
+_BROWSER_TRANSITION_REF = re.compile(
+    r"^browser_state_transition:[0-9a-f]{64}$"
+)
+_BROWSER_STATE_REF = re.compile(r"^browser_state:[0-9a-f]{64}$")
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
     {
         "fresh_boundary_baseline_is_not_usable",
@@ -839,6 +843,132 @@ def _redacted_interaction_render_summary(value: Any) -> Dict[str, Any]:
     }
 
 
+def _redacted_second_interaction_summary(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("second interaction transition is invalid")
+    if (
+        value.get("schema_version") != 1
+        or value.get("mode")
+        != "behavioral_interaction_second_read_transition_v1"
+    ):
+        raise ReceiptStoreError(
+            "second interaction transition contract is invalid"
+        )
+    status = value.get("status")
+    if status == "not_needed":
+        if set(value) != {
+            "schema_version",
+            "mode",
+            "status",
+            "target_requests_sent",
+            "executable",
+        } or (
+            value.get("target_requests_sent") != 0
+            or value.get("executable") is not False
+        ):
+            raise ReceiptStoreError(
+                "inactive second interaction transition is invalid"
+            )
+        return dict(value)
+    if status in {"denied", "failed"}:
+        error_code = value.get("error_code")
+        uncertain = value.get("target_request_may_have_been_sent", False)
+        if (
+            set(value)
+            != {
+                "schema_version",
+                "mode",
+                "status",
+                "error_code",
+                "target_requests_sent",
+                "target_request_may_have_been_sent",
+                "executable",
+            }
+            or value.get("target_requests_sent") != 0
+            or value.get("executable") is not False
+            or not isinstance(error_code, str)
+            or _ABORT_REASON.fullmatch(error_code) is None
+            or not isinstance(uncertain, bool)
+            or uncertain != (status == "failed")
+        ):
+            raise ReceiptStoreError(
+                "failed second interaction transition is invalid"
+            )
+        return dict(value)
+    parent_receipt_id = value.get("parent_receipt_id")
+    parent_transition_id = value.get("parent_transition_id")
+    parent_after_state_id = value.get("parent_after_state_id")
+    observation_id = value.get("observation_id")
+    acquisition_fields = {
+        key: value.get(key)
+        for key in (
+            "status",
+            "receipt",
+            "execution",
+            "target_requests_sent",
+            "render_observation",
+            "state_transition",
+        )
+        if key in value
+    }
+    acquisition = _redacted_interaction_acquisition_summary(
+        {
+            "schema_version": 1,
+            "mode": "behavioral_interaction_read_acquisition_v1",
+            **acquisition_fields,
+        }
+    )
+    expected = {
+        "schema_version",
+        "mode",
+        "status",
+        "parent_receipt_id",
+        "parent_transition_id",
+        "parent_after_state_id",
+        "observation_id",
+        "receipt",
+        "execution",
+        "target_requests_sent",
+        "render_observation",
+        "state_transition",
+        "executable",
+    }
+    if (
+        status not in {"completed", "already_executed"}
+        or set(value) != expected
+        or not isinstance(parent_receipt_id, str)
+        or not parent_receipt_id.startswith("behavioral-")
+        or not re_full_sha256(parent_receipt_id[len("behavioral-") :])
+        or not isinstance(parent_transition_id, str)
+        or _BROWSER_TRANSITION_REF.fullmatch(parent_transition_id) is None
+        or not isinstance(parent_after_state_id, str)
+        or _BROWSER_STATE_REF.fullmatch(parent_after_state_id) is None
+        or not isinstance(observation_id, str)
+        or _INTERACTION_RENDER_REF.fullmatch(observation_id) is None
+        or value.get("executable") is not False
+        or acquisition.get("receipt", {}).get("receipt_id")
+        == parent_receipt_id
+    ):
+        raise ReceiptStoreError(
+            "completed second interaction transition is invalid"
+        )
+    return {
+        "schema_version": 1,
+        "mode": "behavioral_interaction_second_read_transition_v1",
+        "status": status,
+        "parent_receipt_id": parent_receipt_id,
+        "parent_transition_id": parent_transition_id,
+        "parent_after_state_id": parent_after_state_id,
+        "observation_id": observation_id,
+        "receipt": acquisition["receipt"],
+        "execution": acquisition["execution"],
+        "target_requests_sent": acquisition["target_requests_sent"],
+        "render_observation": acquisition["render_observation"],
+        "state_transition": acquisition["state_transition"],
+        "executable": False,
+    }
+
+
 def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ReceiptStoreError("interaction acquisition summary is invalid")
@@ -972,6 +1102,47 @@ def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
                     "interaction render state binding is invalid"
                 )
         output["render_observation"] = render_summary
+    if "second_transition" in value:
+        second = _redacted_second_interaction_summary(
+            value.get("second_transition")
+        )
+        if second["status"] in {"completed", "already_executed"}:
+            parent = output.get("state_transition")
+            if (
+                not isinstance(parent, Mapping)
+                or parent.get("status") != "completed"
+            ):
+                raise ReceiptStoreError(
+                    "second interaction parent transition is unavailable"
+                )
+            parent_result = parent["result"]
+            parent_transition = parent_result["transition"]
+            if (
+                second["parent_receipt_id"] != receipt["receipt_id"]
+                or second["parent_transition_id"]
+                != parent_transition["transition_id"]
+                or second["parent_after_state_id"]
+                != parent_result["after_state"]["state_id"]
+                or second["observation_id"]
+                != output.get("render_observation", {}).get(
+                    "observation_id"
+                )
+                or second["execution"]["admission_id"]
+                != parent_transition["next_admission_id"]
+            ):
+                raise ReceiptStoreError(
+                    "second interaction parent binding is invalid"
+                )
+            child_transition = second["state_transition"]
+            if (
+                child_transition["status"] == "completed"
+                and child_transition["result"]["before_state"]["state_id"]
+                != parent_result["after_state"]["state_id"]
+            ):
+                raise ReceiptStoreError(
+                    "second interaction state binding is invalid"
+                )
+        output["second_transition"] = second
     return output
 
 

@@ -854,9 +854,9 @@ class BoundedBrowserStateExplorer:
             stop_reasons.add("duplicate_state")
         if not new_operations and not resolved and not new_control_catalog:
             stop_reasons.add("no_progress")
-        if candidate_state_count > self.limits.max_states:
+        if candidate_state_count >= self.limits.max_states:
             stop_reasons.add("state_limit")
-        if candidate_transition_count > self.limits.max_transitions:
+        if candidate_transition_count >= self.limits.max_transitions:
             stop_reasons.add("transition_limit")
         if after_state.depth >= self.limits.max_depth:
             stop_reasons.add("depth_limit")
@@ -1019,6 +1019,82 @@ def build_acquisition_transition(
     )
 
 
+def build_chained_acquisition_transition(
+    *,
+    parent: BrowserTransitionResult,
+    world_id: str,
+    admission: InteractionIntentAdmission,
+    acquisition: Mapping[str, Any],
+    receipt_id: str,
+    policy_digest: str,
+    max_total_requests: int,
+    before_frontier: Sequence[Mapping[str, Any]],
+    after_frontier: Sequence[Mapping[str, Any]],
+    after_control_surface: str,
+    after_catalog_id: Optional[str],
+    limits: BrowserStateLimits,
+) -> BrowserTransitionResult:
+    """Build one parent-bound transition and refuse a third interaction."""
+
+    if (
+        not isinstance(parent, BrowserTransitionResult)
+        or not isinstance(admission, InteractionIntentAdmission)
+        or not isinstance(limits, BrowserStateLimits)
+        or not isinstance(world_id, str)
+        or not world_id
+    ):
+        raise TypeError("chained browser transition inputs are invalid")
+    if (
+        parent.transition.decision != "eligible_for_next_transition"
+        or parent.transition.next_admission_id != admission.admission_id
+        or parent.transition.next_intent_id != admission.intent_id
+        or parent.transition.after_state_id != parent.after_state.state_id
+        or parent.transition_count != 1
+        or limits.max_transitions != 2
+    ):
+        raise ValueError("chained browser transition parent is invalid")
+    budget_snapshot = acquisition.get("budget_snapshot")
+    if not isinstance(budget_snapshot, Mapping):
+        raise ValueError("chained interaction budget snapshot is missing")
+    operation_ref = acquisition.get("operation_ref")
+    if not _hash_ref(operation_ref, "action"):
+        raise ValueError("chained interaction operation reference is invalid")
+    after_policy = InteractionAdmissionPolicy.create(
+        policy_digest=policy_digest,
+        budget_snapshot=budget_snapshot,
+        max_total_requests=max_total_requests,
+        world_id=world_id,
+    )
+    if after_policy.world_ref != admission.world_ref:
+        raise ValueError("chained interaction world binding is invalid")
+    after_state = BrowserState.create(
+        target_ref=admission.target_ref,
+        world_ref=admission.world_ref,
+        page_ref=acquisition.get("destination_page_ref"),
+        control_surface=after_control_surface,
+        interaction_catalog_id=after_catalog_id,
+        operation_refs=tuple(
+            sorted({*parent.after_state.operation_refs, operation_ref})
+        ),
+        policy_ref=after_policy.policy_ref,
+        budget_ref=after_policy.budget_ref,
+        depth=parent.after_state.depth + 1,
+        limits=limits,
+    )
+    return BoundedBrowserStateExplorer(limits=limits).observe_transition(
+        before_state=parent.after_state,
+        after_state=after_state,
+        admission=admission,
+        acquisition=acquisition,
+        receipt_id=receipt_id,
+        before_frontier=before_frontier,
+        after_frontier=after_frontier,
+        seen_behavior_refs=(parent.before_state.behavior_ref,),
+        transition_count=parent.transition_count,
+        next_admission=None,
+    )
+
+
 __all__ = [
     "BROWSER_STATE_EXPLORER_MODE",
     "BoundedBrowserStateExplorer",
@@ -1027,5 +1103,6 @@ __all__ = [
     "BrowserStateTransition",
     "BrowserTransitionResult",
     "build_acquisition_transition",
+    "build_chained_acquisition_transition",
     "operation_refs_from_records",
 ]

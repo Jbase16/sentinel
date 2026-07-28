@@ -1518,8 +1518,9 @@ question. It still cannot follow that door, run JavaScript-generated interfaces,
 trust that the control remains present without a fresh live check.
 
 This slice changes neither target traffic nor execution authority. It adds zero
-requests beyond the existing maximum-one acquisition GET and grants no navigation,
-click, script, form, write, external-origin, or second-transition authority. Even
+requests beyond the acquisition that produced its source response and grants no
+navigation, click, script, form, write, external-origin, or second-transition
+authority. Even
 though it is local-only, it remains separately feature-gated, signed-workflow-gated,
 receipt-bound, bounded, redacted, and fail-closed.
 
@@ -1529,6 +1530,51 @@ crawlers either execute the page and inherit its ambient network behavior or par
 HTML without binding the result to the exact authorized action, persona, policy,
 budget, and durable response receipt. Sentinel makes all of those facts one
 falsifiable chain and can prepare—but not silently execute—the next transition.
+
+#### Receipt-chained second safe-read transition
+
+`InteractionSecondReadBoundary` is a separately default-off active seam for the exact
+next admission sealed by the first completed browser-state transition. It requires
+`SENTINELFORGE_BEHAVIOR_INTERACTION_SECOND_TRANSITION=1`, all preceding interaction
+flags and workflows, and the separately signed
+`behavioral_interaction_second_read_transition` workflow.
+
+The boundary binds the parent receipt, transition, after-state, observation, catalog,
+page, actor world, policy, remaining budget, named obligation, and next admission.
+It revalidates the original acquired response body locally, then asks the native
+driver to parse that same response in WebKit's isolated client world and resolve the
+sealed structural locator. No target script runs and no live page state is trusted.
+The full inert catalog and resolved control are rebuilt through the existing intent
+contracts. Resolution happens once before child receipt reservation and again
+immediately before transport; both resolution identities must match.
+
+Only one same-origin authenticated `GET` may then cross the existing
+`InteractionReadAcquisitionBoundary`, `PolicyExecutor`, atomic proof-budget
+reservation, manual-redirect restraint, response bound, and provenance sink. The
+child receipt is distinct from and content-addressed to its parent receipt,
+transition, after-state, observation, admission, policy, depth, and fixed
+two-transition ceiling. The second response is inertly observed and converted into a
+depth-two state transition. The explorer stops at transition two even when another
+candidate exists.
+
+In plain language, Sentinel can now open the one second door that the first room's
+authenticated blueprint already justified. For example, it can retrieve an audit
+index and then one audit detail when both steps remain safe and answer explicit
+security questions. It inspects the second response without switching on the room's
+machinery and then stops. It still cannot press buttons, submit forms, run target
+JavaScript, change data, leave scope, or take a third step.
+
+This slice conditionally changes target traffic and execution authority. When every
+separate gate remains valid, it can add exactly one same-origin authenticated GET,
+raising the interaction maximum from one to two. It grants no DOM, script, form,
+write, redirect-following, external-origin, or open-ended traversal authority.
+Changed or reused evidence, a changed destination, missing parent progress, policy or
+budget denial, and disabled workflows add zero second-transition requests.
+
+The one-of-a-kind property is receipt-derived continuation authority. A newly found
+link is insufficient: the exact prior conduct receipt, observed state, unresolved
+security obligation, sealed admission, current policy, and remaining budget must all
+form one still-valid evidence chain immediately before the next request.
 
 ## Current baseline debt
 
