@@ -1474,13 +1474,61 @@ page, it refuses to pretend it saw the next set of doors.
 
 This slice does not change target traffic or execution authority. It analyzes the
 existing one-GET acquisition result and cannot issue a second request, activate a DOM
-control, submit a form, or authorize a write. The next slice must explicitly account
-for any browser render and subresource traffic before an observed after-state can
-present a second, still non-executable transition.
+control, submit a form, or authorize a write. A separately gated inert observation
+step can now establish an observed after-state without granting the downloaded page
+ambient browser execution.
 
 The one-of-a-kind property is an evidence-bearing exploration halt: novelty,
 obligation progress, durable conduct, state freshness, and authority are one
 falsifiable identity chain rather than separate crawler heuristics.
+
+#### Receipt-bound inert destination observation
+
+`InteractionRenderObservationBoundary` is a separately default-off local observation
+seam for the exact response already returned by controlled interaction acquisition.
+It requires `SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1`, the acquisition flag, and
+the signed `behavioral_interaction_render_observation` workflow. The boundary
+recomputes the acquisition request, response body hash and shape, normalized
+operation, destination page, target, actor world, admission, obligation, and durable
+acquisition receipt bindings before any native command is allowed.
+
+The native driver passes the bounded response text to `DOMParser` inside WebKit's
+isolated client content world. It does not insert the document into a live page,
+navigate a window, execute response scripts, or load images, styles, frames, or other
+subresources. The returned structural controls are bounded to 256 after scanning at
+most 4,096 candidate nodes. The Python boundary requires the driver to attest zero
+target requests, rebuilds the redacted interaction catalog itself, and persists only
+content-addressed references and bounded counters. Response text and raw controls
+never enter the orchestration receipt.
+
+When the observation is complete, the behavioral engine reruns its destination
+analysis with only the actor's newly observed controls and the acquired response
+record. The after-state is bound to that exact catalog. A second admission may be
+presented only if it matches the new page, catalog, actor world, current policy,
+remaining proof budget, and an open security obligation. The admission is still
+non-executable. Truncated observations, cached acquisition receipts without raw
+response bytes, changed bindings, unavailable drivers, or invalid results leave the
+after-state unobserved and stop the chain.
+
+In plain language, Sentinel can now inspect the blueprint delivered from the room it
+just opened without moving into that room or switching on anything inside it. For
+example, if the authenticated response contains a previously unseen link to an audit
+history page, Sentinel can recognize that new door and prepare it as the next
+question. It still cannot follow that door, run JavaScript-generated interfaces, or
+trust that the control remains present without a fresh live check.
+
+This slice changes neither target traffic nor execution authority. It adds zero
+requests beyond the existing maximum-one acquisition GET and grants no navigation,
+click, script, form, write, external-origin, or second-transition authority. Even
+though it is local-only, it remains separately feature-gated, signed-workflow-gated,
+receipt-bound, bounded, redacted, and fail-closed.
+
+The one-of-a-kind property is a browser-state advance derived from authenticated
+response evidence without giving untrusted page code browser authority. Conventional
+crawlers either execute the page and inherit its ambient network behavior or parse
+HTML without binding the result to the exact authorized action, persona, policy,
+budget, and durable response receipt. Sentinel makes all of those facts one
+falsifiable chain and can prepare—but not silently execute—the next transition.
 
 ## Current baseline debt
 

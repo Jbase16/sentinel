@@ -38,6 +38,8 @@ Controlled interaction read acquisition remains default-off and explicit-only
 through :mod:`core.behavior.interaction_boundary`.
 Content-addressed browser state and transition evaluation remains analysis-only and
 explicit-only through :mod:`core.behavior.interaction_state`.
+Receipt-bound inert destination observation remains default-off and explicit-only
+through :mod:`core.behavior.interaction_render`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

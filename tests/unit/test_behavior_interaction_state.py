@@ -312,6 +312,7 @@ def test_observed_novel_state_can_present_only_its_state_bound_next_admission():
     assert result.transition.stop_reasons == ()
     assert result.transition.next_admission_id == next_admission.admission_id
     assert result.transition.next_intent_id == next_admission.intent_id
+    assert "new_control_catalog" in result.transition.signals
 
 
 def test_one_click_builder_uses_only_pre_acquisition_records_for_before_state():
@@ -407,4 +408,5 @@ def test_duplicate_state_and_no_progress_stop_deterministically():
         "duplicate_state",
         "no_progress",
     )
+    assert "no_new_control_catalog" in result.transition.signals
     assert result.state_count == 1

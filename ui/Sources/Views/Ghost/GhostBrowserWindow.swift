@@ -944,6 +944,220 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         return value as? [[String: Any]] ?? []
     }
 
+    public func inspectInteractionResponse(
+        html: String,
+        baseURL: String
+    ) async throws -> [String: Any] {
+        guard html.utf8.count <= 2 * 1024 * 1024,
+              let parsedBaseURL = URL(string: baseURL),
+              CaptureOrigin(url: parsedBaseURL) != nil else {
+            throw NSError(
+                domain: "SND",
+                code: 400,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Interaction response observation input is invalid"
+                ]
+            )
+        }
+        let script = """
+        const source = args.html;
+        const baseURL = args.baseURL;
+        const MAX_SCANNED = 4096;
+        const MAX_CONTROLS = 256;
+        const MAX_LOCATOR_DEPTH = 12;
+        const allowedRoles = new Set([
+            'button', 'checkbox', 'combobox', 'link', 'menuitem',
+            'option', 'radio', 'searchbox', 'switch', 'tab', 'textbox'
+        ]);
+        const semanticTags = new Set([
+            'a', 'button', 'input', 'option', 'select', 'summary', 'textarea'
+        ]);
+        const selector = [
+            'a[href]', 'button', 'input:not([type="hidden"])',
+            'select', 'textarea', 'summary',
+            '[role="button"]', '[role="checkbox"]', '[role="combobox"]',
+            '[role="link"]', '[role="menuitem"]', '[role="option"]',
+            '[role="radio"]', '[role="searchbox"]', '[role="switch"]',
+            '[role="tab"]', '[role="textbox"]', '[contenteditable="true"]'
+        ].join(',');
+
+        if (typeof source !== 'string' || source.length > 2097152) {
+            throw new Error('interaction response exceeds observation limit');
+        }
+        const parsedBase = new URL(baseURL);
+        if (!['http:', 'https:'].includes(parsedBase.protocol)) {
+            throw new Error('interaction response base URL is invalid');
+        }
+        const observed = new DOMParser().parseFromString(source, 'text/html');
+        const baseElement = observed.querySelector('base[href]');
+        let effectiveBase = parsedBase;
+        if (baseElement) {
+            try {
+                effectiveBase = new URL(
+                    baseElement.getAttribute('href'),
+                    parsedBase.href
+                );
+            } catch (_) {
+                effectiveBase = parsedBase;
+            }
+        }
+
+        function structuralLocator(element) {
+            const reversed = [];
+            let current = element;
+            while (current && current.nodeType === Node.ELEMENT_NODE
+                   && reversed.length < MAX_LOCATOR_DEPTH) {
+                let siblingIndex = 1;
+                let sibling = current.previousElementSibling;
+                while (sibling) {
+                    siblingIndex += 1;
+                    sibling = sibling.previousElementSibling;
+                }
+                reversed.push({
+                    tag: String(current.tagName || 'div').toLowerCase().slice(0, 32),
+                    sibling_index: Math.min(siblingIndex, 4096)
+                });
+                if (current === observed.documentElement) {
+                    current = null;
+                    break;
+                }
+                current = current.parentElement;
+            }
+            return {
+                segments: reversed.reverse(),
+                truncated: current !== null
+            };
+        }
+
+        function isStructurallyVisible(element) {
+            if (element.hidden || element.getAttribute('aria-hidden') === 'true') {
+                return false;
+            }
+            const style = String(element.getAttribute('style') || '')
+                .toLowerCase().replaceAll(/\\s+/g, '');
+            return !style.includes('display:none')
+                && !style.includes('visibility:hidden')
+                && !style.includes('opacity:0');
+        }
+
+        function destinationKind(raw) {
+            if (!raw) return 'none';
+            try {
+                const parsed = new URL(raw, effectiveBase.href);
+                if (!['http:', 'https:'].includes(parsed.protocol)) {
+                    return 'non_http';
+                }
+                return parsed.origin === parsedBase.origin
+                    ? 'same_origin' : 'external_origin';
+            } catch (_) {
+                return 'invalid';
+            }
+        }
+
+        function formMethodClass(form) {
+            if (!form) return 'none';
+            const elements = Array.from(form.elements || []).slice(0, 128);
+            const override = elements.find(element =>
+                String(element.name || '').toLowerCase() === '_method'
+            );
+            const overrideValue = String(override && override.value || '').toLowerCase();
+            if (['delete', 'patch', 'put'].includes(overrideValue)) {
+                return 'destructive_override';
+            }
+            const method = String(form.method || 'get').toLowerCase();
+            if (method === 'get' || method === 'post') return method;
+            return 'unknown';
+        }
+
+        function sensitiveForm(form) {
+            if (!form) return false;
+            return Array.from(form.elements || []).slice(0, 128).some(element => {
+                const type = String(element.type || '').toLowerCase();
+                const autocomplete = String(
+                    element.autocomplete || ''
+                ).toLowerCase();
+                return type === 'file' || type === 'password'
+                    || autocomplete.startsWith('cc-')
+                    || autocomplete === 'one-time-code';
+            });
+        }
+
+        const controls = [];
+        const nodes = observed.querySelectorAll(selector);
+        const scanCount = Math.min(nodes.length, MAX_SCANNED);
+        for (let index = 0; index < scanCount; index += 1) {
+            if (controls.length >= MAX_CONTROLS) break;
+            const element = nodes[index];
+            const rawTag = String(element.tagName || '').toLowerCase();
+            const tag = semanticTags.has(rawTag) ? rawTag : 'other';
+            const rawRole = String(element.getAttribute('role') || '').toLowerCase();
+            const role = allowedRoles.has(rawRole) ? rawRole : '';
+            const inputType = rawTag === 'input'
+                ? String(element.type || 'text').toLowerCase() : '';
+            const form = element.form || element.closest('form');
+            const isSubmitter = (
+                rawTag === 'button'
+                && String(element.type || 'submit').toLowerCase() === 'submit'
+            ) || (
+                rawTag === 'input'
+                && ['image', 'submit'].includes(inputType)
+            );
+            const rawDestination = rawTag === 'a'
+                ? element.getAttribute('href')
+                : (form ? form.getAttribute('action') || baseURL : null);
+            const locator = structuralLocator(element);
+            controls.push({
+                tag: tag,
+                role: role,
+                input_type: inputType,
+                form_method: formMethodClass(form),
+                destination: destinationKind(rawDestination),
+                locator: locator.segments,
+                locator_truncated: locator.truncated,
+                visible: isStructurallyVisible(element),
+                disabled: Boolean(element.disabled)
+                    || element.getAttribute('aria-disabled') === 'true',
+                content_editable: element.isContentEditable === true,
+                aria_expanded: element.getAttribute('aria-expanded') === 'true',
+                aria_haspopup: Boolean(element.getAttribute('aria-haspopup'))
+                    && element.getAttribute('aria-haspopup') !== 'false',
+                sensitive_form: sensitiveForm(form),
+                download: rawTag === 'a' && element.hasAttribute('download'),
+                scripted_handler: element.hasAttribute('onclick'),
+                submitter: isSubmitter
+            });
+        }
+        return {
+            base_url: parsedBase.href,
+            controls: controls,
+            scanned_nodes: scanCount,
+            controls_truncated: nodes.length > controls.length
+        };
+        """
+        let value = try await callAsyncJavaScript(
+            script,
+            arguments: [
+                "args": [
+                    "html": html,
+                    "baseURL": baseURL,
+                ]
+            ],
+            in: .defaultClient
+        )
+        guard let result = value as? [String: Any] else {
+            throw NSError(
+                domain: "SND",
+                code: 500,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Interaction response observation returned no result"
+                ]
+            )
+        }
+        return result
+    }
+
     public func resolveInteractionNavigation(
         locator: [[String: Any]]
     ) async throws -> [String: Any] {

@@ -46,7 +46,9 @@ _SIGNALS = frozenset(
         "control_surface_unobserved",
         "duplicate_state",
         "named_blocker_resolved",
+        "new_control_catalog",
         "new_operation",
+        "no_new_control_catalog",
         "no_named_blocker_resolved",
         "no_new_operation",
     }
@@ -806,6 +808,11 @@ class BoundedBrowserStateExplorer:
         new_operations = tuple(
             sorted(set(after_state.operation_refs) - set(before_state.operation_refs))
         )
+        new_control_catalog = (
+            after_state.control_surface == "observed"
+            and after_state.interaction_catalog_id
+            != before_state.interaction_catalog_id
+        )
         duplicate_state = (
             after_state.behavior_ref == before_state.behavior_ref
             or after_state.behavior_ref in seen
@@ -827,6 +834,11 @@ class BoundedBrowserStateExplorer:
         )
 
         signals = {
+            (
+                "new_control_catalog"
+                if new_control_catalog
+                else "no_new_control_catalog"
+            ),
             "new_operation" if new_operations else "no_new_operation",
             ("named_blocker_resolved" if resolved else "no_named_blocker_resolved"),
         }
@@ -840,7 +852,7 @@ class BoundedBrowserStateExplorer:
         stop_reasons = set()
         if duplicate_state:
             stop_reasons.add("duplicate_state")
-        if not new_operations and not resolved:
+        if not new_operations and not resolved and not new_control_catalog:
             stop_reasons.add("no_progress")
         if candidate_state_count > self.limits.max_states:
             stop_reasons.add("state_limit")
@@ -947,6 +959,8 @@ def build_acquisition_transition(
     after_frontier: Sequence[Mapping[str, Any]],
     limits: BrowserStateLimits = BrowserStateLimits(),
     next_admission: Optional[InteractionIntentAdmission] = None,
+    after_control_surface: str = "unobserved",
+    after_catalog_id: Optional[str] = None,
 ) -> BrowserTransitionResult:
     """Build the exact one-click transition from one redacted acquisition."""
 
@@ -985,8 +999,8 @@ def build_acquisition_transition(
         target_ref=admission.target_ref,
         world_ref=admission.world_ref,
         page_ref=acquisition.get("destination_page_ref"),
-        control_surface="unobserved",
-        interaction_catalog_id=None,
+        control_surface=after_control_surface,
+        interaction_catalog_id=after_catalog_id,
         operation_refs=tuple(sorted({*before_state.operation_refs, operation_ref})),
         policy_ref=after_policy.policy_ref,
         budget_ref=after_policy.budget_ref,

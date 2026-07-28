@@ -148,6 +148,8 @@ _CAPTURE_MAX_SETTLE_SECONDS = 5.0
 _MAX_CAPTURE_INFLIGHT = 10_000
 _MAX_INTERACTION_CONTROLS = 256
 _MAX_INTERACTION_LOCATOR_DEPTH = 12
+_MAX_INTERACTION_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_INTERACTION_SCANNED_NODES = 4096
 _INTERACTION_LOCATOR_TAG = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _PAIR_CAPTURE_LOCK = asyncio.Lock()
 
@@ -797,6 +799,89 @@ async def _persona_interaction_controls(
         )
         return ()
     return _sanitized_interaction_controls(result)
+
+
+def _capture_url_identity(value: str) -> Tuple[str, str, int, str, str]:
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme.lower(),
+        (parsed.hostname or "").lower(),
+        parsed.port or (443 if parsed.scheme.lower() == "https" else 80),
+        parsed.path or "/",
+        parsed.query,
+    )
+
+
+async def inspect_interaction_response(
+    persona_id: str,
+    *,
+    base_url: str,
+    html: str,
+) -> Dict[str, Any]:
+    """Inspect already-acquired HTML inertly without target navigation or I/O."""
+
+    validated_persona = _validated_persona_id(persona_id) or ""
+    validated_url = validate_capture_url(base_url)
+    if not isinstance(html, str):
+        raise ValueError("interaction response body must be text")
+    encoded_bytes = len(html.encode("utf-8", errors="replace"))
+    if encoded_bytes > _MAX_INTERACTION_RESPONSE_BYTES:
+        raise ValueError("interaction response body exceeds the observation limit")
+    await _wait_for_node()
+    result = await node_manager.send_command(
+        {
+            "request_id": uuid.uuid4().hex,
+            "command": "inspect_interaction_response",
+            "args": {
+                "persona": validated_persona,
+                "base_url": validated_url,
+                "html": html,
+            },
+        },
+        timeout=15.0,
+    )
+    if not isinstance(result, dict) or set(result) != {
+        "base_url",
+        "controls",
+        "scanned_nodes",
+        "controls_truncated",
+    }:
+        raise DriverCommandError(
+            "node returned an invalid interaction response observation"
+        )
+    observed_url = validate_capture_url(result.get("base_url"))
+    if _capture_url_identity(observed_url) != _capture_url_identity(validated_url):
+        raise DriverCommandError("interaction response observation changed its base URL")
+    scanned_nodes = result.get("scanned_nodes")
+    controls_truncated = result.get("controls_truncated")
+    if (
+        isinstance(scanned_nodes, bool)
+        or not isinstance(scanned_nodes, int)
+        or not 0 <= scanned_nodes <= _MAX_INTERACTION_SCANNED_NODES
+        or not isinstance(controls_truncated, bool)
+    ):
+        raise DriverCommandError(
+            "interaction response observation diagnostics are invalid"
+        )
+    raw_controls = result.get("controls")
+    controls = _sanitized_interaction_controls(raw_controls)
+    if (
+        not isinstance(raw_controls, list)
+        or len(raw_controls) > _MAX_INTERACTION_CONTROLS
+        or len(controls) != len(raw_controls)
+        or scanned_nodes < len(raw_controls)
+    ):
+        raise DriverCommandError(
+            "interaction response observation controls are invalid"
+        )
+    return {
+        "base_url": observed_url,
+        "controls": controls,
+        "scanned_nodes": scanned_nodes,
+        "controls_truncated": controls_truncated,
+        "bytes_inspected": encoded_bytes,
+        "target_requests_sent": 0,
+    }
 
 
 async def resolve_interaction_navigation(

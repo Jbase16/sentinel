@@ -154,6 +154,73 @@ async def test_interaction_navigation_resolver_reads_both_catalogs_without_activ
     assert all("click" not in payload["command"] for payload, _timeout in calls)
 
 
+@pytest.mark.asyncio
+async def test_interaction_response_observation_is_inert_and_bounded(monkeypatch):
+    calls = []
+
+    async def send_command(payload, timeout=30.0):
+        calls.append((payload, timeout))
+        assert payload["command"] == "inspect_interaction_response"
+        return {
+            "base_url": "https://example.test/details",
+            "controls": [_interaction_control(1)],
+            "scanned_nodes": 1,
+            "controls_truncated": False,
+        }
+
+    monkeypatch.setattr(driver.node_manager, "send_command", send_command)
+
+    result = await driver.inspect_interaction_response(
+        SOURCE_PERSONA_ID,
+        base_url="https://example.test/details",
+        html='<a href="/next">Next</a>',
+    )
+
+    assert result["target_requests_sent"] == 0
+    assert result["bytes_inspected"] == len('<a href="/next">Next</a>')
+    assert result["controls"] == (_interaction_control(1),)
+    assert [payload["command"] for payload, _timeout in calls] == [
+        "inspect_interaction_response"
+    ]
+    assert all(
+        payload["command"] not in {"navigate", "click"}
+        for payload, _timeout in calls
+    )
+
+    with pytest.raises(ValueError, match="exceeds the observation limit"):
+        await driver.inspect_interaction_response(
+            SOURCE_PERSONA_ID,
+            base_url="https://example.test/details",
+            html="x" * (2 * 1024 * 1024 + 1),
+        )
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_interaction_response_observation_rejects_dropped_controls(
+    monkeypatch,
+):
+    async def send_command(_payload, timeout=30.0):
+        return {
+            "base_url": "https://example.test/details",
+            "controls": [{"tag": "a"}],
+            "scanned_nodes": 1,
+            "controls_truncated": False,
+        }
+
+    monkeypatch.setattr(driver.node_manager, "send_command", send_command)
+
+    with pytest.raises(
+        driver.DriverCommandError,
+        match="controls are invalid",
+    ):
+        await driver.inspect_interaction_response(
+            SOURCE_PERSONA_ID,
+            base_url="https://example.test/details",
+            html='<a href="/next">Next</a>',
+        )
+
+
 def test_capture_events_are_ignored_without_active_capture(monkeypatch):
     def forbidden(*_args, **_kwargs):
         raise AssertionError("inactive capture must not open a file")

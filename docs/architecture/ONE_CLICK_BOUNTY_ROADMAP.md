@@ -48,14 +48,15 @@ The important current limitations are:
 
 - The macOS ordinary Scan screen does not yet send the explicit behavioral profile.
 - A single URL load exposes only behavior naturally produced by that navigation.
-- The obligation frontier can select and seal one safe acquisition intent, but no
-  active boundary resolves or executes it yet.
+- The obligation frontier can execute one sealed safe acquisition intent and
+  inertly observe the exact returned destination, but it cannot execute the prepared
+  second transition yet.
 - Acquisition and proof continuation do not form one adaptive multi-round loop.
 - Fresh-owned execution supports narrow captured lifecycle shapes.
 - Omission confirmation supports one exact capability-linked lifecycle shape.
 - Most open security-relation types lack independent active proof oracles.
-- The engine cannot yet acquire new evidence specifically to unblock a selected
-  obligation.
+- The engine can acquire one obligation-directed response, but cannot yet repeat that
+  process as a bounded adaptive chain.
 - Closure accounts for the current evidence frontier; it does not establish broad
   target coverage.
 - Behavioral findings are not yet connected directly to the submission-grade report
@@ -769,38 +770,100 @@ the door, which sealed acquisition crossed it, which behavior was actually new, 
 why another action is or is not presently defensible. The map cannot silently turn a
 transport response into imaginary browser authority.
 
+### Receipt-bound inert destination observation
+
+The second Phase 2B slice now turns the exact already-acquired authenticated response
+into a truthful destination control catalog without running the downloaded page.
+
+Technical implementation:
+
+- Require the separate
+  `SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1` feature flag and signed
+  `behavioral_interaction_render_observation` workflow in both direct and ordinary
+  one-click preflight.
+- Recompute and bind the exact acquisition receipt, admission, obligation, actor
+  world, request identity, response body hash and shape, normalized operation,
+  destination page, target, policy, and budget state.
+- Parse at most 2 MiB of the acquired response using `DOMParser` in WebKit's isolated
+  client content world; never insert it into a live document, run target scripts,
+  navigate, or load subresources.
+- Scan at most 4,096 candidate nodes and return at most 256 sanitized structural
+  controls. Require the native result to attest zero target requests.
+- Rebuild the redacted catalog in Python, rerun destination reasoning with only the
+  actor's new controls, and bind a complete observed after-state to that exact
+  catalog.
+- Present at most one next admission only when it matches the exact destination page,
+  catalog, actor world, current policy, remaining budget, and open obligation.
+- Persist only content-addressed observation references and counters. Raw response
+  bytes and structural controls remain ephemeral.
+- Treat truncation, cached acquisition without raw bytes, driver failure, changed
+  evidence, or any contract mismatch as an unobserved state that cannot continue.
+
+Non-technical result:
+
+- Sentinel can inspect the blueprint returned from the room it just opened without
+  walking into the room or switching on anything inside it.
+- If that blueprint exposes a new safe-looking door relevant to an unanswered
+  security question, Sentinel can prepare that exact door as its next choice.
+- It still cannot open the second door, run JavaScript-built controls, submit forms,
+  change data, or assume the prepared control remains live.
+
+Target traffic and execution authority:
+
+- Unchanged. This observation sends zero additional requests beyond the existing
+  maximum-one acquisition GET and grants no navigation, click, script, form, write,
+  external-origin, or second-transition authority.
+
+Exit gate:
+
+- Changed body, response, page, world, admission, obligation, receipt, or
+  authorization bindings fail before the native observer.
+- The observer runs in an isolated WebKit world and cannot be replaced by
+  target-controlled JavaScript globals.
+- Raw HTML and controls cannot enter the durable orchestration receipt.
+- A complete destination catalog can become the after-state and can present only an
+  exactly state-bound, still non-executable next admission.
+- Truncated or unavailable observations cannot authorize continuation.
+
+The one-of-a-kind property is an authenticated browser-state advance without ambient
+page authority. Conventional tools either execute untrusted page code to discover
+controls or parse HTML without connecting it to the exact authorized persona action,
+policy, proof budget, and durable response evidence. Sentinel makes that connection
+falsifiable while keeping the next action inert.
+
 ## Immediate next slice
 
 The next slice continues the bounded browser-state explorer:
 
-> Add one controlled browser render observation for the acquired same-origin
-> destination so Sentinel can build a truthful after-state control catalog and
-> consider—but not yet automatically execute—the next state-bound admission.
+> Execute one receipt-chained second safe-read transition from the prepared
+> destination admission, while retaining the same exact-binding, one-request,
+> zero-ambient-browser-authority rules.
 
 Technical scope:
 
-- Extend the native boundary with a local, actor-world render observation for the
-  exact already-acquired destination, without activating page controls.
-- Recheck final origin, page identity, structural catalog, response bounds, persona
-  ownership, and acquisition receipt binding.
-- Construct an observed after-state only from the actual rendered destination and
-  the network operations generated by that render.
-- Run obligation-directed admission against that new state, then let the transition
-  contract rank the exact state-bound candidate by blocker relevance and measured
-  novelty.
-- Keep automatic execution capped at the existing one GET; the newly ranked second
-  transition remains a non-executable manifest in this next slice.
+- Add a second-transition admission boundary that accepts only the next admission
+  already sealed into the completed first transition.
+- Re-parse the same receipt-bound acquired response locally and resolve the admitted
+  structural locator twice, without running target scripts or trusting a live page.
+- Require the same destination identity on both resolutions, then compile only one
+  same-origin authenticated GET through `PolicyExecutor`.
+- Reserve a distinct durable child receipt bound to the parent transition, remaining
+  budget, depth, state count, and transition count.
+- Feed the second response back into the same inert observation and state-transition
+  machinery, but enforce an implementation cap of exactly two total interaction
+  GETs for this slice.
 
 Non-technical scope:
 
-- Sentinel will load the room it already safely retrieved, look at the actual doors
-  visible there, and prepare one defensible next choice only if the room contained a
-  new clue.
-- It still will not open that second door, press buttons, fill forms, make changes,
-  or roam.
+- Sentinel will be able to open the one second door it already chose from the
+  authenticated blueprint, inspect what came back, and stop with another
+  tamper-evident map entry.
+- It still will not press buttons, submit forms, change data, leave scope, or wander
+  indefinitely.
 
 Target traffic and execution authority:
 
-- The render may produce ordinary browser subresource traffic for the exact
-  same-origin destination, so it requires explicit authority and new traffic
-  accounting. It will not authorize a second interaction transition.
+- Conditional change: a separately authorized scan may send one additional
+  same-origin authenticated GET, for a maximum of two interaction GETs in this
+  implementation slice. It grants no DOM, script, form, write, or external-origin
+  authority.

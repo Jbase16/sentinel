@@ -70,6 +70,17 @@ _INTERACTION_RESPONSE_REF = re.compile(
     r"^interaction_acquisition_response:[0-9a-f]{64}$"
 )
 _INTERACTION_PAGE_REF = re.compile(r"^interaction_page:[0-9a-f]{64}$")
+_INTERACTION_RENDER_REF = re.compile(
+    r"^interaction_render_observation:[0-9a-f]{64}$"
+)
+_INTERACTION_TARGET_REF = re.compile(r"^interaction_target:[0-9a-f]{64}$")
+_INTERACTION_WORLD_REF = re.compile(r"^world:[0-9a-f]{64}$")
+_INTERACTION_CATALOG_REF = re.compile(
+    r"^interaction_intent_catalog:[0-9a-f]{64}$"
+)
+_INTERACTION_INTENT_SET_REF = re.compile(
+    r"^interaction_intent_set:[0-9a-f]{64}$"
+)
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
     {
         "fresh_boundary_baseline_is_not_usable",
@@ -709,6 +720,125 @@ def _redacted_browser_transition_summary(value: Any) -> Dict[str, Any]:
     return {"status": "completed", "result": normalized}
 
 
+def _redacted_interaction_render_summary(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("interaction render observation is invalid")
+    common = {
+        "schema_version": 1,
+        "mode": "behavioral_interaction_render_observation_v1",
+        "target_requests_sent": 0,
+        "executable": False,
+    }
+    if any(value.get(key) != expected for key, expected in common.items()):
+        raise ReceiptStoreError(
+            "interaction render observation contract is invalid"
+        )
+    status = value.get("status")
+    if status == "not_needed":
+        expected = {*common, "status"}
+        if set(value) != expected:
+            raise ReceiptStoreError(
+                "inactive interaction render observation is invalid"
+            )
+        return {**common, "status": status}
+    if status == "unavailable":
+        if (
+            set(value) != {*common, "status", "reason_code"}
+            or value.get("reason_code")
+            != "acquisition_response_not_available_for_observation"
+        ):
+            raise ReceiptStoreError(
+                "unavailable interaction render observation is invalid"
+            )
+        return {**common, "status": status, "reason_code": value["reason_code"]}
+    if status in {"denied", "error"}:
+        error_code = value.get("error_code")
+        if (
+            set(value) != {*common, "status", "error_code"}
+            or not isinstance(error_code, str)
+            or _ABORT_REASON.fullmatch(error_code) is None
+        ):
+            raise ReceiptStoreError(
+                "failed interaction render observation is invalid"
+            )
+        return {**common, "status": status, "error_code": error_code}
+    expected = {
+        *common,
+        "status",
+        "observation_id",
+        "acquisition_id",
+        "acquisition_receipt_id",
+        "admission_id",
+        "obligation_id",
+        "target_ref",
+        "world_ref",
+        "page_ref",
+        "response_ref",
+        "catalog_id",
+        "intent_digest",
+        "controls_observed",
+        "scanned_nodes",
+        "controls_truncated",
+        "bytes_inspected",
+        "complete",
+    }
+    refs = {
+        "observation_id": _INTERACTION_RENDER_REF,
+        "acquisition_id": _INTERACTION_ACQUISITION_REF,
+        "admission_id": _INTERACTION_ADMISSION_REF,
+        "obligation_id": _SECURITY_OBLIGATION_REF,
+        "target_ref": _INTERACTION_TARGET_REF,
+        "world_ref": _INTERACTION_WORLD_REF,
+        "page_ref": _INTERACTION_PAGE_REF,
+        "response_ref": _INTERACTION_RESPONSE_REF,
+        "catalog_id": _INTERACTION_CATALOG_REF,
+        "intent_digest": _INTERACTION_INTENT_SET_REF,
+    }
+    controls_observed = _nonnegative_int(
+        value.get("controls_observed"),
+        field_name="interaction_render.controls_observed",
+    )
+    scanned_nodes = _nonnegative_int(
+        value.get("scanned_nodes"),
+        field_name="interaction_render.scanned_nodes",
+    )
+    bytes_inspected = _nonnegative_int(
+        value.get("bytes_inspected"),
+        field_name="interaction_render.bytes_inspected",
+    )
+    receipt_id = value.get("acquisition_receipt_id")
+    if (
+        status != "completed"
+        or set(value) != expected
+        or any(
+            not isinstance(value.get(key), str)
+            or pattern.fullmatch(value[key]) is None
+            for key, pattern in refs.items()
+        )
+        or not isinstance(receipt_id, str)
+        or not receipt_id.startswith("behavioral-")
+        or not re_full_sha256(receipt_id[len("behavioral-") :])
+        or controls_observed > 256
+        or scanned_nodes > 4_096
+        or bytes_inspected > 2 * 1024 * 1024
+        or not isinstance(value.get("controls_truncated"), bool)
+        or not isinstance(value.get("complete"), bool)
+        or value.get("complete") != (not value.get("controls_truncated"))
+    ):
+        raise ReceiptStoreError("completed interaction render observation is invalid")
+    return {
+        **common,
+        "status": status,
+        **{key: value[key] for key in refs},
+        "acquisition_receipt_id": receipt_id,
+        "controls_observed": controls_observed,
+        "scanned_nodes": scanned_nodes,
+        "controls_truncated": value["controls_truncated"],
+        "bytes_inspected": bytes_inspected,
+        "complete": value["complete"],
+    }
+
+
 def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ReceiptStoreError("interaction acquisition summary is invalid")
@@ -801,6 +931,47 @@ def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
                     "browser state transition acquisition binding is invalid"
                 )
         output["state_transition"] = transition_summary
+    if "render_observation" in value:
+        render_summary = _redacted_interaction_render_summary(
+            value.get("render_observation")
+        )
+        if render_summary["status"] == "completed":
+            redacted_execution = output["execution"]
+            if (
+                render_summary["acquisition_receipt_id"]
+                != receipt["receipt_id"]
+                or render_summary["acquisition_id"]
+                != redacted_execution["acquisition_id"]
+                or render_summary["admission_id"]
+                != redacted_execution["admission_id"]
+                or render_summary["obligation_id"]
+                != redacted_execution["obligation_id"]
+                or render_summary["response_ref"]
+                != redacted_execution["response_ref"]
+                or render_summary["page_ref"]
+                != redacted_execution["destination_page_ref"]
+            ):
+                raise ReceiptStoreError(
+                    "interaction render acquisition binding is invalid"
+                )
+            transition = output.get("state_transition")
+            if (
+                render_summary["complete"]
+                and (
+                    not isinstance(transition, Mapping)
+                    or transition.get("status") != "completed"
+                    or render_summary["page_ref"]
+                    != transition["result"]["after_state"]["page_ref"]
+                    or render_summary["catalog_id"]
+                    != transition["result"]["after_state"][
+                        "interaction_catalog_id"
+                    ]
+                )
+            ):
+                raise ReceiptStoreError(
+                    "interaction render state binding is invalid"
+                )
+        output["render_observation"] = render_summary
     return output
 
 

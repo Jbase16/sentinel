@@ -637,6 +637,13 @@ async def run_behavioral_authorization_endpoint(
         BROWSER_STATE_EXPLORER_MODE,
         build_acquisition_transition,
     )
+    from core.behavior.interaction_render import (
+        INTERACTION_RENDER_MODE,
+        INTERACTION_RENDER_WORKFLOW,
+        InteractionRenderConfig,
+        InteractionRenderDenied,
+        InteractionRenderObservationBoundary,
+    )
     from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
@@ -647,7 +654,10 @@ async def run_behavioral_authorization_endpoint(
     from core.safety.ownership_registry import OwnershipRegistry
     from core.safety.action_classifier import SAFE_READ
     from core.wraith.bola_replay import ReplayRequest, SNDReplayTransport
-    from core.server.routers.driver import resolve_interaction_navigation
+    from core.server.routers.driver import (
+        inspect_interaction_response,
+        resolve_interaction_navigation,
+    )
 
     try:
         target_origin, scope_filter = _behavioral_scope_filter(req.target_origin)
@@ -709,12 +719,24 @@ async def run_behavioral_authorization_endpoint(
     interaction_acquisition_config = (
         InteractionAcquisitionConfig.from_environment()
     )
+    interaction_render_config = InteractionRenderConfig.from_environment()
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
         raise HTTPException(
             status_code=409,
             detail=(
                 "interaction acquisition requires "
                 "SENTINELFORGE_BEHAVIOR_PRIMARY=1"
+            ),
+        )
+    if (
+        interaction_render_config.enabled
+        and not interaction_acquisition_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "interaction response observation requires "
+                "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION=1"
             ),
         )
     if (
@@ -726,6 +748,17 @@ async def run_behavioral_authorization_endpoint(
             detail=(
                 "authorization envelope does not permit "
                 f"{INTERACTION_ACQUISITION_WORKFLOW!r}"
+            ),
+        )
+    if (
+        interaction_render_config.enabled
+        and INTERACTION_RENDER_WORKFLOW not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "authorization envelope does not permit "
+                f"{INTERACTION_RENDER_WORKFLOW!r}"
             ),
         )
     continuation_config = BoundedContinuationConfig.from_environment()
@@ -798,6 +831,14 @@ async def run_behavioral_authorization_endpoint(
         ),
         "target_requests_sent": 0,
     }
+    if interaction_render_config.enabled:
+        interaction_acquisition["render_observation"] = {
+            "schema_version": 1,
+            "mode": INTERACTION_RENDER_MODE,
+            "status": "not_needed",
+            "target_requests_sent": 0,
+            "executable": False,
+        }
     if config.enabled:
         transport = SNDReplayTransport()
         policy = ExecutionPolicy(
@@ -926,6 +967,7 @@ async def run_behavioral_authorization_endpoint(
                     "interaction_acquisition": (
                         interaction_acquisition_config.enabled
                     ),
+                    "interaction_render": interaction_render_config.enabled,
                     "fresh_owned_boundary": fresh_boundary_config.enabled,
                     "fresh_omission_confirmation": (
                         omission_confirmation_config.enabled
@@ -1205,8 +1247,54 @@ async def run_behavioral_authorization_endpoint(
             interaction_acquisition["target_requests_sent"] = (
                 0 if acquisition_result.reused else 1
             )
+            render_observation = None
             if acquisition_result.record is not None:
                 source_records.append(acquisition_result.record)
+                if interaction_render_config.enabled:
+                    try:
+                        render_boundary = InteractionRenderObservationBoundary(
+                            admission=admitted_interaction,
+                            acquisition=acquisition_result.execution,
+                            acquisition_receipt_id=acquisition_result.receipt_id,
+                            record=acquisition_result.record,
+                            target_origin=target_origin,
+                            authorization=envelope,
+                            actor_persona_id=source_persona.persona_id,
+                            peer_persona_id=peer_persona.persona_id,
+                            observer=inspect_interaction_response,
+                            config=interaction_render_config,
+                        )
+                        render_observation = await render_boundary.execute()
+                        interaction_acquisition["render_observation"] = (
+                            render_observation.to_dict()
+                        )
+                    except InteractionRenderDenied as exc:
+                        interaction_acquisition["render_observation"] = {
+                            "schema_version": 1,
+                            "mode": INTERACTION_RENDER_MODE,
+                            "status": "denied",
+                            "error_code": str(exc).split(":", 1)[0],
+                            "target_requests_sent": 0,
+                            "executable": False,
+                        }
+                    except Exception:
+                        logger.exception(
+                            "interaction response observation failed"
+                        )
+                        interaction_acquisition["render_observation"] = {
+                            "schema_version": 1,
+                            "mode": INTERACTION_RENDER_MODE,
+                            "status": "error",
+                            "error_code": (
+                                "interaction_render_internal_error"
+                            ),
+                            "target_requests_sent": 0,
+                            "executable": False,
+                        }
+                use_observed_destination = (
+                    render_observation is not None
+                    and render_observation.complete
+                )
                 shadow_run = shadow_orchestrator.run(
                     source_records,
                     target_origin=target_origin,
@@ -1214,17 +1302,46 @@ async def run_behavioral_authorization_endpoint(
                     peer_records=peer_records,
                     peer_world_id=peer_persona.persona_id,
                     artifacts=tuple(shadow_artifacts),
-                    controls=source_controls,
-                    peer_controls=peer_controls,
-                    interaction_page_url=req.interaction_page_url,
+                    controls=(
+                        render_observation.controls
+                        if use_observed_destination
+                        else source_controls
+                    ),
+                    peer_controls=(
+                        () if use_observed_destination else peer_controls
+                    ),
+                    interaction_page_url=(
+                        acquisition_result.record["url"]
+                        if use_observed_destination
+                        else req.interaction_page_url
+                    ),
                     experiment_context=shadow_context,
                     previous_graph=initial_shadow.graph,
                     derivation_round=2,
                 )
+                if (
+                    use_observed_destination
+                    and shadow_run.interactions.catalog_id
+                    != render_observation.catalog_id
+                ):
+                    raise ValueError(
+                        "observed interaction catalog changed during planning"
+                    )
                 shadow_response = shadow_run.to_dict()
                 shadow_response["interaction_acquisition_ref"] = (
                     acquisition_result.execution.get("acquisition_id")
                 )
+            elif interaction_render_config.enabled:
+                interaction_acquisition["render_observation"] = {
+                    "schema_version": 1,
+                    "mode": INTERACTION_RENDER_MODE,
+                    "status": "unavailable",
+                    "reason_code": (
+                        "acquisition_response_not_available_for_observation"
+                    ),
+                    "target_requests_sent": 0,
+                    "executable": False,
+                }
             state_refs = {
                 "destination_page_ref",
                 "operation_ref",
@@ -1263,6 +1380,24 @@ async def run_behavioral_authorization_endpoint(
                         after_frontier=tuple(
                             item.to_dict()
                             for item in shadow_run.ranked_frontier
+                        ),
+                        next_admission=(
+                            shadow_run.interaction_admission.admission
+                            if render_observation is not None
+                            and render_observation.complete
+                            else None
+                        ),
+                        after_control_surface=(
+                            "observed"
+                            if render_observation is not None
+                            and render_observation.complete
+                            else "unobserved"
+                        ),
+                        after_catalog_id=(
+                            render_observation.catalog_id
+                            if render_observation is not None
+                            and render_observation.complete
+                            else None
                         ),
                     )
                     interaction_acquisition["state_transition"] = {
@@ -1975,6 +2110,10 @@ async def run_behavioral_authorization_from_url_endpoint(
         INTERACTION_ACQUISITION_WORKFLOW,
         InteractionAcquisitionConfig,
     )
+    from core.behavior.interaction_render import (
+        INTERACTION_RENDER_WORKFLOW,
+        InteractionRenderConfig,
+    )
     from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
     from core.behavior.continuation import (
         BoundedContinuationConfig,
@@ -2036,6 +2175,18 @@ async def run_behavioral_authorization_from_url_endpoint(
     interaction_acquisition_config = (
         InteractionAcquisitionConfig.from_environment()
     )
+    interaction_render_config = InteractionRenderConfig.from_environment()
+    if (
+        interaction_render_config.enabled
+        and not interaction_acquisition_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click interaction response observation requires "
+                "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION=1"
+            ),
+        )
     if (
         interaction_acquisition_config.enabled
         and INTERACTION_ACQUISITION_WORKFLOW not in envelope.allowed_workflows
@@ -2045,6 +2196,18 @@ async def run_behavioral_authorization_from_url_endpoint(
             detail=(
                 "one-click interaction acquisition authorization denied; "
                 f"missing signed workflow: {INTERACTION_ACQUISITION_WORKFLOW}"
+            ),
+        )
+    if (
+        interaction_render_config.enabled
+        and INTERACTION_RENDER_WORKFLOW not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click interaction response observation authorization "
+                "denied; missing signed workflow: "
+                f"{INTERACTION_RENDER_WORKFLOW}"
             ),
         )
     if omission_confirmation_config.enabled:
@@ -2074,6 +2237,7 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "interaction_acquisition": (
                     interaction_acquisition_config.enabled
                 ),
+                "interaction_render": interaction_render_config.enabled,
                 "fresh_owned_boundary": (
                     FreshOwnedBoundaryConfig.from_environment().enabled
                 ),
