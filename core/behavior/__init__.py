@@ -42,6 +42,8 @@ Receipt-bound inert destination observation remains default-off and explicit-onl
 through :mod:`core.behavior.interaction_render`.
 Receipt-chained second safe-read execution remains separately default-off and
 explicit-only through :mod:`core.behavior.interaction_second_transition`.
+Bounded adaptive safe-read execution remains separately default-off and explicit-only
+through :mod:`core.behavior.interaction_adaptive`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

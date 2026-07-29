@@ -1033,8 +1033,10 @@ def build_chained_acquisition_transition(
     after_control_surface: str,
     after_catalog_id: Optional[str],
     limits: BrowserStateLimits,
+    seen_behavior_refs: Iterable[str] = (),
+    next_admission: Optional[InteractionIntentAdmission] = None,
 ) -> BrowserTransitionResult:
-    """Build one parent-bound transition and refuse a third interaction."""
+    """Build one immediate-parent-bound transition under explicit hard limits."""
 
     if (
         not isinstance(parent, BrowserTransitionResult)
@@ -1049,8 +1051,10 @@ def build_chained_acquisition_transition(
         or parent.transition.next_admission_id != admission.admission_id
         or parent.transition.next_intent_id != admission.intent_id
         or parent.transition.after_state_id != parent.after_state.state_id
-        or parent.transition_count != 1
-        or limits.max_transitions != 2
+        or parent.transition_count != parent.transition.depth
+        or parent.transition.depth != parent.after_state.depth
+        or parent.transition_count >= limits.max_transitions
+        or parent.after_state.depth >= limits.max_depth
     ):
         raise ValueError("chained browser transition parent is invalid")
     budget_snapshot = acquisition.get("budget_snapshot")
@@ -1089,9 +1093,9 @@ def build_chained_acquisition_transition(
         receipt_id=receipt_id,
         before_frontier=before_frontier,
         after_frontier=after_frontier,
-        seen_behavior_refs=(parent.before_state.behavior_ref,),
+        seen_behavior_refs=seen_behavior_refs,
         transition_count=parent.transition_count,
-        next_admission=None,
+        next_admission=next_admission,
     )
 
 

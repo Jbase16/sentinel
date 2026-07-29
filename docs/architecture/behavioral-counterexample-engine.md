@@ -1576,6 +1576,54 @@ link is insufficient: the exact prior conduct receipt, observed state, unresolve
 security obligation, sealed admission, current policy, and remaining budget must all
 form one still-valid evidence chain immediately before the next request.
 
+#### Bounded adaptive safe-read controller
+
+`InteractionAdaptiveController` is a separately default-off controller that extends
+the fixed parent-child transition without creating a free-form browser loop. It
+requires `SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE=1`, all acquisition and inert
+render prerequisites, and the separately signed
+`behavioral_interaction_adaptive_safe_read` workflow. Adaptive and fixed
+second-transition modes are mutually exclusive.
+
+Each iteration accepts only the next admission sealed by the immediate parent state.
+It revalidates the full parent receipt, transition, observed response, catalog, page,
+actor world, policy, budget, and named obligation. The structural locator is resolved
+twice from the same inert receipt-bound HTML. Only an identical same-origin `GET` can
+cross the existing acquisition boundary. The child response is then inertly
+observed, behaviorally derived, ranked, admitted, and converted into the next
+content-addressed state transition.
+
+Every child receipt contains an immediate-parent chain reference. The root adaptive
+receipt commits to the complete ordered chain and aggregate request count. Receipt
+redaction independently reconstructs the controller identity and every chain link,
+rejecting missing, reordered, duplicated, transplanted, or tampered steps.
+
+Continuation requires measurable new behavior or progress against a named blocker.
+Duplicate states, no progress, no next admission, unavailable or truncated response
+evidence, derivation failure, changed resolution, policy or budget denial, receipt
+reuse without raw ephemeral evidence, and all state, transition, and depth limits
+stop the loop. Version 1 permits at most five states, four transitions, depth four,
+and four total interaction GETs.
+
+In plain language, Sentinel can keep opening the next safe door only when the room it
+just inspected produced new evidence that answers or sharpens an actual security
+question. An account page might justify an audit index, which justifies one audit
+detail, which justifies related metadata. Every step becomes a tamper-evident link in
+one chain, and the chain records its exact stopping reason.
+
+This slice conditionally changes target traffic and execution authority. It can raise
+the interaction maximum from two to four same-origin authenticated GETs, including
+the initial interaction request. It introduces no new traffic class and grants no
+click, target-script, form, write, redirect-following, external-origin, or ambient
+browser authority. Every child remains independently signed, policy-gated, budgeted,
+bounded, provenance-recorded, and duplicate-suppressed.
+
+The one-of-a-kind property is evidence-derived adaptive authority. Sentinel does not
+continue because a crawler has more links or a model remains confident. It continues
+only when the exact previous conduct receipt, resulting observed state, unresolved
+security obligation, sealed next admission, current policy, and remaining budget
+still agree.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

@@ -22,7 +22,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .normalize import stable_hash
 
@@ -85,6 +85,13 @@ _BROWSER_TRANSITION_REF = re.compile(
     r"^browser_state_transition:[0-9a-f]{64}$"
 )
 _BROWSER_STATE_REF = re.compile(r"^browser_state:[0-9a-f]{64}$")
+_BEHAVIORAL_RECEIPT_ID = re.compile(r"^behavioral-[0-9a-f]{64}$")
+_INTERACTION_ADAPTIVE_CONTROLLER_REF = re.compile(
+    r"^interaction_adaptive_controller:[0-9a-f]{64}$"
+)
+_INTERACTION_ADAPTIVE_CHAIN_REF = re.compile(
+    r"^interaction_adaptive_chain:[0-9a-f]{64}$"
+)
 _FRESH_BOUNDARY_ERROR_CODES = frozenset(
     {
         "fresh_boundary_baseline_is_not_usable",
@@ -873,6 +880,7 @@ def _redacted_second_interaction_summary(value: Any) -> Dict[str, Any]:
     if status in {"denied", "failed"}:
         error_code = value.get("error_code")
         uncertain = value.get("target_request_may_have_been_sent", False)
+        target_requests_sent = value.get("target_requests_sent")
         if (
             set(value)
             != {
@@ -884,12 +892,19 @@ def _redacted_second_interaction_summary(value: Any) -> Dict[str, Any]:
                 "target_request_may_have_been_sent",
                 "executable",
             }
-            or value.get("target_requests_sent") != 0
+            or isinstance(target_requests_sent, bool)
+            or not isinstance(target_requests_sent, int)
+            or not 0 <= target_requests_sent <= 3
             or value.get("executable") is not False
             or not isinstance(error_code, str)
             or _ABORT_REASON.fullmatch(error_code) is None
             or not isinstance(uncertain, bool)
-            or uncertain != (status == "failed")
+            or (status == "denied" and (target_requests_sent != 0 or uncertain))
+            or (
+                status == "failed"
+                and target_requests_sent == 0
+                and not uncertain
+            )
         ):
             raise ReceiptStoreError(
                 "failed second interaction transition is invalid"
@@ -965,6 +980,307 @@ def _redacted_second_interaction_summary(value: Any) -> Dict[str, Any]:
         "target_requests_sent": acquisition["target_requests_sent"],
         "render_observation": acquisition["render_observation"],
         "state_transition": acquisition["state_transition"],
+        "executable": False,
+    }
+
+
+def _redacted_adaptive_interaction_step(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("adaptive interaction step is invalid")
+    if (
+        value.get("schema_version") != 1
+        or value.get("mode") != "behavioral_interaction_adaptive_read_v1"
+    ):
+        raise ReceiptStoreError("adaptive interaction step contract is invalid")
+    acquisition = _redacted_interaction_acquisition_summary(
+        {
+            "schema_version": 1,
+            "mode": "behavioral_interaction_read_acquisition_v1",
+            **{
+                key: value.get(key)
+                for key in (
+                    "status",
+                    "receipt",
+                    "execution",
+                    "target_requests_sent",
+                    "render_observation",
+                    "state_transition",
+                )
+            },
+        }
+    )
+    expected = {
+        "schema_version",
+        "mode",
+        "status",
+        "step_index",
+        "controller_id",
+        "root_receipt_id",
+        "root_transition_id",
+        "parent_chain_ref",
+        "chain_ref",
+        "parent_receipt_id",
+        "parent_transition_id",
+        "parent_after_state_id",
+        "observation_id",
+        "receipt",
+        "execution",
+        "target_requests_sent",
+        "render_observation",
+        "state_transition",
+        "analysis",
+        "executable",
+    }
+    analysis = value.get("analysis")
+    analysis_valid = analysis == {"status": "completed"} or (
+        isinstance(analysis, Mapping)
+        and set(analysis) == {"status", "error_code"}
+        and analysis.get("status") == "error"
+        and isinstance(analysis.get("error_code"), str)
+        and _ABORT_REASON.fullmatch(analysis["error_code"]) is not None
+    )
+    refs = {
+        "controller_id": _INTERACTION_ADAPTIVE_CONTROLLER_REF,
+        "root_transition_id": _BROWSER_TRANSITION_REF,
+        "parent_chain_ref": _INTERACTION_ADAPTIVE_CHAIN_REF,
+        "chain_ref": _INTERACTION_ADAPTIVE_CHAIN_REF,
+        "parent_transition_id": _BROWSER_TRANSITION_REF,
+        "parent_after_state_id": _BROWSER_STATE_REF,
+        "observation_id": _INTERACTION_RENDER_REF,
+    }
+    root_receipt_id = value.get("root_receipt_id")
+    parent_receipt_id = value.get("parent_receipt_id")
+    step_index = value.get("step_index")
+    transition = acquisition.get("state_transition")
+    if (
+        value.get("status") not in {"completed", "already_executed"}
+        or set(value) != expected
+        or value.get("executable") is not False
+        or not isinstance(step_index, int)
+        or isinstance(step_index, bool)
+        or not 2 <= step_index <= 4
+        or any(
+            not isinstance(value.get(key), str)
+            or pattern.fullmatch(value[key]) is None
+            for key, pattern in refs.items()
+        )
+        or not isinstance(root_receipt_id, str)
+        or not isinstance(parent_receipt_id, str)
+        or _BEHAVIORAL_RECEIPT_ID.fullmatch(root_receipt_id) is None
+        or _BEHAVIORAL_RECEIPT_ID.fullmatch(parent_receipt_id) is None
+        or not analysis_valid
+        or not isinstance(transition, Mapping)
+        or transition.get("status") != "completed"
+    ):
+        raise ReceiptStoreError("completed adaptive interaction step is invalid")
+    result = transition["result"]
+    child_transition = result["transition"]
+    if (
+        acquisition["receipt"]["receipt_id"] == parent_receipt_id
+        or child_transition["receipt_id"]
+        != acquisition["receipt"]["receipt_id"]
+        or child_transition["before_state_id"]
+        != value["parent_after_state_id"]
+        or child_transition["admission_id"]
+        != acquisition["execution"]["admission_id"]
+        or child_transition["depth"] != step_index
+        or result["transition_count"] != step_index
+    ):
+        raise ReceiptStoreError("adaptive interaction step binding is invalid")
+    expected_chain_ref = stable_hash(
+        "interaction_adaptive_chain",
+        {
+            "controller_id": value["controller_id"],
+            "parent_chain_ref": value["parent_chain_ref"],
+            "receipt_id": acquisition["receipt"]["receipt_id"],
+            "transition_id": child_transition["transition_id"],
+            "after_state_id": result["after_state"]["state_id"],
+        },
+    )
+    if value["chain_ref"] != expected_chain_ref:
+        raise ReceiptStoreError("adaptive interaction chain identity is invalid")
+    return {
+        "schema_version": 1,
+        "mode": "behavioral_interaction_adaptive_read_v1",
+        "status": value["status"],
+        "step_index": step_index,
+        **{key: value[key] for key in refs},
+        "root_receipt_id": root_receipt_id,
+        "parent_receipt_id": parent_receipt_id,
+        "receipt": acquisition["receipt"],
+        "execution": acquisition["execution"],
+        "target_requests_sent": acquisition["target_requests_sent"],
+        "render_observation": acquisition["render_observation"],
+        "state_transition": transition,
+        "analysis": dict(analysis),
+        "executable": False,
+    }
+
+
+def _redacted_adaptive_interaction_summary(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("adaptive interaction chain is invalid")
+    if (
+        value.get("schema_version") != 1
+        or value.get("mode")
+        != "behavioral_interaction_adaptive_safe_read_v1"
+    ):
+        raise ReceiptStoreError("adaptive interaction chain contract is invalid")
+    status = value.get("status")
+    if status == "not_needed":
+        if set(value) != {
+            "schema_version",
+            "mode",
+            "status",
+            "target_requests_sent",
+            "executable",
+        } or (
+            value.get("target_requests_sent") != 0
+            or value.get("executable") is not False
+        ):
+            raise ReceiptStoreError("inactive adaptive interaction is invalid")
+        return dict(value)
+    if status in {"denied", "failed"}:
+        error_code = value.get("error_code")
+        uncertain = value.get("target_request_may_have_been_sent", False)
+        if (
+            set(value)
+            != {
+                "schema_version",
+                "mode",
+                "status",
+                "error_code",
+                "target_requests_sent",
+                "target_request_may_have_been_sent",
+                "executable",
+            }
+            or value.get("target_requests_sent") != 0
+            or value.get("executable") is not False
+            or not isinstance(error_code, str)
+            or _ABORT_REASON.fullmatch(error_code) is None
+            or not isinstance(uncertain, bool)
+            or uncertain != (status == "failed")
+        ):
+            raise ReceiptStoreError("failed adaptive interaction is invalid")
+        return dict(value)
+    expected = {
+        "schema_version",
+        "mode",
+        "status",
+        "controller_id",
+        "root_receipt_id",
+        "root_transition_id",
+        "root_after_state_id",
+        "root_chain_ref",
+        "chain_ref",
+        "limits",
+        "steps",
+        "target_requests_sent",
+        "transition_count",
+        "final_state_id",
+        "stop_reasons",
+        "executable",
+    }
+    limits = value.get("limits")
+    raw_steps = value.get("steps")
+    if (
+        status != "completed"
+        or set(value) != expected
+        or value.get("executable") is not False
+        or not isinstance(limits, Mapping)
+        or set(limits)
+        != {
+            "max_states",
+            "max_transitions",
+            "max_depth",
+            "max_operation_refs",
+            "max_obligation_refs",
+        }
+        or any(
+            isinstance(item, bool)
+            or not isinstance(item, int)
+            or item <= 0
+            for item in limits.values()
+        )
+        or limits["max_states"] > 5
+        or limits["max_transitions"] > 4
+        or limits["max_depth"] > 4
+        or limits["max_operation_refs"] > 512
+        or limits["max_obligation_refs"] > 512
+        or limits["max_transitions"] >= limits["max_states"]
+        or not isinstance(raw_steps, Sequence)
+        or isinstance(raw_steps, (str, bytes))
+        or not 1 <= len(raw_steps) <= limits["max_transitions"] - 1
+    ):
+        raise ReceiptStoreError("completed adaptive interaction is invalid")
+    steps = tuple(
+        _redacted_adaptive_interaction_step(item) for item in raw_steps
+    )
+    step_receipts = tuple(item["receipt"]["receipt_id"] for item in steps)
+    step_transitions = tuple(
+        item["state_transition"]["result"]["transition"]["transition_id"]
+        for item in steps
+    )
+    step_chain_refs = tuple(item["chain_ref"] for item in steps)
+    controller_id = value.get("controller_id")
+    root_receipt_id = value.get("root_receipt_id")
+    root_transition_id = value.get("root_transition_id")
+    root_after_state_id = value.get("root_after_state_id")
+    root_chain_ref = value.get("root_chain_ref")
+    chain_ref = value.get("chain_ref")
+    final_state_id = value.get("final_state_id")
+    stop_reasons = value.get("stop_reasons")
+    final_transition = steps[-1]["state_transition"]["result"]
+    if (
+        not isinstance(controller_id, str)
+        or _INTERACTION_ADAPTIVE_CONTROLLER_REF.fullmatch(controller_id)
+        is None
+        or not isinstance(root_receipt_id, str)
+        or _BEHAVIORAL_RECEIPT_ID.fullmatch(root_receipt_id) is None
+        or not isinstance(root_transition_id, str)
+        or _BROWSER_TRANSITION_REF.fullmatch(root_transition_id) is None
+        or not isinstance(root_after_state_id, str)
+        or _BROWSER_STATE_REF.fullmatch(root_after_state_id) is None
+        or not isinstance(root_chain_ref, str)
+        or _INTERACTION_ADAPTIVE_CHAIN_REF.fullmatch(root_chain_ref) is None
+        or not isinstance(chain_ref, str)
+        or _INTERACTION_ADAPTIVE_CHAIN_REF.fullmatch(chain_ref) is None
+        or not isinstance(final_state_id, str)
+        or _BROWSER_STATE_REF.fullmatch(final_state_id) is None
+        or not isinstance(stop_reasons, Sequence)
+        or isinstance(stop_reasons, (str, bytes))
+        or list(stop_reasons)
+        != final_transition["transition"]["stop_reasons"]
+        or value.get("target_requests_sent")
+        != sum(item["target_requests_sent"] for item in steps)
+        or value.get("transition_count") != 1 + len(steps)
+        or value["transition_count"] != final_transition["transition_count"]
+        or final_state_id != final_transition["after_state"]["state_id"]
+        or chain_ref != steps[-1]["chain_ref"]
+        or len(set(step_receipts)) != len(step_receipts)
+        or len(set(step_transitions)) != len(step_transitions)
+        or len(set(step_chain_refs)) != len(step_chain_refs)
+        or root_receipt_id in step_receipts
+        or root_transition_id in step_transitions
+        or root_chain_ref in step_chain_refs
+    ):
+        raise ReceiptStoreError("adaptive interaction result is invalid")
+    return {
+        "schema_version": 1,
+        "mode": "behavioral_interaction_adaptive_safe_read_v1",
+        "status": "completed",
+        "controller_id": controller_id,
+        "root_receipt_id": root_receipt_id,
+        "root_transition_id": root_transition_id,
+        "root_after_state_id": root_after_state_id,
+        "root_chain_ref": root_chain_ref,
+        "chain_ref": chain_ref,
+        "limits": dict(limits),
+        "steps": list(steps),
+        "target_requests_sent": value["target_requests_sent"],
+        "transition_count": value["transition_count"],
+        "final_state_id": final_state_id,
+        "stop_reasons": list(stop_reasons),
         "executable": False,
     }
 
@@ -1143,6 +1459,114 @@ def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
                     "second interaction state binding is invalid"
                 )
         output["second_transition"] = second
+    if "adaptive_chain" in value:
+        if "second_transition" in value:
+            raise ReceiptStoreError(
+                "fixed and adaptive interaction continuations are mutually exclusive"
+            )
+        adaptive = _redacted_adaptive_interaction_summary(
+            value.get("adaptive_chain")
+        )
+        if adaptive["status"] == "completed":
+            parent = output.get("state_transition")
+            root_observation = output.get("render_observation")
+            if (
+                not isinstance(parent, Mapping)
+                or parent.get("status") != "completed"
+                or not isinstance(root_observation, Mapping)
+                or root_observation.get("status") != "completed"
+                or not root_observation.get("complete")
+            ):
+                raise ReceiptStoreError(
+                    "adaptive interaction root evidence is unavailable"
+                )
+            parent_result = parent["result"]
+            parent_transition = parent_result["transition"]
+            parent_after = parent_result["after_state"]
+            expected_controller_id = stable_hash(
+                "interaction_adaptive_controller",
+                {
+                    "root_receipt_id": receipt["receipt_id"],
+                    "root_transition_id": parent_transition["transition_id"],
+                    "root_after_state_id": parent_after["state_id"],
+                    "target_ref": parent_after["target_ref"],
+                    "world_ref": parent_after["world_ref"],
+                    "limits": adaptive["limits"],
+                },
+            )
+            expected_root_chain_ref = stable_hash(
+                "interaction_adaptive_chain",
+                {
+                    "controller_id": expected_controller_id,
+                    "receipt_id": receipt["receipt_id"],
+                    "transition_id": parent_transition["transition_id"],
+                    "after_state_id": parent_after["state_id"],
+                },
+            )
+            if (
+                adaptive["controller_id"] != expected_controller_id
+                or adaptive["root_receipt_id"] != receipt["receipt_id"]
+                or adaptive["root_transition_id"]
+                != parent_transition["transition_id"]
+                or adaptive["root_after_state_id"] != parent_after["state_id"]
+                or adaptive["root_chain_ref"] != expected_root_chain_ref
+            ):
+                raise ReceiptStoreError(
+                    "adaptive interaction root binding is invalid"
+                )
+            expected_parent_receipt = receipt["receipt_id"]
+            expected_parent_transition = parent_transition
+            expected_parent_after = parent_after
+            expected_observation_id = root_observation["observation_id"]
+            expected_parent_chain_ref = expected_root_chain_ref
+            for index, step in enumerate(adaptive["steps"], start=2):
+                if (
+                    step["step_index"] != index
+                    or step["controller_id"] != expected_controller_id
+                    or step["root_receipt_id"] != receipt["receipt_id"]
+                    or step["root_transition_id"]
+                    != parent_transition["transition_id"]
+                    or step["parent_chain_ref"]
+                    != expected_parent_chain_ref
+                    or step["parent_receipt_id"] != expected_parent_receipt
+                    or step["parent_transition_id"]
+                    != expected_parent_transition["transition_id"]
+                    or step["parent_after_state_id"]
+                    != expected_parent_after["state_id"]
+                    or step["observation_id"] != expected_observation_id
+                    or step["execution"]["admission_id"]
+                    != expected_parent_transition["next_admission_id"]
+                    or expected_parent_transition["decision"]
+                    != "eligible_for_next_transition"
+                ):
+                    raise ReceiptStoreError(
+                        "adaptive interaction parent chain is invalid"
+                    )
+                child_result = step["state_transition"]["result"]
+                expected_parent_receipt = step["receipt"]["receipt_id"]
+                expected_parent_transition = child_result["transition"]
+                expected_parent_after = child_result["after_state"]
+                expected_parent_chain_ref = step["chain_ref"]
+                child_observation = step["render_observation"]
+                expected_observation_id = child_observation.get(
+                    "observation_id"
+                )
+                if (
+                    index < 1 + len(adaptive["steps"])
+                    and (
+                        child_observation.get("status") != "completed"
+                        or not child_observation.get("complete")
+                        or not isinstance(expected_observation_id, str)
+                    )
+                ):
+                    raise ReceiptStoreError(
+                        "adaptive interaction continuation evidence is unavailable"
+                    )
+            if expected_parent_transition["decision"] != "stop":
+                raise ReceiptStoreError(
+                    "adaptive interaction chain did not terminate"
+                )
+        output["adaptive_chain"] = adaptive
     return output
 
 

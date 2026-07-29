@@ -48,14 +48,15 @@ The important current limitations are:
 
 - The macOS ordinary Scan screen does not yet send the explicit behavioral profile.
 - A single URL load exposes only behavior naturally produced by that navigation.
-- The obligation frontier can execute two receipt-chained sealed safe-read intents,
-  but the mechanism is not yet generalized into the bounded adaptive loop.
-- Acquisition and proof continuation do not form one adaptive multi-round loop.
+- The obligation frontier can execute up to four receipt-chained sealed safe-read
+  intents while each step produces measurable progress.
+- Adaptive acquisition and active proof continuation are still separate bounded
+  controllers rather than one proof-convergence loop.
 - Fresh-owned execution supports narrow captured lifecycle shapes.
 - Omission confirmation supports one exact capability-linked lifecycle shape.
 - Most open security-relation types lack independent active proof oracles.
-- The engine can acquire one obligation-directed response, but cannot yet repeat that
-  process as a bounded adaptive chain.
+- The adaptive controller remains intentionally limited to same-origin GETs derived
+  from statically visible response controls.
 - Closure accounts for the current evidence frontier; it does not establish broad
   target coverage.
 - Behavioral findings are not yet connected directly to the submission-grade report
@@ -897,38 +898,116 @@ only because the exact first receipt, resulting state, security obligation, iner
 response evidence, and sealed next admission all still agree immediately before the
 request.
 
-## Immediate next slice
+### Bounded adaptive safe-read controller
 
-The next slice generalizes the fixed two-step controller:
+The fourth Phase 2B slice generalizes the proven parent-child transition into a
+bounded evidence-driven chain.
 
-> Turn the proven parent-child mechanism into a bounded adaptive safe-read loop that
-> may continue only while each receipt-backed transition produces measurable new
-> behavior or resolves a named security blocker.
+Technical implementation:
 
-Technical scope:
+- Require
+  `SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE=1`, all preceding acquisition and
+  render gates, and the separately signed
+  `behavioral_interaction_adaptive_safe_read` workflow.
+- Keep adaptive mode mutually exclusive with the fixed second-transition mode so a
+  request has one unambiguous continuation contract.
+- Revalidate the immediate parent receipt, transition, after-state, inert
+  observation, admission, obligation, actor world, policy, budget, page, and catalog
+  before every child step.
+- Resolve every sealed structural locator twice from the same receipt-bound response,
+  then delegate only an identical same-origin `GET` to the existing controlled
+  acquisition boundary.
+- Repeat inert observation, shadow derivation, obligation ranking, admission, and
+  content-addressed transition evaluation only while the resulting state contains
+  measurable new behavior or named-blocker progress.
+- Bind every child receipt to its immediate parent and bind the root adaptive receipt
+  to the complete ordered chain, allowing the chain to be replay-validated without
+  raw response bodies.
+- Stop on duplicate behavior, no progress, absent next admission, unobserved response,
+  changed resolution, policy or budget denial, receipt reuse without ephemeral
+  response evidence, derivation failure, or any hard limit.
+- Enforce an implementation ceiling of five states, four transitions, depth four,
+  and four total interaction GETs. Existing endpoint and total proof budgets remain
+  independently authoritative.
 
-- Extract the two-transition orchestration into a reusable controller over the
-  existing state, depth, transition, operation, obligation, policy, and proof-budget
-  limits.
-- Make each child receipt point to its immediate parent so the complete exploration
-  chain can be reconstructed and replay-validated.
-- Repeat inert observation, shadow derivation, obligation ranking, admission, double
-  resolution, acquisition, and transition evaluation without introducing a
-  free-form browser loop.
-- Stop on duplicate behavior, no catalog/operation/blocker progress, unavailable raw
-  response evidence, policy or budget exhaustion, receipt reuse without ephemeral
-  evidence, or any hard state/depth/transition limit.
-- Keep the initial implementation read-only and same-origin.
+Non-technical result:
 
-Non-technical scope:
-
-- Sentinel will be able to keep opening only the next justified safe door while each
-  room reveals genuinely new evidence, then stop for a concrete recorded reason.
-- It still will not press buttons, fill forms, make changes, or treat persistence
-  alone as permission to continue.
+- Sentinel can keep opening the next justified safe door while each new room reveals
+  real evidence connected to an unanswered security question.
+- For example, it can move from an account page to an audit index, then an audit
+  detail, then a related metadata page when each response independently justifies
+  the next safe read.
+- It records exactly why it continued and why it stopped. It still cannot press
+  buttons, submit forms, run target JavaScript, change data, follow redirects, leave
+  the authorized origin, or search indefinitely.
 
 Target traffic and execution authority:
 
-- Conditional change: the controller may authorize more than two same-origin GETs,
-  but never beyond the existing hard state, transition, depth, endpoint, and total
-  request budgets. No mutation or ambient browser authority is introduced.
+- Conditional change: adaptive mode can raise the interaction maximum from two to
+  four same-origin authenticated GETs, including the initial interaction request.
+- It grants no new traffic class and no DOM, script, form, write, redirect-following,
+  external-origin, or ambient browser authority. Every additional GET consumes the
+  existing proof budget and crosses the existing policy and provenance boundaries.
+- Disabled, stale, duplicated, non-progressing, changed, denied, exhausted, reused,
+  or unobserved paths stop without another request.
+
+Exit gate:
+
+- A completed run has a replay-valid root receipt and a gap-free sequence of
+  immediate-parent child receipts.
+- Each child is independently policy-gated, budgeted, provenance-recorded, bounded,
+  redacted, and duplicate-suppressed.
+- Focused tests prove progress to the hard ceiling, duplicate-progress stopping,
+  double-resolution failure before transport, missing-workflow zero traffic,
+  replay-without-traffic behavior, receipt-chain tamper rejection, direct URL scan
+  integration, and one-click preflight denial.
+
+The one-of-a-kind property is evidence-derived adaptive authority. This is not a
+crawler queue and it is not a model deciding that another request feels promising:
+the only authority for the next request is the still-valid conjunction of the
+previous request's durable receipt, its newly observed state, a named security
+obligation, a sealed structural admission, current policy, and remaining budget.
+
+## Immediate next slice
+
+The next slice connects adaptive discovery directly to proof convergence:
+
+> When the adaptive read chain makes a high-value security obligation executable,
+> hand that exact obligation and its evidence lineage to the existing independent
+> proof controller instead of ending with a richer map.
+
+Technical scope:
+
+- Define a receipt-bound handoff from the adaptive root and final state to an exact
+  open obligation, executable proof contract, actor world, policy, and remaining
+  budget.
+- Allow only an already implemented independent proof oracle to accept the handoff;
+  adaptive exploration cannot invent a mutation or lower an oracle's admission gate.
+- Feed the proof disposition and evidence references back into the same behavioral
+  graph so success closes the obligation and failure or unavailability becomes a
+  concrete next blocker.
+- Stop on finding confirmation, exhaustive eligible-oracle disposition, policy or
+  budget exhaustion, cleanup uncertainty, duplicate proof, or lack of measurable
+  graph progress.
+- Bind any report-facing candidate to both the adaptive acquisition chain and the
+  independent proof receipt.
+
+Non-technical scope:
+
+- Sentinel will be able to turn a newly discovered locked safe over to the exact
+  approved test that can prove whether the lock is genuinely broken, then put that
+  answer back on the map automatically.
+- For example, if safe reads reveal a specific cross-account document relation, the
+  existing authorization proof oracle can test that exact relation rather than
+  requiring a person to restart the workflow manually.
+- It still will not invent an unsafe test, claim a suspicion as a finding, bypass
+  cleanup requirements, or submit a bounty report without operator confirmation.
+
+Target traffic and execution authority:
+
+- This introduces no new traffic class or execution authority. It may allocate the
+  remaining existing proof budget to an already authorized proof oracle after the
+  read chain; that oracle retains its own signed workflow, policy, ownership,
+  cleanup, and request limits.
+- Mutation remains impossible unless a separate existing mutation-capable proof
+  workflow is explicitly signed and independently admits the exact operation.

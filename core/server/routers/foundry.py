@@ -654,6 +654,14 @@ async def run_behavioral_authorization_endpoint(
         InteractionSecondTransitionConfig,
         InteractionSecondTransitionDenied,
     )
+    from core.behavior.interaction_adaptive import (
+        INTERACTION_ADAPTIVE_MODE,
+        INTERACTION_ADAPTIVE_WORKFLOW,
+        InteractionAdaptiveConfig,
+        InteractionAdaptiveController,
+        InteractionAdaptiveDenied,
+        InteractionAdaptiveDerivation,
+    )
     from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
@@ -734,6 +742,7 @@ async def run_behavioral_authorization_endpoint(
     interaction_second_config = (
         InteractionSecondTransitionConfig.from_environment()
     )
+    interaction_adaptive_config = InteractionAdaptiveConfig.from_environment()
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
         raise HTTPException(
             status_code=409,
@@ -759,6 +768,28 @@ async def run_behavioral_authorization_endpoint(
             detail=(
                 "interaction second transition requires "
                 "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1"
+            ),
+        )
+    if (
+        interaction_adaptive_config.enabled
+        and not interaction_render_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "adaptive interaction requires "
+                "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1"
+            ),
+        )
+    if (
+        interaction_adaptive_config.enabled
+        and interaction_second_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "adaptive and fixed second interaction modes are mutually "
+                "exclusive"
             ),
         )
     if (
@@ -793,6 +824,17 @@ async def run_behavioral_authorization_endpoint(
             detail=(
                 "authorization envelope does not permit "
                 f"{INTERACTION_SECOND_TRANSITION_WORKFLOW!r}"
+            ),
+        )
+    if (
+        interaction_adaptive_config.enabled
+        and INTERACTION_ADAPTIVE_WORKFLOW not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "authorization envelope does not permit "
+                f"{INTERACTION_ADAPTIVE_WORKFLOW!r}"
             ),
         )
     continuation_config = BoundedContinuationConfig.from_environment()
@@ -877,6 +919,14 @@ async def run_behavioral_authorization_endpoint(
         interaction_acquisition["second_transition"] = {
             "schema_version": 1,
             "mode": INTERACTION_SECOND_TRANSITION_MODE,
+            "status": "not_needed",
+            "target_requests_sent": 0,
+            "executable": False,
+        }
+    if interaction_adaptive_config.enabled:
+        interaction_acquisition["adaptive_chain"] = {
+            "schema_version": 1,
+            "mode": INTERACTION_ADAPTIVE_MODE,
             "status": "not_needed",
             "target_requests_sent": 0,
             "executable": False,
@@ -1012,6 +1062,9 @@ async def run_behavioral_authorization_endpoint(
                     "interaction_render": interaction_render_config.enabled,
                     "interaction_second_transition": (
                         interaction_second_config.enabled
+                    ),
+                    "interaction_adaptive": (
+                        interaction_adaptive_config.enabled
                     ),
                     "fresh_owned_boundary": fresh_boundary_config.enabled,
                     "fresh_omission_confirmation": (
@@ -1300,6 +1353,14 @@ async def run_behavioral_authorization_endpoint(
                     "target_requests_sent": 0,
                     "executable": False,
                 }
+            if interaction_adaptive_config.enabled:
+                interaction_acquisition["adaptive_chain"] = {
+                    "schema_version": 1,
+                    "mode": INTERACTION_ADAPTIVE_MODE,
+                    "status": "not_needed",
+                    "target_requests_sent": 0,
+                    "executable": False,
+                }
             render_observation = None
             render_boundary = None
             if acquisition_result.record is not None:
@@ -1462,6 +1523,137 @@ async def run_behavioral_authorization_endpoint(
                         shadow_run.interaction_admission.admission
                     )
                     if (
+                        interaction_adaptive_config.enabled
+                        and render_boundary is not None
+                        and render_observation is not None
+                        and render_observation.complete
+                        and transition_result.transition.decision
+                        == "eligible_for_next_transition"
+                        and next_interaction is not None
+                    ):
+                        adaptive_parent_shadow = shadow_run
+
+                        async def derive_adaptive_step(
+                            record,
+                            observation,
+                            previous_state,
+                            depth,
+                        ):
+                            derived_shadow = shadow_orchestrator.run(
+                                source_records,
+                                target_origin=target_origin,
+                                world_id=source_persona.persona_id,
+                                peer_records=peer_records,
+                                peer_world_id=peer_persona.persona_id,
+                                artifacts=tuple(shadow_artifacts),
+                                controls=observation.controls,
+                                peer_controls=(),
+                                interaction_page_url=record["url"],
+                                experiment_context=shadow_context,
+                                previous_graph=previous_state.graph,
+                                derivation_round=depth + 1,
+                            )
+                            if (
+                                derived_shadow.interactions.catalog_id
+                                != observation.catalog_id
+                            ):
+                                raise ValueError(
+                                    "adaptive observed interaction catalog "
+                                    "changed during planning"
+                                )
+                            return InteractionAdaptiveDerivation(
+                                after_frontier=tuple(
+                                    item.to_dict()
+                                    for item in derived_shadow.ranked_frontier
+                                ),
+                                next_admission=(
+                                    derived_shadow.interaction_admission.admission
+                                ),
+                                state=derived_shadow,
+                            )
+
+                        try:
+                            adaptive_result = await (
+                                InteractionAdaptiveController(
+                                    target_origin=target_origin,
+                                    authorization=envelope,
+                                    actor_persona_id=(
+                                        source_persona.persona_id
+                                    ),
+                                    peer_persona_id=(
+                                        peer_persona.persona_id
+                                    ),
+                                    executor=acquisition_executor,
+                                    resolver=(
+                                        resolve_interaction_response_navigation
+                                    ),
+                                    observer=inspect_interaction_response,
+                                    render_config=interaction_render_config,
+                                    receipt_store=receipt_store,
+                                    config=interaction_adaptive_config,
+                                ).run(
+                                    initial_parent=transition_result,
+                                    initial_source_boundary=render_boundary,
+                                    initial_observation=render_observation,
+                                    initial_admission=next_interaction,
+                                    initial_frontier=tuple(
+                                        item.to_dict()
+                                        for item in adaptive_parent_shadow.ranked_frontier
+                                    ),
+                                    initial_state=adaptive_parent_shadow,
+                                    derive=derive_adaptive_step,
+                                    record_sink=lambda record: (
+                                        source_records.append(dict(record))
+                                    ),
+                                )
+                            )
+                            interaction_acquisition[
+                                "adaptive_chain"
+                            ] = adaptive_result.to_dict()
+                            shadow_run = adaptive_result.final_state
+                            shadow_response = shadow_run.to_dict()
+                            shadow_response[
+                                "interaction_acquisition_ref"
+                            ] = adaptive_result.steps[
+                                -1
+                            ].acquisition.execution.get("acquisition_id")
+                        except InteractionAdaptiveDenied as exc:
+                            interaction_acquisition["adaptive_chain"] = {
+                                "schema_version": 1,
+                                "mode": INTERACTION_ADAPTIVE_MODE,
+                                "status": (
+                                    "failed"
+                                    if (
+                                        exc.target_request_possible
+                                        or exc.target_requests_sent
+                                    )
+                                    else "denied"
+                                ),
+                                "error_code": str(exc).split(":", 1)[0],
+                                "target_requests_sent": (
+                                    exc.target_requests_sent
+                                ),
+                                "target_request_may_have_been_sent": (
+                                    exc.target_request_possible
+                                ),
+                                "executable": False,
+                            }
+                        except Exception:
+                            logger.exception(
+                                "adaptive interaction controller failed"
+                            )
+                            interaction_acquisition["adaptive_chain"] = {
+                                "schema_version": 1,
+                                "mode": INTERACTION_ADAPTIVE_MODE,
+                                "status": "failed",
+                                "error_code": (
+                                    "interaction_adaptive_internal_error"
+                                ),
+                                "target_requests_sent": 0,
+                                "target_request_may_have_been_sent": True,
+                                "executable": False,
+                            }
+                    elif (
                         interaction_second_config.enabled
                         and render_boundary is not None
                         and render_observation is not None
@@ -2460,6 +2652,10 @@ async def run_behavioral_authorization_from_url_endpoint(
         INTERACTION_SECOND_TRANSITION_WORKFLOW,
         InteractionSecondTransitionConfig,
     )
+    from core.behavior.interaction_adaptive import (
+        INTERACTION_ADAPTIVE_WORKFLOW,
+        InteractionAdaptiveConfig,
+    )
     from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
     from core.behavior.continuation import (
         BoundedContinuationConfig,
@@ -2525,6 +2721,7 @@ async def run_behavioral_authorization_from_url_endpoint(
     interaction_second_config = (
         InteractionSecondTransitionConfig.from_environment()
     )
+    interaction_adaptive_config = InteractionAdaptiveConfig.from_environment()
     if (
         interaction_render_config.enabled
         and not interaction_acquisition_config.enabled
@@ -2542,6 +2739,28 @@ async def run_behavioral_authorization_from_url_endpoint(
             detail=(
                 "one-click interaction second transition requires "
                 "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1"
+            ),
+        )
+    if (
+        interaction_adaptive_config.enabled
+        and not interaction_render_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click adaptive interaction requires "
+                "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER=1"
+            ),
+        )
+    if (
+        interaction_adaptive_config.enabled
+        and interaction_second_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click adaptive and fixed second interaction modes are "
+                "mutually exclusive"
             ),
         )
     if (
@@ -2580,6 +2799,18 @@ async def run_behavioral_authorization_from_url_endpoint(
                 f"{INTERACTION_SECOND_TRANSITION_WORKFLOW}"
             ),
         )
+    if (
+        interaction_adaptive_config.enabled
+        and INTERACTION_ADAPTIVE_WORKFLOW not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click adaptive interaction authorization denied; "
+                "missing signed workflow: "
+                f"{INTERACTION_ADAPTIVE_WORKFLOW}"
+            ),
+        )
     if omission_confirmation_config.enabled:
         missing_workflows = sorted(
             {
@@ -2610,6 +2841,9 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "interaction_render": interaction_render_config.enabled,
                 "interaction_second_transition": (
                     interaction_second_config.enabled
+                ),
+                "interaction_adaptive": (
+                    interaction_adaptive_config.enabled
                 ),
                 "fresh_owned_boundary": (
                     FreshOwnedBoundaryConfig.from_environment().enabled
