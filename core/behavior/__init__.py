@@ -44,6 +44,8 @@ Receipt-chained second safe-read execution remains separately default-off and
 explicit-only through :mod:`core.behavior.interaction_second_transition`.
 Bounded adaptive safe-read execution remains separately default-off and explicit-only
 through :mod:`core.behavior.interaction_adaptive`.
+Adaptive-chain to proof-plan binding remains transport-free and can only follow
+explicitly enabled adaptive acquisition through :mod:`core.behavior.adaptive_proof`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

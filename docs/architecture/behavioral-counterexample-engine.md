@@ -1624,6 +1624,50 @@ only when the exact previous conduct receipt, resulting observed state, unresolv
 security obligation, sealed next admission, current policy, and remaining budget
 still agree.
 
+#### Receipt-bound adaptive-to-proof handoff
+
+`AdaptiveProofHandoff` is an analysis-only, transport-free artifact connecting a
+completed adaptive interaction chain to one exact existing proof plan. It is created
+only when the original shadow had no actionable resolution, the adaptive chain
+reached a terminal state, and the final shadow contains an exactly open,
+resolver-backed obligation.
+
+The content-addressed handoff binds the original shadow, adaptive controller, root
+receipt and transition, root and final chain references, final browser state, final
+shadow, graph and closure identities, target, actor world, policy, budget, resolver
+plan, obligation, resolution reference, frontier index, score, and established
+oracle class. It grants no execution authority and has a target-request count of
+zero.
+
+Before execution, `SingleStepObligationResolver` rederives the full plan and requires
+an exact match with the sealed plan. Only the existing controlled authorization,
+fresh-owned boundary, and fresh omission-confirmation resolvers are representable.
+Their independent workflow, policy, ownership, cleanup, provenance, and request
+budgets remain unchanged.
+
+The proof receipt retains the handoff. Receipt feedback requires the handoff's final
+graph, obligation, and resolution to match the exact terminal proof receipt and adds
+the handoff ID to the obligation disposition evidence. A confirmed finding exposes
+both the handoff and proof receipt ID in report-facing metadata. The ordinary
+one-click URL coordinator inherits the same behavior because it delegates to the
+direct behavioral execution path after bounded capture.
+
+In plain language, Sentinel can now prove that a particular approved lock test came
+from a particular chain of newly discovered evidence. A safe-read chain that exposes
+a paired document operation can hand precisely that operation to the existing
+authorization oracle; a different operation, obligation, graph, or proof plan is
+rejected rather than silently substituted.
+
+This slice changes neither target traffic nor execution authority. Handoff creation,
+plan sealing, receipt validation, and feedback binding are local-only. Any proof
+traffic remains solely the authority of the previously implemented oracle and its
+separate safety gates.
+
+The one-of-a-kind property is an unbroken discovery-to-proof evidence lineage. The
+system records that no executable proof existed initially, which adaptive chain made
+one available, which exact oracle was selected, which receipt proves its terminal
+verdict, and which graph disposition consumed that evidence.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

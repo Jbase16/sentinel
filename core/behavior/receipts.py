@@ -1285,6 +1285,68 @@ def _redacted_adaptive_interaction_summary(value: Any) -> Dict[str, Any]:
     }
 
 
+def redacted_adaptive_proof_handoff(value: Any) -> Dict[str, Any]:
+    """Validate and copy the transport-free adaptive-to-proof binding."""
+
+    from .adaptive_proof import AdaptiveProofHandoff
+
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("adaptive proof handoff is invalid")
+    try:
+        return AdaptiveProofHandoff.from_dict(value).to_dict()
+    except (TypeError, ValueError) as exc:
+        raise ReceiptStoreError("adaptive proof handoff contract is invalid") from exc
+
+
+def _attach_adaptive_proof_handoff(
+    output: Dict[str, Any],
+    source: Mapping[str, Any],
+) -> Dict[str, Any]:
+    if "adaptive_proof_handoff" in source:
+        handoff = redacted_adaptive_proof_handoff(
+            source.get("adaptive_proof_handoff")
+        )
+        plan = source.get("plan")
+        if isinstance(plan, Mapping):
+            plan_id = plan.get("plan_id")
+            obligation_id = plan.get("selected_obligation_id")
+            selected_refs = {
+                "authorization_proposal": plan.get(
+                    "selected_proposal_id"
+                ),
+                "owned_experiment": plan.get("selected_experiment_id"),
+                "omission_experiment": plan.get(
+                    "selected_omission_experiment_id"
+                ),
+            }
+            selected_ref = selected_refs[handoff["resolution_kind"]]
+            if (
+                (plan_id is not None and plan_id != handoff["plan_id"])
+                or (
+                    obligation_id is not None
+                    and obligation_id != handoff["obligation_id"]
+                )
+                or (
+                    selected_ref is not None
+                    and selected_ref != handoff["resolution_ref"]
+                )
+            ):
+                raise ReceiptStoreError(
+                    "adaptive proof handoff selection binding is invalid"
+                )
+        experiment_id = source.get("experiment_id")
+        if (
+            experiment_id is not None
+            and handoff["resolution_kind"] == "omission_experiment"
+            and experiment_id != handoff["resolution_ref"]
+        ):
+            raise ReceiptStoreError(
+                "adaptive proof handoff experiment binding is invalid"
+            )
+        output["adaptive_proof_handoff"] = handoff
+    return output
+
+
 def _redacted_interaction_acquisition_summary(value: Any) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ReceiptStoreError("interaction acquisition summary is invalid")
@@ -1817,7 +1879,7 @@ def redacted_fresh_owned_boundary_outcome(
                 response.get("interaction_acquisition")
             )
         )
-    return output
+    return _attach_adaptive_proof_handoff(output, response)
 
 
 def redacted_fresh_omission_outcome(
@@ -2210,7 +2272,7 @@ def redacted_fresh_omission_confirmation_outcome(
         raise ReceiptStoreError(
             "fresh omission confirmation budget is inconsistent"
         )
-    return {
+    output = {
         "kind": "fresh_omission_confirmation",
         **{key: item for key, (item, _pattern) in refs.items()},
         "status": status,
@@ -2226,6 +2288,7 @@ def redacted_fresh_omission_confirmation_outcome(
         "finding_ref": finding_ref,
         "finding": None,
     }
+    return _attach_adaptive_proof_handoff(output, value)
 
 
 def redacted_continuation_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
@@ -2309,9 +2372,10 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
             isinstance(admission_execution, Mapping)
             and admission_execution.get("kind") == "fresh_omission_confirmation"
         ):
-            return redacted_fresh_omission_confirmation_outcome(
+            output = redacted_fresh_omission_confirmation_outcome(
                 admission_execution
             )
+            return _attach_adaptive_proof_handoff(output, response)
     if isinstance(execution_value, Mapping) and execution_value.get("kind") == (
         "fresh_owned_boundary"
     ):
@@ -2354,7 +2418,7 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
                 response.get("interaction_acquisition")
             )
         )
-    return output
+    return _attach_adaptive_proof_handoff(output, response)
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:

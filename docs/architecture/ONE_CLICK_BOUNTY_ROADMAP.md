@@ -50,8 +50,8 @@ The important current limitations are:
 - A single URL load exposes only behavior naturally produced by that navigation.
 - The obligation frontier can execute up to four receipt-chained sealed safe-read
   intents while each step produces measurable progress.
-- Adaptive acquisition and active proof continuation are still separate bounded
-  controllers rather than one proof-convergence loop.
+- A completed adaptive chain can now seal one newly actionable obligation into an
+  existing proof oracle with receipt-verifiable lineage.
 - Fresh-owned execution supports narrow captured lifecycle shapes.
 - Omission confirmation supports one exact capability-linked lifecycle shape.
 - Most open security-relation types lack independent active proof oracles.
@@ -968,46 +968,112 @@ the only authority for the next request is the still-valid conjunction of the
 previous request's durable receipt, its newly observed state, a named security
 obligation, a sealed structural admission, current policy, and remaining budget.
 
-## Immediate next slice
+### Receipt-bound adaptive-to-proof handoff
 
-The next slice connects adaptive discovery directly to proof convergence:
+The fifth Phase 2B slice makes the previously implicit transition from adaptive
+discovery to active proof explicit and falsifiable.
 
-> When the adaptive read chain makes a high-value security obligation executable,
-> hand that exact obligation and its evidence lineage to the existing independent
-> proof controller instead of ending with a richer map.
+Technical implementation:
 
-Technical scope:
+- Create a transport-free `AdaptiveProofHandoff` only when the original shadow had
+  no actionable proof, a bounded adaptive chain completed, and the final shadow has
+  one exact resolver-backed open obligation.
+- Bind the handoff to the initial shadow, adaptive controller, root receipt and
+  transition, root and final chain references, final browser state, final shadow,
+  obligation graph, closure certificate, actor world, target, policy, remaining
+  budget, resolver plan, obligation, resolution reference, rank, and established
+  oracle class.
+- Permit only the existing controlled authorization, fresh-owned boundary, or fresh
+  omission-confirmation oracle classes. The handoff cannot describe or instantiate a
+  new executor.
+- Make the existing resolver recompute the complete selected plan immediately before
+  execution and reject any change in plan identity or contents.
+- Include the handoff in the proof receipt and, for bounded continuation, in the
+  first proof-round fingerprint.
+- Require receipt feedback to match the handoff's final graph, obligation, and
+  resolution reference; include the handoff ID in the resulting graph disposition's
+  evidence.
+- Add the handoff and exact proof receipt ID to a confirmed finding's report-facing
+  metadata.
+- Reuse this direct execution path from the ordinary one-click URL coordinator.
 
-- Define a receipt-bound handoff from the adaptive root and final state to an exact
-  open obligation, executable proof contract, actor world, policy, and remaining
-  budget.
-- Allow only an already implemented independent proof oracle to accept the handoff;
-  adaptive exploration cannot invent a mutation or lower an oracle's admission gate.
-- Feed the proof disposition and evidence references back into the same behavioral
-  graph so success closes the obligation and failure or unavailability becomes a
-  concrete next blocker.
-- Stop on finding confirmation, exhaustive eligible-oracle disposition, policy or
-  budget exhaustion, cleanup uncertainty, duplicate proof, or lack of measurable
-  graph progress.
-- Bind any report-facing candidate to both the adaptive acquisition chain and the
-  independent proof receipt.
+Non-technical result:
 
-Non-technical scope:
-
-- Sentinel will be able to turn a newly discovered locked safe over to the exact
-  approved test that can prove whether the lock is genuinely broken, then put that
-  answer back on the map automatically.
-- For example, if safe reads reveal a specific cross-account document relation, the
-  existing authorization proof oracle can test that exact relation rather than
-  requiring a person to restart the workflow manually.
-- It still will not invent an unsafe test, claim a suspicion as a finding, bypass
-  cleanup requirements, or submit a bounty report without operator confirmation.
+- Sentinel no longer merely finishes exploration with a better map. If those safe
+  reads uncover a specific testable broken-lock hypothesis, it seals the exact map,
+  lock, and approved test together before handing them to the locksmith.
+- For example, a later safe read may expose a paired document operation that did not
+  exist in the original capture. Sentinel can hand that exact cross-account
+  obligation to its established three-leg authorization oracle and return a finding
+  tied to both the discovery chain and proof receipt.
+- It still cannot invent a proof technique, lower an oracle's safety checks, treat
+  an unavailable resolver as executable, or promote a suspicion without an
+  independent terminal verdict.
 
 Target traffic and execution authority:
 
-- This introduces no new traffic class or execution authority. It may allocate the
-  remaining existing proof budget to an already authorized proof oracle after the
-  read chain; that oracle retains its own signed workflow, policy, ownership,
-  cleanup, and request limits.
-- Mutation remains impossible unless a separate existing mutation-capable proof
-  workflow is explicitly signed and independently admits the exact operation.
+- Unchanged. Handoff construction, validation, receipt redaction, and feedback
+  binding send zero requests and grant no authority.
+- The selected oracle may send only the requests it was already authorized to send
+  under its existing signed workflow, policy, ownership, cleanup, provenance, and
+  proof-budget contracts.
+- No new mutation, browser, redirect, external-origin, or report-submission authority
+  is introduced.
+
+Exit gate:
+
+- A handoff cannot be created from an already actionable starting frontier, an
+  incomplete adaptive chain, a non-final shadow, a closed or ambiguous obligation,
+  an unsupported oracle, or a changed proof plan.
+- Durable receipt reconstruction rejects any changed handoff field or identity.
+- Receipt feedback rejects graph, obligation, or resolution transplantation.
+- Focused tests cover deterministic creation, tampering, pre-existing authority,
+  plan rederivation, zero-traffic construction, receipt evidence binding, and a full
+  adaptive-read to confirmed-authorization-proof endpoint path.
+
+The one-of-a-kind property is proof authority with discovery provenance. Existing
+systems can crawl and then launch a scanner module, but the scanner usually cannot
+prove that its exact test was authorized by one particular evidence-producing
+exploration chain. Sentinel makes the initial lack of a proof, every adaptive step,
+the newly executable obligation, the independently selected oracle, its receipt, and
+the graph disposition one content-addressed lineage.
+
+## Immediate next slice
+
+The next slice turns a confirmed adaptive proof into a submission-grade bounty
+candidate:
+
+> Assemble the exact adaptive chain, proof receipt, restraint evidence, sanitized
+> reproduction, impact statement, and scope metadata into Sentinel's existing bounty
+> report and draft workflow without requiring a person to reconstruct the chain.
+
+Technical scope:
+
+- Define one report-candidate contract that accepts only a `VIOLATED` graph
+  disposition backed by an adaptive handoff and independently confirmed proof
+  receipt.
+- Reconstruct a sanitized deterministic reproduction from existing receipt and
+  provenance data without storing raw credentials, response bodies, or private
+  markers.
+- Route the candidate through existing adversarial triage and deduplication before it
+  can enter the bounty report.
+- Bind severity rationale, impact, scope, affected operation, personas, cleanup
+  status, restraint, and all evidence references into the draft.
+- Keep external platform submission behind the existing explicit operator
+  confirmation.
+
+Non-technical scope:
+
+- After Sentinel finds and independently proves the broken lock, it will prepare the
+  complete bounty-ready case file automatically: what broke, why it matters, exactly
+  how it was proven, what safety limits were observed, and the evidence a program
+  can replay.
+- It still will not submit the report, choose disclosure language on the operator's
+  behalf, or promise that the program will accept or pay it.
+
+Target traffic and execution authority:
+
+- No target traffic and no new execution authority. This slice consumes only
+  already-redacted receipts, findings, provenance, scope, and report metadata.
+- HackerOne or other external submission remains a separate irreversible action
+  requiring explicit operator confirmation.

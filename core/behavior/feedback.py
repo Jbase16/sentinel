@@ -362,6 +362,22 @@ class ReceiptDispositionAdapter:
                     "receipt_feedback_terminal_state_is_invalid"
                 )
             outcome = validated.outcome
+            adaptive_handoff = None
+            if "adaptive_proof_handoff" in outcome:
+                from .adaptive_proof import AdaptiveProofHandoff
+
+                try:
+                    adaptive_handoff = AdaptiveProofHandoff.from_dict(
+                        outcome["adaptive_proof_handoff"]
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ReceiptFeedbackDenied(
+                        "receipt_adaptive_proof_handoff_is_invalid"
+                    ) from exc
+                if adaptive_handoff.final_graph_digest != graph.graph_digest:
+                    raise ReceiptFeedbackDenied(
+                        "receipt_adaptive_proof_graph_binding_changed"
+                    )
             if outcome.get("kind") in {
                 "compiled_sequence",
                 "fresh_omission_boundary",
@@ -393,6 +409,7 @@ class ReceiptDispositionAdapter:
                     terminal_operation_id=terminal_operation_id,
                 )
                 status, reason_code = _fresh_omission_disposition_status(outcome)
+                bound_resolution_ref = experiment_id
                 finding_ref = outcome.get("finding_ref")
                 evidence_refs = (
                     (receipt_ref, finding_ref)
@@ -430,6 +447,7 @@ class ReceiptDispositionAdapter:
                         terminal_operation_id=terminal_operation_id,
                     )
                     status, reason_code = _fresh_boundary_disposition_status(outcome)
+                    bound_resolution_ref = experiment_id
                 else:
                     proposal_id = plan.get("selected_proposal_id")
                     if proposal_id is None:
@@ -444,7 +462,18 @@ class ReceiptDispositionAdapter:
                         proposal_id,
                     )
                     status, reason_code = _disposition_status(outcome)
+                    bound_resolution_ref = proposal_id
                 evidence_refs = (receipt_ref,)
+            if adaptive_handoff is not None:
+                if (
+                    adaptive_handoff.obligation_id != obligation.obligation_id
+                    or adaptive_handoff.resolution_ref
+                    != bound_resolution_ref
+                ):
+                    raise ReceiptFeedbackDenied(
+                        "receipt_adaptive_proof_selection_binding_changed"
+                    )
+                evidence_refs = (*evidence_refs, adaptive_handoff.handoff_id)
             if obligation.obligation_id in disposition_obligations:
                 raise ReceiptFeedbackDenied("multiple_receipts_resolve_one_obligation")
             disposition_obligations.add(obligation.obligation_id)

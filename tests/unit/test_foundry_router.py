@@ -613,6 +613,237 @@ class TestBehavioralAuthorizationEndpoint:
             f"{self.ORIGIN}/step-4",
         ]
 
+    def test_adaptive_chain_seals_new_proof_and_receipt_binding(
+        self,
+        monkeypatch,
+    ):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.interaction_adaptive import (
+            INTERACTION_ADAPTIVE_WORKFLOW,
+        )
+        from core.behavior.interaction_boundary import (
+            INTERACTION_ACQUISITION_WORKFLOW,
+        )
+        from core.behavior.interaction_render import (
+            INTERACTION_RENDER_WORKFLOW,
+        )
+        from core.behavior.receipts import BehavioralReceiptStore
+        from core.foundry.authorization import create_envelope
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, peer_persona = self._setup()
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[
+                CONTROLLED_WORKFLOW,
+                INTERACTION_ACQUISITION_WORKFLOW,
+                INTERACTION_RENDER_WORKFLOW,
+                INTERACTION_ADAPTIVE_WORKFLOW,
+            ],
+            disclosure_attestation=True,
+        )
+        request.envelope_id = envelope.envelope_id
+
+        def mutation_record(persona_id, object_id):
+            return {
+                "persona_id": persona_id,
+                "method": "POST",
+                "url": f"{self.ORIGIN}/gql",
+                "request_body": json.dumps(
+                    {
+                        "operationName": "UpdateThing",
+                        "query": (
+                            "mutation UpdateThing($id:ID!){"
+                            "updateThing(id:$id){id}}"
+                        ),
+                        "variables": {"id": object_id},
+                    }
+                ),
+                "response_status": 200,
+                "response_body": "{}",
+            }
+
+        request.source_records = [
+            mutation_record(source_persona.persona_id, "source-owned")
+        ]
+        request.peer_records = [
+            mutation_record(peer_persona.persona_id, "peer-owned"),
+            {
+                "persona_id": peer_persona.persona_id,
+                "method": "GET",
+                "url": f"{self.ORIGIN}/api/documents/{self.PEER_ID}",
+                "response_status": 200,
+                "response_body": '{"owner":"PeerPrivateMarker"}',
+            },
+        ]
+        request.interaction_page_url = f"{self.ORIGIN}/app"
+        control = {
+            "tag": "a",
+            "role": "link",
+            "input_type": "",
+            "form_method": "none",
+            "destination": "same_origin",
+            "locator": [
+                {"tag": "html", "sibling_index": 1},
+                {"tag": "body", "sibling_index": 1},
+                {"tag": "a", "sibling_index": 1},
+            ],
+            "locator_truncated": False,
+            "visible": True,
+            "disabled": False,
+            "content_editable": False,
+            "aria_expanded": False,
+            "aria_haspopup": False,
+            "sensitive_form": False,
+            "download": False,
+            "scripted_handler": False,
+            "submitter": False,
+        }
+        request.source_controls = [control]
+        request.peer_controls = []
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE",
+        ):
+            monkeypatch.setenv(name, "1")
+        monkeypatch.delenv(
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_SECOND_TRANSITION",
+            raising=False,
+        )
+
+        sent = []
+
+        async def fake_send(_transport, persona, replay_request):
+            sent.append((persona, replay_request))
+            if replay_request.url.endswith("/discovery"):
+                return ReplayResponse(
+                    200,
+                    (
+                        "<html><body><a href="
+                        f'"/api/documents/{self.SOURCE_ID}">Document</a>'
+                        "</body></html>"
+                    ),
+                )
+            if persona == peer_persona.persona_id:
+                return ReplayResponse(
+                    200,
+                    '{"owner":"PeerPrivateMarker"}',
+                )
+            if self.SOURCE_ID in replay_request.url:
+                return ReplayResponse(
+                    200,
+                    '{"owner":"SourcePrivateMarker"}',
+                )
+            return ReplayResponse(
+                200,
+                '{"owner":"PeerPrivateMarker"}',
+            )
+
+        async def resolve_live(persona_id, locator, peer_persona_id=None):
+            return {
+                "current_url": request.interaction_page_url,
+                "destination_url": f"{self.ORIGIN}/discovery",
+                "control": control,
+                "catalog_controls": [control],
+                "peer_catalog_controls": (),
+            }
+
+        async def resolve_response(
+            persona_id,
+            locator,
+            *,
+            base_url,
+            html,
+        ):
+            return {
+                "current_url": base_url,
+                "destination_url": (
+                    f"{self.ORIGIN}/api/documents/{self.SOURCE_ID}"
+                ),
+                "control": control,
+                "catalog_controls": [control],
+                "peer_catalog_controls": (),
+            }
+
+        async def inspect_response(persona_id, *, base_url, html):
+            return {
+                "base_url": base_url,
+                "controls": [control],
+                "scanned_nodes": 1,
+                "controls_truncated": False,
+                "bytes_inspected": len(html.encode()),
+                "target_requests_sent": 0,
+            }
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+        monkeypatch.setattr(
+            driver,
+            "resolve_interaction_navigation",
+            resolve_live,
+        )
+        monkeypatch.setattr(
+            driver,
+            "resolve_interaction_response_navigation",
+            resolve_response,
+        )
+        monkeypatch.setattr(
+            driver,
+            "inspect_interaction_response",
+            inspect_response,
+        )
+
+        result = _run(
+            run_behavioral_authorization_endpoint(request, _=True)
+        )
+
+        handoff = result["adaptive_proof_handoff"]
+        assert handoff["status"] == "ready"
+        assert handoff["target_requests_sent"] == 0
+        assert handoff["resolution_kind"] == "authorization_proposal"
+        assert handoff["obligation_id"] == (
+            result["plan"]["selected_obligation_id"]
+        )
+        assert handoff["resolution_ref"] == (
+            result["plan"]["selected_proposal_id"]
+        )
+        assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
+        assert result["finding"] is not None
+        metadata = result["finding"]["metadata"]
+        assert metadata["behavioral_adaptive_proof_handoff"] == handoff
+        assert metadata["behavioral_adaptive_proof_receipt"] == {
+            "handoff_id": handoff["handoff_id"],
+            "receipt_id": result["receipt"]["receipt_id"],
+        }
+        feedback = result["behavioral_shadow"]["receipt_feedback"]
+        assert handoff["handoff_id"] in (
+            feedback["dispositions"][0]["evidence_refs"]
+        )
+        stored = BehavioralReceiptStore().load(
+            result["receipt"]["receipt_id"].removeprefix("behavioral-")
+        )
+        assert stored is not None and stored.outcome is not None
+        assert stored.outcome["adaptive_proof_handoff"] == handoff
+        assert len(sent) == 6
+        assert [item[1].redirect_mode for item in sent[:3]] == [
+            "manual",
+            "manual",
+            "manual",
+        ]
+        assert [item[1].redirect_mode for item in sent[3:]] == [
+            "follow",
+            "follow",
+            "follow",
+        ]
+
     def test_foundry_executes_reports_and_deduplicates_exact_omission_proof(
         self,
         monkeypatch,

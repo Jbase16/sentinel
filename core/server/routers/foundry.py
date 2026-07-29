@@ -662,6 +662,10 @@ async def run_behavioral_authorization_endpoint(
         InteractionAdaptiveDenied,
         InteractionAdaptiveDerivation,
     )
+    from core.behavior.adaptive_proof import (
+        AdaptiveProofHandoff,
+        AdaptiveProofHandoffDenied,
+    )
     from core.behavior.feedback import ReceiptDispositionAdapter
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
@@ -1265,6 +1269,8 @@ async def run_behavioral_authorization_endpoint(
         executor=shadow_executor,
     )
     shadow_run = None
+    adaptive_result = None
+    adaptive_origin_shadow = None
     try:
         shadow_run = shadow_orchestrator.run(
             source_records,
@@ -1610,6 +1616,7 @@ async def run_behavioral_authorization_endpoint(
                             interaction_acquisition[
                                 "adaptive_chain"
                             ] = adaptive_result.to_dict()
+                            adaptive_origin_shadow = initial_shadow
                             shadow_run = adaptive_result.final_state
                             shadow_response = shadow_run.to_dict()
                             shadow_response[
@@ -2166,6 +2173,58 @@ async def run_behavioral_authorization_endpoint(
                     detail="omission confirmation preflight failed; execution refused",
                 ) from exc
 
+    def adaptive_proof_handoff_for(
+        current_shadow,
+        plan,
+    ):
+        if adaptive_result is None:
+            return None
+        if adaptive_origin_shadow is None:
+            raise AdaptiveProofHandoffDenied(
+                "adaptive_proof_handoff_origin_shadow_is_missing"
+            )
+        if plan.selected is None:
+            return None
+        handoff = AdaptiveProofHandoff.create(
+            initial_shadow=adaptive_origin_shadow,
+            adaptive=adaptive_result,
+            final_shadow=current_shadow,
+            plan=plan,
+        )
+        if not handoff.validates_plan(plan):
+            raise AdaptiveProofHandoffDenied(
+                "adaptive_proof_handoff_plan_binding_changed"
+            )
+        return handoff
+
+    def attach_adaptive_proof_handoff(
+        response_value,
+        handoff,
+        *,
+        proof_receipt_id=None,
+    ):
+        if handoff is None:
+            return
+        response_value["adaptive_proof_handoff"] = handoff.to_dict()
+        if response_value.get("finding") is None:
+            return
+        finding = response_value.get("finding")
+        if not isinstance(finding, dict):
+            raise AdaptiveProofHandoffDenied(
+                "adaptive_proof_handoff_finding_is_invalid"
+            )
+        metadata = finding.setdefault("metadata", {})
+        if not isinstance(metadata, dict):
+            raise AdaptiveProofHandoffDenied(
+                "adaptive_proof_handoff_finding_metadata_is_invalid"
+            )
+        metadata["behavioral_adaptive_proof_handoff"] = handoff.to_dict()
+        if proof_receipt_id is not None:
+            metadata["behavioral_adaptive_proof_receipt"] = {
+                "handoff_id": handoff.handoff_id,
+                "receipt_id": proof_receipt_id,
+            }
+
     if continuation_config.enabled:
         if (
             shadow_run is None
@@ -2232,6 +2291,11 @@ async def run_behavioral_authorization_endpoint(
                     current_shadow,
                     fresh_boundary_executor=current_boundary,
                 )
+                round_handoff = (
+                    adaptive_proof_handoff_for(current_shadow, plan)
+                    if round_index == 1
+                    else None
+                )
                 admission = continuation_controller.admit_plan(
                     continuation_rounds,
                     plan,
@@ -2257,19 +2321,22 @@ async def run_behavioral_authorization_endpoint(
 
                 selected = plan.selected
                 assert selected is not None
-                round_fingerprint = request_fingerprint(
-                    {
-                        "schema_version": 1,
-                        "mode": "behavioral_continuation_round",
-                        "root_fingerprint": receipt_fingerprint,
-                        "round_index": round_index,
-                        "shadow_run_id": current_shadow.run_id,
-                        "plan_id": plan.plan_id,
-                        "obligation_id": selected.obligation_id,
-                        "resolution_kind": selected.resolution_kind,
-                        "resolution_ref": selected.resolution_ref,
-                    }
-                )
+                round_descriptor = {
+                    "schema_version": 1,
+                    "mode": "behavioral_continuation_round",
+                    "root_fingerprint": receipt_fingerprint,
+                    "round_index": round_index,
+                    "shadow_run_id": current_shadow.run_id,
+                    "plan_id": plan.plan_id,
+                    "obligation_id": selected.obligation_id,
+                    "resolution_kind": selected.resolution_kind,
+                    "resolution_ref": selected.resolution_ref,
+                }
+                if round_handoff is not None:
+                    round_descriptor["adaptive_proof_handoff_id"] = (
+                        round_handoff.handoff_id
+                    )
+                round_fingerprint = request_fingerprint(round_descriptor)
                 round_reservation = receipt_store.reserve(
                     round_fingerprint,
                     context=continuation_context,
@@ -2291,18 +2358,28 @@ async def run_behavioral_authorization_endpoint(
                     peer_records,
                     controlled_executor=round_controlled_executor,
                     fresh_boundary_executor=current_boundary,
+                    expected_plan=plan,
                 )
                 response = run.to_dict()
                 response["behavioral_shadow"] = before_shadow.to_dict()
                 response["graphql_resolution"] = graphql_summary
                 response["read_exploration"] = read_exploration
                 response["interaction_acquisition"] = interaction_acquisition
+                attach_adaptive_proof_handoff(
+                    response,
+                    round_handoff,
+                )
                 completed_round_receipt = receipt_store.complete(
                     round_fingerprint,
                     reservation_token=round_token,
                     outcome=redacted_outcome(response),
                 )
                 round_token = None
+                attach_adaptive_proof_handoff(
+                    response,
+                    round_handoff,
+                    proof_receipt_id=completed_round_receipt.receipt_id,
+                )
 
                 try:
                     feedback = ReceiptDispositionAdapter().adapt(
@@ -2380,7 +2457,10 @@ async def run_behavioral_authorization_endpoint(
                 "continuation_execution_denied",
             )
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except ClosedLoopResolverDenied as exc:
+        except (
+            ClosedLoopResolverDenied,
+            AdaptiveProofHandoffDenied,
+        ) as exc:
             if round_fingerprint is not None and round_token is not None:
                 abort_continuation_receipt(
                     round_fingerprint,
@@ -2475,6 +2555,7 @@ async def run_behavioral_authorization_endpoint(
         }
         return response
 
+    adaptive_proof_handoff = None
     try:
         if shadow_run is None:
             # Disabled mode has no execution authority. Preserve its diagnostic
@@ -2486,6 +2567,21 @@ async def run_behavioral_authorization_endpoint(
                 peer_persona=peer_persona,
             )
         else:
+            sealed_plan = None
+            if adaptive_result is not None:
+                candidate_plan = obligation_resolver.plan(
+                    shadow_run,
+                    fresh_boundary_executor=fresh_boundary_executor,
+                    omission_confirmation_admission=(
+                        omission_confirmation_admission
+                    ),
+                )
+                adaptive_proof_handoff = adaptive_proof_handoff_for(
+                    shadow_run,
+                    candidate_plan,
+                )
+                if adaptive_proof_handoff is not None:
+                    sealed_plan = candidate_plan
             run = await obligation_resolver.run(
                 shadow_run,
                 source_records,
@@ -2495,6 +2591,7 @@ async def run_behavioral_authorization_endpoint(
                 omission_confirmation_admission=(
                     omission_confirmation_admission
                 ),
+                expected_plan=sealed_plan,
             )
     except (
         ControlledExecutionDenied,
@@ -2516,7 +2613,10 @@ async def run_behavioral_authorization_endpoint(
             except (OSError, ReceiptStoreError):
                 logger.exception("failed to terminate denied behavioral receipt")
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ClosedLoopResolverDenied as exc:
+    except (
+        ClosedLoopResolverDenied,
+        AdaptiveProofHandoffDenied,
+    ) as exc:
         if (
             receipt_store is not None
             and receipt_fingerprint is not None
@@ -2541,6 +2641,10 @@ async def run_behavioral_authorization_endpoint(
     }
     response["read_exploration"] = read_exploration
     response["interaction_acquisition"] = interaction_acquisition
+    attach_adaptive_proof_handoff(
+        response,
+        adaptive_proof_handoff,
+    )
     if (
         receipt_store is not None
         and receipt_fingerprint is not None
@@ -2565,6 +2669,11 @@ async def run_behavioral_authorization_endpoint(
             "state": completed_receipt.state,
             "reused": False,
         }
+        attach_adaptive_proof_handoff(
+            response,
+            adaptive_proof_handoff,
+            proof_receipt_id=completed_receipt.receipt_id,
+        )
         if shadow_run is not None:
             try:
                 feedback = ReceiptDispositionAdapter().adapt(

@@ -665,12 +665,21 @@ class SingleStepObligationResolver:
         omission_confirmation_admission: Optional[
             FreshOmissionConfirmationAdmission
         ] = None,
+        expected_plan: Optional[ClosedLoopResolverPlan] = None,
     ) -> ClosedLoopResolverRun:
         plan = self.plan(
             shadow_run,
             fresh_boundary_executor=fresh_boundary_executor,
             omission_confirmation_admission=(omission_confirmation_admission),
         )
+        if expected_plan is not None and (
+            not isinstance(expected_plan, ClosedLoopResolverPlan)
+            or expected_plan.plan_id != plan.plan_id
+            or expected_plan.to_dict() != plan.to_dict()
+        ):
+            raise ClosedLoopResolverDenied(
+                "sealed_resolver_plan_changed_before_execution"
+            )
         if not self.config.enabled:
             return ClosedLoopResolverRun("disabled", plan)
         if plan.selected is None:
