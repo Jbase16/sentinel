@@ -46,6 +46,10 @@ struct ScanControlView: View {
     @State private var showAdvancedConfig = false
     @State private var personasJSON: String = ""
     @State private var oobJSON: String = ""
+    @State private var behavioralEnabled = false
+    @State private var behavioralEnvelopeId = ""
+    @State private var behavioralSourcePersonaId = ""
+    @State private var behavioralPeerPersonaId = ""
     /// Persisted HackerOne research handle → sent as the X-HackerOne-Research
     /// attribution header on bounty scans. Shares the @AppStorage key with the
     /// field in AdvancedScanConfigView so the two stay in sync.
@@ -112,6 +116,11 @@ struct ScanControlView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 200)
                 .disabled(isScanning)
+                .onChange(of: selectedMode) { _, newMode in
+                    if newMode != .bugBounty {
+                        behavioralEnabled = false
+                    }
+                }
 
                 Picker("", selection: $toolSelectionMode) {
                     ForEach(ToolSelectionMode.allCases) { selectionMode in
@@ -155,11 +164,24 @@ struct ScanControlView: View {
 
                 Button(action: { showAdvancedConfig.toggle() }) {
                     Image(systemName: "slider.horizontal.3")
-                        .foregroundColor(.secondary)
+                        .foregroundColor(
+                            behavioralEnabled
+                                ? (behavioralProfile == nil ? .orange : .cyberCyan)
+                                : .secondary
+                        )
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showAdvancedConfig) {
-                    AdvancedScanConfigView(personasJSON: $personasJSON, oobJSON: $oobJSON)
+                    AdvancedScanConfigView(
+                        personasJSON: $personasJSON,
+                        oobJSON: $oobJSON,
+                        scanTarget: scanTarget,
+                        scanMode: selectedMode,
+                        behavioralEnabled: $behavioralEnabled,
+                        behavioralEnvelopeId: $behavioralEnvelopeId,
+                        behavioralSourcePersonaId: $behavioralSourcePersonaId,
+                        behavioralPeerPersonaId: $behavioralPeerPersonaId
+                    )
                         .frame(width: 540, height: 420)
                         .environmentObject(appState)
                 }
@@ -186,6 +208,7 @@ struct ScanControlView: View {
                         scanTarget.isEmpty
                             || !backend.isRunning
                             || (toolSelectionMode == .custom && selectedTools.isEmpty)
+                            || (behavioralEnabled && behavioralProfile == nil)
                     )
                     .onAppear {
                         print(
@@ -294,6 +317,11 @@ struct ScanControlView: View {
                 (isBounty && !researchHandleTrimmed.isEmpty)
                 ? ["X-HackerOne-Research": researchHandleTrimmed]
                 : nil
+            if behavioralEnabled && behavioralProfile == nil {
+                print("[ScanControlView] Aborting startScan: behavioral profile is incomplete")
+                showAdvancedConfig = true
+                return
+            }
             appState.startScan(
                 target: scanTarget,
                 modules: modules,
@@ -304,13 +332,31 @@ struct ScanControlView: View {
                 scopeStrict: isBounty ? appState.scopeStrict : false,
                 bountyHandle: (isBounty && !bountyHandle.isEmpty) ? bountyHandle : nil,
                 bountyJSON: isBounty ? parsedBountyJSON : nil,
-                identityHeaders: identityHeaders
+                identityHeaders: identityHeaders,
+                behavioralOneClick: isBounty ? behavioralProfile : nil
             )
         } else {
             print(
                 "[ScanControlView] Guard failed - scanTarget.isEmpty: \(scanTarget.isEmpty), backend.isRunning: \(backend.isRunning)"
             )
         }
+    }
+
+    private var behavioralProfile: BehavioralOneClickProfile? {
+        guard behavioralEnabled,
+              selectedMode == .bugBounty,
+              !behavioralEnvelopeId.isEmpty,
+              !behavioralSourcePersonaId.isEmpty,
+              !behavioralPeerPersonaId.isEmpty,
+              behavioralSourcePersonaId != behavioralPeerPersonaId
+        else {
+            return nil
+        }
+        return BehavioralOneClickProfile(
+            envelopeId: behavioralEnvelopeId,
+            sourcePersonaId: behavioralSourcePersonaId,
+            peerPersonaId: behavioralPeerPersonaId
+        )
     }
 
     private func parseJSONArray(_ text: String) -> [[String: Any]]? {
@@ -352,6 +398,12 @@ private struct AdvancedScanConfigView: View {
     @EnvironmentObject var appState: HelixAppState
     @Binding var personasJSON: String
     @Binding var oobJSON: String
+    let scanTarget: String
+    let scanMode: ScanMode
+    @Binding var behavioralEnabled: Bool
+    @Binding var behavioralEnvelopeId: String
+    @Binding var behavioralSourcePersonaId: String
+    @Binding var behavioralPeerPersonaId: String
 
     /// Which tab is visible inside the popover
     @State private var tab: Int = 0
@@ -360,7 +412,10 @@ private struct AdvancedScanConfigView: View {
     
     // Foundry integration
     @State private var availablePersonas: [FoundryPersona] = []
+    @State private var availableEnvelopes: [FoundryAuthorizationEnvelope] = []
     @State private var isFetchingPersonas = false
+    @State private var isFetchingBehavioralOptions = false
+    @State private var behavioralOptionsError: String?
     @State private var showAddPersona = false
     /// Persisted HackerOne research handle (X-HackerOne-Research). Same @AppStorage
     /// key as ScanControlView so what you type here is what the scan sends.
@@ -403,11 +458,12 @@ private struct AdvancedScanConfigView: View {
                 Picker("", selection: $tab) {
                     Text("Scope").tag(0)
                     Text("HackerOne").tag(1)
-                    Text("Personas").tag(2)
-                    Text("OOB").tag(3)
+                    Text("Behavior").tag(2)
+                    Text("Personas").tag(3)
+                    Text("OOB").tag(4)
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 250)
+                .frame(width: 330)
                 Button("Clear All") {
                     appState.scopeRules = []
                     appState.scopeStrict = false
@@ -415,6 +471,10 @@ private struct AdvancedScanConfigView: View {
                     appState.bountyJSONConfig = ""
                     personasJSON = ""
                     oobJSON = ""
+                    behavioralEnabled = false
+                    behavioralEnvelopeId = ""
+                    behavioralSourcePersonaId = ""
+                    behavioralPeerPersonaId = ""
                 }
                 .buttonStyle(.link)
                 .font(.caption)
@@ -431,12 +491,184 @@ private struct AdvancedScanConfigView: View {
                 } else if tab == 1 {
                     hackerOneTab
                 } else if tab == 2 {
+                    behavioralTab
+                } else if tab == 3 {
                     personasTab
                 } else {
                     oobTab
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: - Behavioral One-Click Tab
+
+    private static let controlledBehavioralWorkflow =
+        "behavioral_object_authorization"
+
+    private var eligibleBehavioralEnvelopes: [FoundryAuthorizationEnvelope] {
+        availableEnvelopes.filter { envelope in
+            envelope.isApproved
+                && !envelope.isExpired
+                && envelope.authorizes(urlOrOrigin: scanTarget)
+                && envelope.permits(workflow: Self.controlledBehavioralWorkflow)
+        }
+    }
+
+    private var behavioralConfigurationIssue: String? {
+        if scanMode != .bugBounty {
+            return "Behavioral one-click is available only in Bug Bounty mode."
+        }
+        if eligibleBehavioralEnvelopes.isEmpty {
+            return "No approved envelope authorizes this target and behavioral workflow."
+        }
+        if behavioralEnvelopeId.isEmpty {
+            return "Select an approved authorization envelope."
+        }
+        if behavioralSourcePersonaId.isEmpty || behavioralPeerPersonaId.isEmpty {
+            return "Select both the source and peer research personas."
+        }
+        if behavioralSourcePersonaId == behavioralPeerPersonaId {
+            return "Source and peer must be distinct research personas."
+        }
+        return nil
+    }
+
+    private var behavioralTab: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Behavioral one-click")
+                        .font(.subheadline).bold()
+                    Text("Runs the authorized paired-persona behavioral phase before ordinary scan tools.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                if isFetchingBehavioralOptions {
+                    ProgressView().controlSize(.small)
+                }
+                Button(action: { fetchBehavioralOptions() }) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(.plain)
+                .help("Refresh envelopes and vault personas")
+            }
+
+            Toggle("Enable for this Bug Bounty scan", isOn: $behavioralEnabled)
+                .toggleStyle(.switch)
+                .disabled(scanMode != .bugBounty)
+
+            Picker("Envelope", selection: $behavioralEnvelopeId) {
+                Text("Select an envelope").tag("")
+                ForEach(eligibleBehavioralEnvelopes) { envelope in
+                    Text(
+                        "\(envelope.targetHandle) · \(envelope.envelopeId.prefix(8))"
+                    )
+                    .tag(envelope.envelopeId)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!behavioralEnabled)
+
+            HStack(spacing: 12) {
+                Picker("Source", selection: $behavioralSourcePersonaId) {
+                    Text("Select Alice").tag("")
+                    ForEach(availablePersonas) { persona in
+                        Text(persona.label).tag(persona.personaId)
+                    }
+                }
+                Picker("Peer", selection: $behavioralPeerPersonaId) {
+                    Text("Select Bob").tag("")
+                    ForEach(availablePersonas) { persona in
+                        Text(persona.label).tag(persona.personaId)
+                    }
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!behavioralEnabled)
+
+            if let error = behavioralOptionsError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundColor(.red)
+            } else if behavioralEnabled, let issue = behavioralConfigurationIssue {
+                Label(issue, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                    .foregroundColor(.orange)
+            } else if behavioralEnabled {
+                Label(
+                    "Ready. The backend will still revalidate origin, workflows, personas, policy, and budgets before traffic.",
+                    systemImage: "checkmark.shield.fill"
+                )
+                .font(.caption2)
+                .foregroundColor(.green)
+            }
+
+            Text("This selection does not create authority. It passes the existing signed envelope and exact vault identities to the backend.")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            Spacer()
+        }
+        .padding()
+        .onAppear {
+            if availablePersonas.isEmpty || availableEnvelopes.isEmpty {
+                fetchBehavioralOptions()
+            } else {
+                revalidateBehavioralSelection()
+            }
+        }
+        .onChange(of: scanTarget) { _, _ in
+            revalidateBehavioralSelection()
+        }
+    }
+
+    private func fetchBehavioralOptions() {
+        isFetchingBehavioralOptions = true
+        behavioralOptionsError = nil
+        Task {
+            do {
+                let personas = try await FoundryAPIClient.shared.listPersonas()
+                let envelopes =
+                    try await FoundryAPIClient.shared.listAuthorizationEnvelopes()
+                await MainActor.run {
+                    availablePersonas = personas
+                    availableEnvelopes = envelopes
+                    isFetchingBehavioralOptions = false
+                    revalidateBehavioralSelection()
+                }
+            } catch {
+                await MainActor.run {
+                    behavioralOptionsError = error.localizedDescription
+                    isFetchingBehavioralOptions = false
+                }
+            }
+        }
+    }
+
+    private func revalidateBehavioralSelection() {
+        if !behavioralEnvelopeId.isEmpty
+            && !eligibleBehavioralEnvelopes.contains(
+                where: { $0.envelopeId == behavioralEnvelopeId }
+            )
+        {
+            behavioralEnvelopeId = ""
+        }
+        if !behavioralSourcePersonaId.isEmpty
+            && !availablePersonas.contains(
+                where: { $0.personaId == behavioralSourcePersonaId }
+            )
+        {
+            behavioralSourcePersonaId = ""
+        }
+        if !behavioralPeerPersonaId.isEmpty
+            && !availablePersonas.contains(
+                where: { $0.personaId == behavioralPeerPersonaId }
+            )
+        {
+            behavioralPeerPersonaId = ""
         }
     }
 

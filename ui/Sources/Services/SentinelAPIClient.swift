@@ -138,7 +138,8 @@ public struct SentinelAPIClient: Sendable {
         scopeStrict: Bool = false,
         bountyHandle: String? = nil,
         bountyJSON: [String: Any]? = nil,
-        identityHeaders: [String: String]? = nil
+        identityHeaders: [String: String]? = nil,
+        behavioralOneClick: BehavioralOneClickProfile? = nil
     )
         async throws
     {
@@ -176,6 +177,13 @@ public struct SentinelAPIClient: Sendable {
         // probes included, via the net-adapter choke point.
         if let identityHeaders, !identityHeaders.isEmpty {
             body["identity_headers"] = identityHeaders
+        }
+        if let behavioralOneClick {
+            body["behavioral_one_click"] = [
+                "envelope_id": behavioralOneClick.envelopeId,
+                "source_persona_id": behavioralOneClick.sourcePersonaId,
+                "peer_persona_id": behavioralOneClick.peerPersonaId,
+            ]
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

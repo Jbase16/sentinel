@@ -7,6 +7,28 @@
 
 import Foundation
 
+public struct BehavioralOneClickProfile: Codable, Equatable, Sendable {
+    public let envelopeId: String
+    public let sourcePersonaId: String
+    public let peerPersonaId: String
+
+    public init(
+        envelopeId: String,
+        sourcePersonaId: String,
+        peerPersonaId: String
+    ) {
+        self.envelopeId = envelopeId
+        self.sourcePersonaId = sourcePersonaId
+        self.peerPersonaId = peerPersonaId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case envelopeId = "envelope_id"
+        case sourcePersonaId = "source_persona_id"
+        case peerPersonaId = "peer_persona_id"
+    }
+}
+
 // MARK: - Navigation
 
 public enum SidebarTab: String, CaseIterable, Identifiable {
