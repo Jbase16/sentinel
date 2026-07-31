@@ -10,6 +10,7 @@ from core.errors import ErrorCode, SentinelError
 from core.server.routers.scans import (
     BehavioralOneClickProfile,
     ScanRequest,
+    _bounded_behavioral_phase_summary,
     begin_scan_logic,
     _run_behavioral_one_click_phase,
 )
@@ -35,6 +36,7 @@ class _FindingStore:
 
 class _Session:
     def __init__(self):
+        self.id = "behavioral-direct-session"
         self.findings = _FindingStore()
         self.logs = []
 
@@ -117,6 +119,46 @@ def test_behavioral_one_click_requires_distinct_personas():
             source_persona_id=SOURCE_PERSONA_ID,
             peer_persona_id=SOURCE_PERSONA_ID,
         )
+
+
+def test_behavioral_phase_summary_is_bounded_and_redacted():
+    summary = _bounded_behavioral_phase_summary(
+        phase_status="confirmed_finding",
+        result={
+            "status": "completed",
+            "orchestration_receipt": {
+                "receipt_id": "receipt:abc",
+                "state": "completed",
+                "reused": True,
+                "reservation_token": "must-not-escape",
+            },
+            "execution": {
+                "status": "completed",
+                "cleanup_steps_completed": 2,
+                "raw_response": "must-not-escape",
+            },
+            "capture_pair": {"raw": "must-not-escape"},
+        },
+        finding={
+            "id": "finding-1",
+            "type": "cross_principal_object_access",
+            "metadata": {"secret": "must-not-escape"},
+        },
+    )
+
+    assert summary == {
+        "status": "confirmed_finding",
+        "result_status": "completed",
+        "finding_id": "finding-1",
+        "finding_type": "cross_principal_object_access",
+        "receipt_id": "receipt:abc",
+        "receipt_state": "completed",
+        "receipt_reused": True,
+        "cleanup_status": "completed",
+        "cleanup_steps_completed": 2,
+        "reason": None,
+    }
+    assert "must-not-escape" not in str(summary)
 
 
 @pytest.mark.asyncio
@@ -204,6 +246,9 @@ async def test_behavioral_one_click_denial_fails_before_scan_traffic(
 ):
     from core.server.routers import foundry
 
+    state = ApplicationState()
+    state.scan_state = {"session_id": "behavioral-direct-session"}
+    monkeypatch.setattr(ApplicationState, "_instance", state)
     session = _Session()
 
     async def deny(_request, _):
@@ -225,6 +270,18 @@ async def test_behavioral_one_click_denial_fails_before_scan_traffic(
         "reason": "signed workflow missing",
     }
     assert session.findings.added == []
+    assert state.scan_state["behavioral_one_click"] == {
+        "status": "refused",
+        "result_status": None,
+        "finding_id": None,
+        "finding_type": None,
+        "receipt_id": None,
+        "receipt_state": None,
+        "receipt_reused": None,
+        "cleanup_status": None,
+        "cleanup_steps_completed": None,
+        "reason": "signed workflow missing",
+    }
 
 
 @pytest.mark.asyncio

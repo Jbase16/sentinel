@@ -65,6 +65,13 @@ struct ScanControlView: View {
         appState.engineStatus?.tools?.installed ?? []
     }
 
+    private var behavioralPhaseSummary: BehavioralOneClickPhaseSummary? {
+        if let scanState = appState.engineStatus?.scanState {
+            return scanState.behavioralOneClick
+        }
+        return appState.apiResults?.behavioralOneClick
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Connection status
@@ -83,6 +90,10 @@ struct ScanControlView: View {
             }
             if let waf = appState.wafStatus {
                 WAFStatusBanner(waf: waf) { appState.wafStatus = nil }
+            }
+
+            if let behavioral = behavioralPhaseSummary {
+                BehavioralOneClickStatusBanner(summary: behavioral)
             }
 
             // Scan Progress Header
@@ -390,6 +401,99 @@ struct ScanControlView: View {
         } catch {
             print("[ScanControlView] oobJSON parse error: \(error)")
             return nil
+        }
+    }
+}
+
+private struct BehavioralOneClickStatusBanner: View {
+    let summary: BehavioralOneClickPhaseSummary
+
+    private var presentation: (title: String, icon: String, color: Color) {
+        switch summary.status {
+        case "running":
+            return ("Behavioral phase running", "arrow.triangle.2.circlepath", .cyan)
+        case "confirmed_finding":
+            return (
+                "Behavioral finding independently confirmed",
+                "checkmark.shield.fill",
+                .green
+            )
+        case "completed_no_finding":
+            return (
+                "Behavioral phase completed without a confirmed finding",
+                "checkmark.circle",
+                .blue
+            )
+        case "refused":
+            return (
+                "Behavioral phase refused before ordinary scan traffic",
+                "hand.raised.fill",
+                .orange
+            )
+        case "cleanup_uncertain":
+            return (
+                "Behavioral cleanup is uncertain",
+                "exclamationmark.octagon.fill",
+                .red
+            )
+        case "aborted":
+            return ("Behavioral phase aborted safely", "stop.circle.fill", .orange)
+        default:
+            return ("Behavioral phase failed", "xmark.octagon.fill", .red)
+        }
+    }
+
+    private var detail: String? {
+        if let reason = summary.reason, !reason.isEmpty {
+            return reason
+        }
+        if let findingType = summary.findingType {
+            return findingType
+        }
+        if summary.receiptReused == true {
+            return "A completed durable receipt was reused; no duplicate behavioral execution was authorized."
+        }
+        if let cleanup = summary.cleanupStatus {
+            return "Cleanup state: \(cleanup)"
+        }
+        return nil
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: presentation.icon)
+                .foregroundColor(presentation.color)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(presentation.title)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            Spacer()
+            if summary.receiptReused == true {
+                Text("RECEIPT REUSED")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.purple)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.purple.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+            if let findingId = summary.findingId {
+                Text(String(findingId.prefix(12)))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(presentation.color.opacity(0.08))
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 }

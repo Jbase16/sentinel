@@ -34,6 +34,85 @@ class BehavioralOneClickProfile(BaseModel):
         return self
 
 
+def _bounded_behavioral_phase_summary(
+    *,
+    phase_status: str,
+    result: Optional[Dict[str, Any]] = None,
+    finding: Optional[Dict[str, Any]] = None,
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the small redacted behavioral status exposed to operators."""
+
+    result = result if isinstance(result, dict) else {}
+    finding = finding if isinstance(finding, dict) else {}
+    receipt = result.get("orchestration_receipt")
+    receipt = receipt if isinstance(receipt, dict) else {}
+    execution = result.get("execution")
+    execution = execution if isinstance(execution, dict) else {}
+
+    finding_id = finding.get("id") or result.get("finding_ref")
+    finding_type = finding.get("type")
+    if not isinstance(finding_id, str):
+        finding_id = None
+    if not isinstance(finding_type, str):
+        finding_type = None
+
+    def bounded_string(value: Any, *, limit: int = 512) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        cleaned = " ".join(value.split())
+        return cleaned[:limit] or None
+
+    cleanup_status = bounded_string(execution.get("status"), limit=64)
+    if cleanup_status is None:
+        result_status = bounded_string(result.get("status"), limit=64)
+        if result_status in {"cleanup_failed", "aborted"}:
+            cleanup_status = result_status
+
+    cleanup_steps = execution.get("cleanup_steps_completed")
+    if (
+        isinstance(cleanup_steps, bool)
+        or not isinstance(cleanup_steps, int)
+        or cleanup_steps < 0
+    ):
+        cleanup_steps = None
+
+    return {
+        "status": phase_status,
+        "result_status": bounded_string(result.get("status"), limit=64),
+        "finding_id": bounded_string(finding_id, limit=256),
+        "finding_type": bounded_string(finding_type, limit=256),
+        "receipt_id": bounded_string(receipt.get("receipt_id"), limit=256),
+        "receipt_state": bounded_string(receipt.get("state"), limit=64),
+        "receipt_reused": (
+            receipt.get("reused")
+            if isinstance(receipt.get("reused"), bool)
+            else None
+        ),
+        "cleanup_status": cleanup_status,
+        "cleanup_steps_completed": cleanup_steps,
+        "reason": bounded_string(reason),
+    }
+
+
+def _record_behavioral_phase_summary(
+    session: Any,
+    summary: Dict[str, Any],
+) -> None:
+    """Attach status only to the currently active matching scan session."""
+
+    state = get_state()
+    scan_state = state.scan_state
+    session_id = getattr(session, "id", None)
+    if (
+        not isinstance(scan_state, dict)
+        or not isinstance(session_id, str)
+        or scan_state.get("session_id") != session_id
+    ):
+        return
+    scan_state["behavioral_one_click"] = summary
+
+
 class ScanRequest(BaseModel):
     target: str = Field(..., min_length=1, max_length=2048)
     modules: Optional[List[str]] = None
@@ -217,6 +296,11 @@ async def _run_behavioral_one_click_phase(
     if profile is None:
         return None
 
+    _record_behavioral_phase_summary(
+        session,
+        _bounded_behavioral_phase_summary(phase_status="running"),
+    )
+
     from core.server.routers.foundry import (
         RunBehavioralAuthorizationFromURLRequest,
         run_behavioral_authorization_from_url_endpoint,
@@ -237,6 +321,18 @@ async def _run_behavioral_one_click_phase(
             _=True,
         )
     except HTTPException as exc:
+        phase_status = (
+            "refused"
+            if exc.status_code in {401, 403, 404, 409}
+            else "failed"
+        )
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status=phase_status,
+                reason=str(exc.detail),
+            ),
+        )
         error_code = (
             ErrorCode.AUTH_PERMISSION_DENIED
             if exc.status_code in {401, 403, 404, 409}
@@ -251,8 +347,33 @@ async def _run_behavioral_one_click_phase(
                 "reason": str(exc.detail)[:512],
             },
         ) from exc
+    except asyncio.CancelledError:
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status="aborted",
+                reason="scan cancelled during behavioral execution",
+            ),
+        )
+        raise
+    except Exception:
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status="failed",
+                reason="unexpected behavioral orchestration failure",
+            ),
+        )
+        raise
 
     if not isinstance(result, dict):
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status="failed",
+                reason="behavioral phase returned an invalid result",
+            ),
+        )
         raise SentinelError(
             ErrorCode.SCAN_INITIALIZATION_ERROR,
             "Behavioral one-click phase returned an invalid result",
@@ -296,6 +417,28 @@ async def _run_behavioral_one_click_phase(
             "[behavior] One-click URL phase completed without a confirmed finding "
             f"(status={result.get('status', 'unknown')})."
         )
+
+    result_status = result.get("status")
+    execution = result.get("execution")
+    execution_status = (
+        execution.get("status") if isinstance(execution, dict) else None
+    )
+    if isinstance(finding, dict) or result.get("finding_confirmed") is True:
+        phase_status = "confirmed_finding"
+    elif "cleanup_failed" in {result_status, execution_status}:
+        phase_status = "cleanup_uncertain"
+    elif "aborted" in {result_status, execution_status}:
+        phase_status = "aborted"
+    else:
+        phase_status = "completed_no_finding"
+    _record_behavioral_phase_summary(
+        session,
+        _bounded_behavioral_phase_summary(
+            phase_status=phase_status,
+            result=result,
+            finding=finding,
+        ),
+    )
     return result
 
 def _log_sink_sync(msg: str) -> None:
@@ -2071,6 +2214,7 @@ async def get_scan_results():
             "attack_path_contract": attack_path_contract,
         },
         "phase_results": {},
+        "behavioral_one_click": scan_state.get("behavioral_one_click"),
         "logs": logs
     }
 

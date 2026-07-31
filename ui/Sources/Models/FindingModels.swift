@@ -102,11 +102,38 @@ public struct SentinelResults: Decodable {
     public let killchain: Killchain?
     public let phaseResults: [String: [JSONDict]]?
     public let evidence: [EvidenceSummary]?
+    public let behavioralOneClick: BehavioralOneClickPhaseSummary?
     public let logs: [String]?
 
     enum CodingKeys: String, CodingKey {
         case scan, summary, findings, issues, killchain, logs, evidence
         case phaseResults = "phase_results"
+        case behavioralOneClick = "behavioral_one_click"
+    }
+}
+
+public struct BehavioralOneClickPhaseSummary: Decodable, Equatable {
+    public let status: String
+    public let resultStatus: String?
+    public let findingId: String?
+    public let findingType: String?
+    public let receiptId: String?
+    public let receiptState: String?
+    public let receiptReused: Bool?
+    public let cleanupStatus: String?
+    public let cleanupStepsCompleted: Int?
+    public let reason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, reason
+        case resultStatus = "result_status"
+        case findingId = "finding_id"
+        case findingType = "finding_type"
+        case receiptId = "receipt_id"
+        case receiptState = "receipt_state"
+        case receiptReused = "receipt_reused"
+        case cleanupStatus = "cleanup_status"
+        case cleanupStepsCompleted = "cleanup_steps_completed"
     }
 }
 
@@ -305,6 +332,7 @@ public struct ScanStateDTO: Decodable {
     public let durationMs: Int?
     public let error: String?
     public let sessionId: String?
+    public let behavioralOneClick: BehavioralOneClickPhaseSummary?
 
     enum CodingKeys: String, CodingKey {
         case target, modules, status, error
@@ -312,6 +340,7 @@ public struct ScanStateDTO: Decodable {
         case finishedAt = "finished_at"
         case durationMs = "duration_ms"
         case sessionId = "session_id"
+        case behavioralOneClick = "behavioral_one_click"
     }
 }
 
