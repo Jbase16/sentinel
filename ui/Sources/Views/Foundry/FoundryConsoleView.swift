@@ -26,6 +26,7 @@ import SwiftUI
 public struct FoundryConsoleView: View {
     @StateObject private var vm = FoundryConsoleViewModel()
     @State private var showAddPersona = false
+    @State private var showAddEnvelope = false
     @State private var showRecordRecipe = false
 
     public init() {}
@@ -57,6 +58,13 @@ public struct FoundryConsoleView: View {
         .onDisappear { vm.stop() }
         .sheet(isPresented: $showAddPersona) {
             AddPersonaSheet(onSaved: { Task { await vm.refresh() } })
+        }
+        .sheet(isPresented: $showAddEnvelope) {
+            AddAuthorizationEnvelopeSheet(
+                onSave: { draft in
+                    Task { await vm.createEnvelope(draft) }
+                }
+            )
         }
         .sheet(isPresented: $showRecordRecipe) {
             RecordRecipeSheet(
@@ -211,11 +219,51 @@ public struct FoundryConsoleView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Create a new persona in the Foundry vault")
+                Button(action: { showAddEnvelope = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.shield")
+                        Text("New Envelope")
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Declare the authorization that gates Foundry execution")
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    section("AUTHORIZATION (\(vm.envelopes.count))") {
+                        if vm.envelopes.isEmpty {
+                            emptyHint("Create an authorization envelope before replaying a recipe.")
+                        } else {
+                            Picker(
+                                "Execution envelope",
+                                selection: $vm.selectedEnvelopeId
+                            ) {
+                                Text("Select an envelope").tag("")
+                                ForEach(vm.envelopes) { envelope in
+                                    Text(vm.envelopeLabel(envelope))
+                                        .tag(envelope.envelopeId)
+                                }
+                            }
+                            .pickerStyle(.menu)
+
+                            if let envelope = vm.selectedEnvelope {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(envelope.isApproved && !envelope.isExpired ? Color.green : Color.red)
+                                        .frame(width: 7, height: 7)
+                                    Text(envelope.isApproved && !envelope.isExpired ? "APPROVED" : "NOT EXECUTABLE")
+                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    Text(envelope.authorizedOrigins.joined(separator: ", "))
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.55))
+                                        .lineLimit(1)
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
                     section("PERSONAS (\(vm.personas.count))") {
                         ForEach(vm.personas) { p in
                             HStack {
@@ -242,11 +290,22 @@ public struct FoundryConsoleView: View {
                                 Spacer()
                                 Menu("Run") {
                                     ForEach(vm.personas, id: \.personaId) { p in
-                                        Button(p.label) { Task { await vm.startSignup(recipe: r, personaId: p.personaId) } }
+                                        Button(p.label) {
+                                            Task {
+                                                await vm.startSignup(
+                                                    recipe: r,
+                                                    personaId: p.personaId
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                                 .buttonStyle(.bordered).controlSize(.small)
-                                .disabled(vm.personas.isEmpty)
+                                .disabled(
+                                    vm.personas.isEmpty
+                                        || vm.selectedExecutableEnvelope(for: r) == nil
+                                )
+                                .help(vm.signupRunHelp(for: r))
                                 Button(role: .destructive, action: { Task { await vm.deleteRecipe(recipeId: r.recipeId) } }) {
                                     Image(systemName: "trash")
                                 }
@@ -313,6 +372,138 @@ public struct FoundryConsoleView: View {
             .foregroundColor(color)
             .padding(.horizontal, 6).padding(.vertical, 2)
             .background(color.opacity(0.15)).cornerRadius(4)
+    }
+}
+
+private struct AuthorizationEnvelopeDraft {
+    let researcherIdentity: String
+    let targetHandle: String
+    let authorizedOrigins: [String]
+    let authorizationBasis: String
+    let allowedWorkflows: [String]
+    let disclosureAttestation: Bool
+    let maxAccountsPerService: Int
+    let legalPosture: String
+    let ttlDays: Int
+}
+
+private struct AddAuthorizationEnvelopeSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onSave: (AuthorizationEnvelopeDraft) -> Void
+
+    @State private var researcherIdentity = ""
+    @State private var targetHandle = ""
+    @State private var authorizedOrigins = "https://"
+    @State private var authorizationBasis = ""
+    @State private var allowedWorkflows = ""
+    @State private var disclosureAttestation = false
+    @State private var maxAccountsPerService = 3
+    @State private var legalPosture = ""
+    @State private var ttlDays = 30
+
+    private var originValues: [String] {
+        splitLines(authorizedOrigins)
+    }
+
+    private var workflowValues: [String] {
+        splitLines(allowedWorkflows)
+    }
+
+    private var canSave: Bool {
+        !researcherIdentity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !targetHandle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !originValues.isEmpty
+            && !workflowValues.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("NEW AUTHORIZATION ENVELOPE")
+                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .foregroundColor(.cyberCyan)
+
+            Text("This is an execution gate, not a target profile. Enter only authority you have already reviewed.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+
+            Form {
+                TextField("Researcher identity", text: $researcherIdentity)
+                TextField("Target or program handle", text: $targetHandle)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Authorized origins — one per line")
+                    TextEditor(text: $authorizedOrigins)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(minHeight: 52)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Allowed workflows — one per line")
+                    TextEditor(text: $allowedWorkflows)
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(minHeight: 72)
+                }
+
+                TextField("Authorization basis", text: $authorizationBasis, axis: .vertical)
+                    .lineLimit(2...4)
+                TextField("Legal posture or policy reference", text: $legalPosture, axis: .vertical)
+                    .lineLimit(1...3)
+                Stepper(
+                    "Maximum accounts per service: \(maxAccountsPerService)",
+                    value: $maxAccountsPerService,
+                    in: 1...20
+                )
+                Stepper("Expires after \(ttlDays) days", value: $ttlDays, in: 1...365)
+                Toggle(
+                    "I attest this work is covered by the disclosed authorization above.",
+                    isOn: $disclosureAttestation
+                )
+                .toggleStyle(.checkbox)
+            }
+            .formStyle(.grouped)
+
+            if !disclosureAttestation {
+                Text("Without the attestation this envelope is stored as unapproved and cannot authorize execution.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.orange)
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Save Envelope") {
+                    onSave(
+                        AuthorizationEnvelopeDraft(
+                            researcherIdentity: researcherIdentity.trimmingCharacters(in: .whitespacesAndNewlines),
+                            targetHandle: targetHandle.trimmingCharacters(in: .whitespacesAndNewlines),
+                            authorizedOrigins: originValues,
+                            authorizationBasis: authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines),
+                            allowedWorkflows: workflowValues,
+                            disclosureAttestation: disclosureAttestation,
+                            maxAccountsPerService: maxAccountsPerService,
+                            legalPosture: legalPosture.trimmingCharacters(in: .whitespacesAndNewlines),
+                            ttlDays: ttlDays
+                        )
+                    )
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.cyberCyan)
+                .disabled(!canSave)
+            }
+        }
+        .padding(20)
+        .frame(width: 560, height: 650)
+    }
+
+    private func splitLines(_ value: String) -> [String] {
+        value
+            .components(separatedBy: .newlines)
+            .flatMap { $0.components(separatedBy: ",") }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "https://" }
     }
 }
 
@@ -455,6 +646,8 @@ private struct ChallengeCard: View {
 final class FoundryConsoleViewModel: ObservableObject {
     @Published var challenges: [FoundryChallenge] = []
     @Published var personas: [FoundryPersona] = []
+    @Published var envelopes: [FoundryAuthorizationEnvelope] = []
+    @Published var selectedEnvelopeId: String = ""
     @Published var recipes: [FoundryRecipeSummary] = []
     @Published var jobs: [FoundrySignupJob] = []
     @Published var plan: FoundryAccountPlan?
@@ -477,6 +670,10 @@ final class FoundryConsoleViewModel: ObservableObject {
     private let client = FoundryAPIClient.shared
     private var pollTask: Task<Void, Never>?
 
+    var selectedEnvelope: FoundryAuthorizationEnvelope? {
+        envelopes.first { $0.envelopeId == selectedEnvelopeId }
+    }
+
     func start() {
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -492,8 +689,15 @@ final class FoundryConsoleViewModel: ObservableObject {
             // Challenges first — they're the time-sensitive hero.
             challenges = try await client.listChallenges()
             personas = try await client.listPersonas()
+            envelopes = try await client.listAuthorizationEnvelopes()
             recipes = try await client.listRecipes()
             jobs = try await client.listSignupJobs()
+            if !selectedEnvelopeId.isEmpty
+                && !envelopes.contains(where: { $0.envelopeId == selectedEnvelopeId })
+            {
+                selectedEnvelopeId = ""
+            }
+            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -520,10 +724,79 @@ final class FoundryConsoleViewModel: ObservableObject {
         }
     }
 
+    func envelopeLabel(_ envelope: FoundryAuthorizationEnvelope) -> String {
+        let status = envelope.isApproved && !envelope.isExpired ? "approved" : "blocked"
+        return "\(envelope.targetHandle) · \(status) · \(envelope.envelopeId.prefix(8))"
+    }
+
+    func selectedExecutableEnvelope(
+        for recipe: FoundryRecipeSummary
+    ) -> FoundryAuthorizationEnvelope? {
+        guard let envelope = selectedEnvelope,
+              envelope.isApproved,
+              !envelope.isExpired,
+              let origin = recipe.origin,
+              envelope.authorizes(urlOrOrigin: origin),
+              envelope.permits(workflow: recipe.serviceHandle)
+        else {
+            return nil
+        }
+        return envelope
+    }
+
+    func signupRunHelp(for recipe: FoundryRecipeSummary) -> String {
+        if personas.isEmpty {
+            return "Create a research persona before replaying this recipe."
+        }
+        guard let envelope = selectedEnvelope else {
+            return "Select an approved authorization envelope."
+        }
+        guard envelope.isApproved && !envelope.isExpired else {
+            return "The selected envelope is unapproved or expired."
+        }
+        guard let origin = recipe.origin,
+              envelope.authorizes(urlOrOrigin: origin)
+        else {
+            return "The selected envelope does not authorize this recipe origin."
+        }
+        guard envelope.permits(workflow: recipe.serviceHandle) else {
+            return "The selected envelope does not permit this recipe workflow."
+        }
+        return "Replay this recipe under the selected authorization envelope."
+    }
+
+    fileprivate func createEnvelope(_ draft: AuthorizationEnvelopeDraft) async {
+        do {
+            let created = try await client.createAuthorizationEnvelope(
+                researcherIdentity: draft.researcherIdentity,
+                targetHandle: draft.targetHandle,
+                authorizedOrigins: draft.authorizedOrigins,
+                authorizationBasis: draft.authorizationBasis,
+                allowedWorkflows: draft.allowedWorkflows,
+                disclosureAttestation: draft.disclosureAttestation,
+                maxAccountsPerService: draft.maxAccountsPerService,
+                legalPosture: draft.legalPosture,
+                ttlDays: draft.ttlDays
+            )
+            await refresh()
+            selectedEnvelopeId = created.envelopeId
+            errorMessage = nil
+        } catch {
+            errorMessage = "Envelope: \(error.localizedDescription)"
+        }
+    }
+
     func startSignup(recipe: FoundryRecipeSummary, personaId: String) async {
+        guard let envelope = selectedExecutableEnvelope(for: recipe) else {
+            errorMessage = signupRunHelp(for: recipe)
+            return
+        }
         do {
             _ = try await client.startSignup(
-                recipeId: recipe.recipeId, personaId: personaId)
+                recipeId: recipe.recipeId,
+                personaId: personaId,
+                envelopeId: envelope.envelopeId
+            )
             await refresh()
         } catch {
             errorMessage = "Signup: \(error.localizedDescription)"

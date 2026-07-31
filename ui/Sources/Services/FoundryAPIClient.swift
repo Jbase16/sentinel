@@ -98,20 +98,72 @@ public struct FoundryPersona: Codable, Identifiable {
 
 public struct FoundryAuthorizationEnvelope: Codable, Identifiable {
     public let envelopeId: String
+    public let researcherIdentity: String
     public let targetHandle: String
     public let authorizedOrigins: [String]
     public let allowedWorkflows: [String]
+    public let authorizationBasis: String
+    public let disclosureAttestation: Bool
+    public let maxAccountsPerService: Int
+    public let legalPosture: String
+    public let createdAt: Double
+    public let expiresAt: Double
     public let context: String
 
     public var id: String { envelopeId }
     public var isApproved: Bool { context == "approved" }
+    public var isExpired: Bool { Date().timeIntervalSince1970 >= expiresAt }
 
     enum CodingKeys: String, CodingKey {
+        case context
         case envelopeId = "envelope_id"
+        case researcherIdentity = "researcher_identity"
         case targetHandle = "target_handle"
         case authorizedOrigins = "authorized_origins"
         case allowedWorkflows = "allowed_workflows"
-        case context
+        case authorizationBasis = "authorization_basis"
+        case disclosureAttestation = "disclosure_attestation"
+        case maxAccountsPerService = "max_accounts_per_service"
+        case legalPosture = "legal_posture"
+        case createdAt = "created_at"
+        case expiresAt = "expires_at"
+    }
+
+    public func permits(workflow: String) -> Bool {
+        allowedWorkflows.contains(workflow)
+    }
+
+    public func authorizes(urlOrOrigin: String) -> Bool {
+        guard let requested = Self.normalizedOrigin(urlOrOrigin) else { return false }
+        return authorizedOrigins.contains { allowed in
+            guard let normalized = Self.normalizedOrigin(allowed) else { return false }
+            if normalized == requested {
+                return true
+            }
+            guard allowed.contains("*."),
+                  let allowedHost = URLComponents(string: normalized)?.host,
+                  let requestedHost = URLComponents(string: requested)?.host
+            else {
+                return false
+            }
+            let suffix = allowedHost.replacingOccurrences(of: "*.", with: "")
+            return requestedHost != suffix && requestedHost.hasSuffix(".\(suffix)")
+        }
+    }
+
+    private static func normalizedOrigin(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard let components = URLComponents(string: candidate),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased(),
+              ["http", "https"].contains(scheme)
+        else {
+            return nil
+        }
+        let port = components.port.map { ":\($0)" } ?? ""
+        return "\(scheme)://\(host)\(port)"
     }
 }
 
@@ -161,17 +213,21 @@ public struct FoundryRecipeSummary: Codable, Identifiable {
     public let recipeId: String
     public let serviceHandle: String
     public let name: String
+    public let origin: String?
     public let stepCount: Int
     public let challengeCount: Int
+    public let requiredPersonaFields: [String]?
+    public let source: String?
 
     public var id: String { recipeId }
 
     enum CodingKeys: String, CodingKey {
+        case name, origin, source
         case recipeId = "recipe_id"
         case serviceHandle = "service_handle"
-        case name
         case stepCount = "step_count"
         case challengeCount = "challenge_count"
+        case requiredPersonaFields = "required_persona_fields"
     }
 }
 
@@ -290,6 +346,34 @@ public final class FoundryAPIClient {
         )
     }
 
+    public func createAuthorizationEnvelope(
+        researcherIdentity: String,
+        targetHandle: String,
+        authorizedOrigins: [String],
+        authorizationBasis: String,
+        allowedWorkflows: [String],
+        disclosureAttestation: Bool,
+        maxAccountsPerService: Int = 3,
+        legalPosture: String = "",
+        ttlDays: Int = 30
+    ) async throws -> FoundryAuthorizationEnvelope {
+        try await postJSON(
+            "/v1/foundry/envelopes",
+            body: [
+                "researcher_identity": researcherIdentity,
+                "target_handle": targetHandle,
+                "authorized_origins": authorizedOrigins,
+                "authorization_basis": authorizationBasis,
+                "allowed_workflows": allowedWorkflows,
+                "disclosure_attestation": disclosureAttestation,
+                "max_accounts_per_service": maxAccountsPerService,
+                "legal_posture": legalPosture,
+                "ttl_days": ttlDays,
+            ],
+            as: FoundryAuthorizationEnvelope.self
+        )
+    }
+
     public func runBehavioralAuthorization(
         targetOrigin: String,
         envelopeId: String,
@@ -401,9 +485,17 @@ public final class FoundryAPIClient {
 
     // MARK: signup
 
-    public func startSignup(recipeId: String, personaId: String) async throws -> FoundrySignupJob {
+    public func startSignup(
+        recipeId: String,
+        personaId: String,
+        envelopeId: String
+    ) async throws -> FoundrySignupJob {
         try await postJSON("/v1/foundry/signup",
-            body: ["recipe_id": recipeId, "persona_id": personaId],
+            body: [
+                "recipe_id": recipeId,
+                "persona_id": personaId,
+                "envelope_id": envelopeId,
+            ],
             as: FoundrySignupJob.self)
     }
 
