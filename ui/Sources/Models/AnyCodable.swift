@@ -7,6 +7,27 @@
 
 import Foundation
 
+public enum SentinelRuntimePaths {
+    /// Shared Swift-side view of the backend data root. Acceptance builds set
+    /// SENTINEL_DATA_DIR so tokens, personas, recipes, receipts, and logs never
+    /// mix with the operator's normal ~/.sentinelforge state.
+    public static var dataDirectory: URL {
+        if let configured = ProcessInfo.processInfo.environment["SENTINEL_DATA_DIR"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !configured.isEmpty
+        {
+            return URL(fileURLWithPath: configured, isDirectory: true)
+                .standardizedFileURL
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".sentinelforge", isDirectory: true)
+    }
+
+    public static func file(_ relativePath: String) -> URL {
+        dataDirectory.appendingPathComponent(relativePath)
+    }
+}
+
 public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
 

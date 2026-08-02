@@ -55,8 +55,7 @@ enum GhostCaptureBrowser {
 
     /// Where capture-browser profiles live.
     static var profileBaseURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
+        SentinelRuntimePaths.dataDirectory
     }
 
     /// A FRESH, unique Chromium profile per capture session.

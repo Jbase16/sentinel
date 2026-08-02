@@ -69,10 +69,23 @@ public struct FoundryConsoleView: View {
         .sheet(isPresented: $showRecordRecipe) {
             RecordRecipeSheet(
                 isRecording: $vm.isRecording,
-                onRecord: { handle, name, origin in
-                    Task { await vm.recordRecipe(serviceHandle: handle, name: name, origin: origin) }
+                personas: vm.personas,
+                envelope: vm.selectedEnvelope,
+                onRecord: { handle, name, origin, personaId, variant in
+                    Task {
+                        await vm.recordRecipe(
+                            serviceHandle: handle,
+                            name: name,
+                            origin: origin,
+                            personaId: personaId,
+                            visualVariant: variant
+                        )
+                    }
                 }
             )
+        }
+        .sheet(item: $vm.inspectedRecipe) { recipe in
+            RecipeDetailSheet(recipe: recipe)
         }
     }
 
@@ -288,6 +301,10 @@ public struct FoundryConsoleView: View {
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(.white.opacity(0.5))
                                 Spacer()
+                                Button("Inspect") {
+                                    Task { await vm.inspectRecipe(recipeId: r.recipeId) }
+                                }
+                                .buttonStyle(.bordered).controlSize(.small)
                                 Menu("Run") {
                                     ForEach(vm.personas, id: \.personaId) { p in
                                         Button(p.label) {
@@ -323,7 +340,12 @@ public struct FoundryConsoleView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundColor(vm.isRecording ? .red : .cyberCyan)
-                        .disabled(vm.isRecording)
+                        .disabled(
+                            vm.isRecording
+                                || vm.personas.isEmpty
+                                || vm.selectedEnvelope == nil
+                        )
+                        .help(vm.recordRecipeHelp)
                     }
                     section("SIGNUP JOBS (\(vm.jobs.count))") {
                         ForEach(vm.jobs) { j in
@@ -512,11 +534,34 @@ private struct AddAuthorizationEnvelopeSheet: View {
 private struct RecordRecipeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var isRecording: Bool
-    let onRecord: (String, String, String) -> Void
+    let personas: [FoundryPersona]
+    let envelope: FoundryAuthorizationEnvelope?
+    let onRecord: (String, String, String, String, String) -> Void
 
     @State private var serviceHandle = ""
     @State private var name = ""
     @State private var origin = "https://"
+    @State private var personaId = ""
+    @State private var visualVariant = "classic"
+
+    private let variants = [
+        "classic", "wizard", "modal", "identity_first", "progressive",
+        "narrow", "reordered",
+    ]
+
+    private var authorizationIssue: String? {
+        guard let envelope else { return "Select an authorization envelope first." }
+        guard envelope.isApproved && !envelope.isExpired else {
+            return "The selected envelope is unapproved or expired."
+        }
+        guard envelope.authorizes(urlOrOrigin: origin) else {
+            return "The selected envelope does not authorize this origin."
+        }
+        guard envelope.permits(workflow: serviceHandle) else {
+            return "The selected envelope does not permit this service workflow."
+        }
+        return nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -536,24 +581,146 @@ private struct RecordRecipeSheet: View {
                 Text("Origin URL").font(.system(size: 10, weight: .bold, design: .monospaced))
                 TextField("e.g. https://tiktok.com/signup", text: $origin)
                     .textFieldStyle(.roundedBorder)
+
+                Picker("Recording Persona", selection: $personaId) {
+                    Text("Select a persona").tag("")
+                    ForEach(personas) { persona in
+                        Text("\(persona.label) · \(persona.email)")
+                            .tag(persona.personaId)
+                    }
+                }
+
+                Picker("Visual Variant", selection: $visualVariant) {
+                    ForEach(variants, id: \.self) { variant in
+                        Text(variant).tag(variant)
+                    }
+                }
             }
             .font(.system(size: 12, design: .monospaced))
+
+            if let issue = authorizationIssue {
+                Label(issue, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundColor(.orange)
+            } else if let envelope {
+                Label(
+                    "Authorized by \(envelope.envelopeId.prefix(8)) for this exact origin and workflow.",
+                    systemImage: "checkmark.shield.fill"
+                )
+                .font(.caption)
+                .foregroundColor(.green)
+            }
 
             HStack {
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.bordered)
                 Spacer()
                 Button("Start Recording") {
-                    onRecord(serviceHandle, name, origin)
+                    onRecord(serviceHandle, name, origin, personaId, visualVariant)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyberCyan)
-                .disabled(serviceHandle.isEmpty || name.isEmpty || origin == "https://")
+                .disabled(
+                    serviceHandle.isEmpty
+                        || name.isEmpty
+                        || origin == "https://"
+                        || personaId.isEmpty
+                        || authorizationIssue != nil
+                )
             }
         }
         .padding(20)
         .frame(width: 400)
+    }
+}
+
+
+private struct RecipeDetailSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let recipe: FoundryRecipeDetail
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(recipe.name)
+                        .font(.headline)
+                    Text("\(recipe.serviceHandle) · \(recipe.origin)")
+                        .font(.caption.monospaced())
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button("Done") { dismiss() }
+            }
+
+            HStack(spacing: 18) {
+                detailPill("VARIANT", recipe.visualVariant ?? "not recorded")
+                detailPill("SOURCE", recipe.source)
+                detailPill("SECRET AUDIT", recipe.secretAudit["status"]?.stringValue ?? "not run")
+            }
+
+            GroupBox("Provenance") {
+                Text(jsonText(recipe.provenance))
+                    .font(.system(size: 10, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Text("Recipe Steps")
+                .font(.subheadline.bold())
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(recipe.steps.enumerated()), id: \.offset) { index, step in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(index + 1). \(step.kind.uppercased()) — \(step.label)")
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            if let semantic = step.semanticKey {
+                                Text("semantic: \(semantic)")
+                                    .foregroundColor(.cyan)
+                            }
+                            if let binding = step.valueBinding {
+                                Text("binding: \(binding)")
+                            }
+                            if let challenge = step.challengeKind {
+                                Text("challenge boundary: \(challenge)")
+                                    .foregroundColor(.orange)
+                            }
+                            if let url = step.url { Text("url: \(url)") }
+                            if let selector = step.selector {
+                                Text("selector: \(selector["by"] ?? "?") = \(selector["value"] ?? "?")")
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.04))
+                        .cornerRadius(6)
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .frame(width: 760, height: 720)
+    }
+
+    private func detailPill(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2).foregroundColor(.secondary)
+            Text(value).font(.caption.monospaced()).bold()
+        }
+    }
+
+    private func jsonText(_ value: [String: AnyCodable]) -> String {
+        let object = value.mapValues(\.value)
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                  withJSONObject: object,
+                  options: [.prettyPrinted, .sortedKeys]
+              ) else { return "{}" }
+        return String(data: data, encoding: .utf8) ?? "{}"
     }
 }
 
@@ -653,6 +820,7 @@ final class FoundryConsoleViewModel: ObservableObject {
     @Published var plan: FoundryAccountPlan?
     @Published var errorMessage: String?
     @Published var isRecording: Bool = false
+    @Published var inspectedRecipe: FoundryRecipeDetail?
 
     @Published var planTarget: String = "airtable"
     @Published var selectedVulnClasses: Set<String> = ["idor_cross_principal"]
@@ -765,6 +933,17 @@ final class FoundryConsoleViewModel: ObservableObject {
         return "Replay this recipe under the selected authorization envelope."
     }
 
+    var recordRecipeHelp: String {
+        if personas.isEmpty { return "Create a research persona before recording." }
+        guard let envelope = selectedEnvelope else {
+            return "Select an approved authorization envelope before recording."
+        }
+        guard envelope.isApproved && !envelope.isExpired else {
+            return "The selected envelope is unapproved or expired."
+        }
+        return "Record a human-driven signup under the selected envelope."
+    }
+
     fileprivate func createEnvelope(_ draft: AuthorizationEnvelopeDraft) async {
         do {
             let created = try await client.createAuthorizationEnvelope(
@@ -803,16 +982,47 @@ final class FoundryConsoleViewModel: ObservableObject {
         }
     }
     
-    func recordRecipe(serviceHandle: String, name: String, origin: String) async {
+    func recordRecipe(
+        serviceHandle: String,
+        name: String,
+        origin: String,
+        personaId: String,
+        visualVariant: String
+    ) async {
         isRecording = true
         errorMessage = nil
         do {
-            _ = try await client.recordRecipe(serviceHandle: serviceHandle, name: name, origin: origin)
+            guard let envelope = selectedEnvelope,
+                  envelope.isApproved,
+                  !envelope.isExpired,
+                  envelope.authorizes(urlOrOrigin: origin),
+                  envelope.permits(workflow: serviceHandle) else {
+                errorMessage = "Record: selected envelope does not authorize this origin and workflow"
+                isRecording = false
+                return
+            }
+            _ = try await client.recordRecipe(
+                serviceHandle: serviceHandle,
+                name: name,
+                origin: origin,
+                envelopeId: envelope.envelopeId,
+                personaId: personaId,
+                visualVariant: visualVariant
+            )
             await refresh()
         } catch {
             errorMessage = "Record: \(error.localizedDescription)"
         }
         isRecording = false
+    }
+
+    func inspectRecipe(recipeId: String) async {
+        do {
+            inspectedRecipe = try await client.getRecipe(recipeId: recipeId)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Recipe detail: \(error.localizedDescription)"
+        }
     }
 
     // Challenge handoff

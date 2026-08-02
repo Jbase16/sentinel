@@ -425,7 +425,6 @@
 				};
 			};
 			buildConfigurationList = ABB82D16F30F1E2E0B442F89 /* Build configuration list for PBXProject "SentinelForge" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -435,6 +434,7 @@
 			mainGroup = 2BE62123C101D1A0E78E9AC3;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = 73F5367697371FAE0E7DD69E /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (

@@ -275,6 +275,7 @@ class BackendManager: ObservableObject {
 
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
+        let dataDirectory = SentinelRuntimePaths.dataDirectory
 
         guard let repoPath = resolveBackendRoot(home: home) else {
             await MainActor.run { self.status = "Error: Backend path not found" }
@@ -352,9 +353,7 @@ class BackendManager: ObservableObject {
         // it. The GUI is launched from Finder/Xcode and doesn't inherit the
         // shell env, so we read the file explicitly. Empty/missing → header
         // stays off (backend default).
-        let bbHandleURL = home
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("bb_handle")
+        let bbHandleURL = dataDirectory.appendingPathComponent("bb_handle")
         if let handle = try? String(contentsOf: bbHandleURL, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
             !handle.isEmpty
@@ -364,10 +363,7 @@ class BackendManager: ObservableObject {
         }
 
         // Provide a boot manifest path for deterministic readiness diagnostics.
-        let manifestDir =
-            home
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("run")
+        let manifestDir = dataDirectory.appendingPathComponent("run")
         let manifestPath = manifestDir.appendingPathComponent("boot_manifest.json")
         bootManifestURL = manifestPath
         try? FileManager.default.createDirectory(at: manifestDir, withIntermediateDirectories: true)
@@ -861,8 +857,12 @@ class BackendManager: ObservableObject {
 
         // DEBUG: Write to file
         let fileManager = FileManager.default
-        let home = fileManager.homeDirectoryForCurrentUser
-        let logFile = home.appendingPathComponent(".sentinelforge/ui_backend_debug.log")
+        let dataDirectory = SentinelRuntimePaths.dataDirectory
+        try? fileManager.createDirectory(
+            at: dataDirectory,
+            withIntermediateDirectories: true
+        )
+        let logFile = dataDirectory.appendingPathComponent("ui_backend_debug.log")
 
         if !fileManager.fileExists(atPath: logFile.path) {
             fileManager.createFile(atPath: logFile.path, contents: nil)
@@ -892,9 +892,7 @@ class BackendManager: ObservableObject {
     }
 
     private func isTokenFileFresh(since launchTime: Date) -> Bool {
-        let tokenPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
+        let tokenPath = SentinelRuntimePaths.file("api_token")
 
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: tokenPath.path),
             let modDate = attrs[.modificationDate] as? Date
@@ -911,9 +909,7 @@ class BackendManager: ObservableObject {
     /// regardless of whether the file was rewritten this launch. Mirrors the
     /// backend's own sanity check in SentinelConfig.from_env().
     private func tokenFileIsUsable() -> Bool {
-        let tokenPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
+        let tokenPath = SentinelRuntimePaths.file("api_token")
         guard let raw = try? String(contentsOf: tokenPath, encoding: .utf8) else { return false }
         let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return token.count >= 32 && token.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }

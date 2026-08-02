@@ -18,12 +18,10 @@ real ~/.sentinelforge.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
 from core.ghost.flow import (
-    MAX_BODY_BYTES,
     FlowMapper,
     FlowStep,
     UserFlow,
@@ -409,5 +407,12 @@ def test_flow_store_dir_honors_env(monkeypatch, tmp_path):
 
 def test_flow_store_dir_default_when_no_env(monkeypatch):
     monkeypatch.delenv("SENTINELFORGE_FLOW_STORE", raising=False)
+    monkeypatch.delenv("SENTINEL_DATA_DIR", raising=False)
     from pathlib import Path
     assert _flow_store_dir() == Path.home() / ".sentinelforge" / "ghost_flows"
+
+
+def test_flow_store_dir_uses_isolated_data_root(monkeypatch, tmp_path):
+    monkeypatch.delenv("SENTINELFORGE_FLOW_STORE", raising=False)
+    monkeypatch.setenv("SENTINEL_DATA_DIR", str(tmp_path))
+    assert _flow_store_dir() == tmp_path / "ghost_flows"

@@ -159,29 +159,28 @@ class SignupOrchestrator:
             raise ValueError(f"recipe {recipe_id!r} not found")
 
         # ── Authorization gate (PF11) — judgment is a precondition. ──
-        # During UI development, if envelope_id is None, we bypass this.
-        # Once the UI supports creating envelopes, this should be strictly enforced.
-        if envelope_id is not None:
-            envelope = get_envelope(envelope_id)
-            if envelope is None:
-                raise AuthorizationDenied(
-                    f"no authorization envelope {envelope_id!r} — the Foundry "
-                    f"refuses to create accounts without the researcher's "
-                    f"up-front authorization. Create one with create_envelope()."
-                )
-            # The workflow is the recipe's service handle; the target is the
-            # recipe's origin. Both must be inside the envelope.
-            envelope.authorize_action(
-                target_origin=recipe.origin,
-                workflow=recipe.service_handle,
+        if envelope_id is None:
+            raise AuthorizationDenied(
+                "an authorization envelope is required before signup execution"
             )
-            auth_proof = envelope.authorization_proof(audit_reference=f"job:signup:{recipe_id}")
-            if not auth_proof:
-                raise AuthorizationDenied(
-                    "envelope is UNAPPROVED. Cannot launch."
-                )
-        else:
-            auth_proof = None
+        envelope = get_envelope(envelope_id)
+        if envelope is None:
+            raise AuthorizationDenied(
+                f"no authorization envelope {envelope_id!r} — the Foundry "
+                f"refuses to create accounts without the researcher's "
+                f"up-front authorization. Create one with create_envelope()."
+            )
+        # The workflow is the recipe's service handle; the target is the
+        # recipe's origin. Both must be inside the envelope.
+        envelope.authorize_action(
+            target_origin=recipe.origin,
+            workflow=recipe.service_handle,
+        )
+        auth_proof = envelope.authorization_proof(
+            audit_reference=f"job:signup:{recipe_id}"
+        )
+        if not auth_proof:
+            raise AuthorizationDenied("envelope is UNAPPROVED. Cannot launch.")
 
         vault = self._vault or PersonaVault()
         persona = vault.get_persona(persona_id)
@@ -220,6 +219,14 @@ class SignupOrchestrator:
         driver = None
         try:
             driver = await self._driver_factory()
+            restrict_to_origins = getattr(driver, "restrict_to_origins", None)
+            if callable(restrict_to_origins):
+                from core.foundry.authorization import get_envelope
+
+                envelope = get_envelope(job.envelope_id or "")
+                if envelope is None:
+                    raise RuntimeError("authorization envelope disappeared before replay")
+                await restrict_to_origins(envelope.authorized_origins)
             replayer = RecipeReplayer(driver, vault=vault)
             outcome = await replayer.run(
                 recipe, persona, challenge_handler=self._get_bus().as_handler(),

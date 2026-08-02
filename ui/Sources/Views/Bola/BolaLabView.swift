@@ -24,9 +24,7 @@ final class BolaLabViewModel: ObservableObject {
     private let baseURL = "http://127.0.0.1:8765/v1/driver"
 
     private static func readAPIToken() -> String? {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge", isDirectory: true)
-            .appendingPathComponent("api_token")
+        let path = SentinelRuntimePaths.file("api_token")
         return try? String(contentsOf: path, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -1319,8 +1319,7 @@ public actor CortexClient {
     public init() {}
 
     private func getToken() -> String? {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge/api_token")
+        let path = SentinelRuntimePaths.file("api_token")
         return try? String(contentsOf: path, encoding: .utf8).trimmingCharacters(
             in: .whitespacesAndNewlines)
     }

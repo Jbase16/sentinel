@@ -41,9 +41,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     }
 
     private static func readAPIToken() -> String? {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge", isDirectory: true)
-            .appendingPathComponent("api_token")
+        let path = SentinelRuntimePaths.file("api_token")
         return try? String(contentsOf: path, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -123,7 +121,9 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                 
                 switch command {
                 case "launch":
-                    result = try await launchBrowser(args: args)
+                    var launchArgs = args
+                    launchArgs["session_id"] = dict["session_id"] as? String ?? ""
+                    result = try await launchBrowser(args: launchArgs)
                 case "navigate":
                     if let url = args["url"] as? String {
                         result = try await navigate(
@@ -158,6 +158,20 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     )
                 case "start_recording":
                     result = try await startRecording()
+                case "restrict_origins":
+                    guard let origins = args["origins"] as? [String],
+                          !origins.isEmpty else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "origins must be a non-empty array"
+                            ]
+                        )
+                    }
+                    try getBrowser().restrictToOrigins(origins)
+                    result = "ok"
                 case "start_network_capture":
                     guard let captureSessionId = args["capture_session"] as? String,
                           !captureSessionId.isEmpty else {
@@ -311,6 +325,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             defer: false
         )
         let wc = NSWindowController(window: window)
+        window.eventSessionId = args["session_id"] as? String ?? ""
         wc.showWindow(nil)
         window.makeKeyAndOrderFront(nil)
         

@@ -234,10 +234,7 @@ public final class VerifyAPIClient {
     }
 
     private static func readToken() -> String? {
-        let tokenPath = FileManager.default
-            .homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
+        let tokenPath = SentinelRuntimePaths.file("api_token")
         return try? String(contentsOf: tokenPath).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

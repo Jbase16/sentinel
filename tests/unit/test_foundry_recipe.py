@@ -19,7 +19,6 @@ import json
 import pytest
 
 from core.foundry.recipe import (
-    BindingKind,
     ChallengeKind,
     RecipeStep,
     SignupRecipe,
@@ -222,6 +221,10 @@ class TestSignupRecipe:
 
     def test_round_trip_via_dict(self):
         r = _valid_recipe()
+        r.visual_variant = "classic"
+        r.provenance = {"correlation_ids": ["lab:abc"]}
+        r.secret_audit = {"status": "pass"}
+        r.steps[1].semantic_key = "email"
         r.derive_required_persona_fields()
         restored = SignupRecipe.from_dict(r.to_dict())
         assert restored.service_handle == r.service_handle
@@ -232,6 +235,10 @@ class TestSignupRecipe:
         assert restored.steps[4].challenge_kind is ChallengeKind.EMAIL_LINK
         assert restored.steps[5].extract_as == "api_token"
         assert restored.required_persona_fields == ["email"]
+        assert restored.visual_variant == "classic"
+        assert restored.provenance["correlation_ids"] == ["lab:abc"]
+        assert restored.secret_audit["status"] == "pass"
+        assert restored.steps[1].semantic_key == "email"
 
     def test_to_dict_is_json_safe(self):
         r = _valid_recipe()

@@ -130,6 +130,159 @@ class TestPersonaEndpoints:
         assert audit[0]["service_handle"] == "airtable"
 
 
+# ───────────────────────── authority-bound recording ─────────────────────────
+
+
+class TestRecordRecipeEndpoint:
+    ORIGIN = "https://app.sentinel-lab.test/signup"
+    WORKFLOW = "sentinel-lab"
+
+    def _authorized_request(self):
+        from core.foundry.authorization import create_envelope
+        from core.foundry.vault import PersonaVault
+        from core.server.routers.foundry import RecordRecipeRequest
+
+        persona = PersonaVault().add_persona(
+            label="acceptance-alice",
+            email="acceptance-alice@sentinel-lab.test",
+            password="vault-only-password",
+            first_name="Acceptance",
+            last_name="Alice",
+        )
+        envelope = create_envelope(
+            researcher_identity="operator",
+            target_handle="sentinel-lab",
+            authorized_origins=["https://app.sentinel-lab.test"],
+            authorization_basis="isolated local acceptance lab",
+            allowed_workflows=[self.WORKFLOW],
+            disclosure_attestation=True,
+        )
+        return RecordRecipeRequest(
+            service_handle=self.WORKFLOW,
+            name="classic signup",
+            origin=self.ORIGIN,
+            envelope_id=envelope.envelope_id,
+            persona_id=persona.persona_id,
+            visual_variant="classic",
+        )
+
+    def test_missing_envelope_refuses_before_driver_launch(self, monkeypatch):
+        from fastapi import HTTPException
+
+        from core.foundry.driver_native import GhostNativeDriver
+        from core.foundry.vault import PersonaVault
+        from core.server.routers.foundry import (
+            RecordRecipeRequest,
+            record_recipe_endpoint,
+        )
+
+        persona = PersonaVault().add_persona(label="a", email="a@example.test")
+
+        async def forbidden_launch(*_args, **_kwargs):
+            raise AssertionError("authorization refusal must precede driver launch")
+
+        monkeypatch.setattr(GhostNativeDriver, "launch", forbidden_launch)
+        request = RecordRecipeRequest(
+            service_handle=self.WORKFLOW,
+            name="classic signup",
+            origin=self.ORIGIN,
+            envelope_id="0" * 32,
+            persona_id=persona.persona_id,
+            visual_variant="classic",
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            _run(record_recipe_endpoint(request, _=True))
+        assert exc.value.status_code == 403
+
+    def test_authorized_recording_persists_inspectable_provenance(
+        self, monkeypatch
+    ):
+        from core.foundry.driver_native import GhostNativeDriver
+        from core.foundry.recipe_store import load_recipe
+        from core.server.routers import driver as driver_router
+        from core.server.routers.foundry import record_recipe_endpoint
+
+        request = self._authorized_request()
+
+        class FakeDriver:
+            session_id = "recording-session"
+
+            async def start_recording(self):
+                return None
+
+            async def restrict_to_origins(self, origins):
+                assert origins == ["https://app.sentinel-lab.test"]
+
+            def emit(self, action):
+                event = {
+                    "event": "recorded_action",
+                    "session_id": self.session_id,
+                    "action": action,
+                }
+                for handler in list(driver_router.node_manager.event_handlers):
+                    handler("recorded_action", event)
+
+            async def navigate(self, url):
+                self.emit({
+                    "action": "navigate",
+                    "url": "https://app.sentinel-lab.test/signup/classic",
+                    "correlation_id": "lab:111111111111",
+                })
+
+            async def wait_for_close(self):
+                self.emit({
+                    "action": "fill",
+                    "selector": {"by": "name", "value": "email"},
+                    "field": {
+                        "name": "email",
+                        "type": "email",
+                        "label": "Work email",
+                    },
+                })
+                self.emit({
+                    "action": "navigate",
+                    "url": "https://app.sentinel-lab.test/verify",
+                    "correlation_id": "lab:222222222222",
+                })
+                self.emit({
+                    "action": "fill",
+                    "selector": {"by": "name", "value": "code"},
+                    "field": {"name": "code", "label": "Verification code"},
+                })
+                self.emit({
+                    "action": "navigate",
+                    "url": "https://app.sentinel-lab.test/app",
+                    "correlation_id": "lab:333333333333",
+                })
+
+            async def close(self):
+                return None
+
+        fake = FakeDriver()
+
+        async def launch(*_args, **_kwargs):
+            return fake
+
+        monkeypatch.setattr(GhostNativeDriver, "launch", launch)
+        result = _run(record_recipe_endpoint(request, _=True))
+        recipe = load_recipe(result["recipe_id"])
+
+        assert recipe is not None
+        assert recipe.visual_variant == "classic"
+        assert recipe.secret_audit["status"] == "pass"
+        assert recipe.provenance["correlation_ids"] == [
+            "lab:111111111111",
+            "lab:222222222222",
+            "lab:333333333333",
+        ]
+        assert recipe.provenance["authorization"]["envelope_id"] == (
+            request.envelope_id
+        )
+        assert recipe.challenge_steps()[0].challenge_kind.value == "email_code"
+        assert all("vault-only-password" not in json.dumps(step.to_dict()) for step in recipe.steps)
+
+
 # ───────────────── behavioral primary planner ─────────────────
 
 

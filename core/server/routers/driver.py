@@ -176,6 +176,9 @@ def _capture_store() -> Path:
     override = os.environ.get(_CAPTURE_STORE_ENV)
     if override:
         return Path(override)
+    data_dir = os.environ.get("SENTINEL_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "captures"
     return Path.home() / ".sentinelforge" / "captures"
 
 

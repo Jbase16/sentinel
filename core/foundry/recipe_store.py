@@ -28,14 +28,20 @@ logger = logging.getLogger(__name__)
 
 
 _STORE_ENV = "SENTINELFORGE_RECIPE_STORE"
-_DEFAULT_STORE = Path.home() / ".sentinelforge" / "recipes"
+
+
+def _default_store_dir() -> Path:
+    data_dir = os.environ.get("SENTINEL_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "recipes"
+    return Path.home() / ".sentinelforge" / "recipes"
 
 
 def _store_dir() -> Path:
     override = os.environ.get(_STORE_ENV)
     if override:
         return Path(override)
-    return _DEFAULT_STORE
+    return _default_store_dir()
 
 
 def _path_for(recipe: SignupRecipe) -> Path:

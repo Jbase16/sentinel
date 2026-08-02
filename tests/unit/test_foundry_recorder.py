@@ -9,11 +9,13 @@ and the end-to-end "recorded recipe replays correctly".
 from __future__ import annotations
 
 import asyncio
+import json
 
 from core.foundry.recipe import ChallengeKind, StepKind
 from core.foundry.recorder import (
     RecordedAction,
     infer_binding,
+    infer_semantic_key,
     record_to_recipe,
 )
 
@@ -85,6 +87,48 @@ class TestInferBinding:
     def test_email_wins_over_generic_name(self):
         # A field named "email_name" should be email, not a name field.
         assert infer_binding({"name": "email_address"}) == "persona:email"
+
+    def test_confirmation_semantic_is_distinct_but_reuses_password(self):
+        field = {
+            "type": "password",
+            "name": "f_2",
+            "label": "Repeat",
+            "help_text": "Must match the value below.",
+        }
+        assert infer_semantic_key(field) == "password_confirm"
+        assert infer_binding(field) == "persona:password"
+
+    def test_terms_checkbox_has_semantic_binding(self):
+        field = {"type": "checkbox", "name": "f_7", "label": "Agreed"}
+        assert infer_semantic_key(field) == "accept_terms"
+        assert infer_binding(field) == "literal:true"
+
+    def test_terms_checkbox_records_as_one_replayable_click(self):
+        recipe = record_to_recipe(
+            service_handle="paperframe",
+            origin="https://app.example.test/signup",
+            name="checkbox",
+            actions=[RecordedAction(
+                action="fill",
+                selector={"by": "name", "value": "accept_terms"},
+                field={
+                    "type": "checkbox",
+                    "name": "accept_terms",
+                    "label": "I accept the terms",
+                    "checked": "true",
+                },
+            )],
+        )
+
+        assert len(recipe.steps) == 1
+        assert recipe.steps[0].kind is StepKind.CLICK
+        assert recipe.steps[0].semantic_key == "accept_terms"
+        assert recipe.steps[0].metadata["recorded_checked"] == "true"
+
+    def test_verification_code_never_becomes_a_literal(self):
+        field = {"name": "code", "label": "Verification code"}
+        assert infer_semantic_key(field) == "verification_code"
+        assert infer_binding(field) == "extracted:challenge_email_code"
 
 
 # ───────────────────────── action log → recipe ─────────────────────────
@@ -175,6 +219,41 @@ class TestRecordToRecipe:
         )
         assert "Review needed" in recipe.notes
         assert "favorite_color" in recipe.notes
+
+    def test_variant_correlations_and_challenge_boundary_are_persisted(self):
+        recipe = record_to_recipe(
+            service_handle="sentinel-lab",
+            origin="https://app.sentinel-lab.test/signup",
+            name="classic signup",
+            visual_variant="classic",
+            provenance={"authorization": {"envelope_id": "a" * 32}},
+            actions=[
+                RecordedAction(
+                    action="navigate",
+                    url="https://app.sentinel-lab.test/signup/classic",
+                    correlation_id="lab:111111111111",
+                ),
+                RecordedAction(
+                    action="navigate",
+                    url="https://app.sentinel-lab.test/verify?token=must-not-persist",
+                    correlation_id="lab:222222222222",
+                ),
+                RecordedAction(
+                    action="fill",
+                    selector={"by": "name", "value": "code"},
+                    field={"name": "code", "label": "Verification code"},
+                ),
+            ],
+        )
+
+        assert recipe.visual_variant == "classic"
+        assert recipe.provenance["correlation_ids"] == [
+            "lab:111111111111",
+            "lab:222222222222",
+        ]
+        assert recipe.challenge_steps()[0].challenge_kind is ChallengeKind.EMAIL_CODE
+        assert "token=" not in json.dumps(recipe.to_dict())
+        assert recipe.secret_audit["status"] == "pass"
 
 
 # ───────────────────────── confirm-password reuse end-to-end ─────────────────────────

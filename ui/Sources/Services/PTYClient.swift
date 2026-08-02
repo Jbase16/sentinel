@@ -35,11 +35,7 @@ class PTYClient: ObservableObject {
     private var hasConfirmedConnection: Bool = false
 
     /// Path to the token file
-    private static let tokenPath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
-    }()
+    private static let tokenPath = SentinelRuntimePaths.file("api_token")
 
     private static func readToken() -> String? {
         try? String(contentsOf: tokenPath, encoding: .utf8)

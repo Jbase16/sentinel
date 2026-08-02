@@ -91,9 +91,7 @@ class CortexStream: ObservableObject {
 
     /// Path to the token file (mirrors SentinelAPIClient)
     private static let tokenPath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
+        SentinelRuntimePaths.file("api_token")
     }()
 
     private static func readToken() -> String? {

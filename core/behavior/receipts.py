@@ -2447,6 +2447,9 @@ class BehavioralReceiptStore:
         override = os.environ.get(RECEIPT_ENV)
         if override:
             return Path(override)
+        data_dir = os.environ.get("SENTINEL_DATA_DIR")
+        if data_dir:
+            return Path(data_dir) / "behavioral_receipts"
         return Path.home() / ".sentinelforge" / "behavioral_receipts"
 
     def _prepare_root(self) -> Path:

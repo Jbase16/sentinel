@@ -40,3 +40,14 @@ targets:
         SWIFT_VERSION: 5.0
         MACOSX_DEPLOYMENT_TARGET: "14.0"
         CODE_SIGN_STYLE: Automatic
+
+schemes:
+  SentinelForge-Acceptance:
+    build:
+      targets:
+        SentinelForge: all
+    run:
+      config: Debug
+      environmentVariables:
+        SENTINEL_DATA_DIR: /tmp/sentinelforge-acceptance-state
+        SENTINEL_ACCEPTANCE_MODE: "1"

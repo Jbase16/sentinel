@@ -19,6 +19,7 @@ enforceable. Tests pin:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import stat
 import time
@@ -185,6 +186,33 @@ class TestTamperEvidence:
     def test_signature_stable_for_same_content(self):
         env = _approved()
         assert env.sign() == env.sign()
+
+    def test_modified_persisted_envelope_fails_closed(self, tmp_path):
+        env = _approved()
+        path = (tmp_path / "authz") / f"envelope-{env.envelope_id}.json"
+        payload = json.loads(path.read_text())
+        payload["authorized_origins"] = ["https://evil.example"]
+        path.write_text(json.dumps(payload))
+
+        loaded = get_envelope(env.envelope_id)
+        assert loaded is not None
+        assert loaded.signature_is_valid() is False
+        with pytest.raises(AuthorizationDenied, match="signature_valid=False"):
+            loaded.authorize_action(
+                target_origin="https://evil.example",
+                workflow="airtable",
+            )
+
+    def test_legacy_default_envelope_remains_approved_but_cannot_expand_budget(self):
+        env = _approved()
+        env.attestation_signature = env._legacy_expected_signature()
+
+        assert env.signature_is_valid() is True
+        assert env.is_approved() is True
+
+        env.max_accounts_per_service = 4
+        assert env.signature_is_valid() is False
+        assert env.is_approved() is False
 
 
 # ───────────────────────── store ─────────────────────────

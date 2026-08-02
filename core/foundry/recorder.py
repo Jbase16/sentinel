@@ -33,8 +33,10 @@ The recorder maps each action to a RecipeStep, inferring FILL bindings.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field as dc_field
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 from core.foundry.recipe import (
     ChallengeKind,
@@ -58,6 +60,7 @@ class RecordedAction:
     field: Dict[str, str] = dc_field(default_factory=dict)  # fill metadata
     challenge_kind: Optional[str] = None       # challenge
     label: str = ""
+    correlation_id: Optional[str] = None       # response provenance, never a secret
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "RecordedAction":
@@ -68,6 +71,7 @@ class RecordedAction:
             field=dict(d.get("field", {})),
             challenge_kind=d.get("challenge_kind"),
             label=d.get("label", ""),
+            correlation_id=d.get("correlation_id"),
         )
 
 
@@ -84,8 +88,64 @@ def _field_signal(field: Dict[str, str]) -> str:
         field.get("placeholder", ""),
         field.get("autocomplete", ""),
         field.get("aria-label", ""),
+        field.get("help_text", ""),
     ]
     return " ".join(p for p in parts if p).lower()
+
+
+def infer_semantic_key(field: Dict[str, str]) -> str:
+    """Return the stable meaning of one captured control.
+
+    The semantic key is deliberately independent of DOM position and selector.
+    It distinguishes fields that share a value (password/password_confirm) and
+    records non-text controls such as terms acceptance.
+    """
+    ftype = (field.get("type") or "").lower()
+    autocomplete = (field.get("autocomplete") or "").lower()
+    signal = _field_signal(field)
+
+    if any(word in signal for word in ("verification code", "email code", "one-time code", "otp")):
+        return "verification_code"
+    if (
+        ftype == "password"
+        or autocomplete == "new-password"
+        or "password" in signal
+        or "passwd" in signal
+    ):
+        if any(word in signal for word in ("confirm", "confirmation", "repeat", "match")):
+            return "password_confirm"
+        return "password"
+    if autocomplete == "email" or ftype == "email" or "email" in signal or "e-mail" in signal:
+        return "email"
+    if ftype == "checkbox" and any(
+        word in signal for word in ("terms", "agree", "agreed", "consent")
+    ):
+        return "accept_terms"
+    if autocomplete in ("tel", "tel-national") or ftype == "tel" or any(
+        word in signal for word in ("phone", "mobile", "telephone")
+    ):
+        return "phone"
+    if autocomplete == "name" or any(
+        word in signal for word in ("full name", "display name", "your name")
+    ):
+        return "display_name"
+    if autocomplete == "given-name" or any(
+        word in signal for word in ("first name", "firstname", "fname", "given name")
+    ):
+        return "first_name"
+    if autocomplete == "family-name" or any(
+        word in signal for word in ("last name", "lastname", "lname", "surname", "family name")
+    ):
+        return "last_name"
+    if autocomplete == "username" or any(
+        word in signal for word in ("username", "user name", "handle", "screen name")
+    ):
+        return "username"
+    if autocomplete == "bday" or any(word in signal for word in ("birth", "dob", "birthday")):
+        return "date_of_birth"
+    if "name" in signal:
+        return "display_name"
+    return "unknown"
 
 
 def infer_binding(
@@ -105,49 +165,28 @@ def infer_binding(
     The order of checks matters: more-specific signals (autocomplete,
     type) win over fuzzy name matching.
     """
-    ftype = (field.get("type") or "").lower()
-    autocomplete = (field.get("autocomplete") or "").lower()
-    signal = _field_signal(field)
+    semantic_key = infer_semantic_key(field)
 
-    # Password fields — strongest signal is type=password.
-    if ftype == "password" or "password" in signal or "passwd" in signal:
+    if semantic_key in {"password", "password_confirm"}:
         return "persona:password"
-
-    # Email — autocomplete=email, type=email, or "email" in the signal.
-    if autocomplete == "email" or ftype == "email" or "email" in signal or "e-mail" in signal:
+    if semantic_key == "email":
         return "persona:email"
-
-    # Phone — autocomplete=tel, type=tel, or phone-ish words.
-    if autocomplete in ("tel", "tel-national") or ftype == "tel" or \
-       any(w in signal for w in ("phone", "mobile", "telephone")):
+    if semantic_key == "phone":
         return "persona:phone"
-
-    # Names. autocomplete is the cleanest: given-name / family-name.
-    if autocomplete == "name" or any(
-        w in signal for w in ("full name", "fullname", "first and last name", "first & last name")
-    ):
+    if semantic_key == "display_name":
         return "persona:full_name"
-    if autocomplete == "given-name" or any(
-        w in signal for w in ("first name", "firstname", "fname", "given name")
-    ):
+    if semantic_key == "first_name":
         return "persona:first_name"
-    if autocomplete == "family-name" or any(
-        w in signal for w in ("last name", "lastname", "lname", "surname", "family name")
-    ):
+    if semantic_key == "last_name":
         return "persona:last_name"
-
-    # A generic "name" / "full name" / "your name" → a generated username
-    # (signup "name" fields are usually display names, not legal names).
-    if any(w in signal for w in ("username", "user name", "handle", "screen name")):
+    if semantic_key == "username":
         return "generated:username"
-    if "name" in signal:
-        # Ambiguous full-name field — prefer first_name (most common
-        # mapping); operator can adjust. Mark in the step metadata.
-        return "persona:first_name"
-
-    # Date of birth.
-    if any(w in signal for w in ("birth", "dob", "birthday")):
+    if semantic_key == "date_of_birth":
         return "persona:date_of_birth"
+    if semantic_key == "accept_terms":
+        return "literal:true"
+    if semantic_key == "verification_code":
+        return "extracted:challenge_email_code"
 
     # Fallback — an unrecognized field. Bind to a literal placeholder so
     # the recipe is valid but the operator knows to review it.
@@ -176,6 +215,8 @@ def record_to_recipe(
     origin: str,
     name: str,
     actions: List[RecordedAction],
+    visual_variant: Optional[str] = None,
+    provenance: Optional[Dict[str, Any]] = None,
 ) -> SignupRecipe:
     """Convert a captured action log into a parameterized SignupRecipe.
 
@@ -185,16 +226,49 @@ def record_to_recipe(
     """
     steps: List[RecipeStep] = []
     review_flags: List[str] = []
+    challenge_boundaries: set[str] = set()
+    correlation_ids = {
+        action.correlation_id
+        for action in actions
+        if action.correlation_id
+    }
 
     for i, act in enumerate(actions):
         if act.action == "navigate":
+            safe_url = _redact_url(act.url)
             steps.append(RecipeStep(
-                kind=StepKind.NAVIGATE, url=act.url,
-                label=act.label or f"navigate to {act.url}",
+                kind=StepKind.NAVIGATE, url=safe_url,
+                label=act.label or f"navigate to {safe_url}",
             ))
+            if _is_email_verification_url(safe_url) and "email_code" not in challenge_boundaries:
+                challenge_boundaries.add("email_code")
+                steps.append(RecipeStep(
+                    kind=StepKind.CHALLENGE,
+                    label="email verification challenge",
+                    challenge_kind=ChallengeKind.EMAIL_CODE,
+                    challenge_prompt="Provide the email verification code to continue.",
+                    metadata={"boundary_url": safe_url},
+                ))
 
         elif act.action == "fill":
             binding = infer_binding(act.field)
+            semantic_key = infer_semantic_key(act.field)
+            if (act.field.get("type") or "").lower() == "checkbox":
+                steps.append(RecipeStep(
+                    kind=StepKind.CLICK,
+                    label=act.label or (
+                        "accept terms"
+                        if semantic_key == "accept_terms"
+                        else "toggle checkbox"
+                    ),
+                    selector=act.selector,
+                    semantic_key=semantic_key,
+                    metadata={
+                        "control_type": "checkbox",
+                        "recorded_checked": act.field.get("checked", "true"),
+                    },
+                ))
+                continue
             if binding == "literal:REVIEW_THIS_FIELD":
                 review_flags.append(
                     f"step {len(steps)}: field "
@@ -206,6 +280,7 @@ def record_to_recipe(
                 kind=StepKind.FILL, label=label,
                 selector=act.selector,
                 value_binding=binding,
+                semantic_key=semantic_key,
                 metadata={"inferred_from": _field_signal(act.field)} if act.field else {},
             ))
 
@@ -236,6 +311,14 @@ def record_to_recipe(
         origin=origin,
         steps=steps,
         source="recorded",
+        visual_variant=visual_variant,
+        provenance={
+            **dict(provenance or {}),
+            "correlation_ids": sorted(correlation_ids),
+            "recorded_navigation_count": sum(
+                1 for action in actions if action.action == "navigate"
+            ),
+        },
         notes=(
             "Auto-recorded. " + (
                 "Review needed: " + "; ".join(review_flags)
@@ -245,6 +328,9 @@ def record_to_recipe(
     )
     recipe.validate()
     recipe.derive_required_persona_fields()
+    recipe.secret_audit = _secret_audit(recipe)
+    if recipe.secret_audit["status"] != "pass":
+        raise ValueError("recorded recipe failed secret audit")
     logger.info(
         "[recorder] recorded %s: %d steps, %d challenge(s), %d field(s) "
         "needing review",
@@ -252,6 +338,44 @@ def record_to_recipe(
         len(review_flags),
     )
     return recipe
+
+
+def _redact_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return url
+    parts = urlsplit(url)
+    # Query parameters and fragments frequently contain verification artifacts.
+    # A signup recipe needs the route, not the one-time values from this run.
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _is_email_verification_url(url: Optional[str]) -> bool:
+    if not url:
+        return False
+    return urlsplit(url).path.rstrip("/") == "/verify"
+
+
+_SECRET_SHAPED = re.compile(r"(?:labsess_|labtok_|\b\d{6}\b)", re.IGNORECASE)
+
+
+def _secret_audit(recipe: SignupRecipe) -> Dict[str, Any]:
+    """Audit persisted recipe fields without ever returning matched values."""
+    violations: List[str] = []
+    for index, step in enumerate(recipe.steps):
+        binding = step.value_binding or ""
+        if binding.startswith("literal:") and binding not in {
+            "literal:true",
+            "literal:REVIEW_THIS_FIELD",
+        }:
+            violations.append(f"step_{index}_literal_binding")
+        for candidate in (step.url, step.label, step.challenge_prompt):
+            if candidate and _SECRET_SHAPED.search(candidate):
+                violations.append(f"step_{index}_secret_shaped_text")
+    return {
+        "status": "pass" if not violations else "fail",
+        "scanner": "foundry_recipe_v1",
+        "violations": sorted(set(violations)),
+    }
 
 
 def _label_for_binding(binding: str) -> str:
@@ -264,6 +388,8 @@ def _label_for_binding(binding: str) -> str:
         "persona:date_of_birth": "fill date of birth",
         "persona:password": "fill password",
         "generated:username": "fill username",
+        "literal:true": "accept terms",
+        "extracted:challenge_email_code": "fill email verification code",
         "literal:REVIEW_THIS_FIELD": "fill (REVIEW)",
     }
     return mapping.get(binding, "fill field")

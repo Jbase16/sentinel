@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
@@ -82,13 +83,16 @@ class ResolveChallengeRequest(BaseModel):
 class StartSignupRequest(BaseModel):
     recipe_id: str
     persona_id: str
-    envelope_id: Optional[str] = None
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
 
 
 class RecordRecipeRequest(BaseModel):
     service_handle: str
     name: str
     origin: str
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    visual_variant: str = Field(..., min_length=1, max_length=64)
 
 
 class CreateEnvelopeRequest(BaseModel):
@@ -248,6 +252,8 @@ async def list_recipes_endpoint(
             "challenge_count": len(r.challenge_steps()),
             "required_persona_fields": r.required_persona_fields,
             "source": r.source,
+            "visual_variant": r.visual_variant,
+            "secret_audit_status": r.secret_audit.get("status", "not_run"),
         }
         for r in list_recipes(service_handle)
     ]
@@ -307,53 +313,122 @@ async def record_recipe_endpoint(
     req: RecordRecipeRequest,
     _: bool = Depends(verify_sensitive_token),
 ):
-    """Launch a headful Playwright browser, record human actions, and
-    save them as a SignupRecipe when the browser is closed."""
+    """Record one human-driven signup under prevalidated authority.
+
+    Every authorization, persona, and rate-limit check happens before the
+    native window is launched. A refused request therefore produces no target
+    traffic.
+    """
+    from core.foundry.authorization import AuthorizationDenied, get_envelope
     from core.foundry.driver_native import GhostNativeDriver
     from core.foundry.recorder import RecordedAction, record_to_recipe
     from core.foundry.recipe_store import save_recipe
+    from core.foundry.vault import PersonaVault, RateLimitExceeded
     from core.server.routers.driver import node_manager
-    
+
+    envelope = get_envelope(req.envelope_id)
+    if envelope is None:
+        raise HTTPException(status_code=403, detail="authorization envelope not found")
+    try:
+        envelope.authorize_action(
+            target_origin=req.origin,
+            workflow=req.service_handle,
+        )
+    except AuthorizationDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    vault = PersonaVault(
+        max_accounts_per_service=envelope.max_accounts_per_service,
+        window_seconds=envelope.rate_limit_window_days * 24 * 3600,
+    )
+    if vault.get_persona(req.persona_id) is None:
+        raise HTTPException(status_code=404, detail="recording persona not found")
+    try:
+        vault.check_rate_limit(req.persona_id, req.service_handle)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     actions: List[RecordedAction] = []
-    
+    started_at = time.time()
+
     def on_event(event_type, data):
-        if event_type == "recorded_action":
+        if (
+            event_type == "recorded_action"
+            and data.get("session_id") == driver.session_id
+        ):
             try:
                 actions.append(RecordedAction.from_dict(data.get("action", {})))
             except Exception as e:
                 logger.warning("[recorder] invalid action payload: %s", e)
-                
-    node_manager.event_handlers.append(on_event)
-            
+
     try:
         driver = await GhostNativeDriver.launch(headless=False)
-        
+        node_manager.event_handlers.append(on_event)
+
+        await driver.restrict_to_origins(envelope.authorized_origins)
         # Native recording logic: Swift injects the listener and bridges the events
         await driver.start_recording()
-        
-        actions.append(RecordedAction(action="navigate", url=req.origin))
         await driver.navigate(req.origin)
-        
+
         # Wait for user to close the Native window
-        try:
-            await driver.wait_for_close()
-        except Exception:
-            pass # Timeout or other error during wait
-            
+        await driver.wait_for_close()
+
+        authorization_proof = envelope.authorization_proof(
+            audit_reference=f"record:{req.service_handle}:{req.persona_id}"
+        )
+        if authorization_proof is None:
+            raise AuthorizationDenied("authorization became invalid during recording")
+        for action in actions:
+            if action.action == "navigate" and action.url:
+                envelope.authorize_action(
+                    target_origin=action.url,
+                    workflow=req.service_handle,
+                )
         recipe = record_to_recipe(
             service_handle=req.service_handle,
             origin=req.origin,
             name=req.name,
             actions=actions,
+            visual_variant=req.visual_variant,
+            provenance={
+                "recording_mode": "human_visible_native",
+                "recorded_at": started_at,
+                "persona_id": req.persona_id,
+                "authorization": {
+                    "envelope_id": envelope.envelope_id,
+                    "attestation_signature": envelope.attestation_signature,
+                    "authorized_origin": req.origin,
+                    "workflow": req.service_handle,
+                },
+            },
         )
         save_recipe(recipe)
+
+        completed = any(
+            action.action == "navigate"
+            and urlsplit(action.url or "").path.rstrip("/") == "/app"
+            for action in actions
+        )
+        vault.record_account_creation(
+            persona_id=req.persona_id,
+            service_handle=req.service_handle,
+            recipe_id=recipe.recipe_id,
+            outcome="success" if completed else "abandoned",
+            detail="human-visible recipe recording",
+        )
         return {
             "recipe_id": recipe.recipe_id,
             "service_handle": recipe.service_handle,
             "name": recipe.name,
             "step_count": len(recipe.steps),
             "challenge_count": len(recipe.challenge_steps()),
+            "required_persona_fields": recipe.required_persona_fields,
+            "source": recipe.source,
+            "origin": recipe.origin,
         }
+    except AuthorizationDenied as exc:
+        logger.warning("[recorder] authorization failed closed: %s", exc)
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except Exception as e:
         logger.error("[recorder] recording failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

@@ -29,6 +29,10 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     private var networkCaptureScriptCount = 0
     private var networkCaptureOrigin: CaptureOrigin?
     private var mainFrameResponseStatus = 0
+    private var mainFrameCorrelationId = ""
+    private var recordingEnabled = false
+    private var authorizedNavigationOrigins: [String] = []
+    public var eventSessionId = ""
     
     public override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
         super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
@@ -62,6 +66,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         let continuation = navigationContinuation
         navigationContinuation = nil
+        emitRecordedNavigationIfEnabled()
         captureMainFrameIfEnabled {
             continuation?.resume()
         }
@@ -75,6 +80,11 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         if navigationResponse.isForMainFrame,
            let response = navigationResponse.response as? HTTPURLResponse {
             mainFrameResponseStatus = response.statusCode
+            mainFrameCorrelationId = response.allHeaderFields.first { key, _ in
+                String(describing: key).caseInsensitiveCompare(
+                    "X-Lab-Correlation-Id"
+                ) == .orderedSame
+            }.map { String(describing: $0.value) } ?? ""
         }
         decisionHandler(.allow)
     }
@@ -84,28 +94,83 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        guard networkCaptureEnabled,
-              navigationAction.targetFrame?.isMainFrame == true,
+        guard navigationAction.targetFrame?.isMainFrame == true,
               let requestedURL = navigationAction.request.url else {
             decisionHandler(.allow)
             return
         }
-        guard let allowedOrigin = networkCaptureOrigin,
-              CaptureOrigin(url: requestedURL) == allowedOrigin else {
+
+        if !authorizedNavigationOrigins.isEmpty,
+           !isAuthorizedNavigation(requestedURL) {
             decisionHandler(.cancel)
-            let error = NSError(
-                domain: "SND",
-                code: 403,
-                userInfo: [
-                    NSLocalizedDescriptionKey:
-                        "Capture blocked a cross-origin main-frame navigation"
-                ]
+            refusePendingNavigation(
+                "Authorization blocked an out-of-scope main-frame navigation"
             )
-            navigationContinuation?.resume(throwing: error)
-            navigationContinuation = nil
+            return
+        }
+
+        if networkCaptureEnabled,
+           let allowedOrigin = networkCaptureOrigin,
+           CaptureOrigin(url: requestedURL) != allowedOrigin {
+            decisionHandler(.cancel)
+            refusePendingNavigation(
+                "Capture blocked a cross-origin main-frame navigation"
+            )
             return
         }
         decisionHandler(.allow)
+    }
+
+    private func refusePendingNavigation(_ message: String) {
+        let error = NSError(
+            domain: "SND",
+            code: 403,
+            userInfo: [NSLocalizedDescriptionKey: message]
+        )
+        navigationContinuation?.resume(throwing: error)
+        navigationContinuation = nil
+    }
+
+    private func isAuthorizedNavigation(_ url: URL) -> Bool {
+        guard let requested = CaptureOrigin(url: url) else { return false }
+        return authorizedNavigationOrigins.contains { allowed in
+            guard let components = URLComponents(string: allowed),
+                  let scheme = components.scheme?.lowercased(),
+                  let host = components.host?.lowercased() else {
+                return false
+            }
+            let port = components.port ?? (scheme == "https" ? 443 : 80)
+            guard requested.scheme == scheme, requested.port == port else {
+                return false
+            }
+            if host.hasPrefix("*.") {
+                let suffix = String(host.dropFirst(2))
+                return requested.host != suffix
+                    && requested.host.hasSuffix(".\(suffix)")
+            }
+            return requested.host == host
+        }
+    }
+
+    public func restrictToOrigins(_ origins: [String]) throws {
+        guard !origins.isEmpty,
+              origins.allSatisfy({ allowed in
+                  guard let components = URLComponents(string: allowed),
+                        let scheme = components.scheme?.lowercased(),
+                        let host = components.host,
+                        !host.isEmpty else { return false }
+                  return ["http", "https"].contains(scheme)
+              }) else {
+            throw NSError(
+                domain: "SND",
+                code: 400,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Every authorized origin must be an absolute HTTP(S) origin"
+                ]
+            )
+        }
+        authorizedNavigationOrigins = origins
     }
     
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -144,6 +209,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             DriverBridgeClient.shared.sendSpontaneousEvent(
                 event: "recorded_action",
                 payload: [
+                    "session_id": self.eventSessionId,
                     "action": [
                         "action": "network_capture",
                         "persona_id": personaId,
@@ -195,6 +261,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         
         return try await withCheckedThrowingContinuation { continuation in
             self.mainFrameResponseStatus = 0
+            self.mainFrameCorrelationId = ""
             self.navigationContinuation = continuation
             webView.load(URLRequest(url: nsurl))
         }
@@ -418,6 +485,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     // MARK: - Recording Hook
     
     public func startRecording() async throws {
+        recordingEnabled = true
         let js = """
         function getCssPath(el) {
             if (!(el instanceof Element)) return '';
@@ -448,10 +516,27 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             }
             return {by: 'css', value: getCssPath(el)};
         }
+
+        function getFieldContext(el) {
+            const explicit = el.id
+                ? document.querySelector('label[for="' + CSS.escape(el.id) + '"]')
+                : null;
+            const wrapping = el.closest('label');
+            const described = (el.getAttribute('aria-describedby') || '')
+                .split(/\\s+/)
+                .filter(Boolean)
+                .map(id => document.getElementById(id)?.textContent || '')
+                .join(' ');
+            return {
+                label: (explicit?.textContent || wrapping?.textContent || '').trim(),
+                help_text: described.trim()
+            };
+        }
         
         document.addEventListener('change', e => {
             if (!e.target || e.target.tagName === 'BODY') return;
             const t = e.target;
+            const context = getFieldContext(t);
             window.webkit.messageHandlers.sndRecordingBridge.postMessage({
                 action: 'fill',
                 selector: getBestSelector(t),
@@ -461,14 +546,22 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                     type: t.type || '',
                     placeholder: t.placeholder || '',
                     autocomplete: t.autocomplete || '',
-                    'aria-label': t.getAttribute('aria-label') || ''
+                    'aria-label': t.getAttribute('aria-label') || '',
+                    label: context.label,
+                    help_text: context.help_text,
+                    checked: t.type === 'checkbox' ? String(t.checked) : ''
                 }
             });
         }, {capture: true});
         
         document.addEventListener('click', e => {
             if (!e.target || e.target.tagName === 'BODY') return;
-            const t = e.target;
+            const raw = e.target;
+            const checkbox = raw.matches?.('input[type="checkbox"]')
+                ? raw
+                : raw.closest?.('label')?.querySelector('input[type="checkbox"]');
+            if (checkbox) return; // recorded once, with checked state, by change
+            const t = raw.closest?.('button,a,input[type="submit"],input[type="button"]') || raw;
             if (t.tagName === 'IFRAME') {
                 let src = (t.src || '').toLowerCase();
                 let kind = 'captcha'; // fallback
@@ -493,6 +586,23 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         
         // Also evaluate it right now for the current page
         _ = try? await webView.evaluateJavaScript(js)
+    }
+
+    private func emitRecordedNavigationIfEnabled() {
+        guard recordingEnabled,
+              let url = webView.url?.absoluteString,
+              !url.isEmpty else { return }
+        DriverBridgeClient.shared.sendSpontaneousEvent(
+            event: "recorded_action",
+            payload: [
+                "session_id": eventSessionId,
+                "action": [
+                    "action": "navigate",
+                    "url": url,
+                    "correlation_id": mainFrameCorrelationId,
+                ],
+            ]
+        )
     }
     
     public func startNetworkCapture(
@@ -1416,7 +1526,10 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "sndRecordingBridge", let dict = message.body as? [String: Any] {
             // Forward back to python backend
-            DriverBridgeClient.shared.sendSpontaneousEvent(event: "recorded_action", payload: ["action": dict])
+            DriverBridgeClient.shared.sendSpontaneousEvent(
+                event: "recorded_action",
+                payload: ["session_id": eventSessionId, "action": dict]
+            )
         }
     }
 }

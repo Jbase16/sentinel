@@ -97,6 +97,12 @@ class GhostNativeDriver:
         """Instructs the node to inject the recording hooks and stream events back."""
         await self._send("start_recording", timeout=10.0)
 
+    async def restrict_to_origins(self, origins: list[str]) -> None:
+        """Fail closed on main-frame navigation outside signed scope."""
+        if not origins:
+            raise ValueError("at least one authorized origin is required")
+        await self._send("restrict_origins", {"origins": origins}, timeout=10.0)
+
     async def wait_for_close(self) -> None:
         """Wait until the node reports that the window has been closed."""
         # Wait indefinitely for the window to close
@@ -107,8 +113,9 @@ class GhostNativeDriver:
     async def close(self) -> None:
         if self._is_closed:
             return
-        self._is_closed = True
         try:
             await self._send("close", timeout=3.0)
         except Exception as e:
             logger.warning("[snd-driver] close failed: %s", e)
+        finally:
+            self._is_closed = True

@@ -150,6 +150,12 @@ def test_receipt_reservation_is_atomic_and_owner_only(tmp_path):
         assert secret not in encoded
 
 
+def test_receipt_store_uses_isolated_data_root(monkeypatch, tmp_path):
+    monkeypatch.delenv("SENTINELFORGE_BEHAVIOR_RECEIPTS", raising=False)
+    monkeypatch.setenv("SENTINEL_DATA_DIR", str(tmp_path))
+    assert BehavioralReceiptStore()._root() == tmp_path / "behavioral_receipts"
+
+
 def test_concurrent_reservations_have_exactly_one_owner(tmp_path):
     root = tmp_path / "receipts"
     fingerprint = _fingerprint()

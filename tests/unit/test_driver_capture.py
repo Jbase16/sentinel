@@ -774,3 +774,11 @@ async def test_manual_stop_cannot_release_capture_while_start_is_pending():
     assert error.value.status_code == 409
     assert error.value.detail == "capture is still starting"
     assert driver.ACTIVE_CAPTURE_OWNER_ID == "manual:pending"
+
+
+def test_capture_store_uses_isolated_data_root(monkeypatch, tmp_path):
+    from core.server.routers.driver import _capture_store
+
+    monkeypatch.delenv("SENTINELFORGE_CAPTURE_STORE", raising=False)
+    monkeypatch.setenv("SENTINEL_DATA_DIR", str(tmp_path))
+    assert _capture_store() == tmp_path / "captures"

@@ -218,6 +218,8 @@ public struct FoundryRecipeSummary: Codable, Identifiable {
     public let challengeCount: Int
     public let requiredPersonaFields: [String]?
     public let source: String?
+    public let visualVariant: String?
+    public let secretAuditStatus: String?
 
     public var id: String { recipeId }
 
@@ -228,6 +230,58 @@ public struct FoundryRecipeSummary: Codable, Identifiable {
         case stepCount = "step_count"
         case challengeCount = "challenge_count"
         case requiredPersonaFields = "required_persona_fields"
+        case visualVariant = "visual_variant"
+        case secretAuditStatus = "secret_audit_status"
+    }
+}
+
+public struct FoundryRecipeStep: Codable, Identifiable {
+    public let kind: String
+    public let label: String
+    public let url: String?
+    public let selector: [String: String]?
+    public let valueBinding: String?
+    public let semanticKey: String?
+    public let challengeKind: String?
+    public let challengePrompt: String?
+    public let metadata: [String: AnyCodable]
+
+    public var id: String {
+        "\(kind):\(label):\(url ?? ""):\(selector?["value"] ?? "")"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, label, url, selector, metadata
+        case valueBinding = "value_binding"
+        case semanticKey = "semantic_key"
+        case challengeKind = "challenge_kind"
+        case challengePrompt = "challenge_prompt"
+    }
+}
+
+public struct FoundryRecipeDetail: Codable, Identifiable {
+    public let recipeId: String
+    public let serviceHandle: String
+    public let name: String
+    public let origin: String
+    public let version: Int
+    public let requiredPersonaFields: [String]
+    public let source: String
+    public let notes: String
+    public let visualVariant: String?
+    public let provenance: [String: AnyCodable]
+    public let secretAudit: [String: AnyCodable]
+    public let steps: [FoundryRecipeStep]
+
+    public var id: String { recipeId }
+
+    enum CodingKeys: String, CodingKey {
+        case name, origin, version, source, notes, provenance, steps
+        case recipeId = "recipe_id"
+        case serviceHandle = "service_handle"
+        case requiredPersonaFields = "required_persona_fields"
+        case visualVariant = "visual_variant"
+        case secretAudit = "secret_audit"
     }
 }
 
@@ -285,9 +339,7 @@ public final class FoundryAPIClient {
     }
 
     private static func readToken() -> String? {
-        let p = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
+        let p = SentinelRuntimePaths.file("api_token")
         return try? String(contentsOf: p).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -343,6 +395,13 @@ public final class FoundryAPIClient {
         try await send(
             authed("/v1/foundry/envelopes"),
             as: [FoundryAuthorizationEnvelope].self
+        )
+    }
+
+    public func getRecipe(recipeId: String) async throws -> FoundryRecipeDetail {
+        try await send(
+            authed("/v1/foundry/recipes/\(recipeId)"),
+            as: FoundryRecipeDetail.self
         )
     }
 
@@ -453,13 +512,23 @@ public final class FoundryAPIClient {
         }
     }
 
-    public func recordRecipe(serviceHandle: String, name: String, origin: String) async throws -> FoundryRecipeSummary {
+    public func recordRecipe(
+        serviceHandle: String,
+        name: String,
+        origin: String,
+        envelopeId: String,
+        personaId: String,
+        visualVariant: String
+    ) async throws -> FoundryRecipeSummary {
         var req = authed("/v1/foundry/record", method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body: [String: Any] = [
             "service_handle": serviceHandle,
             "name": name,
-            "origin": origin
+            "origin": origin,
+            "envelope_id": envelopeId,
+            "persona_id": personaId,
+            "visual_variant": visualVariant,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         

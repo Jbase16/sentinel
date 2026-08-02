@@ -24,9 +24,7 @@ public struct SentinelAPIClient: Sendable {
     /// Path to the token file written by the Python backend.
     /// This solves the "Auth Singularity" - backend generates token, Swift discovers it.
     private static let tokenPath: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".sentinelforge")
-            .appendingPathComponent("api_token")
+        SentinelRuntimePaths.file("api_token")
     }()
 
     public init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!, session: URLSession? = nil) {

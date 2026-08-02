@@ -210,6 +210,10 @@ class RecipeStep:
     selector: Optional[Dict[str, str]] = None
     # FILL — the value binding string ("persona:email").
     value_binding: Optional[str] = None
+    # Stable meaning captured independently of selector/layout. This is
+    # intentionally separate from value_binding: password confirmation and
+    # password both use the same vault value but remain distinct semantics.
+    semantic_key: Optional[str] = None
     # EXTRACT — the variable name to store the extracted value under.
     extract_as: Optional[str] = None
     # EXTRACT — how to read the value: "text" | "value" | "attr:href" | "json:path".
@@ -254,6 +258,7 @@ class RecipeStep:
             "url": self.url,
             "selector": dict(self.selector) if self.selector else None,
             "value_binding": self.value_binding,
+            "semantic_key": self.semantic_key,
             "extract_as": self.extract_as,
             "extract_mode": self.extract_mode,
             "challenge_kind": self.challenge_kind.value if self.challenge_kind else None,
@@ -270,6 +275,7 @@ class RecipeStep:
             url=d.get("url"),
             selector=d.get("selector"),
             value_binding=d.get("value_binding"),
+            semantic_key=d.get("semantic_key"),
             extract_as=d.get("extract_as"),
             extract_mode=d.get("extract_mode", "text"),
             challenge_kind=(
@@ -310,6 +316,14 @@ class SignupRecipe:
     # "hand-written".
     source: str = "recorded"
     notes: str = ""
+    # Shape selected by the operator when the recipe was recorded. Replay can
+    # use this to detect accidental cross-variant validation.
+    visual_variant: Optional[str] = None
+    # Secret-free audit linkage: envelope digest, actor reference, request
+    # correlation ids, and recording mode. Never place credentials here.
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    # Result of the recorder's bounded secret scan over persisted fields.
+    secret_audit: Dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         """Validate the whole recipe. Raises ValueError on the first
@@ -354,6 +368,9 @@ class SignupRecipe:
             "required_persona_fields": list(self.required_persona_fields),
             "source": self.source,
             "notes": self.notes,
+            "visual_variant": self.visual_variant,
+            "provenance": dict(self.provenance),
+            "secret_audit": dict(self.secret_audit),
             "steps": [s.to_dict() for s in self.steps],
         }
 
@@ -370,5 +387,8 @@ class SignupRecipe:
             required_persona_fields=list(d.get("required_persona_fields", [])),
             source=d.get("source", "recorded"),
             notes=d.get("notes", ""),
+            visual_variant=d.get("visual_variant"),
+            provenance=dict(d.get("provenance", {})),
+            secret_audit=dict(d.get("secret_audit", {})),
         )
         return recipe

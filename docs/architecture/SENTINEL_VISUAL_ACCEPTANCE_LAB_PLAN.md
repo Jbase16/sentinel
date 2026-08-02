@@ -1,6 +1,6 @@
 # Sentinel Visual Acceptance Lab Plan
 
-Status: proposed implementation outline
+Status: S01 native recording integration implemented; native acceptance proof pending
 
 ## Decision summary
 
@@ -406,6 +406,79 @@ The first full visual acceptance test should follow one observable story:
 The journey must use the native Swift/WKWebView route for the final gate. A Python
 mock, direct API call, or synthetic recorder event is useful at lower layers but
 cannot satisfy this acceptance test.
+
+## Current S01 native recording procedure
+
+This is the first operator-run slice. It validates recording and recipe inspection;
+it does not yet mark the entire golden journey as native-proven.
+
+1. In the lab repository, prepare one clean run:
+
+   ```bash
+   make acceptance-prepare SCENARIO=s01 VARIANT=classic
+   ```
+
+   Do not reset the lab or run its test layers after this command. Record the run id
+   printed by the command.
+
+2. Open `ui/SentinelForge.xcodeproj` in Xcode, select the
+   `SentinelForge-Acceptance` scheme, and run it. This scheme sets
+   `SENTINEL_DATA_DIR=/tmp/sentinelforge-acceptance-state`, keeping tokens,
+   personas, envelopes, recipes, captures, and logs separate from normal operator
+   state.
+
+3. Open **Persona Foundry**. Create a fresh synthetic recording persona whose email,
+   password, first name, and last name match the values that will be typed into the
+   website. Do not use a real identity or reuse the lab's already-created seeded
+   Alice account.
+
+4. Create and select an authorization envelope with these load-bearing values:
+
+   ```text
+   Target/program: sentinel-lab
+   Authorized origin: https://app.sentinel-lab.test
+   Allowed workflow: sentinel-lab
+   Authorization basis: local s01 acceptance run <run-id>
+   Disclosure attestation: enabled
+   ```
+
+   Only the app origin is authorized. The control-center and mail origins must not be
+   added.
+
+5. Choose **Record Recipe** and enter:
+
+   ```text
+   Service handle: sentinel-lab
+   Recipe name: s01 classic signup
+   Origin URL: https://app.sentinel-lab.test/signup
+   Recording persona: the fresh persona from step 3
+   Visual variant: classic
+   ```
+
+6. Complete the visible signup in the Sentinel Native Driver window. Type the same
+   persona email, name, and password stored in the vault. A username may be chosen
+   for this recording; the resulting recipe binds usernames to a replay-time
+   generator. Check the terms box and submit.
+
+7. When the website reaches `/verify`, read the six-digit code from the already-open
+   `https://mail.sentinel-lab.test` page, return to the native window, submit the
+   code, and continue until the native window reaches `/app`. Then close the native
+   window.
+
+8. Back in Persona Foundry, select **Inspect** on `s01 classic signup`. Confirm that:
+
+   - the visual variant is `classic`;
+   - the secret audit is `pass`;
+   - email, password, confirmation, name, and terms have semantic identities;
+   - the email verification challenge appears before the verification-code fill;
+   - provenance contains the envelope id, recording persona id, and lab correlation
+     identifiers;
+   - no typed password, session token, verification token, or six-digit code appears
+     in the persisted recipe.
+
+If the recipe is absent or inspection shows a failed secret audit, stop at the
+`record` or `recipe` stage. Do not continue to replay and conceal the upstream
+failure.
 
 ## Acceptance layers
 

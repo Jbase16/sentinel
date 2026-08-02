@@ -48,6 +48,7 @@ strictly stronger than a puzzle —
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -63,14 +64,20 @@ logger = logging.getLogger(__name__)
 
 
 _ENV_STORE_ENV = "SENTINELFORGE_AUTHZ_STORE"
-_DEFAULT_ENV_STORE = Path.home() / ".sentinelforge" / "authorizations"
+
+
+def _default_store_dir() -> Path:
+    data_dir = os.environ.get("SENTINEL_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "authorizations"
+    return Path.home() / ".sentinelforge" / "authorizations"
 
 
 def _store_dir() -> Path:
     override = os.environ.get(_ENV_STORE_ENV)
     if override:
         return Path(override)
-    return _DEFAULT_ENV_STORE
+    return _default_store_dir()
 
 
 class AuthorizationContext(str, Enum):
@@ -138,11 +145,25 @@ class AuthorizationEnvelope:
 
     # ── derivation ──
 
-    def sign(self) -> str:
-        """Compute (and store) the attestation signature: a hash over
-        the load-bearing fields. Recomputing it lets a verifier detect
-        tampering. (Not a cryptographic signature — a tamper-evidence
-        digest; a real deployment would HMAC with an operator key.)"""
+    def expected_signature(self) -> str:
+        """Return the digest implied by the load-bearing envelope fields."""
+        material = json.dumps({
+            "researcher_identity": self.researcher_identity,
+            "target_handle": self.target_handle,
+            "authorized_origins": sorted(self.authorized_origins),
+            "authorization_basis": self.authorization_basis,
+            "disclosure_attestation": self.disclosure_attestation,
+            "allowed_workflows": sorted(self.allowed_workflows),
+            "max_accounts_per_service": self.max_accounts_per_service,
+            "rate_limit_window_days": self.rate_limit_window_days,
+            "legal_posture": self.legal_posture,
+            "created_at": self.created_at,
+            "expires_at": self.expires_at,
+        }, sort_keys=True)
+        return hashlib.sha256(material.encode()).hexdigest()
+
+    def _legacy_expected_signature(self) -> str:
+        """Digest used before execution constraints joined the material."""
         material = json.dumps({
             "researcher_identity": self.researcher_identity,
             "target_handle": self.target_handle,
@@ -153,8 +174,34 @@ class AuthorizationEnvelope:
             "created_at": self.created_at,
             "expires_at": self.expires_at,
         }, sort_keys=True)
-        self.attestation_signature = hashlib.sha256(material.encode()).hexdigest()
+        return hashlib.sha256(material.encode()).hexdigest()
+
+    def sign(self) -> str:
+        """Compute and store the tamper-evidence digest."""
+        self.attestation_signature = self.expected_signature()
         return self.attestation_signature
+
+    def signature_is_valid(self) -> bool:
+        """Fail closed for unsigned or modified persisted envelopes.
+
+        A legacy digest remains executable only while its previously unsigned
+        execution constraints retain the conservative defaults.
+        """
+        if not self.attestation_signature:
+            return False
+        if hmac.compare_digest(
+            self.attestation_signature,
+            self.expected_signature(),
+        ):
+            return True
+        return (
+            self.max_accounts_per_service == 3
+            and self.rate_limit_window_days == 30
+            and hmac.compare_digest(
+                self.attestation_signature,
+                self._legacy_expected_signature(),
+            )
+        )
 
     def is_expired(self, *, now: Optional[float] = None) -> bool:
         now = now if now is not None else time.time()
@@ -165,6 +212,7 @@ class AuthorizationEnvelope:
         Otherwise UNAPPROVED."""
         if (
             self.disclosure_attestation
+            and self.signature_is_valid()
             and not self.is_expired(now=now)
             and self.authorization_basis.strip()
             and self.authorized_origins
@@ -215,6 +263,7 @@ class AuthorizationEnvelope:
             raise AuthorizationDenied(
                 f"envelope {self.envelope_id} is not in an APPROVED context "
                 f"(attested={self.disclosure_attestation}, "
+                f"signature_valid={self.signature_is_valid()}, "
                 f"expired={self.is_expired(now=now)}). Execution refused — "
                 f"the researcher's up-front authorization is a precondition."
             )

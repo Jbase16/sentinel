@@ -61,6 +61,9 @@ def _flow_store_dir() -> Path:
     override = os.environ.get(_FLOW_STORE_ENV)
     if override:
         return Path(override)
+    data_dir = os.environ.get("SENTINEL_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "ghost_flows"
     return _DEFAULT_FLOW_STORE
 
 

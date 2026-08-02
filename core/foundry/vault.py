@@ -48,14 +48,20 @@ logger = logging.getLogger(__name__)
 
 # Where personas + audit live. Override via env for tests.
 _VAULT_ENV = "SENTINELFORGE_PERSONA_VAULT"
-_DEFAULT_VAULT_DIR = Path.home() / ".sentinelforge" / "personas"
+
+
+def _default_vault_dir() -> Path:
+    data_dir = os.environ.get("SENTINEL_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "personas"
+    return Path.home() / ".sentinelforge" / "personas"
 
 
 def _vault_dir() -> Path:
     override = os.environ.get(_VAULT_ENV)
     if override:
         return Path(override)
-    return _DEFAULT_VAULT_DIR
+    return _default_vault_dir()
 
 
 # Default rate-limit policy: at most this many accounts per
