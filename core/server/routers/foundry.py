@@ -321,7 +321,11 @@ async def record_recipe_endpoint(
     """
     from core.foundry.authorization import AuthorizationDenied, get_envelope
     from core.foundry.driver_native import GhostNativeDriver
-    from core.foundry.recorder import RecordedAction, record_to_recipe
+    from core.foundry.recorder import (
+        RecordedAction,
+        record_to_recipe,
+        recording_rejection_reason,
+    )
     from core.foundry.recipe_store import save_recipe
     from core.foundry.vault import PersonaVault, RateLimitExceeded
     from core.server.routers.driver import node_manager
@@ -384,6 +388,21 @@ async def record_recipe_endpoint(
                     target_origin=action.url,
                     workflow=req.service_handle,
                 )
+        rejection_reason = recording_rejection_reason(actions)
+        if rejection_reason is not None:
+            vault.record_account_creation(
+                persona_id=req.persona_id,
+                service_handle=req.service_handle,
+                outcome="abandoned",
+                detail=f"recording rejected: {rejection_reason}",
+            )
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"recording was not saved: {rejection_reason}. "
+                    "Complete the workflow successfully, then close the recording window."
+                ),
+            )
         recipe = record_to_recipe(
             service_handle=req.service_handle,
             origin=req.origin,
@@ -429,6 +448,8 @@ async def record_recipe_endpoint(
     except AuthorizationDenied as exc:
         logger.warning("[recorder] authorization failed closed: %s", exc)
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("[recorder] recording failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

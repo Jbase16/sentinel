@@ -432,7 +432,7 @@ struct BolaLabView: View {
                             DriverBridgeClient.shared.personaWindows[persona.personaId] = window
                             DriverBridgeClient.shared.personaWindows[persona.label] = window
                             vm.personaWindowDidOpen(for: persona)
-                            window.onClose = { [weak window] in
+                            window.observeClose { [weak window] in
                                 guard let window else { return }
                                 let windows = DriverBridgeClient.shared.personaWindows
                                 var removedPersonaWindow = false

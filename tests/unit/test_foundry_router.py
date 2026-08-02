@@ -282,6 +282,85 @@ class TestRecordRecipeEndpoint:
         assert recipe.challenge_steps()[0].challenge_kind.value == "email_code"
         assert all("vault-only-password" not in json.dumps(step.to_dict()) for step in recipe.steps)
 
+    def test_recording_ending_on_http_error_is_not_persisted(
+        self, monkeypatch
+    ):
+        from fastapi import HTTPException
+
+        from core.foundry.driver_native import GhostNativeDriver
+        from core.foundry.recipe_store import list_recipes
+        from core.foundry.vault import PersonaVault
+        from core.server.routers import driver as driver_router
+        from core.server.routers.foundry import record_recipe_endpoint
+
+        request = self._authorized_request()
+
+        class FailedDriver:
+            session_id = "failed-recording-session"
+            close_count = 0
+
+            async def start_recording(self):
+                return None
+
+            async def restrict_to_origins(self, origins):
+                assert origins == ["https://app.sentinel-lab.test"]
+
+            def emit(self, action):
+                event = {
+                    "event": "recorded_action",
+                    "session_id": self.session_id,
+                    "action": action,
+                }
+                for handler in list(driver_router.node_manager.event_handlers):
+                    handler("recorded_action", event)
+
+            async def navigate(self, url):
+                self.emit({
+                    "action": "navigate",
+                    "url": url,
+                    "response_status": 200,
+                })
+
+            async def wait_for_close(self):
+                self.emit({
+                    "action": "fill",
+                    "selector": {"by": "name", "value": "email"},
+                    "field": {"name": "email", "type": "email"},
+                })
+                self.emit({
+                    "action": "click",
+                    "selector": {"by": "role", "value": "button"},
+                })
+                self.emit({
+                    "action": "navigate",
+                    "url": "https://app.sentinel-lab.test/forbidden",
+                    "response_status": 403,
+                })
+
+            async def close(self):
+                self.close_count += 1
+
+        failed = FailedDriver()
+
+        async def launch(*_args, **_kwargs):
+            return failed
+
+        monkeypatch.setattr(GhostNativeDriver, "launch", launch)
+
+        with pytest.raises(HTTPException) as exc:
+            _run(record_recipe_endpoint(request, _=True))
+
+        assert exc.value.status_code == 422
+        assert "HTTP error (403)" in exc.value.detail
+        assert list_recipes() == []
+        assert failed.close_count == 1
+        audit = PersonaVault().audit_records(
+            persona_id=request.persona_id,
+            service_handle=request.service_handle,
+        )
+        assert len(audit) == 1
+        assert audit[0].outcome == "abandoned"
+
 
 # ───────────────── behavioral primary planner ─────────────────
 

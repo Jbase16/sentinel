@@ -17,6 +17,7 @@ from core.foundry.recorder import (
     infer_binding,
     infer_semantic_key,
     record_to_recipe,
+    recording_rejection_reason,
 )
 
 
@@ -172,6 +173,61 @@ class TestRecordToRecipe:
         recipe.validate()  # no raise
         assert recipe.service_handle == "airtable"
         assert len(recipe.steps) == 8
+
+    def test_rejects_capture_without_reproducible_interaction(self):
+        actions = [RecordedAction(
+            action="navigate",
+            url="https://app.example.test/signup",
+            response_status=200,
+        )]
+
+        assert recording_rejection_reason(actions) == (
+            "recording contains no reproducible interaction"
+        )
+
+    def test_rejects_terminal_http_error_without_site_specific_success_url(self):
+        actions = [
+            RecordedAction(
+                action="navigate",
+                url="https://app.example.test/signup",
+                response_status=200,
+            ),
+            RecordedAction(
+                action="fill",
+                selector={"by": "name", "value": "email"},
+                field={"name": "email", "type": "email"},
+            ),
+            RecordedAction(
+                action="navigate",
+                url="https://app.example.test/forbidden?token=secret",
+                response_status=403,
+            ),
+        ]
+
+        assert recording_rejection_reason(actions) == (
+            "recording ended on an HTTP error (403) at "
+            "https://app.example.test/forbidden"
+        )
+
+    def test_accepts_operator_closed_capture_on_healthy_terminal_page(self):
+        actions = [
+            RecordedAction(
+                action="navigate",
+                url="https://app.example.test/join",
+                response_status=200,
+            ),
+            RecordedAction(
+                action="click",
+                selector={"by": "role", "value": "button"},
+            ),
+            RecordedAction(
+                action="navigate",
+                url="https://app.example.test/welcome",
+                response_status=200,
+            ),
+        ]
+
+        assert recording_rejection_reason(actions) is None
 
     def test_bindings_inferred_correctly(self):
         recipe = record_to_recipe(

@@ -61,6 +61,7 @@ class RecordedAction:
     challenge_kind: Optional[str] = None       # challenge
     label: str = ""
     correlation_id: Optional[str] = None       # response provenance, never a secret
+    response_status: Optional[int] = None      # terminal navigation health
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "RecordedAction":
@@ -72,7 +73,36 @@ class RecordedAction:
             challenge_kind=d.get("challenge_kind"),
             label=d.get("label", ""),
             correlation_id=d.get("correlation_id"),
+            response_status=(
+                int(d["response_status"])
+                if d.get("response_status") is not None else None
+            ),
         )
+
+
+def recording_rejection_reason(actions: List[RecordedAction]) -> Optional[str]:
+    """Return why a human-visible recording is unsafe to persist.
+
+    Closing the native window is the operator's completion signal. This check
+    deliberately avoids assuming a site-specific success URL, while still
+    rejecting captures that cannot reproduce an interaction or that visibly
+    ended on an HTTP failure page.
+    """
+    if not any(action.action in {"fill", "click", "challenge"} for action in actions):
+        return "recording contains no reproducible interaction"
+
+    navigations = [action for action in actions if action.action == "navigate"]
+    if not navigations:
+        return "recording contains no navigation"
+
+    terminal = navigations[-1]
+    if terminal.response_status is not None and terminal.response_status >= 400:
+        return (
+            "recording ended on an HTTP error "
+            f"({terminal.response_status}) at "
+            f"{_redact_url(terminal.url) or 'unknown URL'}"
+        )
+    return None
 
 
 # ─────────────────────────── binding inference ───────────────────────────

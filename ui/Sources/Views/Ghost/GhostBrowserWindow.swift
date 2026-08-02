@@ -19,7 +19,8 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
 
     private var webView: WKWebView!
-    public var onClose: (() -> Void)?
+    private var closeObservers: [() -> Void] = []
+    private var didNotifyClose = false
     
     // For waiting on navigation
     private var navigationContinuation: CheckedContinuation<Void, Error>?
@@ -57,8 +58,27 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
     
     public override func close() {
-        onClose?()
         super.close()
+        notifyCloseIfNeeded()
+    }
+
+    /// Installs the one-shot close observer used by the native driver bridge.
+    /// If the window closed before the bridge began waiting, the observer is
+    /// invoked immediately so the command cannot hang indefinitely.
+    public func observeClose(_ observer: @escaping () -> Void) {
+        if didNotifyClose {
+            observer()
+            return
+        }
+        closeObservers.append(observer)
+    }
+
+    private func notifyCloseIfNeeded() {
+        guard !didNotifyClose else { return }
+        didNotifyClose = true
+        let observers = closeObservers
+        closeObservers.removeAll()
+        observers.forEach { $0() }
     }
     
     // MARK: - Navigation Delegate
@@ -600,6 +620,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                     "action": "navigate",
                     "url": url,
                     "correlation_id": mainFrameCorrelationId,
+                    "response_status": mainFrameResponseStatus,
                 ],
             ]
         )

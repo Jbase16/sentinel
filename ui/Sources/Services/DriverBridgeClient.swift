@@ -501,7 +501,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     @MainActor private func waitForClose() async throws -> String {
         let b = try getBrowser()
         return try await withCheckedThrowingContinuation { continuation in
-            b.onClose = {
+            b.observeClose {
                 continuation.resume(returning: "closed")
             }
         }
@@ -509,9 +509,6 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     
     @MainActor private func closeBrowser() async throws -> String {
         if let wc = currentBrowserWindowController {
-            if let b = wc.window as? GhostBrowserWindow {
-                b.onClose?()
-            }
             wc.close()
             currentBrowserWindowController = nil
         }
