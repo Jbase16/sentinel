@@ -62,7 +62,7 @@ public struct FoundryConsoleView: View {
         .sheet(isPresented: $showAddEnvelope) {
             AddAuthorizationEnvelopeSheet(
                 onSave: { draft in
-                    Task { await vm.createEnvelope(draft) }
+                    try await vm.createEnvelope(draft)
                 }
             )
         }
@@ -411,7 +411,7 @@ private struct AuthorizationEnvelopeDraft {
 
 private struct AddAuthorizationEnvelopeSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let onSave: (AuthorizationEnvelopeDraft) -> Void
+    let onSave: (AuthorizationEnvelopeDraft) async throws -> Void
 
     @State private var researcherIdentity = ""
     @State private var targetHandle = ""
@@ -422,6 +422,8 @@ private struct AddAuthorizationEnvelopeSheet: View {
     @State private var maxAccountsPerService = 3
     @State private var legalPosture = ""
     @State private var ttlDays = 30
+    @State private var isSaving = false
+    @State private var errorText: String?
 
     private var originValues: [String] {
         splitLines(authorizedOrigins)
@@ -431,12 +433,23 @@ private struct AddAuthorizationEnvelopeSheet: View {
         splitLines(allowedWorkflows)
     }
 
-    private var canSave: Bool {
-        !researcherIdentity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !targetHandle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !originValues.isEmpty
-            && !workflowValues.isEmpty
+    private var validationIssue: String? {
+        if researcherIdentity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter the researcher identity."
+        }
+        if targetHandle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter the target or program handle."
+        }
+        if originValues.isEmpty {
+            return "Enter at least one authorized origin, including its https:// scheme."
+        }
+        if workflowValues.isEmpty {
+            return "Enter at least one allowed workflow."
+        }
+        if authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter the authorization basis."
+        }
+        return nil
     }
 
     var body: some View {
@@ -450,24 +463,24 @@ private struct AddAuthorizationEnvelopeSheet: View {
                 .foregroundColor(.secondary)
 
             Form {
-                TextField("Researcher identity", text: $researcherIdentity)
-                TextField("Target or program handle", text: $targetHandle)
+                TextField("Researcher identity (required)", text: $researcherIdentity)
+                TextField("Target or program handle (required)", text: $targetHandle)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Authorized origins — one per line")
+                    Text("Authorized origins — one per line (required)")
                     TextEditor(text: $authorizedOrigins)
                         .font(.system(size: 11, design: .monospaced))
                         .frame(minHeight: 52)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Allowed workflows — one per line")
+                    Text("Allowed workflows — one per line (required)")
                     TextEditor(text: $allowedWorkflows)
                         .font(.system(size: 11, design: .monospaced))
                         .frame(minHeight: 72)
                 }
 
-                TextField("Authorization basis", text: $authorizationBasis, axis: .vertical)
+                TextField("Authorization basis (required)", text: $authorizationBasis, axis: .vertical)
                     .lineLimit(2...4)
                 TextField("Legal posture or policy reference", text: $legalPosture, axis: .vertical)
                     .lineLimit(1...3)
@@ -491,29 +504,27 @@ private struct AddAuthorizationEnvelopeSheet: View {
                     .foregroundColor(.orange)
             }
 
+            if let errorText {
+                Text(errorText)
+                    .font(.system(size: 10))
+                    .foregroundColor(.red)
+            }
+
             HStack {
                 Button("Cancel") { dismiss() }
                     .buttonStyle(.bordered)
+                    .disabled(isSaving)
                 Spacer()
-                Button("Save Envelope") {
-                    onSave(
-                        AuthorizationEnvelopeDraft(
-                            researcherIdentity: researcherIdentity.trimmingCharacters(in: .whitespacesAndNewlines),
-                            targetHandle: targetHandle.trimmingCharacters(in: .whitespacesAndNewlines),
-                            authorizedOrigins: originValues,
-                            authorizationBasis: authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines),
-                            allowedWorkflows: workflowValues,
-                            disclosureAttestation: disclosureAttestation,
-                            maxAccountsPerService: maxAccountsPerService,
-                            legalPosture: legalPosture.trimmingCharacters(in: .whitespacesAndNewlines),
-                            ttlDays: ttlDays
-                        )
-                    )
-                    dismiss()
+                Button(action: save) {
+                    if isSaving {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text("Save Envelope")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.cyberCyan)
-                .disabled(!canSave)
+                .disabled(isSaving)
             }
         }
         .padding(20)
@@ -526,6 +537,36 @@ private struct AddAuthorizationEnvelopeSheet: View {
             .flatMap { $0.components(separatedBy: ",") }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && $0 != "https://" }
+    }
+
+    private func save() {
+        if let validationIssue {
+            errorText = validationIssue
+            return
+        }
+
+        let draft = AuthorizationEnvelopeDraft(
+            researcherIdentity: researcherIdentity.trimmingCharacters(in: .whitespacesAndNewlines),
+            targetHandle: targetHandle.trimmingCharacters(in: .whitespacesAndNewlines),
+            authorizedOrigins: originValues,
+            authorizationBasis: authorizationBasis.trimmingCharacters(in: .whitespacesAndNewlines),
+            allowedWorkflows: workflowValues,
+            disclosureAttestation: disclosureAttestation,
+            maxAccountsPerService: maxAccountsPerService,
+            legalPosture: legalPosture.trimmingCharacters(in: .whitespacesAndNewlines),
+            ttlDays: ttlDays
+        )
+        isSaving = true
+        errorText = nil
+        Task {
+            do {
+                try await onSave(draft)
+                dismiss()
+            } catch {
+                isSaving = false
+                errorText = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -944,7 +985,7 @@ final class FoundryConsoleViewModel: ObservableObject {
         return "Record a human-driven signup under the selected envelope."
     }
 
-    fileprivate func createEnvelope(_ draft: AuthorizationEnvelopeDraft) async {
+    fileprivate func createEnvelope(_ draft: AuthorizationEnvelopeDraft) async throws {
         do {
             let created = try await client.createAuthorizationEnvelope(
                 researcherIdentity: draft.researcherIdentity,
@@ -962,6 +1003,7 @@ final class FoundryConsoleViewModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "Envelope: \(error.localizedDescription)"
+            throw error
         }
     }
 

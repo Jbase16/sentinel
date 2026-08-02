@@ -1572,9 +1572,14 @@ struct AddPersonaSheet: View {
     @State private var isSaving = false
     @State private var errorText: String?
 
-    private var canSave: Bool {
-        !label.trimmingCharacters(in: .whitespaces).isEmpty
-            && email.trimmingCharacters(in: .whitespaces).count >= 3
+    private var validationIssue: String? {
+        if label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Enter a persona label."
+        }
+        if email.trimmingCharacters(in: .whitespacesAndNewlines).count < 3 {
+            return "Enter the persona email."
+        }
+        return nil
     }
 
     var body: some View {
@@ -1586,11 +1591,15 @@ struct AddPersonaSheet: View {
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextField("Label (e.g. research-alice)", text: $label)
+            Text("Required: persona label and email. Password and names are optional.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            TextField("Label (required; e.g. research-alice)", text: $label)
                 .textFieldStyle(.roundedBorder)
-            TextField("Email", text: $email)
+            TextField("Email (required)", text: $email)
                 .textFieldStyle(.roundedBorder)
-            SecureField("Password", text: $password)
+            SecureField("Password (optional)", text: $password)
                 .textFieldStyle(.roundedBorder)
             HStack(spacing: 8) {
                 TextField("First name (optional)", text: $firstName)
@@ -1610,7 +1619,7 @@ struct AddPersonaSheet: View {
                     if isSaving { ProgressView().controlSize(.small) } else { Text("Create") }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!canSave || isSaving)
+                .disabled(isSaving)
             }
         }
         .padding()
@@ -1618,13 +1627,20 @@ struct AddPersonaSheet: View {
     }
 
     private func save() {
+        guard validationIssue == nil else {
+            errorText = validationIssue
+            return
+        }
         isSaving = true
         errorText = nil
         Task {
             do {
                 _ = try await FoundryAPIClient.shared.createPersona(
-                    label: label, email: email, password: password,
-                    firstName: firstName, lastName: lastName)
+                    label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+                    email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                    password: password,
+                    firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
+                    lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines))
                 await MainActor.run { isSaving = false; onSaved(); dismiss() }
             } catch {
                 await MainActor.run { isSaving = false; errorText = "\(error)" }

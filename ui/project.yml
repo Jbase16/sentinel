@@ -42,6 +42,12 @@ targets:
         CODE_SIGN_STYLE: Automatic
 
 schemes:
+  SentinelForge:
+    build:
+      targets:
+        SentinelForge: all
+    run:
+      config: Debug
   SentinelForge-Acceptance:
     build:
       targets:
