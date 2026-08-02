@@ -70,6 +70,11 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "SENTINEL_API_PORT"
+            value = "8766"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "SENTINEL_DATA_DIR"
             value = "/tmp/sentinelforge-acceptance-state"
             isEnabled = "YES">

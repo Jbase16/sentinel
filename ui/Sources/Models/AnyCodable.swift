@@ -28,6 +28,32 @@ public enum SentinelRuntimePaths {
     }
 }
 
+public enum SentinelRuntimeEndpoint {
+    public static let backendPort: Int = {
+        guard let raw = ProcessInfo.processInfo.environment["SENTINEL_API_PORT"],
+              let port = Int(raw),
+              (1...65_535).contains(port)
+        else { return 8765 }
+        return port
+    }()
+
+    public static let httpBaseURL = URL(
+        string: "http://127.0.0.1:\(backendPort)"
+    )!
+
+    public static let webSocketBaseURL = URL(
+        string: "ws://127.0.0.1:\(backendPort)"
+    )!
+
+    public static func httpURL(_ path: String) -> URL {
+        URL(string: path, relativeTo: httpBaseURL)!
+    }
+
+    public static func webSocketURL(_ path: String) -> URL {
+        URL(string: path, relativeTo: webSocketBaseURL)!
+    }
+}
+
 public struct AnyCodable: Codable, @unchecked Sendable {
     public let value: Any
 

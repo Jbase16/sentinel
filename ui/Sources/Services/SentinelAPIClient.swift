@@ -27,7 +27,7 @@ public struct SentinelAPIClient: Sendable {
         SentinelRuntimePaths.file("api_token")
     }()
 
-    public init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!, session: URLSession? = nil) {
+    public init(baseURL: URL = SentinelRuntimeEndpoint.httpBaseURL, session: URLSession? = nil) {
         self.baseURL = baseURL
         if let session = session {
             self.session = session

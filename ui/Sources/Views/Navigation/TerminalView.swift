@@ -124,9 +124,7 @@ struct TerminalView: NSViewRepresentable {
       switch type {
       case "ready":
         // Start connection
-        if let url = URL(string: "ws://127.0.0.1:8765/ws/pty") {
-          client.connect(url: url)
-        }
+        client.connect(url: SentinelRuntimeEndpoint.webSocketURL("/ws/pty"))
       case "input":
         if let data = dict["data"] as? String {
           client.write(data)

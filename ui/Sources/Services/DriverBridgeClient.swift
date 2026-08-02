@@ -50,7 +50,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         guard !isConnected else { return }
         logToSnd("[SND] connect() called")
         
-        let url = URL(string: "ws://127.0.0.1:8765/v1/driver/bridge")!
+        let url = SentinelRuntimeEndpoint.webSocketURL("/v1/driver/bridge")
         var request = URLRequest(url: url)
         if let token = Self.readAPIToken(), !token.isEmpty {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

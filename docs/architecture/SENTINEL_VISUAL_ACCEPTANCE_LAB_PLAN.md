@@ -425,7 +425,9 @@ it does not yet mark the entire golden journey as native-proven.
    `SentinelForge-Acceptance` scheme, and run it. This scheme sets
    `SENTINEL_DATA_DIR=/tmp/sentinelforge-acceptance-state`, keeping tokens,
    personas, envelopes, recipes, captures, and logs separate from normal operator
-   state.
+   state. It also binds the isolated backend and every Swift client to port `8766`,
+   so an ordinary Sentinel backend on port `8765` cannot be mistaken for the
+   acceptance backend.
 
 3. Open **Persona Foundry**. Create a fresh synthetic recording persona whose email,
    password, first name, and last name match the values that will be typed into the

@@ -173,9 +173,7 @@ public class HelixAppState: ObservableObject {
 
     private func connectServices() {
         print("[AppState] Backend Ready. Connecting Services...")
-        if let ptyURL = URL(string: "ws://127.0.0.1:8765/ws/pty") {
-            ptyClient.connect(url: ptyURL)
-        }
+        ptyClient.connect(url: SentinelRuntimeEndpoint.webSocketURL("/ws/pty"))
 
         self.refreshStatus()
         self.refreshToolMetadata()
@@ -1314,7 +1312,7 @@ public struct EdgeDTO: Codable {
 }
 
 public actor CortexClient {
-    private let baseURL = URL(string: "http://127.0.0.1:8765/v1/cortex")!
+    private let baseURL = SentinelRuntimeEndpoint.httpURL("/v1/cortex")
 
     public init() {}
 

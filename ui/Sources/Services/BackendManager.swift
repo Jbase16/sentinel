@@ -75,7 +75,8 @@ class BackendManager: ObservableObject {
     private let startupMaxBackoff: TimeInterval = 5.0
     private let bootManifestWaitMax: TimeInterval = 3.0  // Wait for manifest before /health
     private let bootManifestPollInterval: TimeInterval = 0.1
-    private let healthCheckURL = URL(string: "http://127.0.0.1:8765/v1/health")!
+    private let backendPort = SentinelRuntimeEndpoint.backendPort
+    private let healthCheckURL = SentinelRuntimeEndpoint.httpURL("/v1/health")
     private let startupFailureSignatures = [
         "ModuleNotFoundError: No module named 'uvicorn'"
     ]
@@ -319,7 +320,8 @@ class BackendManager: ObservableObject {
         p.executableURL = python
         p.currentDirectoryURL = repoPath
         p.arguments = [
-            "-m", "uvicorn", "core.server.api:app", "--host", "127.0.0.1", "--port", "8765",
+            "-m", "uvicorn", "core.server.api:app", "--host", "127.0.0.1", "--port",
+            String(backendPort),
         ]
 
         // Inherit PYTHONPATH so imports work
@@ -331,7 +333,7 @@ class BackendManager: ObservableObject {
         // This prevents accidental overrides from shell environment variables
         // (e.g., Docker-era SENTINEL_API_HOST/PORT) that can break connectivity.
         env["SENTINEL_API_HOST"] = "127.0.0.1"
-        env["SENTINEL_API_PORT"] = "8765"
+        env["SENTINEL_API_PORT"] = String(backendPort)
         // SENTINEL_REQUIRE_AUTH is intentionally not set here.
         // The backend defaults to require_auth=true; the Swift app reads the
         // token from ~/.sentinelforge/api_token and passes it as a Bearer
@@ -752,8 +754,12 @@ class BackendManager: ObservableObject {
             errors.append("Python runtime missing at \(python.path)")
         }
 
-        if !isPortAvailable(8765) {
-            errors.append("Port 8765 already in use")
+        guard let checkedPort = UInt16(exactly: backendPort) else {
+            errors.append("Invalid backend port \(backendPort)")
+            return errors
+        }
+        if !isPortAvailable(checkedPort) {
+            errors.append("Port \(backendPort) already in use")
         }
 
         let pathValue = buildToolSearchPath(home: home)

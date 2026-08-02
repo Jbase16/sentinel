@@ -331,7 +331,7 @@ public final class FoundryAPIClient {
     private let baseURL: URL
 
     public init(
-        baseURL: URL = URL(string: "http://127.0.0.1:8765")!,
+        baseURL: URL = SentinelRuntimeEndpoint.httpBaseURL,
         session: URLSession = .shared
     ) {
         self.baseURL = baseURL

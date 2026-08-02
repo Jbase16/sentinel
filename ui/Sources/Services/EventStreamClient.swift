@@ -175,7 +175,7 @@ public class EventStreamClient: ObservableObject {
 
     // MARK: - Initialization
 
-    init(baseURL: URL = URL(string: "http://127.0.0.1:8765")!) {
+    init(baseURL: URL = SentinelRuntimeEndpoint.httpBaseURL) {
         self.baseURL = baseURL
         loadPersistedSequence()
     }

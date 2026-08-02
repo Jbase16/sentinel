@@ -21,7 +21,7 @@ final class BolaLabViewModel: ObservableObject {
         "Open and authenticate two persona windows, then capture both and run."
     @Published var isRunningBehavioral = false
     
-    private let baseURL = "http://127.0.0.1:8765/v1/driver"
+    private let baseURL = SentinelRuntimeEndpoint.httpURL("/v1/driver").absoluteString
 
     private static func readAPIToken() -> String? {
         let path = SentinelRuntimePaths.file("api_token")
