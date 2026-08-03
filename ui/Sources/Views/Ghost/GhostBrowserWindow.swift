@@ -443,21 +443,28 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
     
     public func fill(selector: [String: String], value: String) async throws {
-        // First click to focus
-        try await click(selector: selector)
-        try await Task.sleep(nanoseconds: 100_000_000)
-
         let jsSelector = buildJsSelector(selector)
-        let focused = try await webView.evaluateJavaScript(
-            "document.activeElement === (\(jsSelector))"
-        ) as? Bool
-        guard focused == true else {
+        var focused = false
+        for attempt in 1...3 {
+            // Keep focus acquisition physical.  A busy WKWebView can process
+            // the posted mouse-up after the first focus check, so retry the
+            // complete bounded gesture instead of silently calling JS focus().
+            try await click(selector: selector)
+            try await Task.sleep(
+                nanoseconds: UInt64(attempt) * 100_000_000
+            )
+            focused = try await webView.evaluateJavaScript(
+                "document.activeElement === (\(jsSelector))"
+            ) as? Bool ?? false
+            if focused { break }
+        }
+        guard focused else {
             throw NSError(
                 domain: "SND",
                 code: 409,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "Native driver click did not focus the requested input"
+                        "Native driver could not focus the requested input after 3 bounded hardware gestures"
                 ]
             )
         }
