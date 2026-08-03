@@ -179,7 +179,9 @@ def _default_generator(kind: str) -> str:
         secrets.SystemRandom().shuffle(chars)
         return "".join(chars)
     if kind == "username":
-        return "sf_" + secrets.token_hex(6)
+        # Hyphens are accepted by a broader set of public-handle policies than
+        # underscores while remaining human-readable and URL-safe.
+        return "sf-" + secrets.token_hex(6)
     if kind == "uuid":
         return uuid.uuid4().hex
     raise ValueError(f"unknown generated kind {kind!r}")

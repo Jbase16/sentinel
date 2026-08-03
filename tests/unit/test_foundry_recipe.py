@@ -15,6 +15,7 @@ serializable signup-flow description. Tests pin:
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 
@@ -97,7 +98,8 @@ class TestDefaultGenerator:
 
     def test_username_prefixed(self):
         u = _default_generator("username")
-        assert u.startswith("sf_")
+        assert u.startswith("sf-")
+        assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{2,31}", u)
 
     def test_unknown_generated_kind_raises(self):
         with pytest.raises(ValueError):
