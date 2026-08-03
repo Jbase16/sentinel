@@ -136,6 +136,30 @@ class TestInferBinding:
         assert infer_semantic_key(field) == "verification_code"
         assert infer_binding(field) == "extracted:challenge_email_code"
 
+    def test_click_caused_navigation_is_recorded_as_an_observation(self):
+        recipe = record_to_recipe(
+            service_handle="sentinel-lab",
+            origin="https://app.sentinel-lab.test",
+            name="transition roles",
+            actions=[
+                RecordedAction(
+                    action="navigate",
+                    url="https://app.sentinel-lab.test/signup/classic",
+                ),
+                RecordedAction(
+                    action="click",
+                    selector={"by": "text", "value": "Create account"},
+                ),
+                RecordedAction(
+                    action="navigate",
+                    url="https://app.sentinel-lab.test/verify",
+                ),
+            ],
+        )
+        navigations = [step for step in recipe.steps if step.kind is StepKind.NAVIGATE]
+        assert navigations[0].metadata["navigation_role"] == "drive"
+        assert navigations[1].metadata["navigation_role"] == "observe"
+
 
 # ───────────────────────── action log → recipe ─────────────────────────
 

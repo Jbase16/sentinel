@@ -269,9 +269,15 @@ def record_to_recipe(
     for i, act in enumerate(actions):
         if act.action == "navigate":
             safe_url = _redact_url(act.url)
+            navigation_role = (
+                "observe"
+                if i > 0 and actions[i - 1].action == "click"
+                else "drive"
+            )
             steps.append(RecipeStep(
                 kind=StepKind.NAVIGATE, url=safe_url,
                 label=act.label or f"navigate to {safe_url}",
+                metadata={"navigation_role": navigation_role},
             ))
             if _is_email_verification_url(safe_url) and "email_code" not in challenge_boundaries:
                 challenge_boundaries.add("email_code")

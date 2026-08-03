@@ -34,6 +34,7 @@ Safety:
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
@@ -374,7 +375,22 @@ class RecipeReplayer:
                     f"(allowed: {sorted(allowed_origins)}) — refusing to "
                     f"drive the browser off the recipe's scope."
                 )
-            await self._driver.navigate(step.url)
+            previous_step = recipe.steps[index - 1] if index > 0 else None
+            navigation_role = str(step.metadata.get("navigation_role", ""))
+            observes_click_transition = (
+                navigation_role == "observe"
+                or (
+                    not navigation_role
+                    and previous_step is not None
+                    and previous_step.kind is StepKind.CLICK
+                )
+            )
+            if observes_click_transition:
+                await self._wait_for_recorded_navigation(
+                    step.url, timeout_s=step.timeout_s, step_index=index,
+                )
+            else:
+                await self._driver.navigate(step.url)
 
         elif k is StepKind.FILL:
             value = await self._resolve_fill_value(
@@ -436,6 +452,23 @@ class RecipeReplayer:
             # later step can reference it via extracted:.
             if resolution.extracted_value is not None:
                 extracted[f"challenge_{step.challenge_kind.value}"] = resolution.extracted_value
+
+    async def _wait_for_recorded_navigation(
+        self, expected_url: str, *, timeout_s: float, step_index: int,
+    ) -> None:
+        """Wait for a click-caused transition instead of issuing duplicate traffic."""
+        deadline = time.monotonic() + timeout_s
+        expected_boundary = _challenge_boundary(expected_url)
+        actual_url = await self._driver.current_url()
+        while time.monotonic() < deadline:
+            if _challenge_boundary(actual_url) == expected_boundary:
+                return
+            await asyncio.sleep(0.05)
+            actual_url = await self._driver.current_url()
+        raise RecipeReplayError(
+            f"step {step_index} expected the preceding click to navigate to "
+            f"{expected_url!r}, but the browser remained at {actual_url!r}"
+        )
 
     async def _resolve_fill_value(
         self, step: RecipeStep, recipe: SignupRecipe, persona_id: str,

@@ -388,6 +388,18 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     // MARK: - Hardware Event Synthesis
     
     public func click(selector: [String: String]) async throws {
+        NSApp.activate(ignoringOtherApps: true)
+        makeKeyAndOrderFront(nil)
+        guard makeFirstResponder(webView) else {
+            throw NSError(
+                domain: "SND",
+                code: 409,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Native driver could not focus the WKWebView before hardware input"
+                ]
+            )
+        }
         let rect = try await getBoundingRect(selector: selector)
         let centerWebX = rect.midX
         let centerWebY = rect.midY
@@ -424,22 +436,36 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             pressure: 0.0
         ) else { return }
         
-        self.sendEvent(evtDown)
+        NSApp.postEvent(evtDown, atStart: false)
         try await Task.sleep(nanoseconds: 50_000_000) // 50ms hold
-        self.sendEvent(evtUp)
+        NSApp.postEvent(evtUp, atStart: false)
+        try await Task.sleep(nanoseconds: 100_000_000)
     }
     
     public func fill(selector: [String: String], value: String) async throws {
         // First click to focus
         try await click(selector: selector)
         try await Task.sleep(nanoseconds: 100_000_000)
+
+        let jsSelector = buildJsSelector(selector)
+        let focused = try await webView.evaluateJavaScript(
+            "document.activeElement === (\(jsSelector))"
+        ) as? Bool
+        guard focused == true else {
+            throw NSError(
+                domain: "SND",
+                code: 409,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Native driver click did not focus the requested input"
+                ]
+            )
+        }
         
         // Clear the field first by selecting all and deleting? (Optional, skipping for now)
         
         // Synthesize keystrokes for each character
         for char in value {
-            guard let utf16 = String(char).utf16.first else { continue }
-            
             // Generate KeyDown
             if let evtDown = NSEvent.keyEvent(
                 with: .keyDown,
@@ -453,7 +479,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 isARepeat: false,
                 keyCode: 0 // Virtual keycode doesn't matter as much as characters
             ) {
-                self.sendEvent(evtDown)
+                NSApp.postEvent(evtDown, atStart: false)
             }
             
             try await Task.sleep(nanoseconds: 20_000_000)
@@ -470,7 +496,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 isARepeat: false,
                 keyCode: 0
             ) {
-                self.sendEvent(evtUp)
+                NSApp.postEvent(evtUp, atStart: false)
             }
             
             try await Task.sleep(nanoseconds: 30_000_000)

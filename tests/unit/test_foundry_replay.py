@@ -335,6 +335,68 @@ class TestChallenges:
         assert "without its required operator value" in (outcome.error or "")
 
 
+# ───────────────────────── recorded navigation ─────────────────────────
+
+
+class TestRecordedNavigationTransitions:
+    def test_click_caused_navigation_is_observed_without_duplicate_traffic(self):
+        class TransitionDriver(MockDriver):
+            async def click(self, selector):
+                await super().click(selector)
+                self._url = "https://app.sentinel-lab.test/verify"
+
+        recipe = SignupRecipe(
+            service_handle="sentinel-lab", name="signup transition",
+            origin="https://app.sentinel-lab.test",
+            steps=[
+                RecipeStep(
+                    kind=StepKind.NAVIGATE,
+                    url="https://app.sentinel-lab.test/signup/classic",
+                ),
+                RecipeStep(
+                    kind=StepKind.CLICK,
+                    selector={"by": "text", "value": "Create account"},
+                ),
+                RecipeStep(
+                    kind=StepKind.NAVIGATE,
+                    url="https://app.sentinel-lab.test/verify",
+                ),
+            ],
+        )
+        driver = TransitionDriver()
+        outcome = _run(RecipeReplayer(driver).run(
+            recipe, _persona(), challenge_handler=_never_called_handler,
+        ))
+        assert outcome.state is ReplayState.COMPLETED
+        navigations = [call for call in driver.calls if call["op"] == "navigate"]
+        assert navigations == [{
+            "op": "navigate",
+            "url": "https://app.sentinel-lab.test/signup/classic",
+        }]
+
+    def test_missing_click_navigation_fails_instead_of_forcing_destination(self):
+        recipe = SignupRecipe(
+            service_handle="sentinel-lab", name="stalled transition",
+            origin="https://app.sentinel-lab.test",
+            steps=[
+                RecipeStep(
+                    kind=StepKind.CLICK,
+                    selector={"by": "text", "value": "Create account"},
+                ),
+                RecipeStep(
+                    kind=StepKind.NAVIGATE,
+                    url="https://app.sentinel-lab.test/verify",
+                    timeout_s=0.01,
+                ),
+            ],
+        )
+        outcome = _run(RecipeReplayer(MockDriver()).run(
+            recipe, _persona(), challenge_handler=_never_called_handler,
+        ))
+        assert outcome.state is ReplayState.FAILED
+        assert "preceding click" in (outcome.error or "")
+
+
 # ───────────────────────── scope gate ─────────────────────────
 
 
