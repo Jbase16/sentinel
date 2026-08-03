@@ -134,7 +134,10 @@ def infer_semantic_key(field: Dict[str, str]) -> str:
     autocomplete = (field.get("autocomplete") or "").lower()
     signal = _field_signal(field)
 
-    if any(word in signal for word in ("verification code", "email code", "one-time code", "otp")):
+    if autocomplete == "one-time-code" or any(
+        word in signal
+        for word in ("verification code", "email code", "one-time code", "one-time-code", "otp")
+    ):
         return "verification_code"
     if (
         ftype == "password"

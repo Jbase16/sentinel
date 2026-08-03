@@ -206,6 +206,39 @@ _VERIFICATION_KIND = {
     "sms_code": ChallengeKind.SMS_CODE,
 }
 
+_VALUE_CHALLENGE_BINDING = {
+    ChallengeKind.EMAIL_CODE: "verification:email_code",
+    ChallengeKind.SMS_CODE: "verification:sms_code",
+}
+
+
+def _challenge_boundary(url: str) -> Optional[tuple[str, str]]:
+    """Return the origin + path identity used for a recorded handoff wall."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    path = parsed.path.rstrip("/") or "/"
+    return (f"{parsed.scheme.lower()}://{parsed.netloc.lower()}", path)
+
+
+def _is_legacy_verification_fill(step: RecipeStep) -> bool:
+    """Recognize secret-redacted code fields produced before semantic repair."""
+    if step.value_binding != "literal:REVIEW_THIS_FIELD":
+        return False
+    signal = " ".join(
+        (
+            step.semantic_key or "",
+            str(step.metadata.get("inferred_from", "")),
+        )
+    ).lower()
+    return any(
+        marker in signal
+        for marker in ("verification_code", "verification code", "email code", "one-time code", "one-time-code", "otp")
+    )
+
 
 class RecipeReplayer:
     """Drives a SignupRecipe to completion, handing anti-bot walls to
@@ -367,21 +400,36 @@ class RecipeReplayer:
             extracted[step.extract_as] = val
 
         elif k is StepKind.CHALLENGE:
+            expected_boundary = str(step.metadata.get("boundary_url", "")).strip()
+            if expected_boundary:
+                actual_boundary = await self._driver.current_url()
+                if _challenge_boundary(actual_boundary) != _challenge_boundary(expected_boundary):
+                    raise RecipeReplayError(
+                        f"step {index} CHALLENGE expected browser at "
+                        f"{expected_boundary!r}, but it is at {actual_boundary!r}; "
+                        "refusing to present a stale or impossible handoff"
+                    )
             outcome.challenges_encountered += 1
             outcome.state = ReplayState.AWAITING_CHALLENGE
+            value_binding = _VALUE_CHALLENGE_BINDING.get(step.challenge_kind)
             resolution = await self._emit_challenge(
                 kind=step.challenge_kind,
                 prompt=step.challenge_prompt or _default_prompt(step.challenge_kind),
                 recipe=recipe,
                 persona_id=persona_id,
                 challenge_handler=challenge_handler,
-                needs_value_for=None,
+                needs_value_for=value_binding,
             )
             outcome.state = ReplayState.RUNNING
             if not resolution.resolved:
                 raise _AbortReplay(
                     f"step {index} CHALLENGE ({step.challenge_kind.value}) "
                     f"not resolved by operator"
+                )
+            if value_binding and not str(resolution.extracted_value or "").strip():
+                raise RecipeReplayError(
+                    f"step {index} CHALLENGE ({step.challenge_kind.value}) "
+                    "was resolved without its required operator value"
                 )
             # A challenge MAY carry an extracted value (e.g. a code the
             # human typed) — stash it under the challenge kind so a
@@ -398,6 +446,11 @@ class RecipeReplayer:
         challenge and use the human-supplied value; everything else
         resolves synchronously."""
         binding = step.value_binding or ""
+        if _is_legacy_verification_fill(step):
+            for source in ("email_code", "sms_code"):
+                value = extracted.get(f"challenge_{source}")
+                if value:
+                    return value
         if binding.startswith("verification:"):
             source = binding.split(":", 1)[1]
             kind = _VERIFICATION_KIND.get(source, ChallengeKind.MANUAL)

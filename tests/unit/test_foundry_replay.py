@@ -254,6 +254,86 @@ class TestChallenges:
         ))
         assert outcome.state is ReplayState.ABORTED
 
+    def test_standalone_email_code_handoff_fills_legacy_redacted_field(self):
+        recipe = SignupRecipe(
+            service_handle="sentinel-lab", name="legacy verify",
+            origin="https://app.sentinel-lab.test",
+            steps=[
+                RecipeStep(
+                    kind=StepKind.NAVIGATE,
+                    url="https://app.sentinel-lab.test/verify",
+                ),
+                RecipeStep(
+                    kind=StepKind.CHALLENGE,
+                    challenge_kind=ChallengeKind.EMAIL_CODE,
+                    metadata={"boundary_url": "https://app.sentinel-lab.test/verify"},
+                ),
+                RecipeStep(
+                    kind=StepKind.FILL,
+                    selector={"by": "css", "value": "input#fld-code"},
+                    value_binding="literal:REVIEW_THIS_FIELD",
+                    semantic_key="unknown",
+                    metadata={"inferred_from": "code one-time-code"},
+                ),
+            ],
+        )
+
+        async def handler(ch):
+            assert ch.needs_value_for == "verification:email_code"
+            return ChallengeResolution(
+                challenge_id=ch.challenge_id,
+                resolved=True,
+                extracted_value="654321",
+            )
+
+        driver = MockDriver(current_url="https://app.sentinel-lab.test/verify")
+        outcome = _run(RecipeReplayer(driver).run(
+            recipe, _persona(), challenge_handler=handler,
+        ))
+        assert outcome.state is ReplayState.COMPLETED
+        assert driver.fills()[0]["value"] == "654321"
+
+    def test_challenge_redirected_to_login_fails_before_handoff(self):
+        recipe = SignupRecipe(
+            service_handle="sentinel-lab", name="lost signup session",
+            origin="https://app.sentinel-lab.test",
+            steps=[
+                RecipeStep(
+                    kind=StepKind.CHALLENGE,
+                    challenge_kind=ChallengeKind.EMAIL_CODE,
+                    metadata={"boundary_url": "https://app.sentinel-lab.test/verify"},
+                ),
+            ],
+        )
+        driver = MockDriver(current_url="https://app.sentinel-lab.test/login")
+        outcome = _run(RecipeReplayer(driver).run(
+            recipe, _persona(), challenge_handler=_never_called_handler,
+        ))
+        assert outcome.state is ReplayState.FAILED
+        assert "expected browser" in (outcome.error or "")
+        assert "login" in (outcome.error or "")
+
+    def test_value_handoff_cannot_resolve_without_a_code(self):
+        recipe = SignupRecipe(
+            service_handle="sentinel-lab", name="missing code",
+            origin="https://app.sentinel-lab.test",
+            steps=[
+                RecipeStep(
+                    kind=StepKind.CHALLENGE,
+                    challenge_kind=ChallengeKind.EMAIL_CODE,
+                ),
+            ],
+        )
+
+        async def handler(ch):
+            return ChallengeResolution(challenge_id=ch.challenge_id, resolved=True)
+
+        outcome = _run(RecipeReplayer(MockDriver()).run(
+            recipe, _persona(), challenge_handler=handler,
+        ))
+        assert outcome.state is ReplayState.FAILED
+        assert "without its required operator value" in (outcome.error or "")
+
 
 # ───────────────────────── scope gate ─────────────────────────
 

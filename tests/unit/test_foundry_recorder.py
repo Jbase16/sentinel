@@ -131,6 +131,11 @@ class TestInferBinding:
         assert infer_semantic_key(field) == "verification_code"
         assert infer_binding(field) == "extracted:challenge_email_code"
 
+    def test_standard_one_time_code_autocomplete_never_becomes_a_literal(self):
+        field = {"name": "code", "autocomplete": "one-time-code"}
+        assert infer_semantic_key(field) == "verification_code"
+        assert infer_binding(field) == "extracted:challenge_email_code"
+
 
 # ───────────────────────── action log → recipe ─────────────────────────
 
