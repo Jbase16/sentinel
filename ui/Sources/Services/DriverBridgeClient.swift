@@ -263,6 +263,19 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     )
                 case "wait_for_close":
                     result = try await waitForClose()
+                case "retain_for_persona":
+                    guard let personaId = args["persona_id"] as? String,
+                          !personaId.isEmpty else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "persona_id is required"
+                            ]
+                        )
+                    }
+                    result = try retainBrowser(for: personaId)
                 case "close":
                     result = try await closeBrowser()
                 case "get_cookies":
@@ -512,6 +525,23 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             wc.close()
             currentBrowserWindowController = nil
         }
+        return "ok"
+    }
+
+    @MainActor
+    private func retainBrowser(for personaId: String) throws -> String {
+        let window = try getBrowser()
+        if let existing = personaWindows[personaId], existing !== window {
+            existing.close()
+        }
+        personaWindows[personaId] = window
+        window.title = "SND Window - retained persona"
+        window.observeClose { [weak self, weak window] in
+            guard let self, let window,
+                  self.personaWindows[personaId] === window else { return }
+            self.personaWindows.removeValue(forKey: personaId)
+        }
+        currentBrowserWindowController = nil
         return "ok"
     }
     

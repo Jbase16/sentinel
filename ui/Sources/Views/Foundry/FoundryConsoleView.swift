@@ -894,22 +894,23 @@ final class FoundryConsoleViewModel: ObservableObject {
     func stop() { pollTask?.cancel(); pollTask = nil }
 
     func refresh() async {
-        do {
-            // Challenges first — they're the time-sensitive hero.
-            challenges = try await client.listChallenges()
-            personas = try await client.listPersonas()
-            envelopes = try await client.listAuthorizationEnvelopes()
-            recipes = try await client.listRecipes()
-            jobs = try await client.listSignupJobs()
-            if !selectedEnvelopeId.isEmpty
-                && !envelopes.contains(where: { $0.envelopeId == selectedEnvelopeId })
-            {
-                selectedEnvelopeId = ""
-            }
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
+        var failures: [String] = []
+        do { challenges = try await client.listChallenges() }
+        catch { failures.append("Challenges: \(error.localizedDescription)") }
+        do { personas = try await client.listPersonas() }
+        catch { failures.append("Personas: \(error.localizedDescription)") }
+        do { envelopes = try await client.listAuthorizationEnvelopes() }
+        catch { failures.append("Envelopes: \(error.localizedDescription)") }
+        do { recipes = try await client.listRecipes() }
+        catch { failures.append("Recipes: \(error.localizedDescription)") }
+        do { jobs = try await client.listSignupJobs() }
+        catch { failures.append("Signup jobs: \(error.localizedDescription)") }
+        if !selectedEnvelopeId.isEmpty
+            && !envelopes.contains(where: { $0.envelopeId == selectedEnvelopeId })
+        {
+            selectedEnvelopeId = ""
         }
+        errorMessage = failures.isEmpty ? nil : failures.joined(separator: "\n")
     }
 
     func vulnBinding(_ vc: String) -> Binding<Bool> {
@@ -1013,11 +1014,13 @@ final class FoundryConsoleViewModel: ObservableObject {
             return
         }
         do {
-            _ = try await client.startSignup(
+            let started = try await client.startSignup(
                 recipeId: recipe.recipeId,
                 personaId: personaId,
                 envelopeId: envelope.envelopeId
             )
+            jobs.removeAll { $0.jobId == started.jobId }
+            jobs.insert(started, at: 0)
             await refresh()
         } catch {
             errorMessage = "Signup: \(error.localizedDescription)"

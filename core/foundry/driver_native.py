@@ -23,6 +23,7 @@ class GhostNativeDriver:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self._is_closed = False
+        self._retained_for_persona = False
 
     @classmethod
     async def launch(
@@ -108,10 +109,23 @@ class GhostNativeDriver:
         # Wait indefinitely for the window to close
         await self._send("wait_for_close", timeout=86400.0)
 
+    async def retain_for_persona(self, persona_id: str) -> None:
+        """Transfer a completed native window to the persona registry.
+
+        The Swift execution node becomes the owner of the visible authenticated
+        window.  The replay driver must not send a subsequent close command.
+        """
+        if not persona_id:
+            raise ValueError("persona_id is required")
+        await self._send(
+            "retain_for_persona", {"persona_id": persona_id}, timeout=3.0
+        )
+        self._retained_for_persona = True
+
     # ── lifecycle ──
 
     async def close(self) -> None:
-        if self._is_closed:
+        if self._is_closed or self._retained_for_persona:
             return
         try:
             await self._send("close", timeout=3.0)

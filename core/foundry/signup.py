@@ -217,6 +217,7 @@ class SignupOrchestrator:
 
         job.state = SignupJobState.RUNNING
         driver = None
+        retained_for_persona = False
         try:
             driver = await self._driver_factory()
             restrict_to_origins = getattr(driver, "restrict_to_origins", None)
@@ -237,13 +238,25 @@ class SignupOrchestrator:
                 ReplayState.ABORTED: SignupJobState.ABORTED,
             }.get(outcome.state, SignupJobState.FAILED)
             job.error = outcome.error
+            retain = getattr(driver, "retain_for_persona", None)
+            if job.state is SignupJobState.COMPLETED and callable(retain):
+                try:
+                    await retain(persona.persona_id)
+                    retained_for_persona = True
+                except Exception as e:
+                    logger.warning(
+                        "[signup] completed job %s could not retain its native "
+                        "persona window: %s",
+                        job.job_id,
+                        e,
+                    )
         except Exception as e:
             job.state = SignupJobState.FAILED
             job.error = f"{type(e).__name__}: {e}"
             logger.warning("[signup] job %s failed: %s", job.job_id, e)
         finally:
             job.finished_at = time.time()
-            if driver is not None:
+            if driver is not None and not retained_for_persona:
                 close = getattr(driver, "close", None)
                 if callable(close):
                     try:

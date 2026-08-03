@@ -210,6 +210,47 @@ class TestStartFailFast:
 
 
 class TestBackgroundRun:
+    def test_completed_driver_is_transferred_to_persona_instead_of_closed(self):
+        from tests.unit.test_foundry_replay import MockDriver
+
+        recipe = _make_recipe()
+        vault = PersonaVault()
+        persona = _make_persona(vault)
+        events = []
+
+        class RetainingDriver(MockDriver):
+            async def retain_for_persona(self, persona_id):
+                events.append(("retain", persona_id))
+
+            async def close(self):
+                events.append(("close", None))
+
+        async def factory():
+            return RetainingDriver()
+
+        orch = _reset_orchestrator_for_tests(
+            driver_factory=factory, vault=vault,
+        )
+        env = _make_envelope()
+
+        async def scenario():
+            job = await orch.start(
+                recipe.recipe_id, persona.persona_id,
+                envelope_id=env.envelope_id,
+            )
+            for _ in range(200):
+                if orch.get_job(job.job_id).state in (
+                    SignupJobState.COMPLETED, SignupJobState.FAILED,
+                    SignupJobState.ABORTED,
+                ):
+                    break
+                await asyncio.sleep(0.01)
+            return orch.get_job(job.job_id)
+
+        job = _run(scenario())
+        assert job.state is SignupJobState.COMPLETED
+        assert events == [("retain", persona.persona_id)]
+
     def test_no_challenge_recipe_completes(self):
         recipe = _make_recipe(with_extract=True)
         vault = PersonaVault()
