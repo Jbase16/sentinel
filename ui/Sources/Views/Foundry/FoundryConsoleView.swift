@@ -131,9 +131,15 @@ public struct FoundryConsoleView: View {
                     ForEach(vm.challenges) { ch in
                         ChallengeCard(
                             challenge: ch,
-                            valueDraft: vm.bindingValueDraft(ch.challengeId),
-                            onValueChange: { vm.setValueDraft(ch.challengeId, $0) },
-                            onResolve: { Task { await vm.resolve(ch, resolved: true) } },
+                            onResolve: { value in
+                                Task {
+                                    await vm.resolve(
+                                        ch,
+                                        resolved: true,
+                                        extractedValue: value
+                                    )
+                                }
+                            },
                             onDecline: { Task { await vm.resolve(ch, resolved: false) } }
                         )
                     }
@@ -770,10 +776,13 @@ private struct RecipeDetailSheet: View {
 
 private struct ChallengeCard: View {
     let challenge: FoundryChallenge
-    let valueDraft: String
-    let onValueChange: (String) -> Void
-    let onResolve: () -> Void
+    let onResolve: (String?) -> Void
     let onDecline: () -> Void
+    @State private var valueDraft = ""
+
+    private var submittedValue: String {
+        valueDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -809,18 +818,20 @@ private struct ChallengeCard: View {
 
             // For verification challenges, capture the human's value.
             if challenge.needsValue {
-                TextField("paste the code / link here",
-                          text: Binding(get: { valueDraft }, set: onValueChange))
+                TextField("paste the code / link here", text: $valueDraft)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12, design: .monospaced))
             }
 
             HStack {
-                Button(action: onResolve) {
+                Button(action: {
+                    onResolve(challenge.needsValue ? submittedValue : nil)
+                }) {
                     Label(challenge.needsValue ? "Submit" : "Done", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.green)
+                .disabled(challenge.needsValue && submittedValue.isEmpty)
                 Button(action: onDecline) {
                     Label("Skip", systemImage: "xmark.circle")
                 }
@@ -865,8 +876,6 @@ final class FoundryConsoleViewModel: ObservableObject {
 
     @Published var planTarget: String = "airtable"
     @Published var selectedVulnClasses: Set<String> = ["idor_cross_principal"]
-    private var valueDrafts: [String: String] = [:]
-
     let availableVulnClasses = [
         "idor_cross_principal",
         "idor_horizontal",
@@ -1081,15 +1090,17 @@ final class FoundryConsoleViewModel: ObservableObject {
         }
     }
 
-    func bindingValueDraft(_ id: String) -> String { valueDrafts[id] ?? "" }
-    func setValueDraft(_ id: String, _ value: String) { valueDrafts[id] = value }
-
-    func resolve(_ challenge: FoundryChallenge, resolved: Bool) async {
+    func resolve(
+        _ challenge: FoundryChallenge,
+        resolved: Bool,
+        extractedValue: String? = nil
+    ) async {
         do {
-            let value = challenge.needsValue ? (valueDrafts[challenge.challengeId] ?? "") : nil
             _ = try await client.resolveChallenge(
-                challenge.challengeId, resolved: resolved, extractedValue: value)
-            valueDrafts[challenge.challengeId] = nil
+                challenge.challengeId,
+                resolved: resolved,
+                extractedValue: challenge.needsValue ? extractedValue : nil
+            )
             await refresh()
         } catch {
             errorMessage = "Resolve: \(error.localizedDescription)"

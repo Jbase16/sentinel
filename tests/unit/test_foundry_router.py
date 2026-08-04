@@ -2676,6 +2676,52 @@ class TestChallengeHandoffLoop:
         resolution = _run(scenario())
         assert resolution.extracted_value == "654321"
 
+    def test_empty_verification_value_is_rejected_without_settling_challenge(self):
+        from core.server.routers.foundry import (
+            ResolveChallengeRequest,
+            resolve_challenge_endpoint,
+        )
+        from fastapi import HTTPException
+
+        bus = get_challenge_bus()
+        challenge = Challenge(
+            challenge_id="cv-empty", kind=ChallengeKind.EMAIL_CODE,
+            prompt="Enter the code", context_url="https://x",
+            recipe_id="r", persona_id="p", service_handle="airtable",
+            needs_value_for="verification:email_code",
+        )
+
+        async def scenario():
+            async def human():
+                for _ in range(100):
+                    if bus.get_pending(challenge.challenge_id) is not None:
+                        with pytest.raises(HTTPException) as exc_info:
+                            await resolve_challenge_endpoint(
+                                challenge.challenge_id,
+                                ResolveChallengeRequest(
+                                    resolved=True, extracted_value="   ",
+                                ),
+                                _=True,
+                            )
+                        assert exc_info.value.status_code == 422
+                        assert bus.get_pending(challenge.challenge_id) is challenge
+                        await resolve_challenge_endpoint(
+                            challenge.challenge_id,
+                            ResolveChallengeRequest(
+                                resolved=True, extracted_value=" 654321 ",
+                            ),
+                            _=True,
+                        )
+                        return
+                    await asyncio.sleep(0.02)
+                raise AssertionError("challenge never became pending")
+
+            resolution, _ = await asyncio.gather(bus.submit(challenge), human())
+            return resolution
+
+        resolution = _run(scenario())
+        assert resolution.extracted_value == "654321"
+
     def test_resolve_unknown_challenge_404(self):
         from core.server.routers.foundry import (
             ResolveChallengeRequest, resolve_challenge_endpoint,

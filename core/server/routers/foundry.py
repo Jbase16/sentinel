@@ -491,7 +491,8 @@ async def resolve_challenge_endpoint(
 
     bus = get_challenge_bus()
     # The challenge must still be pending (not timed out / already done).
-    if bus.get_pending(challenge_id) is None:
+    pending = bus.get_pending(challenge_id)
+    if pending is None:
         raise HTTPException(
             status_code=404,
             detail=(
@@ -499,10 +500,21 @@ async def resolve_challenge_endpoint(
                 f"timed out, already been resolved, or never existed."
             ),
         )
+    extracted_value = req.extracted_value
+    if req.resolved and pending.needs_value_for:
+        extracted_value = str(extracted_value or "").strip()
+        if not extracted_value:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"challenge {challenge_id!r} requires a non-empty "
+                    "operator value and remains pending."
+                ),
+            )
     ok = bus.resolve(
         challenge_id,
         resolved=req.resolved,
-        extracted_value=req.extracted_value,
+        extracted_value=extracted_value,
         note=req.note,
     )
     if not ok:
