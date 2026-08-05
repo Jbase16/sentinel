@@ -559,6 +559,14 @@ public class HelixAppState: ObservableObject {
                 await MainActor.run {
                     self.engineStatus = status
                     self.aiStatus = status?.ai
+                    // Lifecycle events provide immediate transitions, while the
+                    // backend snapshot repairs stale or incomplete event replay.
+                    if let status {
+                        self.isScanRunning = status.scanRunning
+                        if !status.scanRunning {
+                            self.scanStartTime = nil
+                        }
+                    }
                 }
             } catch {
                 print("[AppState] Status refresh failed: \(error)")

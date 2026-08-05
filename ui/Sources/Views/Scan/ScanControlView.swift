@@ -80,6 +80,7 @@ struct ScanControlView: View {
                     print(
                         "[ScanControlView] View appeared - appState: \(appState), backend.isRunning: \(backend.isRunning)"
                     )
+                    appState.refreshStatus()
                 }
 
             // Permission Requests
