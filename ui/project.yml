@@ -58,3 +58,4 @@ schemes:
         SENTINEL_DATA_DIR: /tmp/sentinelforge-acceptance-state
         SENTINEL_ACCEPTANCE_MODE: "1"
         SENTINEL_API_PORT: "8766"
+        SENTINELFORGE_BEHAVIOR_PRIMARY: "1"
