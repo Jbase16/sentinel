@@ -73,6 +73,14 @@ def _hash_ref(value: Any, prefix: str) -> bool:
     )
 
 
+def _frontier_signal(value: Any) -> bool:
+    text = str(value or "")
+    return _SEMANTIC.fullmatch(text) is not None or _hash_ref(
+        text,
+        "interaction_intent",
+    )
+
+
 @dataclass(frozen=True)
 class InteractionAdmissionPolicy:
     policy_ref: str
@@ -191,10 +199,7 @@ class _AcquisitionObligation:
             or actionable != (resolution_kind != "unavailable")
             or not isinstance(signals_value, Sequence)
             or isinstance(signals_value, (str, bytes))
-            or any(
-                _SEMANTIC.fullmatch(str(item or "")) is None
-                for item in signals_value
-            )
+            or any(not _frontier_signal(item) for item in signals_value)
         ):
             raise ValueError("interaction acquisition obligation is invalid")
         signals = tuple(sorted(set(str(item) for item in signals_value)))
@@ -214,6 +219,19 @@ class _AcquisitionObligation:
     @property
     def needs_acquisition(self) -> bool:
         return not self.actionable and self.resolution_kind == "unavailable"
+
+    @property
+    def bound_intent_ref(self) -> Optional[str]:
+        refs = tuple(
+            signal
+            for signal in self.signals
+            if _hash_ref(signal, "interaction_intent")
+        )
+        if len(refs) > 1:
+            raise ValueError(
+                "interaction acquisition obligation has multiple intent bindings"
+            )
+        return refs[0] if refs else None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -279,6 +297,7 @@ def _admission_payload(
         "world_ref": intent.world_ref,
         "locator_ref": intent.locator_ref,
         "locator": [item.to_dict() for item in intent.locator],
+        "destination_ref": intent.destination_ref,
         "obligation_id": obligation_id,
         "frontier_ref": frontier_ref,
         "scope_ref": scope_ref,
@@ -305,6 +324,7 @@ class InteractionIntentAdmission:
     tag: str
     role: str
     input_type: str
+    destination_ref: str
     obligation_id: str
     frontier_ref: str
     scope_ref: str
@@ -333,6 +353,7 @@ class InteractionIntentAdmission:
             tag=self.tag,
             role=self.role,
             input_type=self.input_type,
+            destination_ref=self.destination_ref,
             intent_kind=self.intent_kind,
             risk_class=self.risk_class,
             expected_side_effect=self.expected_side_effect,
@@ -428,6 +449,7 @@ class InteractionIntentAdmission:
             tag=intent.tag,
             role=intent.role,
             input_type=intent.input_type,
+            destination_ref=intent.destination_ref,
             obligation_id=obligation_id,
             frontier_ref=frontier_ref,
             scope_ref=scope_ref,
@@ -456,6 +478,7 @@ class InteractionIntentAdmission:
             "tag": self.tag,
             "role": self.role,
             "input_type": self.input_type,
+            "destination_ref": self.destination_ref,
             "obligation_id": self.obligation_id,
             "frontier_ref": self.frontier_ref,
             "scope_ref": self.scope_ref,
@@ -688,6 +711,28 @@ class InteractionIntentSelector:
         acquisition_obligations = tuple(
             item for item in ordered_obligations if item.needs_acquisition
         )
+        bound_obligations = tuple(
+            item
+            for item in acquisition_obligations
+            if item.bound_intent_ref is not None
+        )
+        selected_obligation = (
+            bound_obligations[0]
+            if bound_obligations
+            else (acquisition_obligations[0] if acquisition_obligations else None)
+        )
+        selected_intent = None
+        if selected_obligation is not None:
+            bound_intent_ref = selected_obligation.bound_intent_ref
+            selected_intent = next(
+                (
+                    intent
+                    for intent in eligible
+                    if bound_intent_ref is None
+                    or intent.intent_id == bound_intent_ref
+                ),
+                None,
+            )
         diagnostics = InteractionAdmissionDiagnostics(
             intents_seen=len(catalog.intents),
             eligible_intents=len(eligible),
@@ -702,14 +747,15 @@ class InteractionIntentSelector:
             status = "budget_unavailable"
         elif not acquisition_obligations:
             status = "no_open_acquisition_obligation"
-        elif not eligible:
+        elif selected_intent is None:
             status = "no_eligible_intents"
         else:
             status = "ready_for_active_boundary"
+            assert selected_obligation is not None
             admission = InteractionIntentAdmission.create(
                 catalog_id=catalog.catalog_id,
-                intent=eligible[0],
-                obligation_id=acquisition_obligations[0].obligation_id,
+                intent=selected_intent,
+                obligation_id=selected_obligation.obligation_id,
                 frontier_ref=frontier_ref,
                 policy=policy,
             )

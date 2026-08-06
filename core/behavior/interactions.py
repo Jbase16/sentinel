@@ -19,6 +19,7 @@ INTERACTION_INTENT_MODE = "behavioral_interaction_intent_v1"
 _HASH_REF = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{64}$")
 _SEMANTIC = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _LOCATOR_TAG = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_DESTINATION_REF = re.compile(r"^interaction_destination:[0-9a-f]{64}$")
 _TAGS = frozenset(
     {
         "a",
@@ -191,6 +192,7 @@ class InteractionIntent:
     tag: str
     role: str
     input_type: str
+    destination_ref: str
     intent_kind: str
     risk_class: str
     expected_side_effect: str
@@ -210,6 +212,7 @@ class InteractionIntent:
             "tag": self.tag,
             "role": self.role,
             "input_type": self.input_type,
+            "destination_ref": self.destination_ref,
             "intent_kind": self.intent_kind,
             "risk_class": self.risk_class,
             "expected_side_effect": self.expected_side_effect,
@@ -233,6 +236,10 @@ class InteractionIntent:
             or self.tag not in _TAGS
             or (self.role and self.role not in _ROLES)
             or (self.input_type and self.input_type not in _INPUT_TYPES)
+            or (
+                self.destination_ref
+                and _DESTINATION_REF.fullmatch(self.destination_ref) is None
+            )
             or self.intent_kind not in _INTENT_KINDS
             or self.risk_class not in _RISK_CLASSES
             or _SEMANTIC.fullmatch(self.expected_side_effect) is None
@@ -256,6 +263,7 @@ class InteractionIntent:
             "tag": self.tag,
             "role": self.role,
             "input_type": self.input_type,
+            "destination_ref": self.destination_ref,
             "intent_kind": self.intent_kind,
             "risk_class": self.risk_class,
             "expected_side_effect": self.expected_side_effect,
@@ -353,6 +361,7 @@ class _NormalizedControl:
     input_type: str
     form_method: str
     destination: str
+    destination_ref: str
     visible: bool
     disabled: bool
     content_editable: bool
@@ -378,6 +387,7 @@ def _normalize_control(
     input_type = str(value.get("input_type") or "").strip().lower()
     form_method = str(value.get("form_method") or "none").strip().lower()
     destination = str(value.get("destination") or "none").strip().lower()
+    destination_ref = str(value.get("destination_ref") or "").strip().lower()
     raw_locator = value.get("locator")
     booleans = {
         name: _boolean(value.get(name))
@@ -400,6 +410,7 @@ def _normalize_control(
         or (input_type and input_type not in _INPUT_TYPES)
         or form_method not in _FORM_METHODS
         or destination not in _DESTINATIONS
+        or (destination_ref and _DESTINATION_REF.fullmatch(destination_ref) is None)
         or not isinstance(raw_locator, Sequence)
         or isinstance(raw_locator, (str, bytes))
         or not 1 <= len(raw_locator) <= limits.max_locator_depth
@@ -428,6 +439,7 @@ def _normalize_control(
         input_type=input_type,
         form_method=form_method,
         destination=destination,
+        destination_ref=destination_ref,
         visible=bool(booleans["visible"]),
         disabled=bool(booleans["disabled"]),
         content_editable=bool(booleans["content_editable"]),
@@ -644,6 +656,7 @@ class InteractionIntentMiner:
                     "tag": control.tag,
                     "role": control.role,
                     "input_type": control.input_type,
+                    "destination_ref": control.destination_ref,
                     "intent_kind": intent_kind,
                     "risk_class": risk_class,
                     "expected_side_effect": side_effect,
@@ -667,6 +680,7 @@ class InteractionIntentMiner:
                     tag=control.tag,
                     role=control.role,
                     input_type=control.input_type,
+                    destination_ref=control.destination_ref,
                     intent_kind=intent_kind,
                     risk_class=risk_class,
                     expected_side_effect=side_effect,

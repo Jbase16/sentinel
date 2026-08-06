@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import WebKit
 
 public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
@@ -15,6 +16,53 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             scheme = rawScheme
             host = rawHost
             port = url.port ?? (rawScheme == "https" ? 443 : 80)
+        }
+    }
+
+    private func redactedInteractionControls(
+        _ controls: [[String: Any]],
+        relativeTo baseURL: URL?
+    ) -> [[String: Any]] {
+        guard let baseURL,
+              let baseOrigin = CaptureOrigin(url: baseURL) else {
+            return controls.map { raw in
+                var control = raw
+                control.removeValue(forKey: "destination_identity")
+                return control
+            }
+        }
+        return controls.map { raw in
+            var control = raw
+            defer { control.removeValue(forKey: "destination_identity") }
+            guard control["destination"] as? String == "same_origin",
+                  let identity = control["destination_identity"] as? String,
+                  let destination = URL(
+                    string: identity,
+                    relativeTo: baseURL
+                  )?.absoluteURL,
+                  CaptureOrigin(url: destination) == baseOrigin,
+                  var components = URLComponents(
+                    url: destination,
+                    resolvingAgainstBaseURL: true
+                  ) else { return control }
+            components.scheme = components.scheme?.lowercased()
+            components.host = components.host?.lowercased()
+            components.user = nil
+            components.password = nil
+            components.fragment = nil
+            if components.path.isEmpty {
+                components.path = "/"
+            }
+            if (components.scheme == "https" && components.port == 443)
+                || (components.scheme == "http" && components.port == 80) {
+                components.port = nil
+            }
+            guard let canonical = components.string else { return control }
+            let digest = SHA256.hash(data: Data(canonical.utf8))
+                .map { String(format: "%02x", $0) }
+                .joined()
+            control["destination_ref"] = "interaction_destination:\(digest)"
+            return control
         }
     }
 
@@ -1086,6 +1134,15 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                     input_type: inputType,
                     form_method: formMethodClass(form),
                     destination: destinationKind(rawDestination),
+                    destination_identity: (() => {
+                        try {
+                            const parsed = new URL(rawDestination, document.baseURI);
+                            return parsed.origin === window.location.origin
+                                ? parsed.href : '';
+                        } catch (_) {
+                            return '';
+                        }
+                    })(),
                     locator: locator.segments,
                     locator_truncated: locator.truncated,
                     visible: isVisible(element),
@@ -1105,7 +1162,10 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         })();
         """
         let value = try await webView.evaluateJavaScript(js)
-        return value as? [[String: Any]] ?? []
+        return redactedInteractionControls(
+            value as? [[String: Any]] ?? [],
+            relativeTo: webView.url
+        )
     }
 
     public func inspectInteractionResponse(
@@ -1277,6 +1337,15 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 input_type: inputType,
                 form_method: formMethodClass(form),
                 destination: destinationKind(rawDestination),
+                destination_identity: (() => {
+                    try {
+                        const parsed = new URL(rawDestination, effectiveBase.href);
+                        return parsed.origin === parsedBase.origin
+                            ? parsed.href : '';
+                    } catch (_) {
+                        return '';
+                    }
+                })(),
                 locator: locator.segments,
                 locator_truncated: locator.truncated,
                 visible: isStructurallyVisible(element),
@@ -1309,7 +1378,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             ],
             in: .defaultClient
         )
-        guard let result = value as? [String: Any] else {
+        guard var result = value as? [String: Any] else {
             throw NSError(
                 domain: "SND",
                 code: 500,
@@ -1317,6 +1386,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                     NSLocalizedDescriptionKey:
                         "Interaction response observation returned no result"
                 ]
+            )
+        }
+        if let controls = result["controls"] as? [[String: Any]] {
+            result["controls"] = redactedInteractionControls(
+                controls,
+                relativeTo: parsedBaseURL
             )
         }
         return result
@@ -1538,6 +1613,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 input_type: '',
                 form_method: 'none',
                 destination: 'same_origin',
+                destination_identity: destination.href,
                 locator: path,
                 locator_truncated: false,
                 visible: visible,
@@ -1564,7 +1640,14 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             arguments: ["locator": locator],
             in: .page
         )
-        guard let resolved = value as? [String: Any] else {
+        guard var resolved = value as? [String: Any],
+              let currentURL = resolved["current_url"] as? String,
+              let parsedCurrentURL = URL(string: currentURL),
+              let control = resolved["control"] as? [String: Any],
+              let redactedControl = redactedInteractionControls(
+                [control],
+                relativeTo: parsedCurrentURL
+              ).first else {
             throw NSError(
                 domain: "SND",
                 code: 409,
@@ -1574,6 +1657,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 ]
             )
         }
+        resolved["control"] = redactedControl
         return resolved
     }
     

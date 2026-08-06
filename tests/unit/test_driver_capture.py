@@ -651,6 +651,7 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
                 "input_type": "",
                 "form_method": "none",
                 "destination": "same_origin",
+                "destination_ref": "interaction_destination:" + "a" * 64,
                 "locator": [
                     {"tag": "html", "sibling_index": 1},
                     {"tag": "a", "sibling_index": 2},
@@ -713,6 +714,9 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
     assert SOURCE_PERSONA_ID not in peer.records[0]["response_body"]
     assert source.controls[0]["destination"] == "same_origin"
     assert peer.controls[0]["destination"] == "same_origin"
+    assert source.controls[0]["destination_ref"] == (
+        "interaction_destination:" + "a" * 64
+    )
     assert source.page_url == peer.page_url == "https://api.example.test/app"
     assert "text" not in source.controls[0]
     assert "value" not in source.controls[0]

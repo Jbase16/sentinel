@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from .affordances import LatentAffordanceResult
+from .interactions import InteractionIntentCatalog
 from .lifecycle import LifecycleMiningResult
 from .normalize import stable_hash
 from .omission import OmissionCompilationResult
@@ -193,6 +194,7 @@ class SecurityObligationDiagnostics:
     state_machine_controls: int
     state_machine_legalities: int
     omission_experiments: int
+    interaction_asymmetries: int
     incomplete_relations: int
     duplicate_obligations: int
     dropped_obligations: int
@@ -314,6 +316,8 @@ class SecurityObligationGraphBuilder:
         affordances: Optional[LatentAffordanceResult] = None,
         state_machine: Optional[StateMachineLegalityResult] = None,
         omissions: Optional[OmissionCompilationResult] = None,
+        interactions: Optional[InteractionIntentCatalog] = None,
+        interaction_source_world_ref: Optional[str] = None,
     ) -> SecurityObligationGraph:
         if lifecycle is not None and not isinstance(lifecycle, LifecycleMiningResult):
             raise TypeError("lifecycle must be a LifecycleMiningResult")
@@ -334,6 +338,20 @@ class SecurityObligationGraphBuilder:
             OmissionCompilationResult,
         ):
             raise TypeError("omissions must be an OmissionCompilationResult")
+        if interactions is not None and not isinstance(
+            interactions,
+            InteractionIntentCatalog,
+        ):
+            raise TypeError("interactions must be an InteractionIntentCatalog")
+        if (interactions is None) != (interaction_source_world_ref is None):
+            raise ValueError(
+                "interaction catalog and source world must be provided together"
+            )
+        if interaction_source_world_ref is not None and not _hash_ref(
+            interaction_source_world_ref,
+            "world",
+        ):
+            raise ValueError("interaction source world is invalid")
         if (
             omissions is not None
             and state_machine is not None
@@ -343,6 +361,11 @@ class SecurityObligationGraphBuilder:
 
         canonical_origin = _canonical_origin(target_origin)
         target_ref = stable_hash("security_obligation_target", canonical_origin)
+        if interactions is not None and interactions.target_ref != stable_hash(
+            "interaction_target",
+            canonical_origin,
+        ):
+            raise ValueError("interaction target does not match obligation target")
         if affordances is not None:
             expected_affordance_target = stable_hash(
                 "latent_affordance_target",
@@ -360,6 +383,10 @@ class SecurityObligationGraphBuilder:
                 state_machine.to_dict() if state_machine is not None else None
             ),
             "omissions": omissions.to_dict() if omissions is not None else None,
+            "interactions": (
+                interactions.to_dict() if interactions is not None else None
+            ),
+            "interaction_source_world_ref": interaction_source_world_ref,
         }
         input_digest = stable_hash("security_obligation_inputs", input_payload)
         obligations: Dict[str, SecurityObligation] = {}
@@ -374,6 +401,7 @@ class SecurityObligationGraphBuilder:
             "omission_experiments": (
                 len(omissions.experiments) if omissions is not None else 0
             ),
+            "interaction_asymmetries": 0,
         }
         duplicate_obligations = 0
         dropped_obligations = 0
@@ -448,6 +476,68 @@ class SecurityObligationGraphBuilder:
             dependency_count += len(prerequisites)
             counts[count_key] += 1
             return obligation_id
+
+        if interactions is not None and interaction_source_world_ref is not None:
+            peer_intents = tuple(
+                intent
+                for intent in interactions.intents
+                if intent.world_ref != interaction_source_world_ref
+            )
+            peer_destinations = {
+                intent.destination_ref
+                for intent in peer_intents
+                if intent.destination_ref
+            }
+            source_only = [
+                intent
+                for intent in interactions.intents
+                if peer_intents
+                and intent.world_ref == interaction_source_world_ref
+                and intent.destination_ref
+                and intent.destination_ref not in peer_destinations
+                and intent.tag == "a"
+                and intent.intent_kind == "navigate"
+                and intent.risk_class == "read_interaction"
+                and intent.safety_blockers == ("passive_catalog_only",)
+                and not intent.disabled
+                and not intent.locator_truncated
+                and not intent.scripted_handler
+            ]
+            source_only.sort(
+                key=lambda intent: (
+                    tuple(
+                        (segment.tag, segment.sibling_index)
+                        for segment in intent.locator
+                    ),
+                    intent.intent_id,
+                )
+            )
+            if source_only:
+                intent = source_only[0]
+                subject = stable_hash(
+                    "security_subject",
+                    {
+                        "catalog_id": interactions.catalog_id,
+                        "intent_id": intent.intent_id,
+                        "destination_ref": intent.destination_ref,
+                    },
+                )
+                add(
+                    kind="interaction_navigation_asymmetry",
+                    property_kind="cross_principal_object_authorization",
+                    subject_ref=subject,
+                    status=OPEN,
+                    prerequisite_ids=(),
+                    evidence_refs=(
+                        interactions.catalog_id,
+                        intent.intent_id,
+                        intent.destination_ref,
+                    ),
+                    source_kind="interaction_asymmetry",
+                    risk_class="read",
+                    requires_execution=True,
+                    count_key="interaction_asymmetries",
+                )
 
         if lifecycle is not None:
             for candidate in lifecycle.candidates:

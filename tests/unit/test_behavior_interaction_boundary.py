@@ -22,6 +22,7 @@ from core.behavior.receipts import (
 )
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
+from core.safety.ownership_registry import OwnershipRegistry
 from core.safety.proof_budget import ProofBudget
 from core.safety.provenance import ProvenanceSink
 
@@ -222,6 +223,75 @@ async def test_boundary_resolves_twice_sends_one_get_and_persists_only_redacted_
         redacted_interaction_acquisition_outcome(legacy_outcome)
         == legacy_outcome
     )
+
+
+@pytest.mark.asyncio
+async def test_cross_persona_probe_resolves_as_alice_and_sends_once_as_bob(
+    tmp_path,
+):
+    registry = OwnershipRegistry()
+    registry.register_created_value(
+        f"{ORIGIN}/documents",
+        "doc-owned",
+        actor_persona=ALICE,
+    )
+    policy = ExecutionPolicy(
+        "bounty_safe",
+        scope_filter=lambda url: url.startswith(ORIGIN),
+        budget=ProofBudget(
+            max_total_requests=1,
+            max_requests_per_endpoint=1,
+            max_cross_object_reads=1,
+            max_privilege_mutations=0,
+            max_creates=0,
+            allow_delete=False,
+            allow_real_user_data_access=False,
+        ),
+        ownership_registry=registry,
+    )
+    admission, source_controls, peer_controls = _admission(policy)
+    resolver, resolver_calls = _resolver(
+        source_controls,
+        peer_controls,
+        destinations=[f"{ORIGIN}/documents/doc-owned"] * 2,
+    )
+    sent = []
+
+    async def raw_send(method, url, body=None, **kwargs):
+        sent.append((method, url, body))
+        return 200, '{"owner":"alice","private":"controlled"}'
+
+    provenance = ProvenanceSink()
+    provenance.record_context(
+        target=ORIGIN,
+        proof_mode="bounty_safe_shadow",
+        policy_digest=policy.digest(),
+    )
+    boundary = InteractionReadAcquisitionBoundary(
+        admission=admission,
+        target_origin=ORIGIN,
+        authorization=_envelope(),
+        actor_persona_id=ALICE,
+        peer_persona_id=BOB,
+        request_persona_id=BOB,
+        executor=PolicyExecutor(raw_send, policy, provenance=provenance),
+        resolver=resolver,
+        config=InteractionAcquisitionConfig(enabled=True),
+    )
+
+    result = await InteractionReadAcquisitionAdmission(
+        boundary,
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    ).execute()
+
+    assert resolver_calls == [
+        (ALICE, admission.to_dict()["locator"], BOB),
+        (ALICE, admission.to_dict()["locator"], BOB),
+    ]
+    assert sent == [("GET", f"{ORIGIN}/documents/doc-owned", None)]
+    assert result.record is not None
+    assert result.record["persona_id"] == BOB
+    assert result.execution["budget_snapshot"]["cross_object_reads"] == 1
 
 
 @pytest.mark.asyncio

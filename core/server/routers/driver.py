@@ -151,6 +151,9 @@ _MAX_INTERACTION_LOCATOR_DEPTH = 12
 _MAX_INTERACTION_RESPONSE_BYTES = 2 * 1024 * 1024
 _MAX_INTERACTION_SCANNED_NODES = 4096
 _INTERACTION_LOCATOR_TAG = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+_INTERACTION_DESTINATION_REF = re.compile(
+    r"^interaction_destination:[0-9a-f]{64}$"
+)
 _PAIR_CAPTURE_LOCK = asyncio.Lock()
 
 
@@ -783,6 +786,12 @@ def _sanitized_interaction_controls(value: Any) -> Tuple[Dict[str, Any], ...]:
         }
         control.update({field: raw[field] for field in boolean_fields})
         control["locator"] = locator
+        destination_ref = raw.get("destination_ref")
+        if (
+            isinstance(destination_ref, str)
+            and _INTERACTION_DESTINATION_REF.fullmatch(destination_ref)
+        ):
+            control["destination_ref"] = destination_ref
         controls.append(control)
     return tuple(controls)
 

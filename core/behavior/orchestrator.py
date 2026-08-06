@@ -77,6 +77,13 @@ def _hash_ref(value: Any, prefix: Optional[str] = None) -> bool:
     )
 
 
+def _frontier_signal(value: str) -> bool:
+    return _SEMANTIC.fullmatch(value) is not None or _hash_ref(
+        value,
+        "interaction_intent",
+    )
+
+
 def _run_identity_payload(
     *,
     lifecycle: LifecycleMiningResult,
@@ -218,7 +225,7 @@ class RankedSecurityObligation:
                 }
             )
             or tuple(sorted(set(self.signals))) != self.signals
-            or any(_SEMANTIC.fullmatch(item) is None for item in self.signals)
+            or any(not _frontier_signal(item) for item in self.signals)
         ):
             raise ValueError("ranked security obligation contract is invalid")
 
@@ -560,6 +567,17 @@ class BehavioralShadowOrchestrator:
                 signals.add("omission_confirmation_eligible")
             else:
                 signals.add("no_safe_resolution_path")
+            if obligation.source_kind == "interaction_asymmetry":
+                intent_refs = tuple(
+                    ref
+                    for ref in obligation.evidence_refs
+                    if _hash_ref(ref, "interaction_intent")
+                )
+                if len(intent_refs) != 1:
+                    raise ValueError(
+                        "interaction asymmetry obligation has no exact intent binding"
+                    )
+                signals.add(intent_refs[0])
 
             actionable = resolution_kind in {
                 "authorization_proposal",
@@ -685,6 +703,8 @@ class BehavioralShadowOrchestrator:
             affordances=affordances,
             state_machine=state_machine,
             omissions=omissions,
+            interactions=interactions,
+            interaction_source_world_ref=stable_hash("world", world_id),
         )
         if isinstance(dispositions, (str, bytes)):
             raise TypeError("dispositions must contain ObligationDisposition values")

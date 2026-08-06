@@ -1432,8 +1432,21 @@ async def run_behavioral_authorization_endpoint(
         initial_shadow = shadow_run
         admitted_interaction = shadow_run.interaction_admission.admission
         assert admitted_interaction is not None
+        admitted_obligation = next(
+            item
+            for item in shadow_run.ranked_frontier
+            if item.obligation_id == admitted_interaction.obligation_id
+        )
+        cross_persona_probe = (
+            admitted_obligation.kind == "interaction_navigation_asymmetry"
+        )
+        request_persona_id = (
+            peer_persona.persona_id
+            if cross_persona_probe
+            else source_persona.persona_id
+        )
         acquisition_executor = make_executor(
-            source_persona.persona_id,
+            request_persona_id,
             shadow_policy,
             shadow_provenance,
         )
@@ -1444,6 +1457,7 @@ async def run_behavioral_authorization_endpoint(
                 authorization=envelope,
                 actor_persona_id=source_persona.persona_id,
                 peer_persona_id=peer_persona.persona_id,
+                request_persona_id=request_persona_id,
                 executor=acquisition_executor,
                 resolver=resolve_interaction_navigation,
                 config=interaction_acquisition_config,
@@ -1478,8 +1492,11 @@ async def run_behavioral_authorization_endpoint(
             render_observation = None
             render_boundary = None
             if acquisition_result.record is not None:
-                source_records.append(acquisition_result.record)
-                if interaction_render_config.enabled:
+                if cross_persona_probe:
+                    peer_records.append(acquisition_result.record)
+                else:
+                    source_records.append(acquisition_result.record)
+                if interaction_render_config.enabled and not cross_persona_probe:
                     try:
                         render_boundary = InteractionRenderObservationBoundary(
                             admission=admitted_interaction,
@@ -1575,7 +1592,17 @@ async def run_behavioral_authorization_endpoint(
                 "destination_page_ref",
                 "operation_ref",
             }
-            if not state_refs.issubset(acquisition_result.execution):
+            if cross_persona_probe:
+                interaction_acquisition["state_transition"] = {
+                    "schema_version": 1,
+                    "mode": BROWSER_STATE_EXPLORER_MODE,
+                    "status": "unavailable",
+                    "reason_code": (
+                        "cross_persona_probe_has_no_browser_transition"
+                    ),
+                    "executable": False,
+                }
+            elif not state_refs.issubset(acquisition_result.execution):
                 interaction_acquisition["state_transition"] = {
                     "schema_version": 1,
                     "mode": BROWSER_STATE_EXPLORER_MODE,

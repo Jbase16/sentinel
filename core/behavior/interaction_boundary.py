@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 from core.cortex.execution_policy import DENIED_STATUS, CandidateAction, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
-from core.safety.action_classifier import SAFE_READ
+from core.safety.action_classifier import CROSS_OBJECT_READ, SAFE_READ
 from core.safety.proof_budget import endpoint_key
 from core.safety.provenance import body_hash, response_shape
 
@@ -96,6 +96,7 @@ class InteractionAcquisitionResult:
     response_ref: str
     response_status: int
     response_truncated: bool
+    cross_persona_probe: bool
     requests_attempted: int
     requests_sent: int
     policy_denials: int
@@ -126,6 +127,7 @@ class InteractionAcquisitionResult:
             "response_ref": self.response_ref,
             "response_status": self.response_status,
             "response_truncated": self.response_truncated,
+            "cross_persona_probe": self.cross_persona_probe,
             "requests_attempted": self.requests_attempted,
             "requests_sent": self.requests_sent,
             "policy_denials": self.policy_denials,
@@ -197,6 +199,7 @@ class InteractionReadAcquisitionBoundary:
         authorization: AuthorizationEnvelope,
         actor_persona_id: str,
         peer_persona_id: str,
+        request_persona_id: Optional[str] = None,
         executor: PolicyExecutor,
         resolver: InteractionResolver,
         config: Optional[InteractionAcquisitionConfig] = None,
@@ -222,6 +225,12 @@ class InteractionReadAcquisitionBoundary:
         self.authorization = authorization
         self.actor_persona_id = actor_persona_id
         self.peer_persona_id = peer_persona_id
+        self.request_persona_id = request_persona_id or actor_persona_id
+        if self.request_persona_id not in {
+            self.actor_persona_id,
+            self.peer_persona_id,
+        }:
+            raise ValueError("interaction request persona is not in the admitted pair")
         self.executor = executor
         self.resolver = resolver
         self.config = config or InteractionAcquisitionConfig.from_environment()
@@ -394,8 +403,13 @@ class InteractionReadAcquisitionBoundary:
                 "interaction_navigation_resolution_changed_before_send"
             )
         budget = self.executor.policy.budget
+        action_class = (
+            CROSS_OBJECT_READ
+            if self.request_persona_id != self.actor_persona_id
+            else SAFE_READ
+        )
         reservation_id, reason = budget.try_reserve(
-            ((SAFE_READ, endpoint_key(resolved.destination_url)),)
+            ((action_class, endpoint_key(resolved.destination_url)),)
         )
         if reservation_id is None:
             raise InteractionAcquisitionDenied(
@@ -409,12 +423,16 @@ class InteractionReadAcquisitionBoundary:
                         method="GET",
                         url=resolved.destination_url,
                         body=None,
-                        hint=SAFE_READ,
-                        actor_persona_id=self.actor_persona_id,
+                        hint=action_class,
+                        actor_persona_id=self.request_persona_id,
                         target_owner_persona_id=self.actor_persona_id,
                         target_is_researcher_owned=True,
                         expected_side_effect="read_only_navigation",
-                        proof_goal="obligation_directed_interaction_acquisition",
+                        proof_goal=(
+                            "source_only_navigation_authorization_probe"
+                            if action_class == CROSS_OBJECT_READ
+                            else "obligation_directed_interaction_acquisition"
+                        ),
                         budget_reservation_id=reservation_id,
                     ),
                     _max_response_chars=_MAX_RESPONSE_CHARS,
@@ -465,7 +483,7 @@ class InteractionReadAcquisitionBoundary:
         sink = self.executor.provenance
         record = {
             "action": "interaction_acquisition",
-            "persona_id": self.actor_persona_id,
+            "persona_id": self.request_persona_id,
             "type": "fetch",
             "url": resolved.destination_url,
             "method": "GET",
@@ -478,7 +496,7 @@ class InteractionReadAcquisitionBoundary:
         }
         normalized = normalize_exchange(
             record,
-            world_id=self.actor_persona_id,
+            world_id=self.request_persona_id,
         )
         destination_page_ref = stable_hash(
             "interaction_page",
@@ -509,6 +527,9 @@ class InteractionReadAcquisitionBoundary:
             response_ref=response_ref,
             response_status=status,
             response_truncated=response_truncated,
+            cross_persona_probe=(
+                self.request_persona_id != self.actor_persona_id
+            ),
             requests_attempted=1,
             requests_sent=1,
             policy_denials=len(self.executor.skipped) - skipped_before,
@@ -581,6 +602,7 @@ class InteractionReadAcquisitionAdmission:
             ),
             "actor_persona_id": boundary.actor_persona_id,
             "peer_persona_id": boundary.peer_persona_id,
+            "request_persona_id": boundary.request_persona_id,
             "policy_digest": boundary.executor.policy.digest(),
         }
 

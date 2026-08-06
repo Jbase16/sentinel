@@ -604,6 +604,7 @@ def redacted_interaction_acquisition_outcome(
         )
     response_status = value.get("response_status")
     response_truncated = value.get("response_truncated")
+    cross_persona_probe = value.get("cross_persona_probe", False)
     counters = {
         key: _nonnegative_int(
             value.get(key),
@@ -624,6 +625,7 @@ def redacted_interaction_acquisition_outcome(
         or not isinstance(response_status, int)
         or not 100 <= response_status <= 599
         or not isinstance(response_truncated, bool)
+        or not isinstance(cross_persona_probe, bool)
         or counters
         != {
             "requests_attempted": 1,
@@ -647,7 +649,7 @@ def redacted_interaction_acquisition_outcome(
     )
     if (
         budget["total_requests"] < 1
-        or budget["cross_object_reads"] != 0
+        or budget["cross_object_reads"] != int(cross_persona_probe)
         or budget["privilege_mutations"] != 0
         or budget["creates"] != 0
         or not 1 <= budget["endpoints_touched"] <= budget["total_requests"]
@@ -660,6 +662,7 @@ def redacted_interaction_acquisition_outcome(
         **{key: item for key, (item, _pattern) in refs.items()},
         "response_status": response_status,
         "response_truncated": response_truncated,
+        "cross_persona_probe": cross_persona_probe,
         **counters,
         "provenance_root": provenance_root,
         "budget_snapshot": budget,
@@ -690,8 +693,10 @@ def _redacted_browser_transition_summary(value: Any) -> Dict[str, Any]:
             }
             or value.get("schema_version") != 1
             or value.get("mode") != "behavioral_browser_state_explorer_v1"
-            or value.get("reason_code")
-            != "legacy_acquisition_receipt_missing_state_refs"
+            or value.get("reason_code") not in {
+                "legacy_acquisition_receipt_missing_state_refs",
+                "cross_persona_probe_has_no_browser_transition",
+            }
             or value.get("executable") is not False
         ):
             raise ReceiptStoreError(

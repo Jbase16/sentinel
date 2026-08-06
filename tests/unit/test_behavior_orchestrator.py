@@ -276,6 +276,91 @@ def test_orchestrator_attaches_page_bound_passive_interactions_without_traffic()
     assert executor.policy.budget.snapshot()["total_requests"] == 0
 
 
+def test_source_only_destination_creates_and_binds_one_navigation_obligation():
+    context, calls, executor = _context()
+
+    def control(index, destination_ref):
+        return {
+            "tag": "a",
+            "role": "link",
+            "input_type": "",
+            "form_method": "none",
+            "destination": "same_origin",
+            "destination_ref": destination_ref,
+            "locator": [
+                {"tag": "html", "sibling_index": 1},
+                {"tag": "body", "sibling_index": 1},
+                {"tag": "a", "sibling_index": index},
+            ],
+            "locator_truncated": False,
+            "visible": True,
+            "disabled": False,
+            "content_editable": False,
+            "aria_expanded": False,
+            "aria_haspopup": False,
+            "sensitive_form": False,
+            "download": False,
+            "scripted_handler": False,
+            "submitter": False,
+        }
+
+    common = "interaction_destination:" + "1" * 64
+    source_only = "interaction_destination:" + "2" * 64
+    result = BehavioralShadowOrchestrator().run(
+        _source_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+        peer_records=_peer_records(),
+        peer_world_id="bob",
+        controls=(control(1, common), control(2, source_only)),
+        peer_controls=(control(1, common),),
+        interaction_page_url=f"{ORIGIN}/documents",
+        experiment_context=context,
+    )
+    missing_peer_catalog = BehavioralShadowOrchestrator().run(
+        _source_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+        peer_records=_peer_records(),
+        peer_world_id="bob",
+        controls=(control(1, common), control(2, source_only)),
+        peer_controls=(),
+        interaction_page_url=f"{ORIGIN}/documents",
+        experiment_context=context,
+    )
+
+    obligation = next(
+        item
+        for item in result.graph.obligations
+        if item.kind == "interaction_navigation_asymmetry"
+    )
+    source_intent = next(
+        item
+        for item in result.interactions.intents
+        if item.destination_ref == source_only
+    )
+    ranked = next(
+        item
+        for item in result.ranked_frontier
+        if item.obligation_id == obligation.obligation_id
+    )
+    admission = result.interaction_admission.admission
+
+    assert result.graph.diagnostics.interaction_asymmetries == 1
+    assert source_intent.intent_id in obligation.evidence_refs
+    assert source_intent.intent_id in ranked.signals
+    assert admission is not None
+    assert admission.obligation_id == obligation.obligation_id
+    assert admission.intent_id == source_intent.intent_id
+    assert admission.destination_ref == source_only
+    assert not any(
+        item.kind == "interaction_navigation_asymmetry"
+        for item in missing_peer_catalog.graph.obligations
+    )
+    assert calls == []
+    assert executor.policy.budget.snapshot()["total_requests"] == 0
+
+
 def test_state_machine_legality_enters_frontier_without_resolution_authority():
     workflow_id = "workflow_7fa9f13a2b4c5d6e"
     export_token = "token_4a5b6c7d8e9f0123"
