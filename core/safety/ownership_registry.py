@@ -20,11 +20,17 @@ needing to know the by-id template in advance. Unknown/mismatched refs fail clos
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
 Key = Tuple[str, str, str]   # (origin, collection_noun, object_id)
+
+_DESTINATION_REF = re.compile(r"^interaction_destination:[0-9a-f]{64}$")
+_CREATION_REF = re.compile(r"^interaction_creation:[0-9a-f]{64}$")
+_PROOF_REF = re.compile(r"^native_ownership_witness:[0-9a-f]{64}$")
+_PERSONA_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def _origin(url: str) -> str:
@@ -71,6 +77,30 @@ def _read_key(read_url: str) -> Optional[Key]:
     return (_origin(read_url), segs[-2].lower(), str(segs[-1]))
 
 
+@dataclass(frozen=True)
+class NativeOwnedCreationWitness:
+    """Authenticated native evidence for one UI-created object destination.
+
+    Construction belongs to the driver bridge after it verifies the HMAC made
+    by the retained persona window. The registry still rebinds the witness to
+    the acting persona and exact resolved read URL before accepting ownership.
+    """
+
+    persona_id: str
+    create_ref: str
+    destination_ref: str
+    proof_ref: str
+
+    def __post_init__(self) -> None:
+        if (
+            _PERSONA_ID.fullmatch(self.persona_id) is None
+            or _CREATION_REF.fullmatch(self.create_ref) is None
+            or _DESTINATION_REF.fullmatch(self.destination_ref) is None
+            or _PROOF_REF.fullmatch(self.proof_ref) is None
+        ):
+            raise ValueError("native owned creation witness is invalid")
+
+
 @dataclass
 class OwnershipRegistry:
     """Session-scoped, in-memory record of objects researcher personas created here.
@@ -111,6 +141,40 @@ class OwnershipRegistry:
             "actor_persona": actor_persona,
             "collection": key[1],
             "object_id": key[2],
+        }
+        return key
+
+    def register_native_witnessed_read(
+        self,
+        read_url: str,
+        witness: NativeOwnedCreationWitness,
+        *,
+        actor_persona: str,
+        destination_ref: str,
+    ) -> Optional[Key]:
+        """Register a read only after the authenticated native creation seam.
+
+        This does not accept an arbitrary caller boolean. The driver must first
+        verify the persona-bound HMAC, and this registry then requires the exact
+        active destination reference and actor to match that verified witness.
+        """
+
+        if (
+            not isinstance(witness, NativeOwnedCreationWitness)
+            or witness.persona_id != actor_persona
+            or witness.destination_ref != destination_ref
+        ):
+            return None
+        key = _read_key(read_url)
+        if key is None:
+            return None
+        self._owned[key] = {
+            "actor_persona": actor_persona,
+            "collection": key[1],
+            "object_id": key[2],
+            "proof_source": "authenticated_native_creation_navigation",
+            "proof_ref": witness.proof_ref,
+            "create_ref": witness.create_ref,
         }
         return key
 

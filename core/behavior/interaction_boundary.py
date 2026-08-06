@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from core.cortex.execution_policy import DENIED_STATUS, CandidateAction, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
 from core.safety.action_classifier import CROSS_OBJECT_READ, SAFE_READ
+from core.safety.ownership_registry import NativeOwnedCreationWitness
 from core.safety.proof_budget import endpoint_key
 from core.safety.provenance import body_hash, response_shape
 
@@ -83,6 +84,11 @@ class _ResolvedNavigation:
     resolution_id: str
     destination_url: str = field(repr=False, compare=False)
     current_url: str = field(repr=False, compare=False)
+    ownership_witness: Optional[NativeOwnedCreationWitness] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -97,6 +103,7 @@ class InteractionAcquisitionResult:
     response_status: int
     response_truncated: bool
     cross_persona_probe: bool
+    ownership_proof_ref: Optional[str]
     requests_attempted: int
     requests_sent: int
     policy_denials: int
@@ -128,6 +135,7 @@ class InteractionAcquisitionResult:
             "response_status": self.response_status,
             "response_truncated": self.response_truncated,
             "cross_persona_probe": self.cross_persona_probe,
+            "ownership_proof_ref": self.ownership_proof_ref,
             "requests_attempted": self.requests_attempted,
             "requests_sent": self.requests_sent,
             "policy_denials": self.policy_denials,
@@ -299,13 +307,20 @@ class InteractionReadAcquisitionBoundary:
             raise InteractionAcquisitionDenied(
                 "interaction_navigation_resolution_failed"
             ) from exc
-        if not isinstance(value, Mapping) or set(value) != {
+        required_keys = {
             "current_url",
             "destination_url",
             "control",
             "catalog_controls",
             "peer_catalog_controls",
-        }:
+        }
+        if (
+            not isinstance(value, Mapping)
+            or set(value) not in (
+                required_keys,
+                required_keys | {"ownership_witness"},
+            )
+        ):
             raise InteractionAcquisitionDenied(
                 "interaction_navigation_resolution_is_invalid"
             )
@@ -359,6 +374,7 @@ class InteractionReadAcquisitionBoundary:
                 "interaction_navigation_catalog_binding_changed"
             )
         current_intent = resolved_catalog.intents[0]
+        ownership_witness = value.get("ownership_witness")
         if (
             current_intent.intent_id != self.admission.intent_id
             or current_intent.locator_ref != self.admission.locator_ref
@@ -367,6 +383,18 @@ class InteractionReadAcquisitionBoundary:
             or current_intent.intent_kind != "navigate"
             or current_intent.risk_class != "read_interaction"
             or current_intent.safety_blockers != (PASSIVE_CATALOG_BLOCKER,)
+            or (
+                ownership_witness is not None
+                and (
+                    not isinstance(
+                        ownership_witness,
+                        NativeOwnedCreationWitness,
+                    )
+                    or ownership_witness.persona_id != self.actor_persona_id
+                    or ownership_witness.destination_ref
+                    != current_intent.destination_ref
+                )
+            )
         ):
             raise InteractionAcquisitionDenied(
                 "interaction_navigation_intent_binding_changed"
@@ -379,10 +407,19 @@ class InteractionReadAcquisitionBoundary:
                 "intent_id": current_intent.intent_id,
                 "current_page_ref": current_intent.page_ref,
                 "destination_url": destination_url,
+                "ownership_proof_ref": (
+                    ownership_witness.proof_ref
+                    if isinstance(
+                        ownership_witness,
+                        NativeOwnedCreationWitness,
+                    )
+                    else None
+                ),
             },
         )
         return _ResolvedNavigation(
             resolution_id=resolution_id,
+            ownership_witness=ownership_witness,
             destination_url=destination_url,
             current_url=current_url,
         )
@@ -408,6 +445,29 @@ class InteractionReadAcquisitionBoundary:
             if self.request_persona_id != self.actor_persona_id
             else SAFE_READ
         )
+        ownership_proof_ref = None
+        if action_class == CROSS_OBJECT_READ:
+            registry = self.executor.policy.ownership_registry
+            if registry is None:
+                raise InteractionAcquisitionDenied(
+                    "interaction_cross_persona_ownership_registry_unavailable"
+                )
+            if registry.owner_of(resolved.destination_url) != self.actor_persona_id:
+                witness = resolved.ownership_witness
+                if witness is None or registry.register_native_witnessed_read(
+                    resolved.destination_url,
+                    witness,
+                    actor_persona=self.actor_persona_id,
+                    destination_ref=self.admission.destination_ref,
+                ) is None:
+                    raise InteractionAcquisitionDenied(
+                        "interaction_cross_persona_ownership_proof_unavailable"
+                    )
+                ownership_proof_ref = witness.proof_ref
+            if registry.owner_of(resolved.destination_url) != self.actor_persona_id:
+                raise InteractionAcquisitionDenied(
+                    "interaction_cross_persona_ownership_binding_changed"
+                )
         reservation_id, reason = budget.try_reserve(
             ((action_class, endpoint_key(resolved.destination_url)),)
         )
@@ -530,6 +590,7 @@ class InteractionReadAcquisitionBoundary:
             cross_persona_probe=(
                 self.request_persona_id != self.actor_persona_id
             ),
+            ownership_proof_ref=ownership_proof_ref,
             requests_attempted=1,
             requests_sent=1,
             policy_denials=len(self.executor.skipped) - skipped_before,

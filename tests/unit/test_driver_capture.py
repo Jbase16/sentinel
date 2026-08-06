@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import stat
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,8 +17,8 @@ SOURCE_PERSONA_ID = "a" * 32
 PEER_PERSONA_ID = "b" * 32
 
 
-def _interaction_control(index: int):
-    return {
+def _interaction_control(index: int, *, destination_ref: str = ""):
+    control = {
         "tag": "a",
         "role": "link",
         "input_type": "",
@@ -36,6 +39,33 @@ def _interaction_control(index: int):
         "download": False,
         "scripted_handler": False,
         "submitter": False,
+    }
+    if destination_ref:
+        control["destination_ref"] = destination_ref
+    return control
+
+
+def _ownership_witness(token: str, *, destination_ref: str):
+    create_ref = "interaction_creation:" + "c" * 64
+    material = "\n".join(
+        (
+            "sentinelforge-native-owned-creation-v1",
+            SOURCE_PERSONA_ID,
+            create_ref,
+            destination_ref,
+        )
+    )
+    signature = hmac.new(
+        token.encode("utf-8"),
+        material.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "schema_version": 1,
+        "persona_id": SOURCE_PERSONA_ID,
+        "create_ref": create_ref,
+        "destination_ref": destination_ref,
+        "proof_ref": f"native_ownership_witness:{signature}",
     }
 
 
@@ -152,6 +182,59 @@ async def test_interaction_navigation_resolver_reads_both_catalogs_without_activ
         "resolve_interaction_navigation",
     ]
     assert all("click" not in payload["command"] for payload, _timeout in calls)
+
+
+@pytest.mark.asyncio
+async def test_interaction_navigation_verifies_exact_native_creation_witness(
+    monkeypatch,
+):
+    token = "test-api-token"
+    destination_ref = "interaction_destination:" + "d" * 64
+    witness = _ownership_witness(token, destination_ref=destination_ref)
+
+    async def send_command(payload, timeout=30.0):
+        command = payload["command"]
+        if command == "interaction_controls":
+            return [_interaction_control(1, destination_ref=destination_ref)]
+        if command == "current_url":
+            return "https://example.test/app"
+        if command == "resolve_interaction_navigation":
+            return {
+                "current_url": "https://example.test/app",
+                "destination_url": "https://example.test/documents/doc-owned",
+                "control": _interaction_control(
+                    1,
+                    destination_ref=destination_ref,
+                ),
+                "owned_creation_witness": witness,
+            }
+        raise AssertionError(f"unexpected command {command}")
+
+    monkeypatch.setattr(driver.node_manager, "send_command", send_command)
+    monkeypatch.setattr(
+        driver,
+        "get_config",
+        lambda: SimpleNamespace(
+            security=SimpleNamespace(api_token=token),
+        ),
+    )
+
+    result = await driver.resolve_interaction_navigation(
+        SOURCE_PERSONA_ID,
+        _interaction_control(1)["locator"],
+        PEER_PERSONA_ID,
+    )
+
+    assert result["ownership_witness"].persona_id == SOURCE_PERSONA_ID
+    assert result["ownership_witness"].destination_ref == destination_ref
+
+    tampered = dict(witness)
+    tampered["create_ref"] = "interaction_creation:" + "e" * 64
+    assert driver._verified_owned_creation_witness(
+        tampered,
+        persona_id=SOURCE_PERSONA_ID,
+        destination_ref=destination_ref,
+    ) is None
 
 
 @pytest.mark.asyncio

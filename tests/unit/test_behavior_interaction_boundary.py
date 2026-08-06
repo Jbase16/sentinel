@@ -22,7 +22,10 @@ from core.behavior.receipts import (
 )
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
-from core.safety.ownership_registry import OwnershipRegistry
+from core.safety.ownership_registry import (
+    NativeOwnedCreationWitness,
+    OwnershipRegistry,
+)
 from core.safety.proof_budget import ProofBudget
 from core.safety.provenance import ProvenanceSink
 
@@ -31,8 +34,8 @@ ALICE = "a" * 32
 BOB = "b" * 32
 
 
-def _control(index: int = 1):
-    return {
+def _control(index: int = 1, *, destination_ref: str = ""):
+    control = {
         "tag": "a",
         "role": "link",
         "input_type": "",
@@ -54,6 +57,9 @@ def _control(index: int = 1):
         "scripted_handler": False,
         "submitter": False,
     }
+    if destination_ref:
+        control["destination_ref"] = destination_ref
+    return control
 
 
 def _frontier():
@@ -83,7 +89,11 @@ def _envelope():
     return envelope
 
 
-def _policy(*, scope_filter=lambda url: url.startswith(ORIGIN)):
+def _policy(
+    *,
+    scope_filter=lambda url: url.startswith(ORIGIN),
+    ownership_registry=None,
+):
     return ExecutionPolicy(
         "bounty_safe",
         scope_filter=scope_filter,
@@ -96,11 +106,12 @@ def _policy(*, scope_filter=lambda url: url.startswith(ORIGIN)):
             allow_delete=False,
             allow_real_user_data_access=False,
         ),
+        ownership_registry=ownership_registry,
     )
 
 
-def _admission(policy):
-    source_controls = [_control()]
+def _admission(policy, *, destination_ref: str = ""):
+    source_controls = [_control(destination_ref=destination_ref)]
     peer_controls = [_control(2)]
     catalog = InteractionIntentMiner().mine(
         source_controls,
@@ -122,19 +133,28 @@ def _admission(policy):
     return selected.admission, source_controls, peer_controls
 
 
-def _resolver(source_controls, peer_controls, *, destinations=None):
+def _resolver(
+    source_controls,
+    peer_controls,
+    *,
+    destinations=None,
+    ownership_witness=None,
+):
     calls = []
     destination_values = iter(destinations or [f"{ORIGIN}/details"] * 20)
 
     async def resolve(persona_id, locator, peer_persona_id):
         calls.append((persona_id, locator, peer_persona_id))
-        return {
+        result = {
             "current_url": f"{ORIGIN}/app",
             "destination_url": next(destination_values),
-            "control": _control(),
+            "control": source_controls[0],
             "catalog_controls": source_controls,
             "peer_catalog_controls": peer_controls,
         }
+        if ownership_witness is not None:
+            result["ownership_witness"] = ownership_witness
+        return result
 
     return resolve, calls
 
@@ -292,6 +312,125 @@ async def test_cross_persona_probe_resolves_as_alice_and_sends_once_as_bob(
     assert result.record is not None
     assert result.record["persona_id"] == BOB
     assert result.execution["budget_snapshot"]["cross_object_reads"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cross_persona_probe_requires_creation_witness_before_traffic(
+    tmp_path,
+):
+    destination_ref = "interaction_destination:" + "d" * 64
+    registry = OwnershipRegistry()
+    policy = _policy(ownership_registry=registry)
+    admission, source_controls, peer_controls = _admission(
+        policy,
+        destination_ref=destination_ref,
+    )
+    resolver, _calls = _resolver(
+        source_controls,
+        peer_controls,
+        destinations=[f"{ORIGIN}/documents/doc-owned"] * 2,
+    )
+    sent = []
+
+    async def raw_send(method, url, body=None, **kwargs):
+        sent.append((method, url))
+        return 200, "must not run"
+
+    provenance = ProvenanceSink()
+    provenance.record_context(
+        target=ORIGIN,
+        proof_mode="bounty_safe_shadow",
+        policy_digest=policy.digest(),
+    )
+    boundary = InteractionReadAcquisitionBoundary(
+        admission=admission,
+        target_origin=ORIGIN,
+        authorization=_envelope(),
+        actor_persona_id=ALICE,
+        peer_persona_id=BOB,
+        request_persona_id=BOB,
+        executor=PolicyExecutor(raw_send, policy, provenance=provenance),
+        resolver=resolver,
+        config=InteractionAcquisitionConfig(enabled=True),
+    )
+
+    with pytest.raises(
+        InteractionAcquisitionDenied,
+        match="interaction_cross_persona_ownership_proof_unavailable",
+    ):
+        await InteractionReadAcquisitionAdmission(
+            boundary,
+            receipt_store=BehavioralReceiptStore(tmp_path),
+        ).execute()
+
+    assert sent == []
+    assert not registry.is_owned(
+        f"{ORIGIN}/documents/doc-owned"
+    )
+
+
+@pytest.mark.asyncio
+async def test_cross_persona_probe_accepts_bound_native_creation_witness(
+    tmp_path,
+):
+    destination_ref = "interaction_destination:" + "d" * 64
+    proof_ref = "native_ownership_witness:" + "e" * 64
+    witness = NativeOwnedCreationWitness(
+        persona_id=ALICE,
+        create_ref="interaction_creation:" + "c" * 64,
+        destination_ref=destination_ref,
+        proof_ref=proof_ref,
+    )
+    registry = OwnershipRegistry()
+    policy = _policy(ownership_registry=registry)
+    admission, source_controls, peer_controls = _admission(
+        policy,
+        destination_ref=destination_ref,
+    )
+    resolver, _calls = _resolver(
+        source_controls,
+        peer_controls,
+        destinations=[f"{ORIGIN}/documents/doc-owned"] * 2,
+        ownership_witness=witness,
+    )
+    sent = []
+
+    async def raw_send(method, url, body=None, **kwargs):
+        sent.append((method, url, body))
+        return 200, '{"owner":"alice","private":"controlled"}'
+
+    provenance = ProvenanceSink()
+    provenance.record_context(
+        target=ORIGIN,
+        proof_mode="bounty_safe_shadow",
+        policy_digest=policy.digest(),
+    )
+    boundary = InteractionReadAcquisitionBoundary(
+        admission=admission,
+        target_origin=ORIGIN,
+        authorization=_envelope(),
+        actor_persona_id=ALICE,
+        peer_persona_id=BOB,
+        request_persona_id=BOB,
+        executor=PolicyExecutor(raw_send, policy, provenance=provenance),
+        resolver=resolver,
+        config=InteractionAcquisitionConfig(enabled=True),
+    )
+
+    result = await InteractionReadAcquisitionAdmission(
+        boundary,
+        receipt_store=BehavioralReceiptStore(tmp_path),
+    ).execute()
+
+    assert sent == [
+        ("GET", f"{ORIGIN}/documents/doc-owned", None),
+    ]
+    assert result.execution["ownership_proof_ref"] == proof_ref
+    assert registry.owner_of(
+        f"{ORIGIN}/documents/doc-owned"
+    ) == ALICE
+    stored = json.loads(next(tmp_path.glob("*.json")).read_text())
+    assert stored["outcome"]["ownership_proof_ref"] == proof_ref
 
 
 @pytest.mark.asyncio

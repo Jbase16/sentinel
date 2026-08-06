@@ -7,7 +7,12 @@ security-critical cases are the fail-closed ones — unregistered refs, cross-co
 id collisions, and foreign origins must all be rejected.
 """
 
-from core.safety.ownership_registry import OwnershipRegistry
+import pytest
+
+from core.safety.ownership_registry import (
+    NativeOwnedCreationWitness,
+    OwnershipRegistry,
+)
 
 
 def _reg(create_url, response, **kw):
@@ -59,3 +64,51 @@ def test_numeric_ids_are_matched_as_strings():
     r = _reg("http://h/api/Baskets", {"id": 7})
     assert r.is_owned("http://h/api/Baskets/7")
     assert not r.is_owned("http://h/api/Baskets/8")
+
+
+def test_native_witness_registers_only_the_exact_persona_destination():
+    destination_ref = "interaction_destination:" + "d" * 64
+    witness = NativeOwnedCreationWitness(
+        persona_id="a" * 32,
+        create_ref="interaction_creation:" + "c" * 64,
+        destination_ref=destination_ref,
+        proof_ref="native_ownership_witness:" + "e" * 64,
+    )
+    registry = OwnershipRegistry()
+
+    assert registry.register_native_witnessed_read(
+        "https://example.test/documents/doc-owned",
+        witness,
+        actor_persona="a" * 32,
+        destination_ref=destination_ref,
+    ) == ("https://example.test", "documents", "doc-owned")
+    assert registry.owner_of(
+        "https://example.test/documents/doc-owned"
+    ) == "a" * 32
+
+    other = OwnershipRegistry()
+    assert other.register_native_witnessed_read(
+        "https://example.test/documents/doc-owned",
+        witness,
+        actor_persona="b" * 32,
+        destination_ref=destination_ref,
+    ) is None
+    assert other.register_native_witnessed_read(
+        "https://example.test/documents/doc-owned",
+        witness,
+        actor_persona="a" * 32,
+        destination_ref="interaction_destination:" + "f" * 64,
+    ) is None
+    assert not other.is_owned(
+        "https://example.test/documents/doc-owned"
+    )
+
+
+def test_native_witness_rejects_malformed_contract_fields():
+    with pytest.raises(ValueError, match="witness is invalid"):
+        NativeOwnedCreationWitness(
+            persona_id="alice",
+            create_ref="interaction_creation:" + "c" * 64,
+            destination_ref="interaction_destination:" + "d" * 64,
+            proof_ref="native_ownership_witness:" + "e" * 64,
+        )

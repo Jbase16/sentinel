@@ -535,6 +535,10 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             existing.close()
         }
         personaWindows[personaId] = window
+        window.bindOwnershipWitness(
+            personaId: personaId,
+            apiToken: Self.readAPIToken()
+        )
         window.title = "SND Window - retained persona"
         window.observeClose { [weak self, weak window] in
             guard let self, let window,

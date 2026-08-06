@@ -19,12 +19,56 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         }
     }
 
+    private func canonicalInteractionURL(
+        _ identity: String,
+        relativeTo baseURL: URL
+    ) -> String? {
+        guard let baseOrigin = CaptureOrigin(url: baseURL),
+              let destination = URL(
+                string: identity,
+                relativeTo: baseURL
+              )?.absoluteURL,
+              CaptureOrigin(url: destination) == baseOrigin,
+              var components = URLComponents(
+                url: destination,
+                resolvingAgainstBaseURL: true
+              ) else { return nil }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        components.user = nil
+        components.password = nil
+        components.fragment = nil
+        if components.path.isEmpty {
+            components.path = "/"
+        }
+        if (components.scheme == "https" && components.port == 443)
+            || (components.scheme == "http" && components.port == 80) {
+            components.port = nil
+        }
+        return components.string
+    }
+
+    private func interactionReference(
+        prefix: String,
+        identity: String,
+        relativeTo baseURL: URL
+    ) -> String? {
+        guard let canonical = canonicalInteractionURL(
+            identity,
+            relativeTo: baseURL
+        ) else { return nil }
+        let digest = SHA256.hash(data: Data(canonical.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "\(prefix):\(digest)"
+    }
+
     private func redactedInteractionControls(
         _ controls: [[String: Any]],
         relativeTo baseURL: URL?
     ) -> [[String: Any]] {
         guard let baseURL,
-              let baseOrigin = CaptureOrigin(url: baseURL) else {
+              CaptureOrigin(url: baseURL) != nil else {
             return controls.map { raw in
                 var control = raw
                 control.removeValue(forKey: "destination_identity")
@@ -36,32 +80,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             defer { control.removeValue(forKey: "destination_identity") }
             guard control["destination"] as? String == "same_origin",
                   let identity = control["destination_identity"] as? String,
-                  let destination = URL(
-                    string: identity,
+                  let destinationRef = interactionReference(
+                    prefix: "interaction_destination",
+                    identity: identity,
                     relativeTo: baseURL
-                  )?.absoluteURL,
-                  CaptureOrigin(url: destination) == baseOrigin,
-                  var components = URLComponents(
-                    url: destination,
-                    resolvingAgainstBaseURL: true
                   ) else { return control }
-            components.scheme = components.scheme?.lowercased()
-            components.host = components.host?.lowercased()
-            components.user = nil
-            components.password = nil
-            components.fragment = nil
-            if components.path.isEmpty {
-                components.path = "/"
-            }
-            if (components.scheme == "https" && components.port == 443)
-                || (components.scheme == "http" && components.port == 80) {
-                components.port = nil
-            }
-            guard let canonical = components.string else { return control }
-            let digest = SHA256.hash(data: Data(canonical.utf8))
-                .map { String(format: "%02x", $0) }
-                .joined()
-            control["destination_ref"] = "interaction_destination:\(digest)"
+            control["destination_ref"] = destinationRef
             return control
         }
     }
@@ -81,6 +105,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     private var mainFrameCorrelationId = ""
     private var recordingEnabled = false
     private var authorizedNavigationOrigins: [String] = []
+    private var retainedPersonaId = ""
+    private var ownershipWitnessKey = Data()
+    private var pendingOwnedCreateURL: URL?
+    private var pendingOwnedCreateAccepted = false
+    private var ownedCreationWitnesses: [String: String] = [:]
+    private var ownedCreationWitnessOrder: [String] = []
     public var eventSessionId = ""
     
     public override init(contentRect: NSRect, styleMask style: NSWindow.StyleMask, backing backingStoreType: NSWindow.BackingStoreType, defer flag: Bool) {
@@ -130,10 +160,126 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
     
     // MARK: - Navigation Delegate
+
+    public func bindOwnershipWitness(
+        personaId: String,
+        apiToken: String?
+    ) {
+        let validPersona = personaId.count == 32
+            && personaId.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+        guard validPersona else { return }
+        if retainedPersonaId != personaId {
+            pendingOwnedCreateURL = nil
+            pendingOwnedCreateAccepted = false
+            ownedCreationWitnesses.removeAll()
+            ownedCreationWitnessOrder.removeAll()
+        }
+        retainedPersonaId = personaId
+        ownershipWitnessKey = Data((apiToken ?? "").utf8)
+    }
+
+    private func observeOwnedCreationAction(
+        _ navigationAction: WKNavigationAction
+    ) {
+        guard !retainedPersonaId.isEmpty,
+              !ownershipWitnessKey.isEmpty,
+              navigationAction.targetFrame?.isMainFrame == true,
+              navigationAction.request.httpMethod?.uppercased() == "POST",
+              let url = navigationAction.request.url,
+              isAuthorizedNavigation(url) else { return }
+        pendingOwnedCreateURL = url
+        pendingOwnedCreateAccepted = false
+    }
+
+    private func observeOwnedCreationResponse(
+        _ navigationResponse: WKNavigationResponse
+    ) {
+        guard pendingOwnedCreateURL != nil,
+              navigationResponse.isForMainFrame,
+              let response = navigationResponse.response as? HTTPURLResponse else {
+            return
+        }
+        if (200..<400).contains(response.statusCode) {
+            pendingOwnedCreateAccepted = true
+        } else {
+            pendingOwnedCreateURL = nil
+            pendingOwnedCreateAccepted = false
+        }
+    }
+
+    private func finishOwnedCreationNavigationIfPresent() {
+        guard let createURL = pendingOwnedCreateURL else { return }
+        defer {
+            pendingOwnedCreateURL = nil
+            pendingOwnedCreateAccepted = false
+        }
+        guard pendingOwnedCreateAccepted,
+              (200..<300).contains(mainFrameResponseStatus),
+              let destinationURL = webView.url,
+              CaptureOrigin(url: createURL) == CaptureOrigin(url: destinationURL)
+        else { return }
+        let createSegments = createURL.path.split(separator: "/").map(String.init)
+        let destinationSegments = destinationURL.path
+            .split(separator: "/")
+            .map(String.init)
+        guard !createSegments.isEmpty,
+              destinationSegments.count == createSegments.count + 1,
+              Array(destinationSegments.dropLast()) == createSegments,
+              destinationSegments.last?.isEmpty == false,
+              let createRef = interactionReference(
+                prefix: "interaction_creation",
+                identity: createURL.absoluteString,
+                relativeTo: createURL
+              ),
+              let destinationRef = interactionReference(
+                prefix: "interaction_destination",
+                identity: destinationURL.absoluteString,
+                relativeTo: destinationURL
+              ) else { return }
+        if ownedCreationWitnesses[destinationRef] == nil {
+            ownedCreationWitnessOrder.append(destinationRef)
+        }
+        ownedCreationWitnesses[destinationRef] = createRef
+        while ownedCreationWitnessOrder.count > 32 {
+            let dropped = ownedCreationWitnessOrder.removeFirst()
+            ownedCreationWitnesses.removeValue(forKey: dropped)
+        }
+    }
+
+    private func ownedCreationWitness(
+        destinationRef: String
+    ) -> [String: Any]? {
+        guard !retainedPersonaId.isEmpty,
+              !ownershipWitnessKey.isEmpty,
+              let createRef = ownedCreationWitnesses[destinationRef] else {
+            return nil
+        }
+        let material = [
+            "sentinelforge-native-owned-creation-v1",
+            retainedPersonaId,
+            createRef,
+            destinationRef,
+        ].joined(separator: "\n")
+        let authentication = HMAC<SHA256>.authenticationCode(
+            for: Data(material.utf8),
+            using: SymmetricKey(data: ownershipWitnessKey)
+        )
+        let proof = authentication
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return [
+            "schema_version": 1,
+            "persona_id": retainedPersonaId,
+            "create_ref": createRef,
+            "destination_ref": destinationRef,
+            "proof_ref": "native_ownership_witness:\(proof)",
+        ]
+    }
     
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         let continuation = navigationContinuation
         navigationContinuation = nil
+        finishOwnedCreationNavigationIfPresent()
         emitRecordedNavigationIfEnabled()
         captureMainFrameIfEnabled {
             continuation?.resume()
@@ -154,6 +300,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 ) == .orderedSame
             }.map { String(describing: $0.value) } ?? ""
         }
+        observeOwnedCreationResponse(navigationResponse)
         decisionHandler(.allow)
     }
 
@@ -186,6 +333,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             )
             return
         }
+        observeOwnedCreationAction(navigationAction)
         decisionHandler(.allow)
     }
 
@@ -1658,6 +1806,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             )
         }
         resolved["control"] = redactedControl
+        if let destinationRef = redactedControl["destination_ref"] as? String,
+           let witness = ownedCreationWitness(
+            destinationRef: destinationRef
+           ) {
+            resolved["owned_creation_witness"] = witness
+        }
         return resolved
     }
     

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -24,6 +25,8 @@ from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from core.base.config import get_config
+from core.safety.ownership_registry import NativeOwnedCreationWitness
 from core.server.routers.auth import verify_sensitive_token
 from core.server.routers.realtime import validate_websocket_connection
 
@@ -153,6 +156,10 @@ _MAX_INTERACTION_SCANNED_NODES = 4096
 _INTERACTION_LOCATOR_TAG = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 _INTERACTION_DESTINATION_REF = re.compile(
     r"^interaction_destination:[0-9a-f]{64}$"
+)
+_INTERACTION_CREATION_REF = re.compile(r"^interaction_creation:[0-9a-f]{64}$")
+_NATIVE_OWNERSHIP_PROOF_REF = re.compile(
+    r"^native_ownership_witness:[0-9a-f]{64}$"
 )
 _PAIR_CAPTURE_LOCK = asyncio.Lock()
 
@@ -796,6 +803,59 @@ def _sanitized_interaction_controls(value: Any) -> Tuple[Dict[str, Any], ...]:
     return tuple(controls)
 
 
+def _verified_owned_creation_witness(
+    value: Any,
+    *,
+    persona_id: str,
+    destination_ref: str,
+) -> Optional[NativeOwnedCreationWitness]:
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "persona_id",
+        "create_ref",
+        "destination_ref",
+        "proof_ref",
+    }:
+        return None
+    create_ref = value.get("create_ref")
+    proof_ref = value.get("proof_ref")
+    if (
+        value.get("schema_version") != 1
+        or value.get("persona_id") != persona_id
+        or value.get("destination_ref") != destination_ref
+        or not isinstance(create_ref, str)
+        or _INTERACTION_CREATION_REF.fullmatch(create_ref) is None
+        or not isinstance(proof_ref, str)
+        or _NATIVE_OWNERSHIP_PROOF_REF.fullmatch(proof_ref) is None
+    ):
+        return None
+    material = "\n".join(
+        (
+            "sentinelforge-native-owned-creation-v1",
+            persona_id,
+            create_ref,
+            destination_ref,
+        )
+    )
+    expected = hmac.new(
+        get_config().security.api_token.encode("utf-8"),
+        material.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    supplied = proof_ref[len("native_ownership_witness:") :]
+    if not hmac.compare_digest(expected, supplied):
+        return None
+    try:
+        return NativeOwnedCreationWitness(
+            persona_id=persona_id,
+            create_ref=create_ref,
+            destination_ref=destination_ref,
+            proof_ref=proof_ref,
+        )
+    except ValueError:
+        return None
+
+
 async def _persona_interaction_controls(
     persona_id: str,
 ) -> Tuple[Dict[str, Any], ...]:
@@ -1074,11 +1134,19 @@ async def resolve_interaction_navigation(
         },
         timeout=10.0,
     )
-    if not isinstance(result, dict) or set(result) != {
+    required_result_keys = {
         "current_url",
         "destination_url",
         "control",
-    }:
+    }
+    result_keys = set(result) if isinstance(result, dict) else set()
+    if (
+        not isinstance(result, dict)
+        or result_keys not in (
+            required_result_keys,
+            required_result_keys | {"owned_creation_witness"},
+        )
+    ):
         raise DriverCommandError("node returned an invalid interaction resolution")
     current_url = validate_capture_url(result.get("current_url"))
     destination_url = validate_capture_url(result.get("destination_url"))
@@ -1106,13 +1174,22 @@ async def resolve_interaction_navigation(
         or control["scripted_handler"]
     ):
         raise DriverCommandError("resolved interaction is not an eligible navigation")
-    return {
+    resolved = {
         "current_url": current_url,
         "destination_url": destination_url,
         "control": control,
         "catalog_controls": catalog_controls,
         "peer_catalog_controls": peer_controls,
     }
+    destination_ref = str(control.get("destination_ref") or "")
+    witness = _verified_owned_creation_witness(
+        result.get("owned_creation_witness"),
+        persona_id=validated_persona,
+        destination_ref=destination_ref,
+    )
+    if witness is not None:
+        resolved["ownership_witness"] = witness
+    return resolved
 
 
 async def capture_persona_pair(

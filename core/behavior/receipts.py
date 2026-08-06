@@ -69,6 +69,9 @@ _INTERACTION_REQUEST_REF = re.compile(
 _INTERACTION_RESPONSE_REF = re.compile(
     r"^interaction_acquisition_response:[0-9a-f]{64}$"
 )
+_NATIVE_OWNERSHIP_PROOF_REF = re.compile(
+    r"^native_ownership_witness:[0-9a-f]{64}$"
+)
 _INTERACTION_PAGE_REF = re.compile(r"^interaction_page:[0-9a-f]{64}$")
 _INTERACTION_RENDER_REF = re.compile(
     r"^interaction_render_observation:[0-9a-f]{64}$"
@@ -605,6 +608,7 @@ def redacted_interaction_acquisition_outcome(
     response_status = value.get("response_status")
     response_truncated = value.get("response_truncated")
     cross_persona_probe = value.get("cross_persona_probe", False)
+    ownership_proof_ref = value.get("ownership_proof_ref")
     counters = {
         key: _nonnegative_int(
             value.get(key),
@@ -626,6 +630,15 @@ def redacted_interaction_acquisition_outcome(
         or not 100 <= response_status <= 599
         or not isinstance(response_truncated, bool)
         or not isinstance(cross_persona_probe, bool)
+        or (
+            ownership_proof_ref is not None
+            and (
+                not cross_persona_probe
+                or not isinstance(ownership_proof_ref, str)
+                or _NATIVE_OWNERSHIP_PROOF_REF.fullmatch(ownership_proof_ref)
+                is None
+            )
+        )
         or counters
         != {
             "requests_attempted": 1,
@@ -667,6 +680,8 @@ def redacted_interaction_acquisition_outcome(
         "provenance_root": provenance_root,
         "budget_snapshot": budget,
     }
+    if ownership_proof_ref is not None:
+        output["ownership_proof_ref"] = ownership_proof_ref
     if all(state_ref_presence):
         output.update(
             {
