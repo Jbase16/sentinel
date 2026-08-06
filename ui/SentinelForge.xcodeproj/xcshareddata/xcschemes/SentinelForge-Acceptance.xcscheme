@@ -75,6 +75,11 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "SENTINEL_API_PORT"
             value = "8766"
             isEnabled = "YES">
