@@ -2514,6 +2514,8 @@ class TestBehavioralAuthorizationEndpoint:
         assert [payload["command"] for payload, _ in commands] == [
             "validate_persona_windows",
             "validate_persona_windows",
+            "current_url",
+            "current_url",
             "start_network_capture",
             "navigate",
             "stop_network_capture",
@@ -2532,6 +2534,163 @@ class TestBehavioralAuthorizationEndpoint:
         assert len(list((tmp_path / "captures").glob("*.jsonl"))) == 2
         assert driver.ACTIVE_CAPTURE_OWNER_ID is None
         assert driver.ACTIVE_CAPTURE_SESSION_ID is None
+
+    def test_cross_persona_navigation_requires_html_oracle_and_api_proof(
+        self,
+        monkeypatch,
+    ):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.interaction_adaptive import (
+            INTERACTION_ADAPTIVE_WORKFLOW,
+        )
+        from core.behavior.interaction_boundary import (
+            INTERACTION_ACQUISITION_WORKFLOW,
+        )
+        from core.behavior.interaction_render import (
+            INTERACTION_RENDER_WORKFLOW,
+        )
+        from core.behavior.normalize import stable_hash
+        from core.foundry.authorization import create_envelope
+        from core.safety.ownership_registry import NativeOwnedCreationWitness
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, peer_persona = self._setup()
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="public bounty scope",
+            allowed_workflows=[
+                CONTROLLED_WORKFLOW,
+                INTERACTION_ACQUISITION_WORKFLOW,
+                INTERACTION_RENDER_WORKFLOW,
+                INTERACTION_ADAPTIVE_WORKFLOW,
+            ],
+            disclosure_attestation=True,
+        )
+        request.envelope_id = envelope.envelope_id
+        request.source_records = [{
+            "persona_id": source_persona.persona_id,
+            "method": "GET",
+            "url": f"{self.ORIGIN}/documents",
+            "response_status": 200,
+            "response_body": "owner list",
+        }]
+        request.peer_records = [{
+            "persona_id": peer_persona.persona_id,
+            "method": "GET",
+            "url": f"{self.ORIGIN}/documents",
+            "response_status": 200,
+            "response_body": "reader list",
+        }]
+        request.interaction_page_url = f"{self.ORIGIN}/documents"
+        control = {
+            "tag": "a",
+            "role": "link",
+            "input_type": "",
+            "form_method": "none",
+            "destination": "same_origin",
+            "destination_ref": stable_hash(
+                "interaction_destination",
+                {"test": "owner-document"},
+            ),
+            "locator": [
+                {"tag": "html", "sibling_index": 1},
+                {"tag": "body", "sibling_index": 1},
+                {"tag": "a", "sibling_index": 1},
+            ],
+            "locator_truncated": False,
+            "visible": True,
+            "disabled": False,
+            "content_editable": False,
+            "aria_expanded": False,
+            "aria_haspopup": False,
+            "sensitive_form": False,
+            "download": False,
+            "scripted_handler": False,
+            "submitter": False,
+        }
+        peer_control = dict(control)
+        peer_control["destination_ref"] = stable_hash(
+            "interaction_destination",
+            {"test": "reader-document"},
+        )
+        request.source_controls = [control]
+        request.peer_controls = [peer_control]
+        destination_ref = control["destination_ref"]
+        witness = NativeOwnedCreationWitness(
+            persona_id=source_persona.persona_id,
+            create_ref=stable_hash("interaction_creation", {"test": 1}),
+            destination_ref=destination_ref,
+            proof_ref=stable_hash("native_ownership_witness", {"test": 1}),
+        )
+        owner_url = f"{self.ORIGIN}/documents/doc_owner"
+        reader_url = f"{self.ORIGIN}/documents/doc_reader"
+
+        async def resolve_live(persona_id, locator, peer_persona_id=None):
+            if persona_id == source_persona.persona_id:
+                return {
+                    "current_url": request.interaction_page_url,
+                    "destination_url": owner_url,
+                    "control": control,
+                    "catalog_controls": [control],
+                    "peer_catalog_controls": [peer_control],
+                    "ownership_witness": witness,
+                }
+            return {
+                "current_url": request.interaction_page_url,
+                "destination_url": reader_url,
+                "control": peer_control,
+                "catalog_controls": [peer_control],
+                "peer_catalog_controls": [],
+            }
+
+        traffic = []
+
+        async def fake_send(_transport, persona, replay_request):
+            traffic.append((persona, replay_request.url))
+            if replay_request.url.endswith("/api/documents/doc_owner"):
+                return ReplayResponse(200, '{"body":"OwnerPrivateMarker"}')
+            if replay_request.url.endswith("/documents/doc_owner"):
+                return ReplayResponse(200, '{"body":"OwnerPrivateMarker"}')
+            if replay_request.url.endswith("/documents/doc_reader"):
+                return ReplayResponse(200, '{"body":"ReaderPrivateMarker"}')
+            raise AssertionError(f"unexpected proof URL: {replay_request.url}")
+
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE",
+        ):
+            monkeypatch.setenv(name, "1")
+        monkeypatch.delenv(
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_SECOND_TRANSITION",
+            raising=False,
+        )
+        monkeypatch.setattr(driver, "resolve_interaction_navigation", resolve_live)
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "completed", result[
+            "interaction_acquisition"
+        ]
+        assert result["finding"]["type"] == "cross_principal_object_access"
+        metadata = result["finding"]["metadata"]
+        assert metadata["owner_persona_id"] == source_persona.persona_id
+        assert metadata["reader_persona_id"] == peer_persona.persona_id
+        proof = metadata["behavioral_interaction_cross_persona_proof"]
+        assert proof["finding_authority"] is True
+        assert proof["matched_marker_count"] == 1
+        assert traffic[-1] == (
+            peer_persona.persona_id,
+            f"{self.ORIGIN}/api/documents/doc_owner",
+        )
 
 
 # ───────────────────────── recipes ─────────────────────────

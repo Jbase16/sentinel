@@ -45,6 +45,17 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return try? String(contentsOf: path, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    @MainActor
+    public func bindOwnershipWitness(
+        to window: GhostBrowserWindow,
+        personaId: String
+    ) {
+        window.bindOwnershipWitness(
+            personaId: personaId,
+            apiToken: Self.readAPIToken()
+        )
+    }
     
     public func connect() {
         guard !isConnected else { return }
@@ -535,10 +546,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             existing.close()
         }
         personaWindows[personaId] = window
-        window.bindOwnershipWitness(
-            personaId: personaId,
-            apiToken: Self.readAPIToken()
-        )
+        bindOwnershipWitness(to: window, personaId: personaId)
         window.title = "SND Window - retained persona"
         window.observeClose { [weak self, weak window] in
             guard let self, let window,

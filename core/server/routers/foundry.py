@@ -685,6 +685,7 @@ async def run_behavioral_authorization_endpoint(
         PrimaryPlannerConfig,
     )
     from core.behavior.resolver import (
+        ClosedLoopResolverRun,
         ClosedLoopResolverConfig,
         ClosedLoopResolverDenied,
         SingleStepObligationResolver,
@@ -769,6 +770,11 @@ async def run_behavioral_authorization_endpoint(
         InteractionAdaptiveController,
         InteractionAdaptiveDenied,
         InteractionAdaptiveDerivation,
+    )
+    from core.behavior.interaction_cross_proof import (
+        CROSS_PERSONA_PROOF_MODE,
+        InteractionCrossPersonaProofBoundary,
+        InteractionCrossPersonaProofDenied,
     )
     from core.behavior.adaptive_proof import (
         AdaptiveProofHandoff,
@@ -1019,6 +1025,10 @@ async def run_behavioral_authorization_endpoint(
         ),
         "target_requests_sent": 0,
     }
+    cross_persona_proof_run = None
+    cross_persona_proof_shadow = None
+    cross_persona_proof_records = None
+    cross_persona_independent_proof = None
     if interaction_render_config.enabled:
         interaction_acquisition["render_observation"] = {
             "schema_version": 1,
@@ -1350,8 +1360,12 @@ async def run_behavioral_authorization_endpoint(
         scope_filter=scope_filter,
         budget=ProofBudget(
             max_total_requests=7,
-            max_requests_per_endpoint=5,
-            max_cross_object_reads=1,
+            max_requests_per_endpoint=(
+                6 if interaction_adaptive_config.enabled else 5
+            ),
+            max_cross_object_reads=(
+                3 if interaction_adaptive_config.enabled else 1
+            ),
             max_privilege_mutations=0,
             max_creates=2,
             allow_delete=False,
@@ -1496,6 +1510,162 @@ async def run_behavioral_authorization_endpoint(
                     peer_records.append(acquisition_result.record)
                 else:
                     source_records.append(acquisition_result.record)
+                if (
+                    cross_persona_probe
+                    and interaction_adaptive_config.enabled
+                    and acquisition_result.execution.get("response_status")
+                    in range(200, 300)
+                ):
+                    try:
+                        peer_navigation_resolution = (
+                            await resolve_interaction_navigation(
+                            peer_persona.persona_id,
+                            tuple(
+                                segment.to_dict()
+                                for segment in admitted_interaction.locator
+                            ),
+                        )
+                        )
+                        peer_destination = peer_navigation_resolution.get(
+                            "destination_url"
+                        )
+                        ownership_proof_ref = (
+                            acquisition_result.execution.get(
+                                "ownership_proof_ref"
+                            )
+                        )
+                        if (
+                            not isinstance(peer_destination, str)
+                            or not isinstance(ownership_proof_ref, str)
+                        ):
+                            raise InteractionCrossPersonaProofDenied(
+                                "interaction_cross_persona_proof_resolution_is_incomplete"
+                            )
+                        proof_executors = {
+                            source_persona.persona_id: make_executor(
+                                source_persona.persona_id,
+                                shadow_policy,
+                                shadow_provenance,
+                            ),
+                            peer_persona.persona_id: acquisition_executor,
+                        }
+                        proof_boundary = (
+                            InteractionCrossPersonaProofBoundary(
+                                target_origin=target_origin,
+                                authorization=envelope,
+                                owner_persona=source_persona,
+                                reader_persona=peer_persona,
+                                executors=proof_executors,
+                                owner_url=acquisition_result.record["url"],
+                                reader_url=peer_destination,
+                                ownership_proof_ref=ownership_proof_ref,
+                            )
+                        )
+                        baselines = await proof_boundary.acquire_baselines()
+                        reader_records = [dict(baselines.reader_record)]
+                        owner_records = [dict(baselines.owner_record)]
+                        proof_shadow = shadow_orchestrator.run(
+                            reader_records,
+                            target_origin=target_origin,
+                            world_id=peer_persona.persona_id,
+                            peer_records=owner_records,
+                            peer_world_id=source_persona.persona_id,
+                        )
+                        proof_plan = obligation_resolver.plan(proof_shadow)
+                        selected_proof = proof_plan.selected
+                        if (
+                            selected_proof is None
+                            or selected_proof.resolution_kind
+                            != "authorization_proposal"
+                            or selected_proof.proposal is None
+                        ):
+                            raise InteractionCrossPersonaProofDenied(
+                                "interaction_cross_persona_proof_has_no_authorization_proposal"
+                            )
+                        reverse_executor = ControlledAuthorizationExecutor(
+                            target_origin=target_origin,
+                            authorization=envelope,
+                            source_persona=peer_persona,
+                            peer_persona=source_persona,
+                            executors=proof_executors,
+                        )
+                        proof_execution = await reverse_executor.execute(
+                            selected_proof.proposal,
+                            reader_records,
+                            owner_records,
+                        )
+                        if proof_execution.finding is None:
+                            raise InteractionCrossPersonaProofDenied(
+                                "interaction_cross_persona_html_proof_was_not_confirmed"
+                            )
+                        independent_proof = (
+                            await proof_boundary.confirm_independent_api(
+                                proof_execution.finding.leaked
+                            )
+                        )
+                        cross_persona_proof_run = ClosedLoopResolverRun(
+                            status=proof_execution.status,
+                            plan=proof_plan,
+                            execution=proof_execution,
+                        )
+                        cross_persona_proof_shadow = proof_shadow
+                        cross_persona_proof_records = (
+                            reader_records,
+                            owner_records,
+                        )
+                        cross_persona_independent_proof = (
+                            independent_proof.to_dict()
+                        )
+                        proof_requests = (
+                            baselines.requests_sent
+                            + proof_execution.requests_sent
+                            + independent_proof.requests_sent
+                        )
+                        interaction_acquisition[
+                            "cross_persona_proof"
+                        ] = {
+                            "schema_version": 1,
+                            "mode": CROSS_PERSONA_PROOF_MODE,
+                            "status": "completed",
+                            "executable": True,
+                            "finding_authority": True,
+                            "target_requests_sent": proof_requests,
+                            "proof_id": independent_proof.proof_id,
+                            "plan_id": proof_plan.plan_id,
+                        }
+                    except (
+                        InteractionCrossPersonaProofDenied,
+                        ControlledExecutionDenied,
+                        ClosedLoopResolverDenied,
+                    ) as exc:
+                        interaction_acquisition[
+                            "cross_persona_proof"
+                        ] = {
+                            "schema_version": 1,
+                            "mode": CROSS_PERSONA_PROOF_MODE,
+                            "status": "denied",
+                            "executable": False,
+                            "finding_authority": False,
+                            "target_requests_sent": 0,
+                            "error_code": str(exc).split(":", 1)[0],
+                        }
+                    except Exception:
+                        logger.exception(
+                            "cross-persona interaction proof failed"
+                        )
+                        interaction_acquisition[
+                            "cross_persona_proof"
+                        ] = {
+                            "schema_version": 1,
+                            "mode": CROSS_PERSONA_PROOF_MODE,
+                            "status": "error",
+                            "executable": False,
+                            "finding_authority": False,
+                            "target_requests_sent": 0,
+                            "error_code": (
+                                "interaction_cross_persona_proof_internal_error"
+                            ),
+                        }
                 if interaction_render_config.enabled and not cross_persona_probe:
                     try:
                         render_boundary = InteractionRenderObservationBoundary(
@@ -2692,7 +2862,9 @@ async def run_behavioral_authorization_endpoint(
 
     adaptive_proof_handoff = None
     try:
-        if shadow_run is None:
+        if cross_persona_proof_run is not None:
+            run = cross_persona_proof_run
+        elif shadow_run is None:
             # Disabled mode has no execution authority. Preserve its diagnostic
             # proposal response even if optional shadow analysis failed.
             run = await scheduler.run(
@@ -2767,7 +2939,14 @@ async def run_behavioral_authorization_endpoint(
                 logger.exception("failed to terminate errored behavioral receipt")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     response = run.to_dict()
-    response["behavioral_shadow"] = shadow_response
+    effective_shadow_run = (
+        cross_persona_proof_shadow or shadow_run
+    )
+    response["behavioral_shadow"] = (
+        effective_shadow_run.to_dict()
+        if cross_persona_proof_shadow is not None
+        else shadow_response
+    )
     response["graphql_resolution"] = {
         "catalog": catalog.diagnostics(),
         "assets": asset_resolution,
@@ -2776,6 +2955,22 @@ async def run_behavioral_authorization_endpoint(
     }
     response["read_exploration"] = read_exploration
     response["interaction_acquisition"] = interaction_acquisition
+    if (
+        cross_persona_independent_proof is not None
+        and isinstance(response.get("finding"), dict)
+    ):
+        finding = response["finding"]
+        finding["type"] = "cross_principal_object_access"
+        metadata = finding.setdefault("metadata", {})
+        metadata["finding_class"] = "cross_principal_object_access"
+        metadata["owner_persona_id"] = source_persona.persona_id
+        metadata["reader_persona_id"] = peer_persona.persona_id
+        metadata[
+            "behavioral_interaction_cross_persona_proof"
+        ] = cross_persona_independent_proof
+        interaction_acquisition[
+            "independent_proof"
+        ] = cross_persona_independent_proof
     attach_adaptive_proof_handoff(
         response,
         adaptive_proof_handoff,
@@ -2809,10 +3004,11 @@ async def run_behavioral_authorization_endpoint(
             adaptive_proof_handoff,
             proof_receipt_id=completed_receipt.receipt_id,
         )
-        if shadow_run is not None:
+        if effective_shadow_run is not None:
+            shadow_response = effective_shadow_run.to_dict()
             try:
                 feedback = ReceiptDispositionAdapter().adapt(
-                    shadow_run.graph,
+                    effective_shadow_run.graph,
                     (completed_receipt,),
                     expected_context=redacted_receipt_context(
                         target_origin=target_origin,
@@ -2821,19 +3017,36 @@ async def run_behavioral_authorization_endpoint(
                         peer_persona_id=peer_persona.persona_id,
                     ),
                 )
+                feedback_source_records = source_records
+                feedback_peer_records = peer_records
+                feedback_world_id = source_persona.persona_id
+                feedback_peer_world_id = peer_persona.persona_id
+                feedback_controls = source_controls
+                feedback_peer_controls = peer_controls
+                feedback_experiment_context = shadow_context
+                if cross_persona_proof_records is not None:
+                    (
+                        feedback_source_records,
+                        feedback_peer_records,
+                    ) = cross_persona_proof_records
+                    feedback_world_id = peer_persona.persona_id
+                    feedback_peer_world_id = source_persona.persona_id
+                    feedback_controls = ()
+                    feedback_peer_controls = ()
+                    feedback_experiment_context = None
                 feedback_run = shadow_orchestrator.run(
-                    source_records,
+                    feedback_source_records,
                     target_origin=target_origin,
-                    world_id=source_persona.persona_id,
-                    peer_records=peer_records,
-                    peer_world_id=peer_persona.persona_id,
+                    world_id=feedback_world_id,
+                    peer_records=feedback_peer_records,
+                    peer_world_id=feedback_peer_world_id,
                     artifacts=tuple(shadow_artifacts),
-                    controls=source_controls,
-                    peer_controls=peer_controls,
+                    controls=feedback_controls,
+                    peer_controls=feedback_peer_controls,
                     interaction_page_url=req.interaction_page_url,
-                    experiment_context=shadow_context,
+                    experiment_context=feedback_experiment_context,
                     dispositions=feedback.dispositions,
-                    previous_graph=shadow_run.graph,
+                    previous_graph=effective_shadow_run.graph,
                     derivation_round=2,
                 )
                 shadow_response = feedback_run.to_dict()

@@ -409,8 +409,28 @@ struct BolaLabView: View {
                         } onStop: {
                             vm.stopCapture(for: persona)
                         } onOpenWindow: {
+                            guard let envelope = vm.envelopes.first(where: {
+                                $0.envelopeId == vm.selectedEnvelopeId
+                            }) else {
+                                vm.behavioralStatus =
+                                    "Select an approved authorization envelope."
+                                return
+                            }
                             if let existing = DriverBridgeClient.shared
                                 .personaWindows[persona.personaId] {
+                                do {
+                                    try existing.restrictToOrigins(
+                                        envelope.authorizedOrigins
+                                    )
+                                } catch {
+                                    vm.behavioralStatus =
+                                        "The selected envelope has invalid authorized origins."
+                                    return
+                                }
+                                DriverBridgeClient.shared.bindOwnershipWitness(
+                                    to: existing,
+                                    personaId: persona.personaId
+                                )
                                 existing.makeKeyAndOrderFront(nil)
                                 vm.personaWindowDidOpen(for: persona)
                                 return
@@ -422,6 +442,16 @@ struct BolaLabView: View {
                                 defer: false
                             )
                             window.title = "SND Window - \(persona.label)"
+                            do {
+                                try window.restrictToOrigins(
+                                    envelope.authorizedOrigins
+                                )
+                            } catch {
+                                vm.behavioralStatus =
+                                    "The selected envelope has invalid authorized origins."
+                                window.close()
+                                return
+                            }
                             
                             let wc = NSWindowController(window: window)
                             wc.showWindow(nil)
@@ -429,6 +459,10 @@ struct BolaLabView: View {
                             
                             // The backend addresses owned personas by immutable vault ID.
                             // Keep the label alias for older replay callers.
+                            DriverBridgeClient.shared.bindOwnershipWitness(
+                                to: window,
+                                personaId: persona.personaId
+                            )
                             DriverBridgeClient.shared.personaWindows[persona.personaId] = window
                             DriverBridgeClient.shared.personaWindows[persona.label] = window
                             vm.personaWindowDidOpen(for: persona)

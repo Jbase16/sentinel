@@ -771,6 +771,8 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
 
     assert [payload["command"] for payload, _ in calls] == [
         "validate_persona_windows",
+        "current_url",
+        "current_url",
         "start_network_capture",
         "navigate",
         "stop_network_capture",
@@ -807,6 +809,26 @@ async def test_paired_capture_is_sequential_persona_isolated_and_exclusive(
     assert stat.S_IMODE(Path(peer.path).stat().st_mode) == 0o600
     assert script_urls == ("https://api.example.test/assets/app.js",)
     assert driver.ACTIVE_CAPTURE_OWNER_ID is None
+
+
+def test_paired_capture_preserves_only_a_shared_target_origin_page():
+    target = "https://api.example.test"
+
+    assert driver._paired_capture_url(
+        target,
+        "https://api.example.test/documents#alice",
+        "https://api.example.test/documents#bob",
+    ) == "https://api.example.test/documents"
+    assert driver._paired_capture_url(
+        target,
+        "https://api.example.test/documents",
+        "https://api.example.test/app",
+    ) == target
+    assert driver._paired_capture_url(
+        target,
+        "https://outside.example/documents",
+        "https://outside.example/documents",
+    ) == target
 
 
 @pytest.mark.asyncio

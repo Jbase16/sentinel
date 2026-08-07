@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import hmac
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Sequence, Tuple
@@ -43,6 +44,8 @@ INTERACTION_ACQUISITION_MODE = "behavioral_interaction_read_acquisition_v1"
 INTERACTION_ACQUISITION_WORKFLOW = "behavioral_interaction_read_acquisition"
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _MAX_RESPONSE_CHARS = 2 * 1024 * 1024
+
+logger = logging.getLogger(__name__)
 
 InteractionResolver = Callable[
     [str, Sequence[Dict[str, Any]], Optional[str]],
@@ -304,6 +307,11 @@ class InteractionReadAcquisitionBoundary:
         except InteractionAcquisitionDenied:
             raise
         except Exception as exc:
+            logger.warning(
+                "interaction navigation resolution failed closed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
             raise InteractionAcquisitionDenied(
                 "interaction_navigation_resolution_failed"
             ) from exc

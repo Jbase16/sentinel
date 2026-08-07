@@ -736,6 +736,35 @@ async def _persona_current_url(persona_id: str) -> str:
     return validate_capture_url(result)
 
 
+def _paired_capture_url(
+    target_url: str,
+    source_url: str,
+    peer_url: str,
+) -> str:
+    """Preserve a shared in-origin persona page, otherwise use the scan target."""
+
+    target_url = validate_capture_url(target_url)
+    source_url = validate_capture_url(source_url)
+    peer_url = validate_capture_url(peer_url)
+    target = urlsplit(target_url)
+    source = urlsplit(source_url)
+    peer = urlsplit(peer_url)
+
+    def origin(parts):
+        scheme = parts.scheme.lower()
+        port = parts.port or (443 if scheme == "https" else 80)
+        return scheme, (parts.hostname or "").lower(), port
+
+    if (
+        origin(source) == origin(target)
+        and origin(peer) == origin(target)
+        and source.path == peer.path
+        and source.query == peer.query
+    ):
+        return source._replace(fragment="").geturl()
+    return target_url
+
+
 def _sanitized_interaction_controls(value: Any) -> Tuple[Dict[str, Any], ...]:
     if not isinstance(value, list):
         return ()
@@ -809,6 +838,8 @@ def _verified_owned_creation_witness(
     persona_id: str,
     destination_ref: str,
 ) -> Optional[NativeOwnedCreationWitness]:
+    if value is None:
+        return None
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
         "persona_id",
@@ -816,6 +847,9 @@ def _verified_owned_creation_witness(
         "destination_ref",
         "proof_ref",
     }:
+        logger.warning(
+            "owned creation witness rejected: invalid payload shape"
+        )
         return None
     create_ref = value.get("create_ref")
     proof_ref = value.get("proof_ref")
@@ -828,6 +862,9 @@ def _verified_owned_creation_witness(
         or not isinstance(proof_ref, str)
         or _NATIVE_OWNERSHIP_PROOF_REF.fullmatch(proof_ref) is None
     ):
+        logger.warning(
+            "owned creation witness rejected: invalid bound fields"
+        )
         return None
     material = "\n".join(
         (
@@ -844,6 +881,9 @@ def _verified_owned_creation_witness(
     ).hexdigest()
     supplied = proof_ref[len("native_ownership_witness:") :]
     if not hmac.compare_digest(expected, supplied):
+        logger.warning(
+            "owned creation witness rejected: authentication failed"
+        )
         return None
     try:
         return NativeOwnedCreationWitness(
@@ -853,6 +893,9 @@ def _verified_owned_creation_witness(
             proof_ref=proof_ref,
         )
     except ValueError:
+        logger.warning(
+            "owned creation witness rejected: invalid normalized witness"
+        )
         return None
 
 
@@ -1206,10 +1249,15 @@ async def capture_persona_pair(
         artifacts: List[PersonaCaptureArtifact] = []
         try:
             await validate_persona_windows((source_persona_id, peer_persona_id))
+            capture_url = _paired_capture_url(
+                target_url,
+                await _persona_current_url(source_persona_id),
+                await _persona_current_url(peer_persona_id),
+            )
             for persona_id in (source_persona_id, peer_persona_id):
                 path = await _begin_owned_capture(
                     owner_id=owner_id,
-                    target_url=target_url,
+                    target_url=capture_url,
                     persona_id=persona_id,
                 )
                 await _wait_for_capture_quiescence()

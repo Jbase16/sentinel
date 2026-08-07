@@ -456,8 +456,22 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     
     // MARK: - API
     
-    public func callAsyncJavaScript(_ script: String, arguments: [String: Any], in world: WKContentWorld = .page) async throws -> Any? {
-        return try await webView.callAsyncJavaScript(script, arguments: arguments, in: nil, in: world)
+    public func callAsyncJavaScript(_ script: String, arguments: [String: Any], in world: WKContentWorld) async throws -> Any? {
+        return try await withCheckedThrowingContinuation { continuation in
+            webView.callAsyncJavaScript(
+                script,
+                arguments: arguments,
+                in: nil,
+                in: world
+            ) { result in
+                switch result {
+                case .success(let value):
+                    continuation.resume(returning: value)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
     
     public func navigate(url: String) async throws {
@@ -1776,22 +1790,45 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 scripted_handler: element.hasAttribute('onclick'),
                 submitter: false
             };
-            return {
+            return JSON.stringify({
                 current_url: window.location.href,
                 destination_url: destination.href,
                 control: control
-            };
+            });
         })()
         """
         let value = try await callAsyncJavaScript(
             js,
             arguments: ["locator": locator],
-            in: .page
+            in: .defaultClient
         )
-        guard var resolved = value as? [String: Any],
-              let currentURL = resolved["current_url"] as? String,
-              let parsedCurrentURL = URL(string: currentURL),
-              let control = resolved["control"] as? [String: Any],
+        guard let serializedValue = value as? String,
+              let normalizedData = serializedValue.data(using: .utf8),
+              let normalizedValue = try? JSONSerialization.jsonObject(
+                with: normalizedData
+              ),
+              var resolved = normalizedValue as? [String: Any] else {
+            throw NSError(
+                domain: "SND",
+                code: 409,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "structural navigation returned an invalid payload"
+                ]
+            )
+        }
+        guard let currentURL = resolved["current_url"] as? String,
+              let parsedCurrentURL = URL(string: currentURL) else {
+            throw NSError(
+                domain: "SND",
+                code: 409,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "structural navigation returned an invalid current URL"
+                ]
+            )
+        }
+        guard let control = resolved["control"] as? [String: Any],
               let redactedControl = redactedInteractionControls(
                 [control],
                 relativeTo: parsedCurrentURL
@@ -1801,7 +1838,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
                 code: 409,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "structural navigation could not be resolved"
+                        "structural navigation returned an invalid control"
                 ]
             )
         }
