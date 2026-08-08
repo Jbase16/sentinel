@@ -67,9 +67,10 @@ struct ScanControlView: View {
     }
 
     private var behavioralPhaseSummary: BehavioralOneClickPhaseSummary? {
-        if let scanState = appState.engineStatus?.scanState {
-            return scanState.behavioralOneClick
+        if let liveSummary = appState.engineStatus?.scanState?.behavioralOneClick {
+            return liveSummary
         }
+        guard !appState.isScanRunning else { return nil }
         return appState.apiResults?.behavioralOneClick
     }
 

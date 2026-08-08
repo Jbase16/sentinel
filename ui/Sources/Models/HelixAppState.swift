@@ -224,6 +224,7 @@ public class HelixAppState: ObservableObject {
                         }
                     case .scanCompleted:
                         self.isScanRunning = false
+                        self.refreshStatus()
                         self.refreshResults()
                         self.refreshGraph()
                     case .scanFailed:
@@ -237,6 +238,7 @@ public class HelixAppState: ObservableObject {
                             self.apiLogs.append(text)
                             self.apiLogItems.append(LogItem(id: UUID(), text: text))
                         }
+                        self.refreshStatus()
                         self.refreshResults()
                     case .scanPhaseChanged:
                         if let phase = event.payload["phase"]?.stringValue {
