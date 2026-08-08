@@ -122,6 +122,11 @@ public struct BehavioralOneClickPhaseSummary: Decodable, Equatable {
     public let receiptReused: Bool?
     public let cleanupStatus: String?
     public let cleanupStepsCompleted: Int?
+    public let profileMode: String?
+    public let observationClassification: String?
+    public let observationCount: Int?
+    public let adaptiveExecutionStatus: String?
+    public let independentProofStatus: String?
     public let reason: String?
 
     enum CodingKeys: String, CodingKey {
@@ -134,6 +139,11 @@ public struct BehavioralOneClickPhaseSummary: Decodable, Equatable {
         case receiptReused = "receipt_reused"
         case cleanupStatus = "cleanup_status"
         case cleanupStepsCompleted = "cleanup_steps_completed"
+        case profileMode = "profile_mode"
+        case observationClassification = "observation_classification"
+        case observationCount = "observation_count"
+        case adaptiveExecutionStatus = "adaptive_execution_status"
+        case independentProofStatus = "independent_proof_status"
     }
 }
 

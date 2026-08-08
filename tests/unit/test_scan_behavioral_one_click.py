@@ -81,6 +81,9 @@ class _RunnerEventBus:
     def emit(self, event):
         self.events.append(event)
 
+    def emit_scan_completed(self, *_args, **_kwargs):
+        return None
+
 
 def _request() -> ScanRequest:
     return ScanRequest(
@@ -121,6 +124,34 @@ def test_behavioral_one_click_requires_distinct_personas():
         )
 
 
+def test_anonymous_passive_profile_forbids_persona_identities():
+    profile = BehavioralOneClickProfile(
+        mode="anonymous_passive",
+        envelope_id=ENVELOPE_ID,
+    )
+    assert profile.is_anonymous_passive is True
+    assert profile.source_persona_id is None
+    assert profile.peer_persona_id is None
+
+    with pytest.raises(
+        ValidationError,
+        match="anonymous passive one-click forbids persona identities",
+    ):
+        BehavioralOneClickProfile(
+            mode="anonymous_passive",
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+        )
+
+
+def test_paired_persona_profile_still_requires_both_identities():
+    with pytest.raises(
+        ValidationError,
+        match="paired-persona one-click requires both persona identities",
+    ):
+        BehavioralOneClickProfile(envelope_id=ENVELOPE_ID)
+
+
 def test_behavioral_phase_summary_is_bounded_and_redacted():
     summary = _bounded_behavioral_phase_summary(
         phase_status="confirmed_finding",
@@ -156,6 +187,11 @@ def test_behavioral_phase_summary_is_bounded_and_redacted():
         "receipt_reused": True,
         "cleanup_status": "completed",
         "cleanup_steps_completed": 2,
+        "profile_mode": None,
+        "observation_classification": None,
+        "observation_count": None,
+        "adaptive_execution_status": None,
+        "independent_proof_status": None,
         "reason": None,
     }
     assert "must-not-escape" not in str(summary)
@@ -280,6 +316,11 @@ async def test_behavioral_one_click_denial_fails_before_scan_traffic(
         "receipt_reused": None,
         "cleanup_status": None,
         "cleanup_steps_completed": None,
+        "profile_mode": None,
+        "observation_classification": None,
+        "observation_count": None,
+        "adaptive_execution_status": None,
+        "independent_proof_status": None,
         "reason": "signed workflow missing",
     }
 
@@ -293,6 +334,133 @@ async def test_scan_without_behavioral_profile_is_unchanged():
         await _run_behavioral_one_click_phase(request, session=session)
         is None
     )
+
+
+@pytest.mark.asyncio
+async def test_anonymous_passive_profile_surfaces_observation_without_finding(
+    monkeypatch,
+):
+    from core.server.routers import scans
+
+    state = ApplicationState()
+    state.scan_state = {"session_id": "behavioral-direct-session"}
+    monkeypatch.setattr(ApplicationState, "_instance", state)
+    session = _Session()
+    result = {
+        "kind": "passive_visibility_observation",
+        "mode": "behavioral_anonymous_passive_visibility_v1",
+        "status": "completed",
+        "finding_authority": False,
+        "finding_confirmed": False,
+        "observation": {
+            "classification": "preexisting_passive_visibility",
+            "discovered_public_page_count": 1,
+        },
+        "execution": {"status": "completed", "mutations": 0},
+        "adaptive_execution": {"status": "skipped"},
+        "independent_proof": {"status": "skipped"},
+        "orchestration_receipt": None,
+    }
+
+    async def execute(_request, *, session):
+        assert session is not None
+        return result
+
+    monkeypatch.setattr(
+        scans,
+        "_run_anonymous_passive_one_click_phase",
+        execute,
+    )
+    request = ScanRequest(
+        target="https://example.test/",
+        mode="bug_bounty",
+        behavioral_one_click={
+            "mode": "anonymous_passive",
+            "envelope_id": ENVELOPE_ID,
+        },
+    )
+
+    observed = await _run_behavioral_one_click_phase(request, session=session)
+
+    assert observed == result
+    assert session.findings.added == []
+    summary = state.scan_state["behavioral_one_click"]
+    assert summary["status"] == "passive_visibility_observed"
+    assert summary["observation_classification"] == (
+        "preexisting_passive_visibility"
+    )
+    assert summary["observation_count"] == 1
+    assert summary["adaptive_execution_status"] == "skipped"
+    assert summary["independent_proof_status"] == "skipped"
+    assert summary["receipt_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_anonymous_passive_scan_skips_reasoning_tools_and_verification(
+    monkeypatch,
+):
+    state = ApplicationState()
+    monkeypatch.setattr(ApplicationState, "_instance", state)
+
+    database = MagicMock()
+    database.init = AsyncMock()
+    database.blackbox.enqueue = AsyncMock()
+    database.blackbox.flush = AsyncMock()
+    monkeypatch.setattr(
+        "core.server.routers.scans.Database.instance",
+        lambda: database,
+    )
+    monkeypatch.setattr("core.base.session.ScanSession", _RunnerSession)
+    monkeypatch.setattr(
+        "core.toolkit.tools.get_installed_tools",
+        lambda: {"nuclei_safe": object()},
+    )
+    event_bus = _RunnerEventBus()
+    monkeypatch.setattr("core.cortex.events.get_event_bus", lambda: event_bus)
+
+    async def execute(_request, *, session):
+        return {
+            "kind": "passive_visibility_observation",
+            "status": "completed",
+            "finding_authority": False,
+            "finding_confirmed": False,
+            "execution": {"status": "completed", "mutations": 0},
+        }
+
+    monkeypatch.setattr(
+        "core.server.routers.scans._run_behavioral_one_click_phase",
+        execute,
+    )
+    reasoning_called = False
+
+    async def forbidden_reasoning(**_kwargs):
+        nonlocal reasoning_called
+        reasoning_called = True
+        raise AssertionError("passive-only scan must not start ordinary reasoning")
+
+    monkeypatch.setattr(
+        "core.cortex.reasoning.reasoning_engine.start_scan",
+        forbidden_reasoning,
+    )
+
+    session_id = await begin_scan_logic(
+        ScanRequest(
+            target="https://example.test/",
+            mode="bug_bounty",
+            scope=["example.test"],
+            scope_strict=True,
+            behavioral_one_click={
+                "mode": "anonymous_passive",
+                "envelope_id": ENVELOPE_ID,
+            },
+        )
+    )
+    await state.active_scan_task
+
+    session = await state.get_session(session_id)
+    assert state.scan_state["status"] == "completed"
+    assert session.status == "completed"
+    assert reasoning_called is False
 
 
 @pytest.mark.asyncio

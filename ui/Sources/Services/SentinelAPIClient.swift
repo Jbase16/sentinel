@@ -177,11 +177,17 @@ public struct SentinelAPIClient: Sendable {
             body["identity_headers"] = identityHeaders
         }
         if let behavioralOneClick {
-            body["behavioral_one_click"] = [
+            var profile: [String: Any] = [
+                "mode": behavioralOneClick.mode.rawValue,
                 "envelope_id": behavioralOneClick.envelopeId,
-                "source_persona_id": behavioralOneClick.sourcePersonaId,
-                "peer_persona_id": behavioralOneClick.peerPersonaId,
             ]
+            if let source = behavioralOneClick.sourcePersonaId {
+                profile["source_persona_id"] = source
+            }
+            if let peer = behavioralOneClick.peerPersonaId {
+                profile["peer_persona_id"] = peer
+            }
+            body["behavioral_one_click"] = profile
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)

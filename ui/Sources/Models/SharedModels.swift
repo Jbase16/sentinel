@@ -7,22 +7,40 @@
 
 import Foundation
 
+public enum BehavioralOneClickMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    case pairedPersona = "paired_persona"
+    case anonymousPassive = "anonymous_passive"
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .pairedPersona: return "Paired personas"
+        case .anonymousPassive: return "Anonymous passive"
+        }
+    }
+}
+
 public struct BehavioralOneClickProfile: Codable, Equatable, Sendable {
+    public let mode: BehavioralOneClickMode
     public let envelopeId: String
-    public let sourcePersonaId: String
-    public let peerPersonaId: String
+    public let sourcePersonaId: String?
+    public let peerPersonaId: String?
 
     public init(
+        mode: BehavioralOneClickMode = .pairedPersona,
         envelopeId: String,
-        sourcePersonaId: String,
-        peerPersonaId: String
+        sourcePersonaId: String? = nil,
+        peerPersonaId: String? = nil
     ) {
+        self.mode = mode
         self.envelopeId = envelopeId
         self.sourcePersonaId = sourcePersonaId
         self.peerPersonaId = peerPersonaId
     }
 
     enum CodingKeys: String, CodingKey {
+        case mode
         case envelopeId = "envelope_id"
         case sourcePersonaId = "source_persona_id"
         case peerPersonaId = "peer_persona_id"

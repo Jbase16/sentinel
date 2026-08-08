@@ -47,6 +47,7 @@ struct ScanControlView: View {
     @State private var personasJSON: String = ""
     @State private var oobJSON: String = ""
     @State private var behavioralEnabled = false
+    @State private var behavioralProfileMode: BehavioralOneClickMode = .pairedPersona
     @State private var behavioralEnvelopeId = ""
     @State private var behavioralSourcePersonaId = ""
     @State private var behavioralPeerPersonaId = ""
@@ -190,6 +191,7 @@ struct ScanControlView: View {
                         scanTarget: scanTarget,
                         scanMode: selectedMode,
                         behavioralEnabled: $behavioralEnabled,
+                        behavioralProfileMode: $behavioralProfileMode,
                         behavioralEnvelopeId: $behavioralEnvelopeId,
                         behavioralSourcePersonaId: $behavioralSourcePersonaId,
                         behavioralPeerPersonaId: $behavioralPeerPersonaId
@@ -357,14 +359,24 @@ struct ScanControlView: View {
     private var behavioralProfile: BehavioralOneClickProfile? {
         guard behavioralEnabled,
               selectedMode == .bugBounty,
-              !behavioralEnvelopeId.isEmpty,
-              !behavioralSourcePersonaId.isEmpty,
+              !behavioralEnvelopeId.isEmpty
+        else {
+            return nil
+        }
+        if behavioralProfileMode == .anonymousPassive {
+            return BehavioralOneClickProfile(
+                mode: .anonymousPassive,
+                envelopeId: behavioralEnvelopeId
+            )
+        }
+        guard !behavioralSourcePersonaId.isEmpty,
               !behavioralPeerPersonaId.isEmpty,
               behavioralSourcePersonaId != behavioralPeerPersonaId
         else {
             return nil
         }
         return BehavioralOneClickProfile(
+            mode: .pairedPersona,
             envelopeId: behavioralEnvelopeId,
             sourcePersonaId: behavioralSourcePersonaId,
             peerPersonaId: behavioralPeerPersonaId
@@ -425,6 +437,12 @@ private struct BehavioralOneClickStatusBanner: View {
                 "checkmark.circle",
                 .blue
             )
+        case "passive_visibility_observed":
+            return (
+                "Pre-existing passive visibility observed",
+                "eye.fill",
+                .blue
+            )
         case "refused":
             return (
                 "Behavioral phase refused before ordinary scan traffic",
@@ -450,6 +468,10 @@ private struct BehavioralOneClickStatusBanner: View {
         }
         if let findingType = summary.findingType {
             return findingType
+        }
+        if summary.status == "passive_visibility_observed" {
+            let count = summary.observationCount ?? 0
+            return "Observed \(count) public same-origin page(s). Adaptive execution and independent proof were skipped."
         }
         if summary.receiptReused == true {
             return "A completed durable receipt was reused; no duplicate behavioral execution was authorized."
@@ -506,6 +528,7 @@ private struct AdvancedScanConfigView: View {
     let scanTarget: String
     let scanMode: ScanMode
     @Binding var behavioralEnabled: Bool
+    @Binding var behavioralProfileMode: BehavioralOneClickMode
     @Binding var behavioralEnvelopeId: String
     @Binding var behavioralSourcePersonaId: String
     @Binding var behavioralPeerPersonaId: String
@@ -611,13 +634,21 @@ private struct AdvancedScanConfigView: View {
 
     private static let controlledBehavioralWorkflow =
         "behavioral_object_authorization"
+    private static let passiveVisibilityWorkflow =
+        "behavioral_passive_visibility"
+
+    private var requiredBehavioralWorkflow: String {
+        behavioralProfileMode == .anonymousPassive
+            ? Self.passiveVisibilityWorkflow
+            : Self.controlledBehavioralWorkflow
+    }
 
     private var eligibleBehavioralEnvelopes: [FoundryAuthorizationEnvelope] {
         availableEnvelopes.filter { envelope in
             envelope.isApproved
                 && !envelope.isExpired
                 && envelope.authorizes(urlOrOrigin: scanTarget)
-                && envelope.permits(workflow: Self.controlledBehavioralWorkflow)
+                && envelope.permits(workflow: requiredBehavioralWorkflow)
         }
     }
 
@@ -630,6 +661,9 @@ private struct AdvancedScanConfigView: View {
         }
         if behavioralEnvelopeId.isEmpty {
             return "Select an approved authorization envelope."
+        }
+        if behavioralProfileMode == .anonymousPassive {
+            return nil
         }
         if behavioralSourcePersonaId.isEmpty || behavioralPeerPersonaId.isEmpty {
             return "Select both the source and peer research personas."
@@ -646,7 +680,11 @@ private struct AdvancedScanConfigView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Behavioral one-click")
                         .font(.subheadline).bold()
-                    Text("Runs the authorized paired-persona behavioral phase before ordinary scan tools.")
+                    Text(
+                        behavioralProfileMode == .anonymousPassive
+                            ? "Observes already-public same-origin pages without authentication, adaptive execution, or ordinary scan tools."
+                            : "Runs the authorized paired-persona behavioral phase before ordinary scan tools."
+                    )
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -665,6 +703,14 @@ private struct AdvancedScanConfigView: View {
                 .toggleStyle(.switch)
                 .disabled(scanMode != .bugBounty)
 
+            Picker("Profile", selection: $behavioralProfileMode) {
+                ForEach(BehavioralOneClickMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!behavioralEnabled)
+
             Picker("Envelope", selection: $behavioralEnvelopeId) {
                 Text("Select an envelope").tag("")
                 ForEach(eligibleBehavioralEnvelopes) { envelope in
@@ -677,22 +723,31 @@ private struct AdvancedScanConfigView: View {
             .pickerStyle(.menu)
             .disabled(!behavioralEnabled)
 
-            HStack(spacing: 12) {
-                Picker("Source", selection: $behavioralSourcePersonaId) {
-                    Text("Select Alice").tag("")
-                    ForEach(availablePersonas) { persona in
-                        Text(persona.label).tag(persona.personaId)
+            if behavioralProfileMode == .pairedPersona {
+                HStack(spacing: 12) {
+                    Picker("Source", selection: $behavioralSourcePersonaId) {
+                        Text("Select Alice").tag("")
+                        ForEach(availablePersonas) { persona in
+                            Text(persona.label).tag(persona.personaId)
+                        }
+                    }
+                    Picker("Peer", selection: $behavioralPeerPersonaId) {
+                        Text("Select Bob").tag("")
+                        ForEach(availablePersonas) { persona in
+                            Text(persona.label).tag(persona.personaId)
+                        }
                     }
                 }
-                Picker("Peer", selection: $behavioralPeerPersonaId) {
-                    Text("Select Bob").tag("")
-                    ForEach(availablePersonas) { persona in
-                        Text(persona.label).tag(persona.personaId)
-                    }
-                }
+                .pickerStyle(.menu)
+                .disabled(!behavioralEnabled)
+            } else {
+                Label(
+                    "No persona or authenticated session will be used. The backend permits only bounded same-origin GET requests.",
+                    systemImage: "eye"
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
             }
-            .pickerStyle(.menu)
-            .disabled(!behavioralEnabled)
 
             if let error = behavioralOptionsError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -704,14 +759,20 @@ private struct AdvancedScanConfigView: View {
                     .foregroundColor(.orange)
             } else if behavioralEnabled {
                 Label(
-                    "Ready. The backend will still revalidate origin, workflows, personas, policy, and budgets before traffic.",
+                    behavioralProfileMode == .anonymousPassive
+                        ? "Ready. The backend will revalidate the origin, passive workflow, scope, and 15-request zero-mutation budget before traffic."
+                        : "Ready. The backend will still revalidate origin, workflows, personas, policy, and budgets before traffic.",
                     systemImage: "checkmark.shield.fill"
                 )
                 .font(.caption2)
                 .foregroundColor(.green)
             }
 
-            Text("This selection does not create authority. It passes the existing signed envelope and exact vault identities to the backend.")
+            Text(
+                behavioralProfileMode == .anonymousPassive
+                    ? "This selection does not create authority. It passes only the existing signed envelope; passive observations cannot become adaptive findings or receipts."
+                    : "This selection does not create authority. It passes the existing signed envelope and exact vault identities to the backend."
+            )
                 .font(.caption2)
                 .foregroundColor(.secondary)
 
@@ -726,6 +787,10 @@ private struct AdvancedScanConfigView: View {
             }
         }
         .onChange(of: scanTarget) { _, _ in
+            revalidateBehavioralSelection()
+        }
+        .onChange(of: behavioralProfileMode) { _, _ in
+            behavioralEnvelopeId = ""
             revalidateBehavioralSelection()
         }
     }

@@ -4,7 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,17 +21,28 @@ router = APIRouter(prefix="/scans", tags=["scans"])
 
 
 class BehavioralOneClickProfile(BaseModel):
-    """Exact pre-authorized browser identities for one behavioral URL phase."""
+    """Exact pre-authorized profile for one behavioral URL phase."""
 
+    mode: Literal["paired_persona", "anonymous_passive"] = "paired_persona"
     envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
-    source_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
-    peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    source_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    peer_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
     @model_validator(mode="after")
-    def validate_distinct_personas(self) -> "BehavioralOneClickProfile":
+    def validate_profile_shape(self) -> "BehavioralOneClickProfile":
+        if self.mode == "anonymous_passive":
+            if self.source_persona_id is not None or self.peer_persona_id is not None:
+                raise ValueError("anonymous passive one-click forbids persona identities")
+            return self
+        if self.source_persona_id is None or self.peer_persona_id is None:
+            raise ValueError("paired-persona one-click requires both persona identities")
         if self.source_persona_id == self.peer_persona_id:
             raise ValueError("behavioral one-click personas must be distinct")
         return self
+
+    @property
+    def is_anonymous_passive(self) -> bool:
+        return self.mode == "anonymous_passive"
 
 
 def _bounded_behavioral_phase_summary(
@@ -49,6 +60,12 @@ def _bounded_behavioral_phase_summary(
     receipt = receipt if isinstance(receipt, dict) else {}
     execution = result.get("execution")
     execution = execution if isinstance(execution, dict) else {}
+    observation = result.get("observation")
+    observation = observation if isinstance(observation, dict) else {}
+    adaptive = result.get("adaptive_execution")
+    adaptive = adaptive if isinstance(adaptive, dict) else {}
+    independent = result.get("independent_proof")
+    independent = independent if isinstance(independent, dict) else {}
 
     finding_id = finding.get("id") or result.get("finding_ref")
     finding_type = finding.get("type")
@@ -77,6 +94,14 @@ def _bounded_behavioral_phase_summary(
     ):
         cleanup_steps = None
 
+    observation_count = observation.get("discovered_public_page_count")
+    if (
+        isinstance(observation_count, bool)
+        or not isinstance(observation_count, int)
+        or observation_count < 0
+    ):
+        observation_count = None
+
     return {
         "status": phase_status,
         "result_status": bounded_string(result.get("status"), limit=64),
@@ -91,6 +116,20 @@ def _bounded_behavioral_phase_summary(
         ),
         "cleanup_status": cleanup_status,
         "cleanup_steps_completed": cleanup_steps,
+        "profile_mode": bounded_string(result.get("mode"), limit=96),
+        "observation_classification": bounded_string(
+            observation.get("classification"),
+            limit=96,
+        ),
+        "observation_count": observation_count,
+        "adaptive_execution_status": bounded_string(
+            adaptive.get("status"),
+            limit=64,
+        ),
+        "independent_proof_status": bounded_string(
+            independent.get("status"),
+            limit=64,
+        ),
         "reason": bounded_string(reason),
     }
 
@@ -285,6 +324,65 @@ class ScanRequest(BaseModel):
         return self
 
 
+async def _run_anonymous_passive_one_click_phase(
+    req: ScanRequest,
+    *,
+    session: Any,
+) -> Dict[str, Any]:
+    """Execute the envelope-gated anonymous GET-only observation boundary."""
+
+    profile = req.behavioral_one_click
+    if profile is None or not profile.is_anonymous_passive:
+        raise HTTPException(status_code=409, detail="anonymous passive profile is required")
+    scope_context = getattr(session, "scope_context", None)
+    if scope_context is None:
+        raise HTTPException(status_code=409, detail="scan scope context is unavailable")
+
+    from core.behavior.passive_visibility import (
+        AnonymousPassiveVisibilityBoundary,
+        PassiveHTTPResponse,
+        PassiveVisibilityDenied,
+    )
+    from core.foundry.authorization import get_envelope
+    from core.net.adapter import SentinelHTTPClient
+    from core.net.http_factory import create_async_client
+
+    envelope = get_envelope(profile.envelope_id)
+    if envelope is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"envelope {profile.envelope_id!r} not found",
+        )
+
+    async def fetch(url: str) -> PassiveHTTPResponse:
+        underlying = create_async_client(follow_redirects=False)
+        client = SentinelHTTPClient(scope_context, underlying_client=underlying)
+        try:
+            response = await client.get(
+                url,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            return PassiveHTTPResponse(
+                status=response.status_code,
+                headers={key.lower(): value for key, value in response.headers.items()},
+                body=response.text,
+            )
+        finally:
+            await client.aclose()
+
+    try:
+        return await AnonymousPassiveVisibilityBoundary(
+            target_url=req.target,
+            authorization=envelope,
+            fetch=fetch,
+        ).observe()
+    except PassiveVisibilityDenied as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 async def _run_behavioral_one_click_phase(
     req: ScanRequest,
     *,
@@ -301,25 +399,37 @@ async def _run_behavioral_one_click_phase(
         _bounded_behavioral_phase_summary(phase_status="running"),
     )
 
-    from core.server.routers.foundry import (
-        RunBehavioralAuthorizationFromURLRequest,
-        run_behavioral_authorization_from_url_endpoint,
-    )
-
-    session.log(
-        "[behavior] Running the pre-authorized one-click URL phase before "
-        "ordinary scan traffic."
-    )
-    try:
-        result = await run_behavioral_authorization_from_url_endpoint(
-            RunBehavioralAuthorizationFromURLRequest(
-                target_url=req.target,
-                envelope_id=profile.envelope_id,
-                source_persona_id=profile.source_persona_id,
-                peer_persona_id=profile.peer_persona_id,
-            ),
-            _=True,
+    if profile.is_anonymous_passive:
+        session.log(
+            "[behavior] Running an envelope-gated anonymous passive capture; "
+            "adaptive execution and ordinary scan tools are disabled."
         )
+    else:
+        session.log(
+            "[behavior] Running the pre-authorized one-click URL phase before "
+            "ordinary scan traffic."
+        )
+    try:
+        if profile.is_anonymous_passive:
+            result = await _run_anonymous_passive_one_click_phase(
+                req,
+                session=session,
+            )
+        else:
+            from core.server.routers.foundry import (
+                RunBehavioralAuthorizationFromURLRequest,
+                run_behavioral_authorization_from_url_endpoint,
+            )
+
+            result = await run_behavioral_authorization_from_url_endpoint(
+                RunBehavioralAuthorizationFromURLRequest(
+                    target_url=req.target,
+                    envelope_id=profile.envelope_id,
+                    source_persona_id=profile.source_persona_id,
+                    peer_persona_id=profile.peer_persona_id,
+                ),
+                _=True,
+            )
     except HTTPException as exc:
         phase_status = (
             "refused"
@@ -423,7 +533,9 @@ async def _run_behavioral_one_click_phase(
     execution_status = (
         execution.get("status") if isinstance(execution, dict) else None
     )
-    if isinstance(finding, dict) or result.get("finding_confirmed") is True:
+    if result.get("kind") == "passive_visibility_observation":
+        phase_status = "passive_visibility_observed"
+    elif isinstance(finding, dict) or result.get("finding_confirmed") is True:
         phase_status = "confirmed_finding"
     elif "cleanup_failed" in {result_status, execution_status}:
         phase_status = "cleanup_uncertain"
@@ -738,6 +850,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             if requested_tools
             else installed_tools
         )
+        if (
+            req.behavioral_one_click is not None
+            and req.behavioral_one_click.is_anonymous_passive
+        ):
+            # This profile is the complete scan. Ordinary tools and the active
+            # verification phases would destroy its passive-only attribution.
+            allowed_tools = []
         # Phase 2H: subtract any banned_tools the policy enforcement set
         # (e.g. nuclei_mutating disabled by NO_DOS). banned_tools is a Set;
         # check for None defensively since older policies may not have it.
@@ -868,14 +987,24 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             tool_outcomes = {"attempted": 0, "succeeded": 0, "failed": 0}
             try:
                 await _run_behavioral_one_click_phase(req, session=session)
-                _action_dispatcher.action_approved.connect(
-                    _on_action_approved
+                passive_only = bool(
+                    req.behavioral_one_click is not None
+                    and req.behavioral_one_click.is_anonymous_passive
                 )
-                logger.info(
-                    "[ActionBridge] Wired action_approved → tool execution "
-                    "for session %s",
-                    session.id,
-                )
+                if passive_only:
+                    session.log(
+                        "[behavior] Anonymous passive profile completed; ordinary "
+                        "reasoning, tools, verification, and receipts remain skipped."
+                    )
+                else:
+                    _action_dispatcher.action_approved.connect(
+                        _on_action_approved
+                    )
+                    logger.info(
+                        "[ActionBridge] Wired action_approved → tool execution "
+                        "for session %s",
+                        session.id,
+                    )
 
                 async def dispatch_tool(tool: str) -> List[Dict]:
                     findings = []
@@ -955,28 +1084,29 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             error=tool_error,
                         )
 
-                # Store dispatch_tool on state for external callers
-                state.scan_state["_dispatch_tool"] = dispatch_tool
+                if not passive_only:
+                    # Store dispatch_tool on state for external callers
+                    state.scan_state["_dispatch_tool"] = dispatch_tool
 
-                await reasoning_engine.start_scan(
-                    target=req.target,
-                    available_tools=allowed_tools,
-                    mode=req.mode,
-                    dispatch_tool=dispatch_tool,
-                    log_fn=session.log,
-                    knowledge=session.knowledge,
-                )
-
-                if (
-                    tool_outcomes["attempted"] > 0
-                    and tool_outcomes["succeeded"] == 0
-                    and tool_outcomes["failed"] > 0
-                ):
-                    raise SentinelError(
-                        ErrorCode.TOOL_EXEC_FAILED,
-                        "Scan failed because every attempted tool failed",
-                        details=dict(tool_outcomes),
+                    await reasoning_engine.start_scan(
+                        target=req.target,
+                        available_tools=allowed_tools,
+                        mode=req.mode,
+                        dispatch_tool=dispatch_tool,
+                        log_fn=session.log,
+                        knowledge=session.knowledge,
                     )
+
+                    if (
+                        tool_outcomes["attempted"] > 0
+                        and tool_outcomes["succeeded"] == 0
+                        and tool_outcomes["failed"] > 0
+                    ):
+                        raise SentinelError(
+                            ErrorCode.TOOL_EXEC_FAILED,
+                            "Scan failed because every attempted tool failed",
+                            details=dict(tool_outcomes),
+                        )
 
                 # --- Phase 3: active verification (Run #26 wiring) -----------
                 # In bug_bounty mode, after recon, probe a curated set of
@@ -987,7 +1117,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # briefing, and reports, with zero extra plumbing.
                 # Scope-strict mode hard-gates probes through the same scope
                 # registry the scan uses for tools (single source of truth).
-                if req.mode in ("bug_bounty", "bounty"):
+                if req.mode in ("bug_bounty", "bounty") and not passive_only:
                     try:
                         from core.wraith.verify_phase import run_verify_phase
                         # Build candidate target set: original + any hosts the
@@ -1716,7 +1846,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # session. Suppressed rows are preserved (recoverable), just
                 # hidden. Active modes only (the gate issues live requests); a
                 # gate failure never kills a scan and never suppresses anything.
-                if req.mode in ("standard", "bug_bounty", "bounty"):
+                if (
+                    req.mode in ("standard", "bug_bounty", "bounty")
+                    and not passive_only
+                ):
                     try:
                         from core.toolkit.finding_verifier import (
                             gate as _verify_gate,
