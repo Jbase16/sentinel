@@ -58,5 +58,6 @@ schemes:
         SENTINEL_DATA_DIR: /tmp/sentinelforge-acceptance-state
         SENTINEL_ACCEPTANCE_MODE: "1"
         SENTINEL_API_PORT: "8766"
+        SENTINEL_CA_BUNDLE: ../sentinel-visual-acceptance-lab/var/caddy/caddy/pki/authorities/local/root.crt
         SENTINELFORGE_BEHAVIOR_PRIMARY: "1"
         SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION: "1"

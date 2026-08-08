@@ -99,6 +99,11 @@
             value = "/tmp/sentinelforge-acceptance-state"
             isEnabled = "YES">
          </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "SENTINEL_CA_BUNDLE"
+            value = "../sentinel-visual-acceptance-lab/var/caddy/caddy/pki/authorities/local/root.crt"
+            isEnabled = "YES">
+         </EnvironmentVariable>
       </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
