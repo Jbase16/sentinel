@@ -13,6 +13,7 @@ final class BolaLabViewModel: ObservableObject {
     @Published var personas: [FoundryPersona] = []
     @Published var envelopes: [FoundryAuthorizationEnvelope] = []
     @Published var selectedEnvelopeId: String = ""
+    @Published var selectedOwnedPersonaId: String = ""
     @Published var actorStatuses: [String: String] = [:]
     @Published var isCapturing: [String: Bool] = [:]
     @Published var captureFiles: [String: String] = [:]
@@ -20,6 +21,7 @@ final class BolaLabViewModel: ObservableObject {
     @Published var behavioralStatus: String =
         "Open and authenticate two persona windows, then capture both and run."
     @Published var isRunningBehavioral = false
+    @Published var isRunningOwnedProof = false
     
     private let baseURL = SentinelRuntimeEndpoint.httpURL("/v1/driver").absoluteString
 
@@ -56,6 +58,9 @@ final class BolaLabViewModel: ObservableObject {
             if selectedEnvelopeId.isEmpty {
                 selectedEnvelopeId = envelopes.first?.envelopeId ?? ""
             }
+            if selectedOwnedPersonaId.isEmpty {
+                selectedOwnedPersonaId = fetched.first?.personaId ?? ""
+            }
         } catch {
             print("BolaLabViewModel failed to fetch personas: \(error)")
         }
@@ -88,6 +93,22 @@ final class BolaLabViewModel: ObservableObject {
             && openPersonaWindows.count >= 2
             && !isAnyCaptureActive
             && !isRunningBehavioral
+    }
+
+    var canRunOwnedProof: Bool {
+        guard let url = URL(string: targetUrl),
+              let scheme = url.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              url.host != nil,
+              personas.contains(where: { $0.personaId == selectedOwnedPersonaId }),
+              let envelope = envelopes.first(where: {
+                  $0.envelopeId == selectedEnvelopeId
+              }),
+              envelope.allowedWorkflows.contains("behavioral_owned_read_proof")
+        else { return false }
+        return !isAnyCaptureActive
+            && !isRunningBehavioral
+            && !isRunningOwnedProof
     }
 
     func personaWindowDidOpen(for persona: FoundryPersona) {
@@ -300,6 +321,40 @@ final class BolaLabViewModel: ObservableObject {
         }
     }
 
+    func runOwnedReadProof() {
+        Task {
+            guard canRunOwnedProof else {
+                behavioralStatus =
+                    "Select an owned-read envelope, persona and exact proof URL."
+                return
+            }
+            let personaId = selectedOwnedPersonaId
+            isRunningOwnedProof = true
+            behavioralStatus = "Resolving one owned, read-only proof..."
+            defer { isRunningOwnedProof = false }
+            do {
+                let result = try await FoundryAPIClient.shared.runOwnedReadProof(
+                    proofURL: targetUrl,
+                    envelopeId: selectedEnvelopeId,
+                    personaId: personaId
+                )
+                let receipt = String(result.receipt.receiptId.prefix(28))
+                if result.receipt.reused {
+                    actorStatuses[personaId] = "Durable receipt replayed."
+                    behavioralStatus =
+                        "Receipt reused with zero renewed target traffic: \(receipt)…"
+                } else {
+                    actorStatuses[personaId] = "Owned proof complete."
+                    behavioralStatus =
+                        "Owned proof complete: \(receipt)… "
+                        + "(\(result.proof.correlationIds.count) correlation id)"
+                }
+            } catch {
+                behavioralStatus = "Owned proof failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func loadCapture(path: String) throws -> [[String: Any]] {
         let text = try String(contentsOfFile: path, encoding: .utf8)
         var records: [[String: Any]] = []
@@ -369,6 +424,13 @@ struct BolaLabView: View {
                 }
                 .frame(maxWidth: 360)
 
+                Picker("Owned proof persona", selection: $vm.selectedOwnedPersonaId) {
+                    ForEach(vm.personas) { persona in
+                        Text(persona.label).tag(persona.personaId)
+                    }
+                }
+                .frame(maxWidth: 250)
+
                 VStack(alignment: .trailing, spacing: 8) {
                     Button {
                         vm.runBehavioralAuthorizationFromURL()
@@ -387,6 +449,19 @@ struct BolaLabView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(!vm.canRunBehavioral)
+
+                    Button {
+                        vm.runOwnedReadProof()
+                    } label: {
+                        Label(
+                            vm.isRunningOwnedProof
+                                ? "Resolving..."
+                                : "Run / Replay Owned Proof",
+                            systemImage: "doc.badge.clock"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!vm.canRunOwnedProof)
                 }
             }
 

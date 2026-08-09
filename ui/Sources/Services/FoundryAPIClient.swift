@@ -209,6 +209,35 @@ public struct BehavioralAuthorizationResponse: Codable {
     }
 }
 
+public struct OwnedReadProofReceipt: Codable {
+    public let receiptId: String
+    public let state: String
+    public let reused: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case state, reused
+        case receiptId = "receipt_id"
+    }
+}
+
+public struct OwnedReadProofEvidence: Codable {
+    public let proofId: String
+    public let artifactRef: String
+    public let correlationIds: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case proofId = "proof_id"
+        case artifactRef = "artifact_ref"
+        case correlationIds = "correlation_ids"
+    }
+}
+
+public struct OwnedReadProofResponse: Codable {
+    public let status: String
+    public let receipt: OwnedReadProofReceipt
+    public let proof: OwnedReadProofEvidence
+}
+
 public struct FoundryRecipeSummary: Codable, Identifiable {
     public let recipeId: String
     public let serviceHandle: String
@@ -478,6 +507,27 @@ public final class FoundryAPIClient {
             ]
         )
         return try await send(request, as: BehavioralAuthorizationResponse.self)
+    }
+
+    public func runOwnedReadProof(
+        proofURL: String,
+        envelopeId: String,
+        personaId: String
+    ) async throws -> OwnedReadProofResponse {
+        var request = authed(
+            "/v1/foundry/behavioral-owned-read-proof",
+            method: "POST"
+        )
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: [
+                "proof_url": proofURL,
+                "envelope_id": envelopeId,
+                "persona_id": personaId,
+            ]
+        )
+        return try await send(request, as: OwnedReadProofResponse.self)
     }
 
     /// Create a research persona in the vault. The password is stored server-side

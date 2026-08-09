@@ -564,6 +564,18 @@ async def validate_persona_windows(persona_ids: Sequence[str]) -> None:
         raise PersonaWindowUnavailable(str(exc)) from exc
 
 
+async def capture_persona_interaction_snapshot(
+    persona_id: str,
+) -> Tuple[str, Tuple[Dict[str, Any], ...]]:
+    """Read one retained persona page and its controls without navigation."""
+
+    validated = _validated_persona_id(persona_id) or ""
+    await validate_persona_windows((validated,))
+    current_url = await _persona_current_url(validated)
+    controls = await _persona_interaction_controls(validated)
+    return current_url, controls
+
+
 async def _begin_owned_capture(
     *, owner_id: str, target_url: str, persona_id: Optional[str]
 ) -> str:

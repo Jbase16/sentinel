@@ -113,6 +113,7 @@ class InteractionAcquisitionResult:
     provenance_root: str
     budget_snapshot: Dict[str, int]
     restraint: Dict[str, Any]
+    correlation_ids: Tuple[str, ...] = ()
     record: Optional[Dict[str, Any]] = field(
         default=None,
         repr=False,
@@ -123,7 +124,7 @@ class InteractionAcquisitionResult:
     mode: str = INTERACTION_ACQUISITION_MODE
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "schema_version": 1,
             "kind": self.kind,
             "mode": self.mode,
@@ -146,6 +147,9 @@ class InteractionAcquisitionResult:
             "budget_snapshot": dict(self.budget_snapshot),
             "restraint": copy.deepcopy(self.restraint),
         }
+        if self.correlation_ids:
+            result["correlation_ids"] = list(self.correlation_ids)
+        return result
 
 
 def _origin(value: str) -> str:
@@ -209,7 +213,7 @@ class InteractionReadAcquisitionBoundary:
         target_origin: str,
         authorization: AuthorizationEnvelope,
         actor_persona_id: str,
-        peer_persona_id: str,
+        peer_persona_id: Optional[str],
         request_persona_id: Optional[str] = None,
         executor: PolicyExecutor,
         resolver: InteractionResolver,
@@ -226,21 +230,26 @@ class InteractionReadAcquisitionBoundary:
         if (
             not isinstance(actor_persona_id, str)
             or not actor_persona_id
-            or not isinstance(peer_persona_id, str)
-            or not peer_persona_id
-            or actor_persona_id == peer_persona_id
+            or (
+                peer_persona_id is not None
+                and (
+                    not isinstance(peer_persona_id, str)
+                    or not peer_persona_id
+                    or actor_persona_id == peer_persona_id
+                )
+            )
         ):
-            raise ValueError("two distinct interaction personas are required")
+            raise ValueError("interaction persona binding is invalid")
         self.admission = admission
         self.target_origin = _origin(target_origin)
         self.authorization = authorization
         self.actor_persona_id = actor_persona_id
         self.peer_persona_id = peer_persona_id
         self.request_persona_id = request_persona_id or actor_persona_id
-        if self.request_persona_id not in {
-            self.actor_persona_id,
-            self.peer_persona_id,
-        }:
+        permitted_personas = {self.actor_persona_id}
+        if self.peer_persona_id is not None:
+            permitted_personas.add(self.peer_persona_id)
+        if self.request_persona_id not in permitted_personas:
             raise ValueError("interaction request persona is not in the admitted pair")
         self.executor = executor
         self.resolver = resolver
@@ -530,6 +539,21 @@ class InteractionReadAcquisitionBoundary:
         response_truncated = bool(
             getattr(response, "body_truncated", False)
         )
+        raw_response_headers = getattr(response, "response_headers", {})
+        correlation_ids = tuple(sorted({
+            str(value).strip()
+            for key, value in (
+                raw_response_headers.items()
+                if isinstance(raw_response_headers, Mapping)
+                else ()
+            )
+            if str(key).strip().lower() in {
+                "x-correlation-id",
+                "x-lab-correlation-id",
+                "x-request-id",
+            }
+            and 0 < len(str(value).strip()) <= 128
+        }))[:8]
         request_ref = stable_hash(
             "interaction_acquisition_request",
             {
@@ -605,6 +629,7 @@ class InteractionReadAcquisitionBoundary:
             provenance_root=(sink.root() if sink is not None else "") or "",
             budget_snapshot=budget.snapshot(),
             restraint=self.executor.restraint_summary(),
+            correlation_ids=correlation_ids,
             record=record,
         )
 
@@ -653,7 +678,9 @@ class InteractionReadAcquisitionAdmission:
             target_origin=boundary.target_origin,
             envelope_id=boundary.authorization.envelope_id,
             source_persona_id=boundary.actor_persona_id,
-            peer_persona_id=boundary.peer_persona_id,
+            peer_persona_id=(
+                boundary.peer_persona_id or boundary.actor_persona_id
+            ),
         )
 
     def _descriptor(self, resolution_id: str) -> Dict[str, Any]:

@@ -69,6 +69,9 @@ _INTERACTION_REQUEST_REF = re.compile(
 _INTERACTION_RESPONSE_REF = re.compile(
     r"^interaction_acquisition_response:[0-9a-f]{64}$"
 )
+_OWNED_READ_PROOF_REF = re.compile(r"^owned_read_proof:[0-9a-f]{64}$")
+_SHA256_ARTIFACT_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
 _NATIVE_OWNERSHIP_PROOF_REF = re.compile(
     r"^native_ownership_witness:[0-9a-f]{64}$"
 )
@@ -680,6 +683,27 @@ def redacted_interaction_acquisition_outcome(
         "provenance_root": provenance_root,
         "budget_snapshot": budget,
     }
+    correlation_ids_value = value.get("correlation_ids", ())
+    if (
+        not isinstance(correlation_ids_value, Sequence)
+        or isinstance(correlation_ids_value, (str, bytes))
+        or len(correlation_ids_value) > 8
+        or any(
+            not isinstance(item, str)
+            or _CORRELATION_ID.fullmatch(item) is None
+            for item in correlation_ids_value
+        )
+    ):
+        raise ReceiptStoreError(
+            "interaction acquisition correlation identity is invalid"
+        )
+    correlation_ids = tuple(sorted(set(correlation_ids_value)))
+    if len(correlation_ids) != len(correlation_ids_value):
+        raise ReceiptStoreError(
+            "interaction acquisition correlation identity is duplicated"
+        )
+    if correlation_ids:
+        output["correlation_ids"] = list(correlation_ids)
     if ownership_proof_ref is not None:
         output["ownership_proof_ref"] = ownership_proof_ref
     if all(state_ref_presence):
@@ -690,6 +714,65 @@ def redacted_interaction_acquisition_outcome(
             }
         )
     return output
+
+
+def redacted_owned_read_proof_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Seal one same-persona read proof without retaining its URL or body."""
+
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("owned read proof outcome is invalid")
+    proof_id = value.get("proof_id")
+    acquisition_receipt_id = value.get("acquisition_receipt_id")
+    artifact_ref = value.get("artifact_ref")
+    acquisition_value = value.get("acquisition")
+    correlation_ids_value = value.get("correlation_ids", ())
+    if (
+        value.get("kind") != "owned_read_proof"
+        or value.get("mode") != "behavioral_owned_read_proof_v1"
+        or value.get("status") != "completed"
+        or not isinstance(proof_id, str)
+        or _OWNED_READ_PROOF_REF.fullmatch(proof_id) is None
+        or not isinstance(acquisition_receipt_id, str)
+        or _BEHAVIORAL_RECEIPT_ID.fullmatch(acquisition_receipt_id) is None
+        or not isinstance(artifact_ref, str)
+        or _SHA256_ARTIFACT_REF.fullmatch(artifact_ref) is None
+        or not isinstance(acquisition_value, Mapping)
+        or not isinstance(correlation_ids_value, Sequence)
+        or isinstance(correlation_ids_value, (str, bytes))
+        or not 1 <= len(correlation_ids_value) <= 8
+        or any(
+            not isinstance(item, str)
+            or _CORRELATION_ID.fullmatch(item) is None
+            for item in correlation_ids_value
+        )
+    ):
+        raise ReceiptStoreError("owned read proof outcome is invalid")
+    correlation_ids = tuple(sorted(set(correlation_ids_value)))
+    if len(correlation_ids) != len(correlation_ids_value):
+        raise ReceiptStoreError("owned read proof correlation identity is duplicated")
+    acquisition = redacted_interaction_acquisition_outcome(acquisition_value)
+    if acquisition.get("cross_persona_probe") is not False:
+        raise ReceiptStoreError("owned read proof became cross-persona")
+    identity = {
+        "acquisition_receipt_id": acquisition_receipt_id,
+        "acquisition_id": acquisition["acquisition_id"],
+        "artifact_ref": artifact_ref,
+        "correlation_ids": list(correlation_ids),
+    }
+    if proof_id != stable_hash("owned_read_proof", identity):
+        raise ReceiptStoreError("owned read proof identity is inconsistent")
+    return {
+        "kind": "owned_read_proof",
+        "mode": "behavioral_owned_read_proof_v1",
+        "status": "completed",
+        "proof_id": proof_id,
+        "acquisition_receipt_id": acquisition_receipt_id,
+        "artifact_ref": artifact_ref,
+        "correlation_ids": list(correlation_ids),
+        "acquisition": acquisition,
+    }
 
 
 def _redacted_browser_transition_summary(value: Any) -> Dict[str, Any]:
@@ -2442,6 +2525,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "owned_read_proof":
+        return redacted_owned_read_proof_outcome(value)
     if value.get("kind") == "interaction_read_acquisition":
         return redacted_interaction_acquisition_outcome(value)
     if value.get("kind") == "compiled_sequence":

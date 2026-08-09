@@ -151,6 +151,14 @@ class RunBehavioralAuthorizationFromURLRequest(BaseModel):
     peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
 
 
+class RunOwnedReadProofRequest(BaseModel):
+    """One explicit, same-persona, read-only proof with durable replay."""
+
+    proof_url: str = Field(..., min_length=8, max_length=4096)
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+
+
 # ─────────────────────────── plan ───────────────────────────
 
 
@@ -3488,6 +3496,61 @@ async def run_behavioral_authorization_from_url_endpoint(
         "reused": False,
     }
     return response
+
+
+@router.post("/behavioral-owned-read-proof")
+async def run_owned_read_proof_endpoint(
+    req: RunOwnedReadProofRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Execute one exact owned GET once, then replay its durable receipt."""
+
+    from core.behavior.interaction_boundary import InteractionAcquisitionConfig
+    from core.behavior.owned_read_proof import (
+        OwnedReadProofDenied,
+        execute_owned_read_proof,
+    )
+    from core.behavior.receipts import BehavioralReceiptStore
+    from core.epistemic.cas import ContentAddressableStorage
+    from core.foundry.authorization import AuthorizationDenied, get_envelope
+    from core.foundry.vault import PersonaVault
+    from core.server.routers.driver import (
+        DriverBridgeError,
+        capture_persona_interaction_snapshot,
+        resolve_interaction_navigation,
+    )
+    from core.wraith.bola_replay import SNDReplayTransport
+
+    persona = PersonaVault().get_persona(req.persona_id)
+    if persona is None:
+        raise HTTPException(status_code=404, detail="research persona was not found")
+    envelope = get_envelope(req.envelope_id)
+    if envelope is None:
+        raise HTTPException(status_code=404, detail="authorization envelope was not found")
+    try:
+        result = await execute_owned_read_proof(
+            proof_url=req.proof_url,
+            envelope=envelope,
+            persona_id=persona.persona_id,
+            snapshot=capture_persona_interaction_snapshot,
+            resolve_navigation=resolve_interaction_navigation,
+            transport=SNDReplayTransport(),
+            store_artifact=ContentAddressableStorage().store,
+            receipt_store=BehavioralReceiptStore(),
+            acquisition_config=InteractionAcquisitionConfig.from_environment(),
+        )
+    except AuthorizationDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DriverBridgeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OwnedReadProofDenied as exc:
+        raise HTTPException(
+            status_code=503 if exc.target_request_possible else 409,
+            detail=str(exc),
+        ) from exc
+    return result.to_dict()
 
 
 @router.post("/signup")
