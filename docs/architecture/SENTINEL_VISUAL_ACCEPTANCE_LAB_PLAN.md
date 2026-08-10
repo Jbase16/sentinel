@@ -1,6 +1,12 @@
 # Sentinel Visual Acceptance Lab Plan
 
-Status: S01 native recording integration implemented; native acceptance proof pending
+Status: historical design and integration plan; the external lab now contains the
+S01-S10 scenario catalog and records current proof status per acceptance run
+
+Use the lab repository's operator documentation for current run procedures and
+[`ONE_CLICK_BOUNTY_RECONCILIATION_PLAN.md`](ONE_CLICK_BOUNTY_RECONCILIATION_PLAN.md)
+for Sentinel's authoritative forward implementation order. This document remains the
+design record for why the lab exists and what its evidence is allowed to claim.
 
 ## Decision summary
 

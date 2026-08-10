@@ -1,7 +1,14 @@
 # Sentinel One-Click Bounty Roadmap
 
-Status: forward implementation plan
+Status: historical implementation record through the adaptive-proof handoff
 Starting point: `4d2d6cd` (`feat(scans): bridge behavioral one-click execution`)
+
+This document preserves the reasoning and completed-slice record from that starting
+point. It is no longer the authoritative forward plan. Several of its "current"
+limitations were subsequently implemented, including native ordinary-scan behavioral
+profiles and visual acceptance coverage. Use
+[`ONE_CLICK_BOUNTY_RECONCILIATION_PLAN.md`](ONE_CLICK_BOUNTY_RECONCILIATION_PLAN.md)
+for current status, outstanding promises, implementation order, and exit gates.
 
 ## Purpose
 

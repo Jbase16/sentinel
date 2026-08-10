@@ -1,0 +1,616 @@
+# Sentinel One-Click Bounty Reconciliation Plan
+
+Status: authoritative forward implementation plan
+
+Baseline: `f9d3607950885953ab620b973723044d342e7925`
+
+Last reconciled: 2026-08-09
+
+## Purpose
+
+This plan reconciles Sentinel's original Boundary Counterexample Compiler and
+Backward-Chaining Exploit Compiler ideas with the code that now exists. It has three
+jobs:
+
+1. preserve the original capability promises so unfinished work cannot disappear;
+2. distinguish implemented foundations from narrow implementations and missing
+   universal behavior; and
+3. define one dependency-ordered backlog from the current repository to an honest
+   click-to-bounty-candidate workflow.
+
+This document is the forward-planning source of truth. The following documents remain
+valuable, but serve different purposes:
+
+- [`behavioral-counterexample-engine.md`](behavioral-counterexample-engine.md) is the
+  detailed implementation record for completed behavioral slices.
+- [`ONE_CLICK_BOUNTY_ROADMAP.md`](ONE_CLICK_BOUNTY_ROADMAP.md) is the historical roadmap
+  beginning at the first ordinary-scan bridge.
+- [`SENTINEL_VISUAL_ACCEPTANCE_LAB_PLAN.md`](SENTINEL_VISUAL_ACCEPTANCE_LAB_PLAN.md) is
+  the design and safety contract for the external visual acceptance lab.
+
+## Finish-line contract
+
+The finish line is not a claim that every URL contains a vulnerability or that every
+valid report will be paid. It is this engineering contract:
+
+> Given an authorized target and any unavoidable operator-supplied authentication,
+> Sentinel discovers payout-relevant operations, chooses the minimum sufficient proof
+> topology, constructs the controlled prerequisite state it can safely manufacture,
+> learns explicit constraints from failed attempts, replans within signed authority,
+> independently confirms any counterexample, and produces a reproducible
+> submission-grade candidate from one ordinary scan action.
+
+External report submission remains an explicit operator action. Sentinel must never
+expand scope, identities, workflows, action classes, or traffic merely because a plan
+would otherwise be blocked.
+
+## Architectural reconciliation
+
+The earlier names describe different layers, not competing replacements:
+
+```text
+Authorized URL and optional owned identities
+                  |
+                  v
+Target semantic reconstruction and capability graph
+                  |
+                  v
+Payout-goal and proof-topology planner
+                  |
+                  v
+Backward prerequisite compiler and constraint replanner
+                  |
+                  v
+Policy-gated experiment manifest and isolated worlds
+                  |
+                  v
+Independent property oracle and counterexample minimizer
+                  |
+                  v
+Evidence, closure accounting, triage, and bounty candidate
+```
+
+- **Boundary Counterexample Compiler** is the umbrella black-box search architecture.
+- **Payout-goal and proof-topology planner** decides what valuable property to test and
+  whether it needs zero, one, two, or another controlled world arrangement.
+- **Backward-Chaining Exploit Compiler** determines what prerequisite state and
+  sequence must be constructed for the chosen goal.
+- **Proof backends** execute one property family, such as authorization or lifecycle
+  prerequisite enforcement.
+- **Policy, receipts, provenance, and reporting** remain invariant safety and evidence
+  boundaries around all of them.
+
+The paired-persona engine is therefore one proof backend. It is not the universal
+planner, and a URL without meaningful accounts must not be forced into that topology.
+
+## Status vocabulary
+
+- **Implemented** — production caller exists and focused tests cover the contract.
+- **Narrow** — production behavior exists, but only for explicitly bounded shapes.
+- **Passive only** — useful analysis exists but cannot create target traffic or grant
+  execution.
+- **Missing** — the original capability has no complete implementation.
+- **Validated** — the relevant native or wire acceptance path has produced evidence;
+  validation does not imply universal target coverage.
+
+## Current capability ledger
+
+| Original capability | Status | Current implementation | Remaining obligation |
+|---|---|---|---|
+| Deterministic observation and state fingerprints | Implemented | `normalize.py`, `models.py`, and `graph.py` produce redacted action, state, transition, and world identities. | Preserve these identities across every new semantic source. |
+| Passive action/resource/capability graph | Implemented, bounded | Captured REST and GraphQL exchanges produce operation contracts and graph coverage. | Incorporate all supported browser, specification, and client-artifact semantics into one catalog. |
+| Typed `requires -> produces` operations | Implemented | `OperationContract` and `Capability` provide the typed transformation substrate. | Add richer resource relationships, lifecycle states, and security-control semantics. |
+| Backward prerequisite search | Implemented, analysis only | `BackwardExploitCompiler` performs deterministic bounded prerequisite search. | Connect it to universal goals, learned constraints, and generalized manifests. |
+| Exact value lineage and variable binding | Implemented, narrow | `ValueLineageLedger` and `PlanRehydrator` bind captured values across path, query, JSON, form, and GraphQL locations in one world. | Support additional typed values and safely proven cross-world handoffs where a proof topology requires them. |
+| Owned lifecycle manufacturing and cleanup | Narrow | Captured create/read/cleanup lifecycles can become admitted controlled sequences. | Generalize beyond direct path-bound identifiers and the current lifecycle shapes. |
+| Latent capability-directed discovery | Passive only | Existing JavaScript, source-map, and OpenAPI evidence can reveal capability-linked routes; persisted GraphQL documents can be reconstructed. | Feed all sources through the ordinary acquisition path and turn candidates into typed, confirmable operations. |
+| Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
+| Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
+| State-machine prerequisite omission oracle | Implemented, narrow | Exact capability-linked lifecycle omissions can be recreated, compared, and independently confirmed. | Generalize prerequisite types, lifecycle shapes, and non-account state machines. |
+| Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
+| Ordinary one-click behavioral bridge | Implemented | The native Scan UI can send paired-persona or anonymous-passive profiles to the backend. | Replace manual proof-topology choice with an evidence-driven recommendation and permitted automatic selection. |
+| Proof topology selector | Missing as a universal component | The obligation resolver selects among already-supported proof backends; the operator selects paired versus anonymous mode. | Select the minimum sufficient zero-, one-, two-, role-, lifecycle-, or callback-world topology from evidence and authority. |
+| Payout-grade goal language | Missing beyond a small terminal goal | `BackwardGoal` names a terminal operation and required outputs; high-value names receive basic selection. | Represent impact, protected subject, violated property, witness requirements, cleanup, and program-relevant evidence. |
+| Failure-derived constraint learning | Missing | Failures become blockers, receipts, or graph dispositions. | Convert trustworthy response evidence into typed missing prerequisites without treating an error string as proof. |
+| Deterministic replanning | Missing as a general loop | Adaptive reads can continue while the current frontier progresses. | Recompile after learned constraints or disproved assumptions while preserving plan identity, bounds, and authority. |
+| Generalized counterexample/oracle SDK | Missing | Authorization, owned-boundary, and omission implementations have separate strict contracts. | Introduce a common experiment, control, witness, cleanup, and verdict contract without weakening each oracle. |
+| Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
+| Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
+| Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
+
+## Backward compiler kernel checklist
+
+This list preserves the ten original requirements verbatim in meaning and assigns each
+one to the forward backlog.
+
+- [x] Typed operation graph describing what an action consumes and produces.
+- [ ] Rich goal language for payout-grade security witnesses. **R1**
+- [x] Bounded backward prerequisite solver.
+- [x] Exact variable binding for supported captured locations.
+- [ ] General multi-step execution beyond the current owned lifecycle shapes. **R4**
+- [ ] Constraint learning from trustworthy failure evidence. **R3**
+- [ ] Deterministic replanning after an assumed path fails. **R3**
+- [ ] General safe creation and cleanup of controlled state. **R4-R5**
+- [ ] General proof-oracle contract and additional property families. **R4-R5**
+- [ ] High-value sink coverage ledger with defensible blocked/exhausted states. **R6**
+
+## Original Boundary Counterexample sequence
+
+| Original step | Status now | Forward owner |
+|---|---|---|
+| 1. Reproducible baseline and regression harness | Implemented; S01-S10 provide the current real-shaped catalog. | Permanent gate |
+| 2. Observation normalization and deterministic state fingerprinting | Implemented. | Preserve in R2-R6 |
+| 3. Passive action/resource/capability graph | Implemented, bounded. | Generalize in R2 |
+| 4. Coverage ledger with no active traffic | Implemented for known evidence. | Extend in R6 |
+| 5. Isolated world manager | Partial through persona worlds and browser ownership. | Generalize in R1 and R4 |
+| 6. Authorization hyperproperty oracle | Implemented, narrow. | Generalize in R5A |
+| 7. Policy-constrained experiment executor | Implemented for admitted shapes. | Generalize in R4 |
+| 8. Old-versus-new differential validation | Partial through shadow promotion and vulnerable/secure controls. | Preserve per R5 family |
+| 9. Counterexample minimization and repeated replay | Partial for omission and receipt-backed proofs. | Generalize in R4 and R7 |
+| 10. Translation into findings and reports | Implemented for existing finding paths; adaptive candidate assembly remains. | Complete in R7 |
+| 11. Coverage-guided scheduler | Partial obligation ranking only. | Complete in R6 |
+| 12. Additional property families | Authorization and prerequisite omission started. | Continue in R5 |
+
+## Authoritative implementation backlog
+
+### R0 — Reconcile the plan and freeze the baseline
+
+Status: complete when this document is merged.
+
+#### Technical explanation
+
+Record current capabilities, explicit gaps, implementation dependencies, and permanent
+acceptance gates at one repository identity. Preserve the prior roadmaps as historical
+records and point them here instead of rewriting their implementation history.
+
+#### Non-technical explanation
+
+Sentinel now has one accurate map showing what is real, what works only in a narrow
+case, and what still has to be built. An old idea cannot disappear merely because a
+newer feature was implemented nearby.
+
+#### Target traffic and execution authority
+
+No target traffic. No execution-authority change.
+
+#### Exit gate
+
+- [x] Every original compiler-kernel requirement has a status and forward owner.
+- [x] Every original counterexample-engine phase has a status and forward owner.
+- [x] Historical roadmaps point to this plan.
+- [x] Baseline identity is recorded above and focused documentation checks pass.
+
+### R1 — Universal payout goals and proof topology
+
+Status: **next implementation slice**.
+
+#### Technical explanation
+
+Define immutable, redacted contracts for `PayoutSink`, `SecurityWitnessGoal`,
+`SecurityProperty`, `ProofTopology`, `WorldRequirement`, and `GoalBlocker`. Build a
+passive selector that consumes the current operation/capability graph, security
+obligations, available proof backends, signed envelope, and available owned identities.
+It must rank goals and choose the minimum sufficient admissible topology without
+calling a transport.
+
+Initial sink classes must include:
+
+- export and download;
+- payment, credit, balance, refund, and payout;
+- invitation and membership;
+- API keys, tokens, and integrations;
+- role and permission changes;
+- password, email, and recovery changes;
+- file and private-message access;
+- administrative and bulk operations; and
+- account deletion, ownership, and transfer.
+
+Initial topology classes must include:
+
+- zero-persona anonymous;
+- fresh anonymous browser state;
+- one owned account;
+- two owned accounts;
+- owned role differential;
+- controlled lifecycle state; and
+- callback receiver required but unavailable or available.
+
+The selector may recommend only a topology authorized by the existing envelope. A
+missing identity, workflow, callback service, or action class becomes an explicit
+blocker rather than an excuse to broaden authority.
+
+#### Non-technical explanation
+
+Sentinel will decide what kind of test a valuable operation actually needs. A public
+download may need no account, a private document may need Alice and Bob, and an account
+recovery package may need one account plus a fresh browser. This slice chooses and
+explains the setup; it does not yet perform a new exploit.
+
+#### Target traffic and execution authority
+
+No target traffic. No new execution authority.
+
+#### Exit gate
+
+- [ ] The same evidence produces the same ranked goals and topology on repeated runs.
+- [ ] Zero-, one-, and two-persona fixtures select different correct topologies.
+- [ ] Unsupported callback or role requirements remain visible blockers.
+- [ ] No selector code imports or invokes a target transport.
+- [ ] No raw identity, token, URL query value, or response body enters public output.
+- [ ] Existing authorization and omission planners remain behaviorally unchanged.
+
+### R2 — Complete target semantic reconstruction
+
+#### Technical explanation
+
+Unify typed operation discovery from captured REST requests, GraphQL documents and
+persisted operations, bounded JavaScript and source maps, OpenAPI documents, HTML
+forms, safe browser transitions, client validation metadata, server-issued identifiers,
+and observed lifecycle transitions. Add explicit resource provenance and parent-child,
+ownership, tenant, role, and lifecycle-state relationships. Every inferred operation
+must retain redacted source references and an epistemic status: observed, specified,
+published, inferred, or unconfirmed.
+
+#### Non-technical explanation
+
+Sentinel will build a more complete map of the doors, keys, rooms, and required order
+of operations exposed by the site. A route found in JavaScript will be labeled as a
+published lead, while a request that actually succeeded will be labeled as observed;
+the two will never be treated as equally proven.
+
+#### Target traffic and execution authority
+
+Passive compilation adds no traffic. Any new artifact acquisition must be a separate
+same-origin safe-read admission using the existing policy, budget, and provenance
+boundaries. No mutation authority is added.
+
+#### Exit gate
+
+- [ ] One bounded catalog represents every supported source with source provenance.
+- [ ] Equivalent operations deduplicate without merging distinct worlds or tenants.
+- [ ] Resource IDs, parent IDs, lifecycle state, and downstream input slots are typed.
+- [ ] Truncation, ambiguity, conflicting specifications, and dropped evidence are
+  explicit coverage deficits.
+- [ ] Lab fixtures prove REST, GraphQL, form, JavaScript, source-map, and OpenAPI paths.
+
+### R3 — Constraint learning and deterministic replanning
+
+#### Technical explanation
+
+Introduce a content-addressed `ConstraintLedger` for response-backed prerequisite
+facts such as missing fields, parent resources, membership, role, lifecycle state,
+CSRF/session context, and server-issued capabilities. Begin with deterministic
+structured evidence; free-form error text may generate a hypothesis but never a fact
+without an independently successful control. Recompile the same goal after new
+constraints, preserving the original evidence, plan lineage, policy digest, bounds,
+and every disproved assumption.
+
+Stopping must be state-based rather than time-based. One goal ends only as:
+
+- confirmed counterexample;
+- independently upheld control;
+- blocked by signed authority;
+- blocked by safety or cleanup requirements;
+- unreachable in the current proven operation graph;
+- incomplete because semantic evidence was truncated or ambiguous; or
+- bounded search exhausted with the exact bound recorded.
+
+#### Non-technical explanation
+
+If the site says an order needs an address, Sentinel records that requirement, finds a
+safe way to create an address if one is known and authorized, and rebuilds the plan.
+It does not keep blindly retrying, and it does not pretend an unexplained failure means
+the operation is secure.
+
+#### Target traffic and execution authority
+
+The ledger and compiler are passive. Replanning grants no authority. Executing a
+replanned step may use target traffic only through the separately admitted R4
+experiment boundary and the original signed envelope.
+
+#### Exit gate
+
+- [ ] Structured missing-prerequisite responses create deterministic typed constraints.
+- [ ] Untrusted free text cannot directly authorize or satisfy a prerequisite.
+- [ ] Replanning never repeats a disproved identical plan.
+- [ ] Cycles, contradictory constraints, and search bounds produce honest blockers.
+- [ ] A lab flow demonstrates `fail -> learn -> replan -> controlled success`.
+
+### R4 — Generalized experiment, world, and oracle SDK
+
+#### Technical explanation
+
+Define a common proof-carrying manifest for goals, topology, prerequisite sequence,
+world bindings, controls, mutation expectations, cleanup, budgets, provenance, and
+oracle verdicts. Generalize world provisioning across zero-, one-, two-, role-,
+lifecycle-, and callback-based topologies while preserving exact browser/persona
+ownership. An oracle must compare an experiment with the minimum independent control
+and may emit only confirmed, refuted, or inconclusive—not a finding directly.
+
+#### Non-technical explanation
+
+Sentinel will gain one safe test bench where different broken-lock experiments can be
+plugged in without giving the planner free control of the target. Every experiment
+must arrive with its permission slip, controlled identities, cleanup plan, comparison,
+and proof budget already sealed.
+
+#### Target traffic and execution authority
+
+This phase introduces new traffic only for a specifically implemented experiment
+backend. It does not create ambient authority. Each backend requires an explicit
+workflow/action-class grant, a bounded budget, a policy executor, provenance, durable
+receipts, and a fail-closed cleanup contract where mutation is possible.
+
+#### Exit gate
+
+- [ ] Existing authorization and omission backends conform without weaker checks.
+- [ ] Zero-, one-, and two-world manifests cannot be interchanged or forged.
+- [ ] Controls and experiments reserve their complete budgets atomically.
+- [ ] Uncertain mutation or cleanup stops the sequence and remains visible.
+- [ ] Oracle results cannot bypass adversarial triage or finding promotion.
+
+### R5 — Expand payout-relevant proof families
+
+Each family is an independent subproject. No family inherits traffic or authority merely
+because another family passed its gate.
+
+#### R5A — Generalized object authorization
+
+- [ ] Path, query, JSON, form, and GraphQL object locations.
+- [ ] Alice/Alice, Bob/Bob, Bob/Alice, anonymous/Alice, and low-role/high-role controls
+  where the selected topology and envelope permit them.
+- [ ] Read, mutation, follow-up owner read, and server-produced field semantics.
+
+#### R5B — Generalized lifecycle prerequisite enforcement
+
+- [ ] Multiple prerequisites and non-linear lifecycle states.
+- [ ] Omission, reordering, replay, and stale-state experiments.
+- [ ] Zero-persona and one-persona workflows in addition to paired accounts.
+
+#### R5C — Authority monotonicity and role enforcement
+
+- [ ] Invitation, membership, role assignment, and administrative boundaries.
+- [ ] Lower authority must not gain an effect available only to higher authority.
+- [ ] All role changes use owned tenants and reversible cleanup.
+
+#### R5D — Capability confinement, freshness, and replay
+
+- [ ] Object-bound, account-bound, tenant-bound, single-use, and expiry properties.
+- [ ] Tokens and keys remain ephemeral; public evidence contains only typed hashes.
+- [ ] Callback-dependent effects require an owned callback receiver and explicit scope.
+
+#### R5E — Owned-data integrity relations
+
+- [ ] Controlled field write versus authoritative follow-up read.
+- [ ] Server-produced, client-writable, ignored, and role-sensitive field classes.
+- [ ] Mass-assignment claims require demonstrated protected effect, not response echo.
+
+#### R5F — Parser, cache, and trust-boundary disagreement
+
+- [ ] Method, path, encoding, header, host, cache-key, and proxy/router interpretations.
+- [ ] Only safe counterfactual pairs with explicit target authorization.
+- [ ] Independent effect oracle; response difference alone is not a vulnerability.
+
+#### Technical explanation
+
+Implement each property as a topology-aware experiment compiler plus an independent
+oracle under the R4 SDK. Add one family at a time, starting with the highest expected
+bounty yield and lowest safe proof cost: R5A, R5B, R5C, then R5D. R5E and R5F remain
+separately gated because they require broader mutation or protocol-boundary reasoning.
+
+#### Non-technical explanation
+
+Sentinel will learn additional categories of broken locks one by one. It will first
+generalize the account and workflow flaws it already understands, then add roles,
+one-time capabilities, protected data changes, and finally disagreements between
+layers such as caches and application routers.
+
+#### Target traffic and execution authority
+
+Every family changes target traffic when its experiments are enabled. Authority is
+never shared across families. Each family must define its exact action classes,
+maximum requests, owned-data requirements, and cleanup behavior before integration.
+
+#### Exit gate for every family
+
+- [ ] Vulnerable and secure twins produce confirmed and upheld outcomes respectively.
+- [ ] Ambiguous evidence is inconclusive, never promoted.
+- [ ] Counterexamples reproduce from a fresh controlled state.
+- [ ] Cleanup success or failure is durable and report-visible.
+- [ ] Native and wire acceptance show zero out-of-scope requests.
+
+### R6 — Coverage-guided payout search and defensible stopping
+
+#### Technical explanation
+
+Add a `HighValueSinkLedger` and scheduler over ranked security goals. Record each sink
+as discovered, insufficiently observed, reachable, planned, executing, confirmed,
+upheld, blocked, or bounded-exhausted. Rank the next experiment by estimated impact,
+new state/relation coverage, information gain, proof strength, execution cost, cleanup
+risk, and available authority. A stop certificate must describe only the explored
+frontier and must preserve every blocker and coverage deficit.
+
+#### Non-technical explanation
+
+Sentinel will keep choosing the most valuable unanswered question instead of walking a
+generic checklist. It stops because every valuable door it knows about was either
+tested, proven secure for the tested property, found broken, or shown to require
+missing permission or evidence—not because a timer ran out or it became bored.
+
+#### Target traffic and execution authority
+
+Scheduling itself is passive. Dispatch uses only existing R4/R5 experiment authority.
+The scheduler cannot increase budgets, add identities, change origins, or reinterpret a
+blocked goal as permission to try something else.
+
+#### Exit gate
+
+- [ ] Scheduler order is deterministic for identical evidence and authority.
+- [ ] New information can change priority without erasing prior decisions.
+- [ ] Repeated zero-progress work is not reissued under a new identifier.
+- [ ] Stop certificates distinguish target coverage from current-frontier coverage.
+- [ ] Dropped or bounded evidence prevents an exhaustive claim.
+
+### R7 — Submission-grade candidate assembly
+
+#### Technical explanation
+
+Accept only independently confirmed counterexamples with valid receipts, provenance,
+scope, topology, cleanup, and graph dispositions. Reconstruct a sanitized deterministic
+reproduction, impact argument, affected operation, restraint summary, correlation
+identifiers, and evidence references. Route the result through the existing finding
+adversary, deduplication, severity rationale, FindingsStore, report composer, and draft
+workflow. Preserve explicit operator confirmation for external submission.
+
+#### Non-technical explanation
+
+After Sentinel proves a broken lock, it prepares the complete bounty case file without
+making the operator rebuild the story by hand. The operator still reviews and submits
+it, and Sentinel still cannot promise eligibility, uniqueness, severity, acceptance,
+or payment.
+
+#### Target traffic and execution authority
+
+No target traffic. No new execution authority. External submission remains a separate
+operator-authorized irreversible action.
+
+#### Exit gate
+
+- [ ] Fresh replay reproduces the candidate from sanitized instructions.
+- [ ] Report claims are mechanically traceable to receipts and provenance.
+- [ ] Raw credentials, private markers, tokens, and unrelated response data are absent.
+- [ ] Refuted, inconclusive, duplicate, or cleanup-uncertain results cannot surface.
+- [ ] Native UI exposes the complete draft and its remaining operator decisions.
+
+### R8 — Operational one-click completion
+
+#### Technical explanation
+
+Replace manual proof-mode configuration with an evidence-driven recommended topology,
+while requiring the operator to supply or approve any missing envelope, identity,
+workflow, or callback authority. Surface acquisition, planning, execution, proof,
+cleanup, coverage, and report status as one durable scan state. Restart must resume or
+honestly terminate receipts without duplicating target effects.
+
+#### Non-technical explanation
+
+The operator supplies the URL and the permission Sentinel cannot invent. Sentinel then
+chooses the safe test setup, runs the supported search, explains what is blocked, and
+returns either a proven candidate or an honest coverage report from the same Scan
+button.
+
+#### Target traffic and execution authority
+
+No new classes of traffic beyond R2-R6. The UI cannot create authority; it passes only
+operator-selected existing authorization to the backend.
+
+#### Exit gate
+
+- [ ] Zero-account targets do not demand two personas.
+- [ ] Account targets request only the minimum missing owned identities or roles.
+- [ ] Restart and duplicate-click behavior is receipt-safe.
+- [ ] The UI never labels passive visibility as an adaptive proof.
+- [ ] One scan exports both confirmed candidates and explicit coverage limitations.
+
+### R9 — Real-target validation and payout acceptance
+
+#### Technical explanation
+
+Advance through deterministic twins, unknown-to-the-runner seeded staging targets,
+authorized public-program canaries, independent human evidence review, and explicit
+operator submission. Track confirmed findings, duplicates, informative and rejected
+reports, payouts, severity, requests per finding, cleanup failures, out-of-scope I/O,
+human interventions, open/blocked goals, and yield beyond established scanners.
+
+#### Non-technical explanation
+
+The software claim is not earned by code volume or a lab pass. It is earned when the
+same one-click system safely finds reproducible issues on targets it was not built
+around and at least one real program accepts and pays for the result.
+
+#### Target traffic and execution authority
+
+This phase uses real target traffic only under reviewed program scope, conservative
+budgets, owned accounts, and explicit operator authorization. Submission remains
+operator-confirmed.
+
+#### Exit gate
+
+- [ ] Supported automated and native release gates pass from clean state.
+- [ ] Calibration records zero out-of-scope requests.
+- [ ] No unresolved cleanup failure is hidden.
+- [ ] Findings reproduce independently.
+- [ ] At least one Sentinel-originated finding is accepted and paid.
+- [ ] Repeated results demonstrate generalization beyond one target or proof family.
+
+## Dependency-ordered to-do list
+
+This is the execution order unless a newly discovered safety dependency requires an
+explicit plan revision:
+
+1. [ ] **R1** — payout-goal contracts and passive proof-topology selector.
+2. [ ] **R2** — unified semantic reconstruction and resource provenance.
+3. [ ] **R3** — constraint ledger and deterministic replanning.
+4. [ ] **R4** — generalized experiment, world, and oracle SDK.
+5. [ ] **R5A-R5D** — highest-yield proof families.
+6. [ ] **R6** — coverage-guided scheduling and stop certificates.
+7. [ ] **R7** — submission-grade candidate assembly.
+8. [ ] **R8** — operational one-click completion.
+9. [ ] **R5E-R5F** — separately gated integrity and boundary-disagreement families.
+10. [ ] **R9** — continuous real-target validation and payout acceptance.
+
+R1-R4 are the missing universal-planner center. R5-R8 turn that center into broader
+finding yield and an operator-ready workflow. R9 is how the product claim is earned.
+
+## Acceptance strategy from this point
+
+The existing S01-S10 catalog remains a regression foundation, not a detour and not a
+permanent proof of future behavior. Each new slice adds the smallest scenario needed to
+falsify its new claim. Proposed future coverage is:
+
+| Scenario | Purpose |
+|---|---|
+| S11 | Zero-persona, one-persona, and paired-persona topology selection |
+| S12 | High-value sink discovery across REST, GraphQL, forms, JavaScript, source maps, and OpenAPI |
+| S13 | Structured failure constraint learning and successful replanning |
+| S14 | Missing authority blocks replanning before target traffic |
+| S15 | Generalized multi-step state manufacture with verified cleanup |
+| S16 | Role and membership monotonicity, vulnerable and secure twins |
+| S17 | Capability confinement, freshness, and replay |
+| S18 | Coverage-guided ordering and honest stop certificate |
+| S19 | Submission-grade candidate assembly and sanitized reproduction |
+| S20 | Full ordinary-click run across acquisition, proof, report, restart, and deduplication |
+
+Scenario numbers are reservations, not implementations. A scenario is added only with
+the corresponding slice; the plan must not create a second speculative lab backlog
+detached from production code.
+
+## Permanent verification rules
+
+For every slice:
+
+1. Inspect and preserve current architecture before editing.
+2. Add deterministic unit tests for every new contract and denial path.
+3. Run the narrowest focused check after the coherent edit.
+4. At the slice checkpoint, run the relevant behavioral, router, persistence, and UI
+   gates once.
+5. Add or update one real-wire lab scenario when the slice changes observable behavior.
+6. Require native acceptance when the slice changes the macOS operator journey.
+7. Review the final diff for secrets, raw target data, debug artifacts, unbounded
+   collections, accidental authority, and stale documentation.
+8. Never describe a focused test pass as payout readiness.
+
+## Plan-change control
+
+This plan may change when implementation evidence invalidates an assumption, but no
+original capability may be silently removed. A revision must:
+
+- state what changed and why;
+- move, replace, or explicitly reject the affected item;
+- identify the preserving or superseding contract;
+- update dependencies and acceptance gates; and
+- retain the historical decision in version control.
+
+An item may be marked complete only when its production caller, safety boundary,
+focused tests, and required acceptance evidence all exist. A design document, unused
+class, mocked-only path, or one successful manual run is not completion.
