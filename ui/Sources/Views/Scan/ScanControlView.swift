@@ -1208,23 +1208,27 @@ struct ToolSelectionView: View {
 
             List {
                 ForEach(installed, id: \.self) { tool in
-                    HStack {
-                        Image(systemName: selection.contains(tool) ? "checkmark.square" : "square")
-                        Text(tool)
-                        if let meta = appState.toolMetadata[tool] {
-                            TierBadgeView(tierShort: meta.tierShort, tierValue: meta.tierValue)
+                    Toggle(
+                        isOn: Binding(
+                            get: { selection.contains(tool) },
+                            set: { isSelected in
+                                if isSelected {
+                                    selection.insert(tool)
+                                } else {
+                                    selection.remove(tool)
+                                }
+                            }
+                        )
+                    ) {
+                        HStack {
+                            Text(tool)
+                            if let meta = appState.toolMetadata[tool] {
+                                TierBadgeView(tierShort: meta.tierShort, tierValue: meta.tierValue)
+                            }
+                            Spacer()
                         }
-                        Spacer()
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        // Conditional branch.
-                        if selection.contains(tool) {
-                            selection.remove(tool)
-                        } else {
-                            selection.insert(tool)
-                        }
-                    }
+                    .toggleStyle(.checkbox)
                 }
             }
             .frame(minWidth: 250, minHeight: 300)
