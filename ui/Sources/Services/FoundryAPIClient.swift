@@ -238,6 +238,36 @@ public struct OwnedReadProofResponse: Codable {
     public let proof: OwnedReadProofEvidence
 }
 
+public struct OwnedStateTransitionProofEvidence: Codable {
+    public let proofId: String
+    public let confirmationStatus: String
+    public let sourceState: String
+    public let prerequisiteState: String
+    public let targetState: String
+    public let correlationIds: [String]
+    public let artifactRefs: [String]
+    public let findingRef: String?
+    public let cleanupComplete: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case proofId = "proof_id"
+        case confirmationStatus = "confirmation_status"
+        case sourceState = "source_state"
+        case prerequisiteState = "prerequisite_state"
+        case targetState = "target_state"
+        case correlationIds = "correlation_ids"
+        case artifactRefs = "artifact_refs"
+        case findingRef = "finding_ref"
+        case cleanupComplete = "cleanup_complete"
+    }
+}
+
+public struct OwnedStateTransitionProofResponse: Codable {
+    public let status: String
+    public let receipt: OwnedReadProofReceipt
+    public let proof: OwnedStateTransitionProofEvidence
+}
+
 public struct FoundryRecipeSummary: Codable, Identifiable {
     public let recipeId: String
     public let serviceHandle: String
@@ -528,6 +558,39 @@ public final class FoundryAPIClient {
             ]
         )
         return try await send(request, as: OwnedReadProofResponse.self)
+    }
+
+    public func runOwnedStateTransitionProof(
+        collectionURL: String,
+        envelopeId: String,
+        personaId: String,
+        initialState: String,
+        prerequisiteAction: String,
+        prerequisiteState: String,
+        terminalAction: String,
+        terminalState: String,
+        cleanupAction: String
+    ) async throws -> OwnedStateTransitionProofResponse {
+        var request = authed(
+            "/v1/foundry/behavioral-owned-state-transition-proof",
+            method: "POST"
+        )
+        request.timeoutInterval = 180
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(
+            withJSONObject: [
+                "collection_url": collectionURL,
+                "envelope_id": envelopeId,
+                "persona_id": personaId,
+                "initial_state": initialState,
+                "prerequisite_action": prerequisiteAction,
+                "prerequisite_state": prerequisiteState,
+                "terminal_action": terminalAction,
+                "terminal_state": terminalState,
+                "cleanup_action": cleanupAction,
+            ]
+        )
+        return try await send(request, as: OwnedStateTransitionProofResponse.self)
     }
 
     /// Create a research persona in the vault. The password is stored server-side

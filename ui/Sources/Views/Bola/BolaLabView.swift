@@ -22,6 +22,13 @@ final class BolaLabViewModel: ObservableObject {
         "Open and authenticate two persona windows, then capture both and run."
     @Published var isRunningBehavioral = false
     @Published var isRunningOwnedProof = false
+    @Published var isRunningStateTransitionProof = false
+    @Published var lifecycleInitialState = "draft"
+    @Published var lifecyclePrerequisiteAction = "review"
+    @Published var lifecyclePrerequisiteState = "review"
+    @Published var lifecycleTerminalAction = "publish"
+    @Published var lifecycleTerminalState = "published"
+    @Published var lifecycleCleanupAction = "draft"
     
     private let baseURL = SentinelRuntimeEndpoint.httpURL("/v1/driver").absoluteString
 
@@ -109,6 +116,40 @@ final class BolaLabViewModel: ObservableObject {
         return !isAnyCaptureActive
             && !isRunningBehavioral
             && !isRunningOwnedProof
+    }
+
+    var canRunStateTransitionProof: Bool {
+        guard let components = URLComponents(string: targetUrl),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https"].contains(scheme),
+              components.host != nil,
+              components.query == nil,
+              components.fragment == nil,
+              personas.contains(where: { $0.personaId == selectedOwnedPersonaId }),
+              let envelope = envelopes.first(where: {
+                  $0.envelopeId == selectedEnvelopeId
+              }),
+              envelope.allowedWorkflows.contains(
+                  "behavioral_owned_state_transition_proof"
+              ) else { return false }
+        let states = [
+            lifecycleInitialState,
+            lifecyclePrerequisiteState,
+            lifecycleTerminalState,
+        ]
+        let actions = [
+            lifecyclePrerequisiteAction,
+            lifecycleTerminalAction,
+            lifecycleCleanupAction,
+        ]
+        return states.allSatisfy { !$0.isEmpty }
+            && Set(states).count == states.count
+            && actions.allSatisfy { !$0.isEmpty }
+            && Set(actions).count == actions.count
+            && !isAnyCaptureActive
+            && !isRunningBehavioral
+            && !isRunningOwnedProof
+            && !isRunningStateTransitionProof
     }
 
     func personaWindowDidOpen(for persona: FoundryPersona) {
@@ -355,6 +396,56 @@ final class BolaLabViewModel: ObservableObject {
         }
     }
 
+    func runOwnedStateTransitionProof() {
+        Task {
+            guard canRunStateTransitionProof else {
+                behavioralStatus =
+                    "Select a lifecycle envelope, persona and complete contract."
+                return
+            }
+            let personaId = selectedOwnedPersonaId
+            isRunningStateTransitionProof = true
+            behavioralStatus =
+                "Rehearsing the lifecycle and reverse action before one omission..."
+            defer { isRunningStateTransitionProof = false }
+            do {
+                let result = try await FoundryAPIClient.shared
+                    .runOwnedStateTransitionProof(
+                        collectionURL: targetUrl,
+                        envelopeId: selectedEnvelopeId,
+                        personaId: personaId,
+                        initialState: lifecycleInitialState,
+                        prerequisiteAction: lifecyclePrerequisiteAction,
+                        prerequisiteState: lifecyclePrerequisiteState,
+                        terminalAction: lifecycleTerminalAction,
+                        terminalState: lifecycleTerminalState,
+                        cleanupAction: lifecycleCleanupAction
+                    )
+                let proof = result.proof
+                let receipt = String(result.receipt.receiptId.prefix(28))
+                actorStatuses[personaId] = result.receipt.reused
+                    ? "Lifecycle receipt replayed."
+                    : "Lifecycle proof complete."
+                if proof.confirmationStatus == "confirmed_fail_open" {
+                    behavioralStatus =
+                        "Lifecycle finding confirmed: \(proof.sourceState) → "
+                        + "\(proof.targetState), omitting \(proof.prerequisiteState). "
+                        + "Cleanup: \(proof.cleanupComplete ? "complete" : "failed"). "
+                        + "Receipt: \(receipt)…"
+                } else {
+                    behavioralStatus =
+                        "Lifecycle prerequisite enforced: \(proof.sourceState) remained "
+                        + "\(proof.sourceState) without \(proof.prerequisiteState). "
+                        + "Cleanup: \(proof.cleanupComplete ? "complete" : "failed"). "
+                        + "Receipt: \(receipt)…"
+                }
+            } catch {
+                behavioralStatus =
+                    "Lifecycle proof failed: \(error.localizedDescription)"
+            }
+        }
+    }
+
     private func loadCapture(path: String) throws -> [[String: Any]] {
         let text = try String(contentsOfFile: path, encoding: .utf8)
         var records: [[String: Any]] = []
@@ -463,6 +554,61 @@ struct BolaLabView: View {
                     .buttonStyle(.bordered)
                     .disabled(!vm.canRunOwnedProof)
                 }
+            }
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        TextField(
+                            "Initial state",
+                            text: $vm.lifecycleInitialState
+                        )
+                        TextField(
+                            "Prerequisite action",
+                            text: $vm.lifecyclePrerequisiteAction
+                        )
+                        TextField(
+                            "Prerequisite state",
+                            text: $vm.lifecyclePrerequisiteState
+                        )
+                    }
+                    HStack(spacing: 10) {
+                        TextField(
+                            "Terminal action",
+                            text: $vm.lifecycleTerminalAction
+                        )
+                        TextField(
+                            "Terminal state",
+                            text: $vm.lifecycleTerminalState
+                        )
+                        TextField(
+                            "Cleanup action",
+                            text: $vm.lifecycleCleanupAction
+                        )
+                        Button {
+                            vm.runOwnedStateTransitionProof()
+                        } label: {
+                            Label(
+                                vm.isRunningStateTransitionProof
+                                    ? "Running..."
+                                    : "Run Lifecycle Proof",
+                                systemImage: "arrow.triangle.2.circlepath"
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!vm.canRunStateTransitionProof)
+                    }
+                    Text(
+                        "Uses the target URL as the owned-object collection. "
+                        + "Sentinel rehearses the full path and reverse action, "
+                        + "then tries one fresh omission and cleans both objects."
+                    )
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.5))
+                }
+            } label: {
+                Text("Lifecycle omission contract")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
             }
 
             Text(vm.behavioralStatus)

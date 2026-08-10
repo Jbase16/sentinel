@@ -159,6 +159,20 @@ class RunOwnedReadProofRequest(BaseModel):
     persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
 
 
+class RunOwnedStateTransitionProofRequest(BaseModel):
+    """One declared, reversible owned-object lifecycle omission proof."""
+
+    collection_url: str = Field(..., min_length=8, max_length=4096)
+    envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    initial_state: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    prerequisite_action: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    prerequisite_state: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    terminal_action: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    terminal_state: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+    cleanup_action: str = Field(..., pattern=r"^[a-z][a-z0-9_-]{0,63}$")
+
+
 # ─────────────────────────── plan ───────────────────────────
 
 
@@ -3546,6 +3560,60 @@ async def run_owned_read_proof_endpoint(
     except DriverBridgeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OwnedReadProofDenied as exc:
+        raise HTTPException(
+            status_code=503 if exc.target_request_possible else 409,
+            detail=str(exc),
+        ) from exc
+    return result.to_dict()
+
+
+@router.post("/behavioral-owned-state-transition-proof")
+async def run_owned_state_transition_proof_endpoint(
+    req: RunOwnedStateTransitionProofRequest,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Execute one signed, rehearsed lifecycle omission proof exactly once."""
+
+    from core.behavior.receipts import BehavioralReceiptStore
+    from core.behavior.state_transition_proof import (
+        OwnedStateTransitionDenied,
+        StateTransitionContract,
+        execute_owned_state_transition_proof,
+    )
+    from core.epistemic.cas import ContentAddressableStorage
+    from core.foundry.authorization import AuthorizationDenied, get_envelope
+    from core.foundry.vault import PersonaVault
+    from core.wraith.bola_replay import SNDReplayTransport
+
+    persona = PersonaVault().get_persona(req.persona_id)
+    if persona is None:
+        raise HTTPException(status_code=404, detail="research persona was not found")
+    envelope = get_envelope(req.envelope_id)
+    if envelope is None:
+        raise HTTPException(status_code=404, detail="authorization envelope was not found")
+    try:
+        contract = StateTransitionContract(
+            initial_state=req.initial_state,
+            prerequisite_action=req.prerequisite_action,
+            prerequisite_state=req.prerequisite_state,
+            terminal_action=req.terminal_action,
+            terminal_state=req.terminal_state,
+            cleanup_action=req.cleanup_action,
+        )
+        result = await execute_owned_state_transition_proof(
+            collection_url=req.collection_url,
+            contract=contract,
+            envelope=envelope,
+            persona_id=persona.persona_id,
+            transport=SNDReplayTransport(),
+            store_artifact=ContentAddressableStorage().store,
+            receipt_store=BehavioralReceiptStore(),
+        )
+    except AuthorizationDenied as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OwnedStateTransitionDenied as exc:
         raise HTTPException(
             status_code=503 if exc.target_request_possible else 409,
             detail=str(exc),

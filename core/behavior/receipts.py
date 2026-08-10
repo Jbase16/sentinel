@@ -70,8 +70,18 @@ _INTERACTION_RESPONSE_REF = re.compile(
     r"^interaction_acquisition_response:[0-9a-f]{64}$"
 )
 _OWNED_READ_PROOF_REF = re.compile(r"^owned_read_proof:[0-9a-f]{64}$")
+_OWNED_STATE_TRANSITION_PROOF_REF = re.compile(
+    r"^owned_state_transition_proof:[0-9a-f]{64}$"
+)
+_STATE_TRANSITION_ACTION_REF = re.compile(
+    r"^state_transition_action:[0-9a-f]{64}$"
+)
+_LIFECYCLE_FINDING_REF = re.compile(
+    r"^forbidden_lifecycle_transition:[0-9a-f]{64}$"
+)
 _SHA256_ARTIFACT_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
+_STATE_TRANSITION_SEMANTIC = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _NATIVE_OWNERSHIP_PROOF_REF = re.compile(
     r"^native_ownership_witness:[0-9a-f]{64}$"
 )
@@ -714,6 +724,140 @@ def redacted_interaction_acquisition_outcome(
             }
         )
     return output
+
+
+def redacted_owned_state_transition_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Seal one owned lifecycle proof without object identifiers or URLs."""
+
+    if not isinstance(value, Mapping):
+        raise ReceiptStoreError("owned state transition outcome is invalid")
+    proof_id = value.get("proof_id")
+    confirmation_status = value.get("confirmation_status")
+    states = {
+        key: value.get(key)
+        for key in ("source_state", "prerequisite_state", "target_state")
+    }
+    action_refs = {
+        key: value.get(key)
+        for key in (
+            "prerequisite_action_ref",
+            "terminal_action_ref",
+            "cleanup_action_ref",
+        )
+    }
+    correlation_ids_value = value.get("correlation_ids", ())
+    artifact_refs_value = value.get("artifact_refs", ())
+    finding_ref = value.get("finding_ref")
+    requests_sent = value.get("requests_sent")
+    provenance_root = value.get("provenance_root")
+    if (
+        value.get("kind") != "owned_state_transition_proof"
+        or value.get("mode") != "behavioral_owned_state_transition_proof_v1"
+        or value.get("status") != "completed"
+        or not isinstance(proof_id, str)
+        or _OWNED_STATE_TRANSITION_PROOF_REF.fullmatch(proof_id) is None
+        or confirmation_status
+        not in {"confirmed_fail_open", "prerequisite_enforced"}
+        or any(
+            not isinstance(item, str)
+            or _STATE_TRANSITION_SEMANTIC.fullmatch(item) is None
+            for item in states.values()
+        )
+        or len(set(states.values())) != 3
+        or any(
+            not isinstance(item, str)
+            or _STATE_TRANSITION_ACTION_REF.fullmatch(item) is None
+            for item in action_refs.values()
+        )
+        or len(set(action_refs.values())) != 3
+        or not isinstance(correlation_ids_value, Sequence)
+        or isinstance(correlation_ids_value, (str, bytes))
+        or not 1 <= len(correlation_ids_value) <= 24
+        or any(
+            not isinstance(item, str)
+            or _CORRELATION_ID.fullmatch(item) is None
+            for item in correlation_ids_value
+        )
+        or len(set(correlation_ids_value)) != len(correlation_ids_value)
+        or not isinstance(artifact_refs_value, Sequence)
+        or isinstance(artifact_refs_value, (str, bytes))
+        or len(artifact_refs_value) != len(correlation_ids_value)
+        or any(
+            not isinstance(item, str)
+            or _SHA256_ARTIFACT_REF.fullmatch(item) is None
+            for item in artifact_refs_value
+        )
+        or value.get("cleanup_complete") is not True
+        or isinstance(requests_sent, bool)
+        or not isinstance(requests_sent, int)
+        or not 1 <= requests_sent <= 21
+        or not isinstance(provenance_root, str)
+        or not re_full_sha256(provenance_root)
+    ):
+        raise ReceiptStoreError("owned state transition outcome is invalid")
+    if confirmation_status == "confirmed_fail_open":
+        if (
+            not isinstance(finding_ref, str)
+            or _LIFECYCLE_FINDING_REF.fullmatch(finding_ref) is None
+        ):
+            raise ReceiptStoreError("owned state transition finding is invalid")
+    elif finding_ref is not None:
+        raise ReceiptStoreError("enforced state transition cannot retain a finding")
+    correlation_ids = list(correlation_ids_value)
+    artifact_refs = list(artifact_refs_value)
+    identity = {
+        "confirmation_status": confirmation_status,
+        **states,
+        **action_refs,
+        "correlation_ids": correlation_ids,
+        "artifact_refs": artifact_refs,
+    }
+    if proof_id != stable_hash("owned_state_transition_proof", identity):
+        raise ReceiptStoreError("owned state transition identity is inconsistent")
+    expected_finding_ref = (
+        stable_hash("forbidden_lifecycle_transition", identity)
+        if confirmation_status == "confirmed_fail_open"
+        else None
+    )
+    if finding_ref != expected_finding_ref:
+        raise ReceiptStoreError("owned state transition finding is inconsistent")
+    budget = _count_section(
+        value.get("budget_snapshot"),
+        (
+            "total_requests",
+            "cross_object_reads",
+            "privilege_mutations",
+            "creates",
+            "endpoints_touched",
+        ),
+        section="owned_state_transition.budget_snapshot",
+    )
+    if (
+        budget["total_requests"] != requests_sent
+        or budget["cross_object_reads"] != 0
+        or budget["privilege_mutations"] != 0
+        or budget["creates"] != 2
+        or not 1 <= budget["endpoints_touched"] <= requests_sent
+    ):
+        raise ReceiptStoreError("owned state transition budget is inconsistent")
+    return {
+        "kind": "owned_state_transition_proof",
+        "mode": "behavioral_owned_state_transition_proof_v1",
+        "status": "completed",
+        "proof_id": proof_id,
+        "confirmation_status": confirmation_status,
+        **states,
+        **action_refs,
+        "correlation_ids": correlation_ids,
+        "artifact_refs": artifact_refs,
+        "finding_ref": finding_ref,
+        "cleanup_complete": True,
+        "requests_sent": requests_sent,
+        "provenance_root": provenance_root,
+        "budget_snapshot": budget,
+    }
 
 
 def redacted_owned_read_proof_outcome(
@@ -2525,6 +2669,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "owned_state_transition_proof":
+        return redacted_owned_state_transition_outcome(value)
     if value.get("kind") == "owned_read_proof":
         return redacted_owned_read_proof_outcome(value)
     if value.get("kind") == "interaction_read_acquisition":
