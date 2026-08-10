@@ -98,19 +98,19 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Original capability | Status | Current implementation | Remaining obligation |
 |---|---|---|---|
 | Deterministic observation and state fingerprints | Implemented | `normalize.py`, `models.py`, and `graph.py` produce redacted action, state, transition, and world identities. | Preserve these identities across every new semantic source. |
-| Passive action/resource/capability graph | Implemented, bounded | Captured REST and GraphQL exchanges produce operation contracts and graph coverage. | Incorporate all supported browser, specification, and client-artifact semantics into one catalog. |
-| Typed `requires -> produces` operations | Implemented | `OperationContract` and `Capability` provide the typed transformation substrate. | Add richer resource relationships, lifecycle states, and security-control semantics. |
+| Passive action/resource/capability graph | Implemented, bounded and unified | `TargetSemanticCatalog` joins observed REST, GraphQL, DOM/form, server-identifier, lifecycle, browser-transition, JavaScript, source-map, and OpenAPI evidence without merging evidence strength. | Preserve the catalog through R3-R8 and expand only through bounded source adapters. |
+| Typed `requires -> produces` operations | Implemented with resource provenance | `SemanticOperation`, `SemanticSlot`, `SemanticResource`, and `SemanticRelation` type downstream inputs, server-issued IDs, parent, owner, tenant, role, and lifecycle context. | Learn missing constraints in R3 and turn the typed graph into generalized controlled state in R4. |
 | Backward prerequisite search | Implemented, analysis only | `BackwardExploitCompiler` performs deterministic bounded prerequisite search. | Connect it to universal goals, learned constraints, and generalized manifests. |
 | Exact value lineage and variable binding | Implemented, narrow | `ValueLineageLedger` and `PlanRehydrator` bind captured values across path, query, JSON, form, and GraphQL locations in one world. | Support additional typed values and safely proven cross-world handoffs where a proof topology requires them. |
 | Owned lifecycle manufacturing and cleanup | Narrow | Captured create/read/cleanup lifecycles can become admitted controlled sequences. | Generalize beyond direct path-bound identifiers and the current lifecycle shapes. |
-| Latent capability-directed discovery | Passive only | Existing JavaScript, source-map, and OpenAPI evidence can reveal capability-linked routes; persisted GraphQL documents can be reconstructed. | Feed all sources through the ordinary acquisition path and turn candidates into typed, confirmable operations. |
+| Latent capability-directed discovery | Passive and cataloged | Capability-linked JavaScript, source-map, and OpenAPI routes become published or specified semantic operations; unmatched and ambiguous routes remain coverage deficits. | Feed every source through ordinary acquisition and actively confirm only through separately admitted R4-R8 workflows. |
 | Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
 | State-machine prerequisite omission oracle | Implemented, narrow | Exact capability-linked lifecycle omissions can be recreated, compared, and independently confirmed. | Generalize prerequisite types, lifecycle shapes, and non-account state machines. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
 | Ordinary one-click behavioral bridge | Implemented | The native Scan UI can send paired-persona or anonymous-passive profiles to the backend. | Replace manual proof-topology choice with an evidence-driven recommendation and permitted automatic selection. |
-| Proof topology selector | Implemented, passive and bounded | `PayoutGoalTopologyPlanner` selects the minimum supported zero-, one-, two-, role-, lifecycle-, or callback-world topology from redacted operation semantics, proof-backend availability, owned worlds, and envelope authority. | Feed it the richer semantics from R2, generalize executable worlds in R4, and let the ordinary-click coordinator consume the decision in R8. |
-| Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, evidence-quality, and learned prerequisite requirements in R2-R6. |
+| Proof topology selector | Implemented, passive and bounded | `PayoutGoalTopologyPlanner` now consumes R2 semantic projections and selects the minimum supported zero-, one-, two-, role-, lifecycle-, or callback-world topology from evidence, proof-backend availability, owned worlds, and envelope authority. | Generalize executable worlds in R4 and let the ordinary-click coordinator consume the decision in R8. |
+| Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and learned prerequisite requirements in R3-R6. |
 | Failure-derived constraint learning | Missing | Failures become blockers, receipts, or graph dispositions. | Convert trustworthy response evidence into typed missing prerequisites without treating an error string as proof. |
 | Deterministic replanning | Missing as a general loop | Adaptive reads can continue while the current frontier progresses. | Recompile after learned constraints or disproved assumptions while preserving plan identity, bounds, and authority. |
 | Generalized counterexample/oracle SDK | Missing | Authorization, owned-boundary, and omission implementations have separate strict contracts. | Introduce a common experiment, control, witness, cleanup, and verdict contract without weakening each oracle. |
@@ -141,7 +141,7 @@ one to the forward backlog.
 |---|---|---|
 | 1. Reproducible baseline and regression harness | Implemented; S01-S10 provide the current real-shaped catalog. | Permanent gate |
 | 2. Observation normalization and deterministic state fingerprinting | Implemented. | Preserve in R2-R6 |
-| 3. Passive action/resource/capability graph | Implemented, bounded. | Generalize in R2 |
+| 3. Passive action/resource/capability graph | Implemented, bounded and unified through R2. | Preserve in R3-R8 |
 | 4. Coverage ledger with no active traffic | Implemented for known evidence. | Extend in R6 |
 | 5. Isolated world manager | Partial through persona worlds and browser ownership; R1 now represents the required topology without creating worlds. | Generalize runtime world construction in R4 |
 | 6. Authorization hyperproperty oracle | Implemented, narrow. | Generalize in R5A |
@@ -242,6 +242,8 @@ No target traffic. No new execution authority.
 
 ### R2 — Complete target semantic reconstruction
 
+Status: **implemented as a bounded passive catalog and focused-tested**.
+
 #### Technical explanation
 
 Unify typed operation discovery from captured REST requests, GraphQL documents and
@@ -273,12 +275,13 @@ boundaries. No mutation authority is added.
 
 #### Exit gate
 
-- [ ] One bounded catalog represents every supported source with source provenance.
-- [ ] Equivalent operations deduplicate without merging distinct worlds or tenants.
-- [ ] Resource IDs, parent IDs, lifecycle state, and downstream input slots are typed.
-- [ ] Truncation, ambiguity, conflicting specifications, and dropped evidence are
+- [x] One bounded catalog represents every supported source with source provenance.
+- [x] Equivalent operations deduplicate without merging distinct worlds or tenants.
+- [x] Resource IDs, parent IDs, lifecycle state, and downstream input slots are typed.
+- [x] Truncation, ambiguity, conflicting specifications, and dropped evidence are
   explicit coverage deficits.
-- [ ] Lab fixtures prove REST, GraphQL, form, JavaScript, source-map, and OpenAPI paths.
+- [x] Deterministic lab-shaped contract fixtures prove REST, GraphQL, form,
+  JavaScript, source-map, and OpenAPI paths without adding a UI or traffic surface.
 
 ### R3 — Constraint learning and deterministic replanning
 
@@ -556,7 +559,7 @@ This is the execution order unless a newly discovered safety dependency requires
 explicit plan revision:
 
 1. [x] **R1** — payout-goal contracts and passive proof-topology selector.
-2. [ ] **R2** — unified semantic reconstruction and resource provenance.
+2. [x] **R2** — unified semantic reconstruction and resource provenance.
 3. [ ] **R3** — constraint ledger and deterministic replanning.
 4. [ ] **R4** — generalized experiment, world, and oracle SDK.
 5. [ ] **R5A-R5D** — highest-yield proof families.
@@ -566,10 +569,10 @@ explicit plan revision:
 9. [ ] **R5E-R5F** — separately gated integrity and boundary-disagreement families.
 10. [ ] **R9** — continuous real-target validation and payout acceptance.
 
-R1 establishes the first passive decision layer of the universal-planner center.
-R2-R4 supply the semantic, replanning, and executable-world substrate it still lacks.
-R5-R8 turn that center into broader finding yield and an operator-ready workflow. R9
-is how the product claim is earned.
+R1 and R2 establish the passive decision and semantic substrate of the universal
+planner center. R3-R4 supply learned constraints, replanning, and executable-world
+construction. R5-R8 turn that center into broader finding yield and an operator-ready
+workflow. R9 is how the product claim is earned.
 
 ## Acceptance strategy from this point
 
@@ -595,7 +598,9 @@ the corresponding slice; the plan must not create a second speculative lab backl
 detached from production code. R1's S11 purpose is currently covered by deterministic
 zero-, one-, and two-persona contract fixtures. The visual system scenario remains
 reserved until R8 exposes topology selection through the ordinary scan workflow; R1
-deliberately adds no UI or execution surface.
+deliberately adds no UI or execution surface. R2's S12 source matrix is likewise
+covered at the passive contract boundary; an operator-visible end-to-end presentation
+remains reserved for R8 rather than introducing a temporary diagnostic UI.
 
 ## Permanent verification rules
 

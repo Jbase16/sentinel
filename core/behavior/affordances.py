@@ -57,6 +57,21 @@ class ClientArtifact:
             raise ValueError("client artifact contract is invalid")
 
 
+def client_artifact_ref(artifact: ClientArtifact) -> str:
+    """Return the canonical content-addressed reference for an acquired artifact."""
+
+    if not isinstance(artifact, ClientArtifact):
+        raise TypeError("artifact must be a ClientArtifact")
+    return stable_hash(
+        "client_artifact",
+        {
+            "source": artifact.source,
+            "text": artifact.text,
+            "kind": artifact.kind,
+        },
+    )
+
+
 @dataclass(frozen=True)
 class LatentAffordanceLimits:
     max_records: int = 4_096
@@ -757,14 +772,7 @@ class LatentAffordanceMiner:
             ):
                 dropped_artifact_bytes += encoded_bytes
                 continue
-            artifact_ref = stable_hash(
-                "client_artifact",
-                {
-                    "source": artifact.source,
-                    "text": artifact.text,
-                    "kind": artifact.kind,
-                },
-            )
+            artifact_ref = client_artifact_ref(artifact)
             accepted_artifacts.append((artifact, artifact_ref))
             artifact_hashes.append(artifact_ref)
             artifact_bytes += encoded_bytes
@@ -951,6 +959,7 @@ class LatentAffordanceMiner:
 __all__ = [
     "LATENT_AFFORDANCE_MODE",
     "ClientArtifact",
+    "client_artifact_ref",
     "LatentAffordanceCandidate",
     "LatentAffordanceDiagnostics",
     "LatentAffordanceLimits",

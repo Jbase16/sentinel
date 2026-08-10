@@ -189,6 +189,10 @@ def test_orchestrator_builds_and_ranks_one_unified_frontier_without_traffic():
     assert result.proposals is not None and len(result.proposals.proposals) == 2
     assert result.affordances.status == "ready"
     assert result.experiment_stage.status == "ready"
+    assert result.semantic_catalog.status in {"ready", "partial"}
+    assert result.semantic_catalog.target_ref == result.graph.target_ref
+    assert result.semantic_catalog.executable is False
+    assert result.to_dict()["semantic_catalog"]["catalog_id"]
     assert result.payout_goal_plan.status == "ready"
     assert result.payout_goal_plan.selected is not None
     assert (

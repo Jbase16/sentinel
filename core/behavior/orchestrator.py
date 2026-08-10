@@ -52,6 +52,10 @@ from .proposals import (
     ProposalBatch,
     compile_authorization_proposals,
 )
+from .semantic_catalog import (
+    TargetSemanticCatalog,
+    TargetSemanticCatalogBuilder,
+)
 from .state_machine import (
     StateMachineLegalityMiner,
     StateMachineLegalityResult,
@@ -99,6 +103,7 @@ def _run_identity_payload(
     interactions: InteractionIntentCatalog,
     interaction_admission: InteractionAdmissionResult,
     experiment_stage: "OwnedExperimentShadowStage",
+    semantic_catalog: TargetSemanticCatalog,
     payout_goal_plan: PayoutGoalPlan,
     graph: SecurityObligationGraph,
     closure: SecurityClosureCertificate,
@@ -119,6 +124,7 @@ def _run_identity_payload(
         "interaction_catalog_id": interactions.catalog_id,
         "interaction_admission_result_id": interaction_admission.result_id,
         "experiment_stage": experiment_stage.to_dict(),
+        "semantic_catalog_id": semantic_catalog.catalog_id,
         "payout_goal_plan_id": payout_goal_plan.plan_id,
         "graph_digest": graph.graph_digest,
         "closure_certificate_id": closure.certificate_id,
@@ -273,6 +279,7 @@ class BehavioralShadowRun:
         compare=False,
     )
     experiment_stage: OwnedExperimentShadowStage = field(repr=False, compare=False)
+    semantic_catalog: TargetSemanticCatalog = field(repr=False, compare=False)
     payout_goal_plan: PayoutGoalPlan = field(repr=False, compare=False)
     graph: SecurityObligationGraph = field(repr=False, compare=False)
     closure: SecurityClosureCertificate = field(repr=False, compare=False)
@@ -294,6 +301,8 @@ class BehavioralShadowRun:
             or self.mode != BEHAVIORAL_SHADOW_ORCHESTRATOR_MODE
             or self.executable
             or self.graph.target_ref != self.closure.target_ref
+            or self.semantic_catalog.target_ref != self.graph.target_ref
+            or self.semantic_catalog.executable
             or self.payout_goal_plan.target_ref != self.graph.target_ref
             or self.payout_goal_plan.graph_digest != self.graph.graph_digest
             or self.payout_goal_plan.executable
@@ -347,6 +356,7 @@ class BehavioralShadowRun:
             interactions=self.interactions,
             interaction_admission=self.interaction_admission,
             experiment_stage=self.experiment_stage,
+            semantic_catalog=self.semantic_catalog,
             payout_goal_plan=self.payout_goal_plan,
             graph=self.graph,
             closure=self.closure,
@@ -372,6 +382,7 @@ class BehavioralShadowRun:
             "interactions": self.interactions.to_dict(),
             "interaction_admission": self.interaction_admission.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
+            "semantic_catalog": self.semantic_catalog.to_dict(),
             "payout_goal_plan": self.payout_goal_plan.to_dict(),
             "obligation_graph": self.graph.to_dict(),
             "closure": self.closure.to_dict(),
@@ -403,6 +414,7 @@ class BehavioralShadowOrchestrator:
         interaction_miner: Optional[InteractionIntentMiner] = None,
         interaction_selector: Optional[InteractionIntentSelector] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
+        semantic_catalog_builder: Optional[TargetSemanticCatalogBuilder] = None,
         payout_goal_planner: Optional[PayoutGoalTopologyPlanner] = None,
         graph_builder: Optional[SecurityObligationGraphBuilder] = None,
         closure_evaluator: Optional[SecurityClosureEvaluator] = None,
@@ -421,6 +433,9 @@ class BehavioralShadowOrchestrator:
             interaction_selector or InteractionIntentSelector()
         )
         self.experiment_factory = experiment_factory or OwnedExperimentFactory()
+        self.semantic_catalog_builder = (
+            semantic_catalog_builder or TargetSemanticCatalogBuilder()
+        )
         self.payout_goal_planner = payout_goal_planner or PayoutGoalTopologyPlanner()
         self.graph_builder = graph_builder or SecurityObligationGraphBuilder()
         self.closure_evaluator = closure_evaluator or SecurityClosureEvaluator()
@@ -736,6 +751,18 @@ class BehavioralShadowOrchestrator:
             interactions=interactions,
             interaction_source_world_ref=stable_hash("world", world_id),
         )
+        semantic_catalog = self.semantic_catalog_builder.build(
+            primary_records,
+            target_ref=graph.target_ref,
+            target_origin=target_origin,
+            world_id=world_id,
+            peer_records=secondary_records,
+            peer_world_id=peer_world_id,
+            artifacts=artifact_values,
+            affordances=affordances,
+            interactions=interactions,
+            lifecycle=lifecycle,
+        )
         available_backends = []
         if proposals is not None and any(
             item.risk_class == CROSS_OBJECT_READ for item in proposals.proposals
@@ -758,8 +785,8 @@ class BehavioralShadowOrchestrator:
             lifecycle_available=bool(state_machine.candidates),
             available_backends=available_backends,
         )
-        payout_goal_plan = self.payout_goal_planner.plan_from_records(
-            (*primary_records, *secondary_records),
+        payout_goal_plan = self.payout_goal_planner.plan(
+            semantic_catalog.planner_operations(),
             graph=graph,
             context=payout_context,
             proposals=proposals,
@@ -823,6 +850,7 @@ class BehavioralShadowOrchestrator:
                     interactions=interactions,
                     interaction_admission=interaction_admission,
                     experiment_stage=experiment_stage,
+                    semantic_catalog=semantic_catalog,
                     payout_goal_plan=payout_goal_plan,
                     graph=graph,
                     closure=closure,
@@ -839,6 +867,7 @@ class BehavioralShadowOrchestrator:
             interactions=interactions,
             interaction_admission=interaction_admission,
             experiment_stage=experiment_stage,
+            semantic_catalog=semantic_catalog,
             payout_goal_plan=payout_goal_plan,
             graph=graph,
             closure=closure,

@@ -843,8 +843,11 @@ def _candidate_blockers(
     context: GoalPlanningContext,
     requirement: WorldRequirement,
     backend: str,
+    operation_observed: bool,
 ) -> Tuple[GoalBlocker, ...]:
     blockers = []
+    if not operation_observed:
+        blockers.append(GoalBlocker.build("operation_unconfirmed"))
     if context.authorization_ref is None:
         blockers.append(GoalBlocker.build("authorization_unavailable"))
     elif not context.authorization_approved:
@@ -1016,6 +1019,7 @@ class PayoutGoalTopologyPlanner:
                     context=context,
                     requirement=requirement,
                     backend=backend,
+                    operation_observed=operation.observed_success,
                 )
                 score = max(
                     0,

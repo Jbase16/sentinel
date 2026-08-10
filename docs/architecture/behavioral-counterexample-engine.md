@@ -1697,9 +1697,9 @@ trying something else.
 
 This slice creates no target traffic and grants no execution authority. It does not
 manufacture worlds, learn prerequisites from server failures, replan, execute a new
-proof family, promote a finding, or make the ordinary Scan UI choose a topology. Its
-sink recognition is only as complete as the redacted semantics preserved by the
-current operation catalog; REST and GraphQL semantic reconstruction remains R2 work.
+proof family, promote a finding, or make the ordinary Scan UI choose a topology. R2
+now supplies its redacted semantic inputs, while incomplete or unconfirmed semantics
+remain blockers rather than admissible proof goals.
 
 The novel kernel is a proof-carrying topology decision bound to the same deterministic
 shadow identity as the evidence that justified it. Instead of choosing a fixed scanner
@@ -1707,6 +1707,58 @@ template or asking an operator to select an account mode first, Sentinel can rep
 the payout-directed goal, required security property, minimum world arrangement, and
 current authority/backend blockers as one reproducible passive artifact—without that
 artifact itself becoming permission to execute.
+
+### Unified target-semantic catalog and resource provenance
+
+`TargetSemanticCatalogBuilder` now composes the previously separate passive evidence
+surfaces into one content-addressed graph. Sources retain both their kind and their
+epistemic status: captured REST and GraphQL exchanges, DOM controls, server-issued
+identifiers, and receipt-bound browser transitions are observed; OpenAPI is specified;
+JavaScript and source maps are published; lifecycle relationships are inferred; and
+unresolved operations remain unconfirmed. One source type cannot silently inherit the
+proof strength of another.
+
+The catalog represents operations, typed input/output slots, resources, and relations.
+Server-produced identifiers are distinguished from downstream inputs. Resource nodes
+remain isolated by world and tenant. Parent, ownership, tenant, role, lifecycle-read,
+and lifecycle-cleanup relationships retain their evidence references. Equivalent
+evidence deduplicates deterministically inside the same world and tenant, while the
+same operation in another world or tenant remains distinct.
+
+GraphQL operation names participate in semantic identity instead of being collapsed
+when request shapes match. Unnamed persisted operations remain explicitly unresolved.
+REST and published route labels retain allowlisted business semantics while replacing
+unknown segments. Forms and client validation metadata enter the same catalog without
+granting submission authority. Capability-linked JavaScript, source-map, and OpenAPI
+routes become typed published or specified leads; a lead that has not succeeded in
+captured traffic receives `operation_unconfirmed` and cannot become an admissible
+payout goal.
+
+Every bound has an observable failure surface. Record, artifact, source, operation,
+slot, resource, relation, and deficit truncation is counted. Ambiguous action semantics,
+conflicting artifact versions, unmatched routes, incomplete form semantics, redacted
+path semantics, and incomplete lifecycle evidence remain content-addressed coverage
+deficits. They are neither discarded nor interpreted as evidence that the target was
+exhausted.
+
+In plain language, Sentinel now keeps one connected map of what the target appears to
+offer and why it believes each part of that map. It can distinguish a door it actually
+opened from a door shown in the building plans, connect a server-created key to the
+later door that consumes it, and keep Alice's and Bob's otherwise identical rooms
+separate. If a label or relationship is missing, the map contains a visible blank
+instead of a confident guess.
+
+This slice creates no target traffic and grants no execution authority. It consumes
+only already-acquired records and artifacts. It does not fetch additional bundles or
+specifications, submit a form, follow a browser transition, learn constraints from a
+server failure, manufacture state, or execute a proof. Those remain separately gated
+R3-R8 responsibilities.
+
+The novel kernel is epistemically typed resource provenance feeding payout-directed
+proof planning without collapsing discovery into authority. A single deterministic
+artifact now records not only an operation name, but which world and tenant it belongs
+to, which inputs and server outputs connect it to other operations, which source class
+supports it, how strong that knowledge is, and precisely what uncertainty blocks it.
 
 ## Current baseline debt
 

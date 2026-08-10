@@ -111,6 +111,30 @@ def _blocker_codes(candidate):
     return {item.code for item in candidate.blockers}
 
 
+def test_unconfirmed_semantic_operation_cannot_become_an_admissible_goal():
+    operation = OperationContract(
+        operation_id=stable_hash("action", "published-export"),
+        label="artifact_route.get.api.export.id",
+        requires=(),
+        produces=(),
+        observed_success=False,
+        source_refs=(stable_hash("source_ref", "published-export"),),
+    )
+    plan = PayoutGoalTopologyPlanner().plan(
+        (operation,),
+        graph=_graph(),
+        context=_context(
+            owned_worlds=("alice", "bob"),
+            backends=("object_authorization",),
+            workflows=("behavioral_object_authorization",),
+        ),
+    )
+
+    assert plan.status == "blocked"
+    assert plan.selected is None
+    assert "operation_unconfirmed" in _blocker_codes(plan.candidates[0])
+
+
 def test_planner_preserves_all_initial_payout_sink_classes():
     operations = (
         _operation("ownership", "TransferAccountOwnership"),
