@@ -1668,6 +1668,46 @@ system records that no executable proof existed initially, which adaptive chain 
 one available, which exact oracle was selected, which receipt proves its terminal
 verdict, and which graph disposition consumed that evidence.
 
+### Passive payout-goal and proof-topology planning
+
+`PayoutGoalTopologyPlanner` adds a content-addressed, transport-free decision layer to
+the behavioral shadow run. It classifies redacted operation contracts into the first
+ten payout-sink families, expresses the security property that would need to be
+witnessed, and selects the minimum sufficient supported topology: zero-persona
+anonymous, fresh anonymous, one owned account, paired owned accounts, owned role
+differential, controlled lifecycle, or callback receiver. Its decision is derived
+from the current operation graph, existing authorization and prerequisite evidence,
+available proof backends, owned-world declarations, and the signed envelope summary.
+
+Every candidate carries explicit world requirements and blockers. Missing workflow
+authority, target origin, owned identity, role relationship, lifecycle control,
+callback receiver, or proof backend therefore prevents selection instead of widening
+authority. Inputs, candidates, and evidence references are bounded; dropped evidence
+is counted; public output contains content-addressed references rather than raw target
+URLs, identifiers, response bodies, or operation labels. The chosen plan ID is bound
+into the enclosing `BehavioralShadowRun`, so a change in evidence, authority, worlds,
+or topology changes the run identity.
+
+In plain language, Sentinel can now look at a valuable-looking operation and state
+which controlled setup would be needed to prove a bug. A private file may require an
+Alice-owned file and Bob's account, while an account-recovery boundary may require one
+owned account plus a clean browser. If the required account, permission, callback, or
+approved workflow is absent, Sentinel records that exact obstacle rather than silently
+trying something else.
+
+This slice creates no target traffic and grants no execution authority. It does not
+manufacture worlds, learn prerequisites from server failures, replan, execute a new
+proof family, promote a finding, or make the ordinary Scan UI choose a topology. Its
+sink recognition is only as complete as the redacted semantics preserved by the
+current operation catalog; REST and GraphQL semantic reconstruction remains R2 work.
+
+The novel kernel is a proof-carrying topology decision bound to the same deterministic
+shadow identity as the evidence that justified it. Instead of choosing a fixed scanner
+template or asking an operator to select an account mode first, Sentinel can represent
+the payout-directed goal, required security property, minimum world arrangement, and
+current authority/backend blockers as one reproducible passive artifact—without that
+artifact itself becoming permission to execute.
+
 ## Current baseline debt
 
 The broad repository suite is not a clean release gate yet. On the initial Phase 1

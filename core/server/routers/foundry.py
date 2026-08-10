@@ -1411,6 +1411,7 @@ async def run_behavioral_authorization_endpoint(
         authorization=envelope,
         actor_persona_id=source_persona.persona_id,
         executor=shadow_executor,
+        peer_persona_id=peer_persona.persona_id,
     )
     shadow_run = None
     adaptive_result = None

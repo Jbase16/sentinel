@@ -41,6 +41,11 @@ from .omission import (
     OmissionCompilationResult,
 )
 from .obligations import OPEN, SecurityObligationGraph, SecurityObligationGraphBuilder
+from .payout_goals import (
+    GoalPlanningContext,
+    PayoutGoalPlan,
+    PayoutGoalTopologyPlanner,
+)
 from .proposals import (
     CROSS_OBJECT_READ,
     AuthorizationExperimentProposal,
@@ -94,6 +99,7 @@ def _run_identity_payload(
     interactions: InteractionIntentCatalog,
     interaction_admission: InteractionAdmissionResult,
     experiment_stage: "OwnedExperimentShadowStage",
+    payout_goal_plan: PayoutGoalPlan,
     graph: SecurityObligationGraph,
     closure: SecurityClosureCertificate,
     ranked_frontier: Sequence["RankedSecurityObligation"],
@@ -113,6 +119,7 @@ def _run_identity_payload(
         "interaction_catalog_id": interactions.catalog_id,
         "interaction_admission_result_id": interaction_admission.result_id,
         "experiment_stage": experiment_stage.to_dict(),
+        "payout_goal_plan_id": payout_goal_plan.plan_id,
         "graph_digest": graph.graph_digest,
         "closure_certificate_id": closure.certificate_id,
         "ranked_frontier": [item.to_dict() for item in ranked_frontier],
@@ -138,6 +145,7 @@ class OwnedExperimentShadowContext:
     authorization: AuthorizationEnvelope = field(repr=False, compare=False)
     actor_persona_id: str = field(repr=False)
     executor: PolicyExecutor = field(repr=False, compare=False)
+    peer_persona_id: Optional[str] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -145,6 +153,14 @@ class OwnedExperimentShadowContext:
             or not isinstance(self.executor, PolicyExecutor)
             or not isinstance(self.actor_persona_id, str)
             or not self.actor_persona_id
+            or (
+                self.peer_persona_id is not None
+                and (
+                    not isinstance(self.peer_persona_id, str)
+                    or not self.peer_persona_id
+                    or self.peer_persona_id == self.actor_persona_id
+                )
+            )
         ):
             raise ValueError("owned experiment shadow context is invalid")
 
@@ -257,6 +273,7 @@ class BehavioralShadowRun:
         compare=False,
     )
     experiment_stage: OwnedExperimentShadowStage = field(repr=False, compare=False)
+    payout_goal_plan: PayoutGoalPlan = field(repr=False, compare=False)
     graph: SecurityObligationGraph = field(repr=False, compare=False)
     closure: SecurityClosureCertificate = field(repr=False, compare=False)
     ranked_frontier: Tuple[RankedSecurityObligation, ...]
@@ -277,6 +294,9 @@ class BehavioralShadowRun:
             or self.mode != BEHAVIORAL_SHADOW_ORCHESTRATOR_MODE
             or self.executable
             or self.graph.target_ref != self.closure.target_ref
+            or self.payout_goal_plan.target_ref != self.graph.target_ref
+            or self.payout_goal_plan.graph_digest != self.graph.graph_digest
+            or self.payout_goal_plan.executable
             or self.interaction_admission.catalog_id
             != self.interactions.catalog_id
             or self.interaction_admission.frontier_ref
@@ -327,6 +347,7 @@ class BehavioralShadowRun:
             interactions=self.interactions,
             interaction_admission=self.interaction_admission,
             experiment_stage=self.experiment_stage,
+            payout_goal_plan=self.payout_goal_plan,
             graph=self.graph,
             closure=self.closure,
             ranked_frontier=self.ranked_frontier,
@@ -351,6 +372,7 @@ class BehavioralShadowRun:
             "interactions": self.interactions.to_dict(),
             "interaction_admission": self.interaction_admission.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
+            "payout_goal_plan": self.payout_goal_plan.to_dict(),
             "obligation_graph": self.graph.to_dict(),
             "closure": self.closure.to_dict(),
         }
@@ -381,6 +403,7 @@ class BehavioralShadowOrchestrator:
         interaction_miner: Optional[InteractionIntentMiner] = None,
         interaction_selector: Optional[InteractionIntentSelector] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
+        payout_goal_planner: Optional[PayoutGoalTopologyPlanner] = None,
         graph_builder: Optional[SecurityObligationGraphBuilder] = None,
         closure_evaluator: Optional[SecurityClosureEvaluator] = None,
     ) -> None:
@@ -398,6 +421,7 @@ class BehavioralShadowOrchestrator:
             interaction_selector or InteractionIntentSelector()
         )
         self.experiment_factory = experiment_factory or OwnedExperimentFactory()
+        self.payout_goal_planner = payout_goal_planner or PayoutGoalTopologyPlanner()
         self.graph_builder = graph_builder or SecurityObligationGraphBuilder()
         self.closure_evaluator = closure_evaluator or SecurityClosureEvaluator()
 
@@ -651,6 +675,12 @@ class BehavioralShadowOrchestrator:
             raise ValueError("peer_world_id must identify a distinct non-empty world")
         if experiment_context is not None and experiment_context.actor_persona_id != world_id:
             raise ValueError("experiment context actor does not match world_id")
+        if (
+            experiment_context is not None
+            and experiment_context.peer_persona_id is not None
+            and experiment_context.peer_persona_id != peer_world_id
+        ):
+            raise ValueError("experiment context peer does not match peer_world_id")
 
         primary_records = tuple(records)
         secondary_records = tuple(peer_records)
@@ -705,6 +735,36 @@ class BehavioralShadowOrchestrator:
             omissions=omissions,
             interactions=interactions,
             interaction_source_world_ref=stable_hash("world", world_id),
+        )
+        available_backends = []
+        if proposals is not None and any(
+            item.risk_class == CROSS_OBJECT_READ for item in proposals.proposals
+        ):
+            available_backends.append("object_authorization")
+        if omissions.experiments:
+            available_backends.append("prerequisite_omission")
+        owned_world_ids = ()
+        authorization = None
+        if experiment_context is not None:
+            authorization = experiment_context.authorization
+            owned_world_ids = (experiment_context.actor_persona_id,)
+            if experiment_context.peer_persona_id is not None:
+                owned_world_ids = (*owned_world_ids, experiment_context.peer_persona_id)
+        payout_context = GoalPlanningContext.build(
+            target_ref=graph.target_ref,
+            target_origin=target_origin,
+            authorization=authorization,
+            owned_world_ids=owned_world_ids,
+            lifecycle_available=bool(state_machine.candidates),
+            available_backends=available_backends,
+        )
+        payout_goal_plan = self.payout_goal_planner.plan_from_records(
+            (*primary_records, *secondary_records),
+            graph=graph,
+            context=payout_context,
+            proposals=proposals,
+            state_machine=state_machine,
+            omissions=omissions,
         )
         if isinstance(dispositions, (str, bytes)):
             raise TypeError("dispositions must contain ObligationDisposition values")
@@ -763,6 +823,7 @@ class BehavioralShadowOrchestrator:
                     interactions=interactions,
                     interaction_admission=interaction_admission,
                     experiment_stage=experiment_stage,
+                    payout_goal_plan=payout_goal_plan,
                     graph=graph,
                     closure=closure,
                     ranked_frontier=ranked,
@@ -778,6 +839,7 @@ class BehavioralShadowOrchestrator:
             interactions=interactions,
             interaction_admission=interaction_admission,
             experiment_stage=experiment_stage,
+            payout_goal_plan=payout_goal_plan,
             graph=graph,
             closure=closure,
             ranked_frontier=ranked,

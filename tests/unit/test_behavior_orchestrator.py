@@ -126,7 +126,7 @@ def _authorization(*, compiled: bool = True):
     return envelope
 
 
-def _context(*, compiled: bool = True):
+def _context(*, compiled: bool = True, peer: bool = False):
     calls = []
 
     async def forbidden_transport(method, url, body=None, **kwargs):
@@ -156,6 +156,7 @@ def _context(*, compiled: bool = True):
             authorization=_authorization(compiled=compiled),
             actor_persona_id="alice",
             executor=executor,
+            peer_persona_id="bob" if peer else None,
         ),
         calls,
         executor,
@@ -167,7 +168,7 @@ def _run(*, context=True):
     calls = []
     executor = None
     if context:
-        experiment_context, calls, executor = _context()
+        experiment_context, calls, executor = _context(peer=True)
     result = BehavioralShadowOrchestrator().run(
         _source_records(),
         target_origin=ORIGIN,
@@ -188,6 +189,13 @@ def test_orchestrator_builds_and_ranks_one_unified_frontier_without_traffic():
     assert result.proposals is not None and len(result.proposals.proposals) == 2
     assert result.affordances.status == "ready"
     assert result.experiment_stage.status == "ready"
+    assert result.payout_goal_plan.status == "ready"
+    assert result.payout_goal_plan.selected is not None
+    assert (
+        result.payout_goal_plan.selected.world_requirement.topology.value
+        == "paired_owned_accounts"
+    )
+    assert result.to_dict()["payout_goal_plan"]["executable"] is False
     assert len(result.experiment_stage.inventory.experiments) == 1
     assert result.closure.open_count == 5
     assert len(result.ranked_frontier) == 5
@@ -203,6 +211,26 @@ def test_orchestrator_builds_and_ranks_one_unified_frontier_without_traffic():
     ]
     assert calls == []
     assert executor.policy.budget.snapshot()["total_requests"] == 0
+
+
+def test_shadow_identity_commits_to_the_passive_payout_topology_plan():
+    paired, paired_calls, _executor = _run()
+    single_context, single_calls, _single_executor = _context()
+    single = BehavioralShadowOrchestrator().run(
+        _source_records(),
+        target_origin=ORIGIN,
+        world_id="alice",
+        peer_records=_peer_records(),
+        peer_world_id="bob",
+        artifacts=_artifacts(),
+        experiment_context=single_context,
+    )
+
+    assert paired.payout_goal_plan.plan_id != single.payout_goal_plan.plan_id
+    assert paired.run_id != single.run_id
+    assert paired.payout_goal_plan.selected is not None
+    assert single.payout_goal_plan.selected is None
+    assert paired_calls == single_calls == []
 
 
 def test_orchestrator_attaches_page_bound_passive_interactions_without_traffic():

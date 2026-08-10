@@ -46,6 +46,8 @@ Bounded adaptive safe-read execution remains separately default-off and explicit
 through :mod:`core.behavior.interaction_adaptive`.
 Adaptive-chain to proof-plan binding remains transport-free and can only follow
 explicitly enabled adaptive acquisition through :mod:`core.behavior.adaptive_proof`.
+Payout-goal and proof-topology selection remains passive and explicit-only through
+:mod:`core.behavior.payout_goals`; importing :mod:`core.behavior` does not expose it.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

@@ -109,8 +109,8 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | State-machine prerequisite omission oracle | Implemented, narrow | Exact capability-linked lifecycle omissions can be recreated, compared, and independently confirmed. | Generalize prerequisite types, lifecycle shapes, and non-account state machines. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
 | Ordinary one-click behavioral bridge | Implemented | The native Scan UI can send paired-persona or anonymous-passive profiles to the backend. | Replace manual proof-topology choice with an evidence-driven recommendation and permitted automatic selection. |
-| Proof topology selector | Missing as a universal component | The obligation resolver selects among already-supported proof backends; the operator selects paired versus anonymous mode. | Select the minimum sufficient zero-, one-, two-, role-, lifecycle-, or callback-world topology from evidence and authority. |
-| Payout-grade goal language | Missing beyond a small terminal goal | `BackwardGoal` names a terminal operation and required outputs; high-value names receive basic selection. | Represent impact, protected subject, violated property, witness requirements, cleanup, and program-relevant evidence. |
+| Proof topology selector | Implemented, passive and bounded | `PayoutGoalTopologyPlanner` selects the minimum supported zero-, one-, two-, role-, lifecycle-, or callback-world topology from redacted operation semantics, proof-backend availability, owned worlds, and envelope authority. | Feed it the richer semantics from R2, generalize executable worlds in R4, and let the ordinary-click coordinator consume the decision in R8. |
+| Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, evidence-quality, and learned prerequisite requirements in R2-R6. |
 | Failure-derived constraint learning | Missing | Failures become blockers, receipts, or graph dispositions. | Convert trustworthy response evidence into typed missing prerequisites without treating an error string as proof. |
 | Deterministic replanning | Missing as a general loop | Adaptive reads can continue while the current frontier progresses. | Recompile after learned constraints or disproved assumptions while preserving plan identity, bounds, and authority. |
 | Generalized counterexample/oracle SDK | Missing | Authorization, owned-boundary, and omission implementations have separate strict contracts. | Introduce a common experiment, control, witness, cleanup, and verdict contract without weakening each oracle. |
@@ -124,7 +124,8 @@ This list preserves the ten original requirements verbatim in meaning and assign
 one to the forward backlog.
 
 - [x] Typed operation graph describing what an action consumes and produces.
-- [ ] Rich goal language for payout-grade security witnesses. **R1**
+- [x] Initial rich goal language for payout-grade security witnesses. **R1**;
+  refine impact, cleanup, and evidence requirements in **R2-R6**.
 - [x] Bounded backward prerequisite solver.
 - [x] Exact variable binding for supported captured locations.
 - [ ] General multi-step execution beyond the current owned lifecycle shapes. **R4**
@@ -142,7 +143,7 @@ one to the forward backlog.
 | 2. Observation normalization and deterministic state fingerprinting | Implemented. | Preserve in R2-R6 |
 | 3. Passive action/resource/capability graph | Implemented, bounded. | Generalize in R2 |
 | 4. Coverage ledger with no active traffic | Implemented for known evidence. | Extend in R6 |
-| 5. Isolated world manager | Partial through persona worlds and browser ownership. | Generalize in R1 and R4 |
+| 5. Isolated world manager | Partial through persona worlds and browser ownership; R1 now represents the required topology without creating worlds. | Generalize runtime world construction in R4 |
 | 6. Authorization hyperproperty oracle | Implemented, narrow. | Generalize in R5A |
 | 7. Policy-constrained experiment executor | Implemented for admitted shapes. | Generalize in R4 |
 | 8. Old-versus-new differential validation | Partial through shadow promotion and vulnerable/secure controls. | Preserve per R5 family |
@@ -182,7 +183,7 @@ No target traffic. No execution-authority change.
 
 ### R1 — Universal payout goals and proof topology
 
-Status: **next implementation slice**.
+Status: **implemented and focused-tested**.
 
 #### Technical explanation
 
@@ -232,12 +233,12 @@ No target traffic. No new execution authority.
 
 #### Exit gate
 
-- [ ] The same evidence produces the same ranked goals and topology on repeated runs.
-- [ ] Zero-, one-, and two-persona fixtures select different correct topologies.
-- [ ] Unsupported callback or role requirements remain visible blockers.
-- [ ] No selector code imports or invokes a target transport.
-- [ ] No raw identity, token, URL query value, or response body enters public output.
-- [ ] Existing authorization and omission planners remain behaviorally unchanged.
+- [x] The same evidence produces the same ranked goals and topology on repeated runs.
+- [x] Zero-, one-, and two-persona fixtures select different correct topologies.
+- [x] Unsupported callback or role requirements remain visible blockers.
+- [x] No selector code imports or invokes a target transport.
+- [x] No raw identity, token, URL query value, or response body enters public output.
+- [x] Existing authorization and omission planners remain behaviorally unchanged.
 
 ### R2 — Complete target semantic reconstruction
 
@@ -250,6 +251,12 @@ and observed lifecycle transitions. Add explicit resource provenance and parent-
 ownership, tenant, role, and lifecycle-state relationships. Every inferred operation
 must retain redacted source references and an epistemic status: observed, specified,
 published, inferred, or unconfirmed.
+
+R1 intentionally exposes an important input deficit rather than weakening redaction:
+current REST normalization can replace semantic path segments with placeholders, and
+captured GraphQL exchanges can collapse distinct operation labels after normalization.
+R2 must reconstruct stable redacted semantics before the payout selector can claim
+complete sink recognition from ordinary captured traffic.
 
 #### Non-technical explanation
 
@@ -548,7 +555,7 @@ operator-confirmed.
 This is the execution order unless a newly discovered safety dependency requires an
 explicit plan revision:
 
-1. [ ] **R1** — payout-goal contracts and passive proof-topology selector.
+1. [x] **R1** — payout-goal contracts and passive proof-topology selector.
 2. [ ] **R2** — unified semantic reconstruction and resource provenance.
 3. [ ] **R3** — constraint ledger and deterministic replanning.
 4. [ ] **R4** — generalized experiment, world, and oracle SDK.
@@ -559,8 +566,10 @@ explicit plan revision:
 9. [ ] **R5E-R5F** — separately gated integrity and boundary-disagreement families.
 10. [ ] **R9** — continuous real-target validation and payout acceptance.
 
-R1-R4 are the missing universal-planner center. R5-R8 turn that center into broader
-finding yield and an operator-ready workflow. R9 is how the product claim is earned.
+R1 establishes the first passive decision layer of the universal-planner center.
+R2-R4 supply the semantic, replanning, and executable-world substrate it still lacks.
+R5-R8 turn that center into broader finding yield and an operator-ready workflow. R9
+is how the product claim is earned.
 
 ## Acceptance strategy from this point
 
@@ -583,7 +592,10 @@ falsify its new claim. Proposed future coverage is:
 
 Scenario numbers are reservations, not implementations. A scenario is added only with
 the corresponding slice; the plan must not create a second speculative lab backlog
-detached from production code.
+detached from production code. R1's S11 purpose is currently covered by deterministic
+zero-, one-, and two-persona contract fixtures. The visual system scenario remains
+reserved until R8 exposes topology selection through the ordinary scan workflow; R1
+deliberately adds no UI or execution surface.
 
 ## Permanent verification rules
 
