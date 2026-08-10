@@ -51,6 +51,21 @@ class TestToolCommandGeneration:
         assert os.path.basename(cmd[0]) == "dnsx"
         assert "bash" not in cmd
 
+    def test_linked_crawl_is_bounded_and_does_not_use_the_directory_wordlist(self):
+        cmd, stdin = get_tool_command("linked_crawl", "https://example.com")
+
+        assert stdin is None
+        assert os.path.basename(cmd[0]) == "feroxbuster"
+        assert "-n" in cmd
+        assert cmd[cmd.index("--threads") + 1] == "1"
+        assert cmd[cmd.index("--rate-limit") + 1] == "2"
+        wordlist = cmd[cmd.index("-w") + 1]
+        assert wordlist.endswith("assets/wordlists/link-crawl-seed.txt")
+        exclusion = cmd[cmd.index("--dont-scan") + 1]
+        assert "/static/" in exclusion
+        assert "login" in exclusion
+        assert "signup" in exclusion
+
     def test_no_shell_injection_in_target(self):
         """
         Target with shell metacharacters is safe because subprocess uses list args.

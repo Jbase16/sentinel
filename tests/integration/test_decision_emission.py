@@ -23,6 +23,7 @@ from core.scheduler.intents import (
     INTENT_ACTIVE_LIVE_CHECK,
     INTENT_SURFACE_ENUMERATION,
     INTENT_VULN_SCANNING,
+    INTENT_VERIFICATION,
     INTENT_HEAVY_ARTILLERY
 )
 
@@ -129,6 +130,7 @@ class TestIntentTransitionEmission:
                 INTENT_ACTIVE_LIVE_CHECK,
                 INTENT_SURFACE_ENUMERATION,
                 INTENT_VULN_SCANNING,
+                INTENT_VERIFICATION,
                 INTENT_HEAVY_ARTILLERY
             ], f"Unknown intent: {decision.chosen}"
             

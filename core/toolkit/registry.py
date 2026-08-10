@@ -146,6 +146,11 @@ class WordlistManager:
 
 # Initialize common wordlist path (Guaranteed to be a string path now)
 COMMON_WORDLIST = WordlistManager.get_path("common.txt")
+LINK_CRAWL_WORDLIST = str((WORDLIST_DIR / "link-crawl-seed.txt").resolve())
+LINK_CRAWL_EXCLUSION_PATTERN = (
+    r".*(?:/static/|/(?:login|log-in|signin|sign-in|signup|sign-up|register|password|account)"
+    r"(?:[/?#]|$)|\.js(?:\?|$)|\.css(?:\?|$)).*"
+)
 
 
 # --------------------------------------------------------------------------
@@ -323,6 +328,28 @@ _tool_data = [
         cmd_template=["gobuster", "dir", "-u", "{target}", "-w", COMMON_WORDLIST],
         aggressive=True,
         target_type="url"
+    ),
+    ToolDefinition(
+        name="linked_crawl",
+        label="Linked crawl (bounded same-origin discovery)",
+        cmd_template=[
+            "feroxbuster",
+            "-u",
+            "{target}",
+            "-w",
+            LINK_CRAWL_WORDLIST,
+            "-n",
+            "--threads",
+            "1",
+            "--rate-limit",
+            "2",
+            "--silent",
+            "--dont-scan",
+            LINK_CRAWL_EXCLUSION_PATTERN,
+        ],
+        aggressive=False,
+        target_type="url",
+        binary_name="feroxbuster",
     ),
     ToolDefinition(
         name="feroxbuster",

@@ -2206,6 +2206,7 @@ _HANDLERS: Dict[str, Callable[[str, str], List[RawFinding]]] = {
     "dirsearch": _handle_dirsearch,
     "gobuster": _handle_gobuster,
     "feroxbuster": _handle_feroxbuster,
+    "linked_crawl": _handle_feroxbuster,
     "nikto": _handle_nikto,
     "masscan": _handle_masscan,
     "naabu": _handle_naabu,

@@ -103,6 +103,13 @@ class ToolRegistry:
             "intrusiveness": 2,
             "gates": ["protocol:http", "protocol:https"]
         },
+        "linked_crawl": {
+            "intent": INTENT_SURFACE_ENUMERATION,
+            "phase": PHASE_3_SURFACE,
+            "cost": 2,
+            "intrusiveness": 1,
+            "gates": ["protocol:http", "protocol:https"],
+        },
          "feroxbuster": {
             "intent": INTENT_SURFACE_ENUMERATION,
             "phase": PHASE_3_SURFACE,

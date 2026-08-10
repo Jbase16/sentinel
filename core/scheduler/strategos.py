@@ -853,6 +853,22 @@ class Strategos:
                             chosen_action = "SKIP_NO_TOOLS"
                             rationale = "No runnable tools for this intent; advancing to the next intent."
                             suppressed = ["CONCLUDE_PHASE"]
+                        elif (
+                            mode != ScanMode.PASSIVE
+                            and target_classification.value != "file"
+                            and current_intent
+                            in {INTENT_PASSIVE_RECON, INTENT_ACTIVE_LIVE_CHECK}
+                        ):
+                            # DNS recon and a liveness probe cannot justify abandoning an
+                            # explicit URL before its public surface has been mapped. Empty
+                            # output is common for valid single-host targets and says nothing
+                            # about links or application routes exposed by the seed page.
+                            chosen_action = "CONTINUE_ENGAGEMENT"
+                            rationale = (
+                                "Minimum URL baseline is incomplete; proceeding through "
+                                "active reachability and surface enumeration."
+                            )
+                            suppressed = ["CONCLUDE_PHASE"]
                         elif has_findings or has_new_surface:
                              chosen_action = "CONTINUE_ENGAGEMENT"
                              rationale = f"Novel surface or findings detected ({self.context.findings_this_intent} new)."

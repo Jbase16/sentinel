@@ -56,6 +56,36 @@ class TestStrategosIntentProgression:
         assert INTENT_PASSIVE_RECON in intents
         assert INTENT_ACTIVE_LIVE_CHECK in intents
 
+    @pytest.mark.asyncio
+    async def test_empty_recon_cannot_end_explicit_url_scan_before_surface_mapping(self):
+        """A URL must be touched and crawled before an empty result can end the scan."""
+        brain = Strategos()
+        dispatched = []
+        original_scope = brain._capability_gate.scope_targets
+        original_mode = brain._capability_gate.mode
+
+        async def dispatch(tool: str) -> List[Dict]:
+            dispatched.append(tool)
+            return []
+
+        try:
+            await brain.run_mission(
+                target="https://example.com",
+                available_tools=["subfinder", "httpx", "hakrawler"],
+                mode=ScanMode.STANDARD,
+                dispatch_tool=dispatch,
+            )
+
+            assert "subfinder" in dispatched
+            assert "httpx" in dispatched
+            assert "hakrawler" in dispatched
+            assert dispatched.index("subfinder") < dispatched.index("httpx")
+            assert dispatched.index("httpx") < dispatched.index("hakrawler")
+            assert brain.context.knowledge["last_assessment"] == "CONCLUDE_PHASE"
+        finally:
+            brain._capability_gate.scope_targets = original_scope
+            brain._capability_gate.set_mode(original_mode)
+
 
 class TestStrategosToolSelection:
     """Test that Strategos correctly selects tools for intents."""
