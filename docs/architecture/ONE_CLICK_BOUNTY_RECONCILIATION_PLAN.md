@@ -98,9 +98,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Original capability | Status | Current implementation | Remaining obligation |
 |---|---|---|---|
 | Deterministic observation and state fingerprints | Implemented | `normalize.py`, `models.py`, and `graph.py` produce redacted action, state, transition, and world identities. | Preserve these identities across every new semantic source. |
-| Passive action/resource/capability graph | Implemented, bounded and unified | `TargetSemanticCatalog` joins observed REST, GraphQL, DOM/form, server-identifier, lifecycle, browser-transition, JavaScript, source-map, and OpenAPI evidence without merging evidence strength. | Preserve the catalog through R3-R8 and expand only through bounded source adapters. |
-| Typed `requires -> produces` operations | Implemented with resource provenance | `SemanticOperation`, `SemanticSlot`, `SemanticResource`, and `SemanticRelation` type downstream inputs, server-issued IDs, parent, owner, tenant, role, and lifecycle context. | Learn missing constraints in R3 and turn the typed graph into generalized controlled state in R4. |
-| Backward prerequisite search | Implemented, analysis only | `BackwardExploitCompiler` performs deterministic bounded prerequisite search. | Connect it to universal goals, learned constraints, and generalized manifests. |
+| Passive action/resource/capability graph | Implemented, bounded and unified | `TargetSemanticCatalog` joins observed REST, GraphQL, DOM/form, server-identifier, lifecycle, browser-transition, JavaScript, source-map, and OpenAPI evidence without merging evidence strength. | Preserve the catalog through R4-R8 and expand only through bounded source adapters. |
+| Typed `requires -> produces` operations | Implemented with resource provenance | `SemanticOperation`, `SemanticSlot`, `SemanticResource`, and `SemanticRelation` type downstream inputs, server-issued IDs, parent, owner, tenant, role, and lifecycle context. | Turn the typed graph and R3 learned facts into generalized controlled state in R4. |
+| Backward prerequisite search | Implemented, analysis only | `ConstraintReplanner` now connects payout witness goals and evidence-backed constraints to the deterministic bounded `BackwardExploitCompiler`. | Connect replanned sequences to generalized R4 manifests and experiment admission. |
 | Exact value lineage and variable binding | Implemented, narrow | `ValueLineageLedger` and `PlanRehydrator` bind captured values across path, query, JSON, form, and GraphQL locations in one world. | Support additional typed values and safely proven cross-world handoffs where a proof topology requires them. |
 | Owned lifecycle manufacturing and cleanup | Narrow | Captured create/read/cleanup lifecycles can become admitted controlled sequences. | Generalize beyond direct path-bound identifiers and the current lifecycle shapes. |
 | Latent capability-directed discovery | Passive and cataloged | Capability-linked JavaScript, source-map, and OpenAPI routes become published or specified semantic operations; unmatched and ambiguous routes remain coverage deficits. | Feed every source through ordinary acquisition and actively confirm only through separately admitted R4-R8 workflows. |
@@ -110,9 +110,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
 | Ordinary one-click behavioral bridge | Implemented | The native Scan UI can send paired-persona or anonymous-passive profiles to the backend. | Replace manual proof-topology choice with an evidence-driven recommendation and permitted automatic selection. |
 | Proof topology selector | Implemented, passive and bounded | `PayoutGoalTopologyPlanner` now consumes R2 semantic projections and selects the minimum supported zero-, one-, two-, role-, lifecycle-, or callback-world topology from evidence, proof-backend availability, owned worlds, and envelope authority. | Generalize executable worlds in R4 and let the ordinary-click coordinator consume the decision in R8. |
-| Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and learned prerequisite requirements in R3-R6. |
-| Failure-derived constraint learning | Missing | Failures become blockers, receipts, or graph dispositions. | Convert trustworthy response evidence into typed missing prerequisites without treating an error string as proof. |
-| Deterministic replanning | Missing as a general loop | Adaptive reads can continue while the current frontier progresses. | Recompile after learned constraints or disproved assumptions while preserving plan identity, bounds, and authority. |
+| Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
+| Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
+| Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
 | Generalized counterexample/oracle SDK | Missing | Authorization, owned-boundary, and omission implementations have separate strict contracts. | Introduce a common experiment, control, witness, cleanup, and verdict contract without weakening each oracle. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
@@ -129,8 +129,8 @@ one to the forward backlog.
 - [x] Bounded backward prerequisite solver.
 - [x] Exact variable binding for supported captured locations.
 - [ ] General multi-step execution beyond the current owned lifecycle shapes. **R4**
-- [ ] Constraint learning from trustworthy failure evidence. **R3**
-- [ ] Deterministic replanning after an assumed path fails. **R3**
+- [x] Constraint learning from trustworthy failure evidence. **R3**
+- [x] Deterministic replanning after an assumed path fails. **R3**
 - [ ] General safe creation and cleanup of controlled state. **R4-R5**
 - [ ] General proof-oracle contract and additional property families. **R4-R5**
 - [ ] High-value sink coverage ledger with defensible blocked/exhausted states. **R6**
@@ -285,6 +285,13 @@ boundaries. No mutation authority is added.
 
 ### R3 — Constraint learning and deterministic replanning
 
+**Status: complete as a passive kernel.** `constraints.py` creates a bounded,
+content-addressed ledger from already-acquired structured responses and independent
+controls. `replanning.py` applies facts to the existing operation contracts and
+recompiles the same `SecurityWitnessGoal` without changing policy or authority. Raw
+free text is never retained as a prerequisite fact, and neither module imports a
+transport.
+
 #### Technical explanation
 
 Introduce a content-addressed `ConstraintLedger` for response-backed prerequisite
@@ -320,11 +327,11 @@ experiment boundary and the original signed envelope.
 
 #### Exit gate
 
-- [ ] Structured missing-prerequisite responses create deterministic typed constraints.
-- [ ] Untrusted free text cannot directly authorize or satisfy a prerequisite.
-- [ ] Replanning never repeats a disproved identical plan.
-- [ ] Cycles, contradictory constraints, and search bounds produce honest blockers.
-- [ ] A lab flow demonstrates `fail -> learn -> replan -> controlled success`.
+- [x] Structured missing-prerequisite responses create deterministic typed constraints.
+- [x] Untrusted free text cannot directly authorize or satisfy a prerequisite.
+- [x] Replanning never repeats a disproved identical plan.
+- [x] Cycles, contradictory constraints, and search bounds produce honest blockers.
+- [x] A lab-shaped offline flow demonstrates `fail -> learn -> replan -> controlled prerequisite path`; R4 remains responsible for admitted target execution.
 
 ### R4 — Generalized experiment, world, and oracle SDK
 
@@ -560,7 +567,7 @@ explicit plan revision:
 
 1. [x] **R1** — payout-goal contracts and passive proof-topology selector.
 2. [x] **R2** — unified semantic reconstruction and resource provenance.
-3. [ ] **R3** — constraint ledger and deterministic replanning.
+3. [x] **R3** — constraint ledger and deterministic replanning.
 4. [ ] **R4** — generalized experiment, world, and oracle SDK.
 5. [ ] **R5A-R5D** — highest-yield proof families.
 6. [ ] **R6** — coverage-guided scheduling and stop certificates.
@@ -569,9 +576,9 @@ explicit plan revision:
 9. [ ] **R5E-R5F** — separately gated integrity and boundary-disagreement families.
 10. [ ] **R9** — continuous real-target validation and payout acceptance.
 
-R1 and R2 establish the passive decision and semantic substrate of the universal
-planner center. R3-R4 supply learned constraints, replanning, and executable-world
-construction. R5-R8 turn that center into broader finding yield and an operator-ready
+R1-R3 establish the passive decision, semantic, constraint-learning, and replanning
+substrate of the universal planner center. R4 supplies executable-world construction.
+R5-R8 turn that center into broader finding yield and an operator-ready
 workflow. R9 is how the product claim is earned.
 
 ## Acceptance strategy from this point
