@@ -347,6 +347,10 @@ class _LegProgress:
     create_attempted: bool = False
     create_completed: bool = False
     omitted_capability: Optional[Any] = field(default=None, repr=False)
+    terminal_request: Optional[EphemeralRehydratedStep] = field(
+        default=None,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -383,6 +387,8 @@ class _ReservationCursor:
         self.index = 0
         self.attempted = 0
         self.sent = 0
+        self.skipped = 0
+        self.attempted_ordinals: list[int] = []
 
     async def send(
         self,
@@ -395,6 +401,7 @@ class _ReservationCursor:
         if expected_index != self.index:
             raise FreshOmissionDenied("fresh_omission_reservation_order_changed")
         self.attempted += 1
+        self.attempted_ordinals.append(expected_index)
         remaining_before = self.budget.reservation_remaining(self.reservation_id)
         total_before = self.budget.snapshot()["total_requests"]
         try:
@@ -402,7 +409,10 @@ class _ReservationCursor:
         except BaseException:
             remaining_after = self.budget.reservation_remaining(self.reservation_id)
             if remaining_after == remaining_before:
-                self.budget.skip_reservation_entries(self.reservation_id, 1)
+                self.skipped += self.budget.skip_reservation_entries(
+                    self.reservation_id,
+                    1,
+                )
             self.sent += max(
                 0,
                 self.budget.snapshot()["total_requests"] - total_before,
@@ -411,7 +421,10 @@ class _ReservationCursor:
             raise
         remaining_after = self.budget.reservation_remaining(self.reservation_id)
         if remaining_after == remaining_before:
-            self.budget.skip_reservation_entries(self.reservation_id, 1)
+            self.skipped += self.budget.skip_reservation_entries(
+                self.reservation_id,
+                1,
+            )
         self.sent += max(
             0,
             self.budget.snapshot()["total_requests"] - total_before,
@@ -424,7 +437,10 @@ class _ReservationCursor:
             raise FreshOmissionDenied("fresh_omission_reservation_skip_is_invalid")
         count = target_index - self.index
         if count:
-            self.budget.skip_reservation_entries(self.reservation_id, count)
+            self.skipped += self.budget.skip_reservation_entries(
+                self.reservation_id,
+                count,
+            )
             self.index = target_index
 
 
@@ -582,6 +598,8 @@ class FreshOmissionBoundaryExecutor:
     def _validate_policy(
         self,
         reserved_actions: Sequence[Tuple[str, str]],
+        *,
+        budget_reservation_id: Optional[str] = None,
     ) -> None:
         policy = self.executor.policy
         budget = policy.budget
@@ -600,6 +618,13 @@ class FreshOmissionBoundaryExecutor:
             or budget.allow_delete
             or budget.allow_real_user_data_access
             or any(budget.snapshot().values())
+            or (
+                budget_reservation_id is not None
+                and not budget.reservation_matches(
+                    budget_reservation_id,
+                    reserved_actions,
+                )
+            )
         ):
             raise FreshOmissionDenied(
                 "fresh_omission_requires_exact_unused_bounty_safe_policy"
@@ -621,7 +646,23 @@ class FreshOmissionBoundaryExecutor:
             cleanup_action,
         )
 
-    def _preflight(self) -> _OmissionPreflight:
+    def _preflight(
+        self,
+        *,
+        admitted: bool = False,
+        budget_reservation_id: Optional[str] = None,
+        cleanup_verification_count: int = 0,
+    ) -> _OmissionPreflight:
+        if (
+            not isinstance(admitted, bool)
+            or isinstance(cleanup_verification_count, bool)
+            or not isinstance(cleanup_verification_count, int)
+            or cleanup_verification_count < 0
+            or cleanup_verification_count > self.expected_creates
+            or (not admitted and cleanup_verification_count)
+            or (budget_reservation_id is not None and not admitted)
+        ):
+            raise FreshOmissionDenied("fresh_omission_admitted_contract_is_invalid")
         if not self.config.enabled:
             raise FreshOmissionDenied("fresh_omission_execution_is_disabled")
         if not self.world_id or not self.actor_persona_id:
@@ -881,9 +922,23 @@ class FreshOmissionBoundaryExecutor:
             omission_actions=omission_actions,
             cleanup_action=cleanup_action,
         )
-        self._validate_policy(reserved_actions)
+        if cleanup_verification_count:
+            verification_action = (
+                SAFE_READ,
+                endpoint_key(
+                    requests[self.experiment.terminal_operation_id].url
+                ),
+            )
+            reserved_actions = (
+                *reserved_actions,
+                *(verification_action for _ in range(cleanup_verification_count)),
+            )
+        self._validate_policy(
+            reserved_actions,
+            budget_reservation_id=budget_reservation_id,
+        )
 
-        for action_class, operation_id in (
+        preflight_actions = () if admitted else (
             *(
                 (
                     OWNED_CREATE
@@ -902,7 +957,8 @@ class FreshOmissionBoundaryExecutor:
                 )
                 for item in self.experiment.omission_operation_ids
             ),
-        ):
+        )
+        for action_class, operation_id in preflight_actions:
             request = requests[operation_id]
             decision = self.executor.policy.evaluate_action(
                 CandidateAction(
@@ -923,24 +979,25 @@ class FreshOmissionBoundaryExecutor:
                 raise FreshOmissionDenied(
                     f"fresh_omission_policy_preflight_denied:{decision.reason}"
                 )
-        cleanup_decision = self.executor.policy.evaluate_action(
-            CandidateAction(
-                method=cleanup_request.method,
-                url=cleanup_request.url,
-                body=classification_body(cleanup_request.body),
-                hint=OWNED_UPDATE_LOW_RISK,
-                actor_persona_id=self.actor_persona_id,
-                target_owner_persona_id=self.actor_persona_id,
-                target_is_researcher_owned=True,
-                expected_side_effect="cleanup_owned_test_object",
-                proof_goal=self.cleanup_proof_goal,
+        if not admitted:
+            cleanup_decision = self.executor.policy.evaluate_action(
+                CandidateAction(
+                    method=cleanup_request.method,
+                    url=cleanup_request.url,
+                    body=classification_body(cleanup_request.body),
+                    hint=OWNED_UPDATE_LOW_RISK,
+                    actor_persona_id=self.actor_persona_id,
+                    target_owner_persona_id=self.actor_persona_id,
+                    target_is_researcher_owned=True,
+                    expected_side_effect="cleanup_owned_test_object",
+                    proof_goal=self.cleanup_proof_goal,
+                )
             )
-        )
-        if not cleanup_decision.allowed:
-            raise FreshOmissionDenied(
-                "fresh_omission_cleanup_policy_preflight_denied:"
-                f"{cleanup_decision.reason}"
-            )
+            if not cleanup_decision.allowed:
+                raise FreshOmissionDenied(
+                    "fresh_omission_cleanup_policy_preflight_denied:"
+                    f"{cleanup_decision.reason}"
+                )
 
         payload = {
             "mode": self.boundary_mode,
@@ -995,11 +1052,22 @@ class FreshOmissionBoundaryExecutor:
 
         return self._preflight().boundary_id
 
-    async def _claim(self, expected_boundary_id: Optional[str]) -> _OmissionPreflight:
+    async def _claim(
+        self,
+        expected_boundary_id: Optional[str],
+        *,
+        admitted: bool = False,
+        budget_reservation_id: Optional[str] = None,
+        cleanup_verification_count: int = 0,
+    ) -> _OmissionPreflight:
         async with self._lock:
             if self._consumed:
                 raise FreshOmissionDenied("fresh_omission_executor_already_consumed")
-            preflight = self._preflight()
+            preflight = self._preflight(
+                admitted=admitted,
+                budget_reservation_id=budget_reservation_id,
+                cleanup_verification_count=cleanup_verification_count,
+            )
             if (
                 expected_boundary_id is not None
                 and preflight.boundary_id != expected_boundary_id
@@ -1192,6 +1260,7 @@ class FreshOmissionBoundaryExecutor:
                     status=int(status),
                     response=response,
                 )
+                progress.terminal_request = copy.deepcopy(request)
             progress.completed += 1
         if progress.owned_object is None or progress.terminal_evidence is None:
             raise _OmissionAbort(

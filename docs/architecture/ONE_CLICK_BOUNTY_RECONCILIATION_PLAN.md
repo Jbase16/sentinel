@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | URL-addressed authorization execution implemented; omission execution pending | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C1 adapter now consumes that exact claim through the existing authorization oracle, adds an independent owner witness, and terminalizes a redacted non-promoting evaluation receipt. | Adapt the existing omission backend in R4C2; generalized body, query, form, and GraphQL ownership locators remain R5A. |
+| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. Omission execution preserves three fresh owned states, one omitted binding, a wrong-object control, bounded cleanup, independent cleanup reads, and a redacted non-promoting evaluation receipt. | Generalized body, query, form, and GraphQL ownership locators remain R5A; ordinary one-click selection and dispatch remain later integration work. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -382,39 +382,48 @@ and proof budget already sealed.
   Current ownership admission is limited to objects whose researcher-created identity
   can be proven from the request URL; body, query, form, and GraphQL object bindings
   remain R5A rather than being accepted on caller assertion.
-- [ ] **R4C2 — Admitted omission execution and cleanup receipt.** Adapt the existing
-  omission executor to the same claim boundary without weakening its fresh-state,
-  single-delta, wrong-object control, mutation uncertainty, or cleanup requirements.
+- [x] **R4C2 — Admitted omission execution and cleanup receipt.** The separately
+  default-off `AdmittedOmissionExperimentExecutor` revalidates one lifecycle-bound
+  owned world, the exact baseline/treatment/witness topology, all runtime action
+  binding IDs, and the original R4B reservation before delegating to the existing
+  fresh-state confirmation backend. The admitted backend preserves the valid
+  baseline, removes exactly one query-capability binding, runs the independent
+  wrong-object control, cleans every fresh object, and then repeats a safe read for
+  each object to prove archival, removal, or terminal absence. An uncertain create,
+  policy denial, cleanup response, or cleanup read stops promotion, releases unused
+  slots, records an orphan warning, and produces only an inconclusive generalized
+  evaluation. Even a confirmed fail-open yields a content-addressed candidate
+  reference with mandatory adversarial triage and no finding authority.
 
 R4A and R4B send no target traffic and provision no browser, persona, or callback.
 R4B does reserve mutable policy budget and creates narrowly scoped eligibility for a
-future backend adapter, but it grants no ambient or direct dispatch authority. Owned
+single-use backend adapter, but it grants no ambient or direct dispatch authority. Owned
 worlds are checked against the Persona Vault; role, lifecycle, anonymous, and callback
-worlds additionally fail closed without a backend-supplied attestation validator. R4
-remains incomplete until R4C2 consumes an omission claim and preserves its mutation
-and cleanup outcomes in the generalized receipt boundary.
+worlds additionally fail closed without a backend-supplied attestation validator.
+R4's backend-adapter kernel is complete at this explicit-only boundary. It is not yet
+ordinary one-click behavior: later slices must expand proof families, schedule them,
+and connect admitted experiments to the normal URL-scan workflow.
 
 #### Target traffic and execution authority
 
-R4C1 introduces up to four read requests only when both admission and authorization
-execution are explicitly enabled: peer baseline, source baseline, cross-object
-counterfactual, and independent owner witness. Every request consumes the exact atomic
-reservation through `PolicyExecutor`; no mutation, cleanup, ambient authority, finding
-promotion, or automatic ordinary-scan activation is introduced. Each later backend
-still requires its own workflow/action-class grant, policy executor, provenance,
-durable receipt, and fail-closed cleanup contract where mutation is possible.
+R4C1 introduces up to four reads when both admission and authorization execution are
+explicitly enabled. R4C2 separately permits one exact admitted omission sequence of up
+to 52 requests under the existing plan-step ceiling (13 for the current three-step
+recipe): three researcher-owned creates at most, the bounded baseline/omission/control
+reads, three archival or deactivation mutations, and three cleanup-verification reads.
+Every action consumes the pre-reserved sequence through `PolicyExecutor`; no delete,
+real-user-data authority, ambient dispatch, finding promotion, or automatic ordinary-
+scan activation is introduced.
 
 #### Exit gate
 
-- [ ] Existing authorization and omission backends conform without weaker checks.
-  URL-addressed authorization conforms through R4C1; generalized locator ownership
-  remains R5A, and omission runtime conformance remains R4C2.
+- [x] Existing authorization and omission backends conform without weaker checks.
+  URL-addressed authorization conforms through R4C1 and lifecycle-bound omission
+  execution through R4C2; generalized ownership locators remain R5A.
 - [x] Zero-, one-, and two-world manifests cannot be interchanged or forged.
 - [x] Controls and experiments reserve their complete budgets atomically.
-- [ ] Uncertain mutation or cleanup stops the sequence and remains visible. R4C1 is
-  read-only; runtime enforcement for omission mutations remains R4C2.
-- [ ] Oracle results cannot bypass adversarial triage or finding promotion. R4C1
-  enforces this for authorization; omission receipt-to-triage integration remains R4C2.
+- [x] Uncertain mutation or cleanup stops the sequence and remains visible.
+- [x] Oracle results cannot bypass adversarial triage or finding promotion.
 
 ### R5 — Expand payout-relevant proof families
 

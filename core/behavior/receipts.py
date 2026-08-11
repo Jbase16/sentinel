@@ -2774,10 +2774,198 @@ def redacted_proof_experiment_authorization_outcome(
     }
 
 
+def redacted_proof_experiment_omission_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the cleanup-bound, non-promoting R4C2 omission summary."""
+
+    if value.get("kind") != "proof_experiment_omission":
+        raise ReceiptStoreError("proof experiment omission kind is invalid")
+    status = value.get("status")
+    oracle_verdict = value.get("oracle_verdict")
+    legacy_verdict = value.get("legacy_verdict")
+    cleanup_outcome = value.get("cleanup_outcome")
+    if (
+        status not in {"completed", "aborted"}
+        or oracle_verdict not in {"confirmed", "refuted", "inconclusive"}
+        or legacy_verdict not in _FRESH_OMISSION_CONFIRMATION_STATUSES
+        or cleanup_outcome not in {"complete", "failed", "uncertain"}
+    ):
+        raise ReceiptStoreError("proof experiment omission verdict is invalid")
+
+    exact_refs = (
+        (value.get("manifest_id"), _PROOF_EXPERIMENT_MANIFEST_REF),
+        (value.get("admission_id"), _PROOF_EXPERIMENT_ADMISSION_REF),
+        (value.get("evaluation_id"), _PROOF_EXPERIMENT_EVALUATION_REF),
+        (value.get("oracle_id"), _PROOF_EXPERIMENT_ORACLE_REF),
+        (value.get("backend_receipt_ref"), _BEHAVIORAL_RECEIPT_REF),
+        (value.get("provenance_root"), _PROVENANCE_REF),
+    )
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item, pattern in exact_refs
+    ):
+        raise ReceiptStoreError(
+            "proof experiment omission reference is invalid"
+        )
+
+    def evidence_refs(field_name: str) -> tuple[str, ...]:
+        raw = value.get(field_name)
+        if not isinstance(raw, (list, tuple)) or any(
+            not isinstance(item, str)
+            or _PROOF_EXPERIMENT_ACTION_EVIDENCE_REF.fullmatch(item) is None
+            for item in raw
+        ):
+            raise ReceiptStoreError(
+                "proof experiment omission evidence reference is invalid"
+            )
+        refs = tuple(raw)
+        if refs != tuple(sorted(set(refs))):
+            raise ReceiptStoreError(
+                "proof experiment omission evidence is not canonical"
+            )
+        return refs
+
+    controls = evidence_refs("control_evidence_refs")
+    treatment = evidence_refs("treatment_evidence_refs")
+    witnesses = evidence_refs("witness_evidence_refs")
+    cleanup = evidence_refs("cleanup_evidence_refs")
+    raw_uncertainty = value.get("uncertainty_reasons")
+    if not isinstance(raw_uncertainty, (list, tuple)) or any(
+        not isinstance(item, str)
+        or _STATE_TRANSITION_SEMANTIC.fullmatch(item) is None
+        for item in raw_uncertainty
+    ):
+        raise ReceiptStoreError(
+            "proof experiment omission uncertainty is invalid"
+        )
+    uncertainty = tuple(raw_uncertainty)
+    if uncertainty != tuple(sorted(set(uncertainty))):
+        raise ReceiptStoreError(
+            "proof experiment omission uncertainty is not canonical"
+        )
+
+    counters = {
+        key: _nonnegative_int(
+            value.get(key),
+            field_name=f"proof_experiment_omission.{key}",
+        )
+        for key in (
+            "requests_attempted",
+            "requests_sent",
+            "policy_denials",
+            "reserved_units_released",
+            "total_request_units",
+            "creates_attempted",
+            "creates_completed",
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "cleanup_verifications_attempted",
+            "cleanup_verifications_completed",
+        )
+    }
+    orphaned = value.get("orphaned_owned_state_possible")
+    candidate_ref = value.get("finding_candidate_ref")
+    if candidate_ref is not None and (
+        not isinstance(candidate_ref, str)
+        or _PROOF_EXPERIMENT_FINDING_CANDIDATE_REF.fullmatch(candidate_ref)
+        is None
+    ):
+        raise ReceiptStoreError(
+            "proof experiment omission candidate reference is invalid"
+        )
+    all_evidence = controls + treatment + witnesses + cleanup
+    conclusive = oracle_verdict in {"confirmed", "refuted"}
+    cleanup_complete = bool(
+        counters["creates_completed"] > 0
+        and counters["creates_attempted"] == counters["creates_completed"]
+        and counters["cleanup_steps_completed"]
+        == counters["creates_completed"]
+        and counters["cleanup_verifications_completed"]
+        == counters["creates_completed"]
+        and orphaned is False
+    )
+    if (
+        counters["total_request_units"] == 0
+        or counters["total_request_units"] > 64
+        or counters["requests_attempted"] > counters["total_request_units"]
+        or counters["requests_sent"] > counters["requests_attempted"]
+        or counters["requests_sent"] + counters["reserved_units_released"]
+        != counters["total_request_units"]
+        or counters["policy_denials"] > counters["requests_attempted"]
+        or counters["creates_completed"] > counters["creates_attempted"]
+        or counters["creates_attempted"] > 3
+        or counters["cleanup_steps_completed"]
+        > counters["cleanup_steps_attempted"]
+        or counters["cleanup_steps_attempted"] > 3
+        or counters["cleanup_verifications_completed"]
+        > counters["cleanup_verifications_attempted"]
+        or counters["cleanup_verifications_attempted"] > 3
+        or not isinstance(orphaned, bool)
+        or len(set(all_evidence)) != len(all_evidence)
+        or len(all_evidence) > counters["requests_attempted"]
+        or (cleanup_outcome == "complete") != cleanup_complete
+        or (cleanup_outcome == "complete" and not cleanup)
+        or (oracle_verdict == "confirmed")
+        != (candidate_ref is not None)
+        or (
+            oracle_verdict == "confirmed"
+            and legacy_verdict != "confirmed_fail_open"
+        )
+        or (
+            oracle_verdict == "refuted"
+            and legacy_verdict != "omission_rejected"
+        )
+        or (conclusive and status != "completed")
+        or (conclusive and counters["requests_sent"] != counters["total_request_units"])
+        or (conclusive and counters["creates_completed"] != 3)
+        or (conclusive and not controls)
+        or (conclusive and not treatment)
+        or (conclusive and not witnesses)
+        or (conclusive and not cleanup)
+        or (conclusive and cleanup_outcome != "complete")
+        or (conclusive and uncertainty)
+        or (oracle_verdict == "inconclusive" and status != "aborted")
+        or (oracle_verdict == "inconclusive" and not uncertainty)
+        or value.get("adversarial_triage_required") is not True
+        or value.get("promotion_authority") is not False
+        or value.get("finding_authority") is not False
+    ):
+        raise ReceiptStoreError(
+            "proof experiment omission outcome is inconsistent"
+        )
+    return {
+        "kind": "proof_experiment_omission",
+        "status": status,
+        "manifest_id": value["manifest_id"],
+        "admission_id": value["admission_id"],
+        "evaluation_id": value["evaluation_id"],
+        "oracle_id": value["oracle_id"],
+        "oracle_verdict": oracle_verdict,
+        "backend_receipt_ref": value["backend_receipt_ref"],
+        "legacy_verdict": legacy_verdict,
+        "control_evidence_refs": list(controls),
+        "treatment_evidence_refs": list(treatment),
+        "witness_evidence_refs": list(witnesses),
+        "cleanup_evidence_refs": list(cleanup),
+        "cleanup_outcome": cleanup_outcome,
+        "provenance_root": value["provenance_root"],
+        "uncertainty_reasons": list(uncertainty),
+        **counters,
+        "orphaned_owned_state_possible": orphaned,
+        "finding_candidate_ref": candidate_ref,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
     if response.get("kind") == "proof_experiment_authorization":
         return redacted_proof_experiment_authorization_outcome(response)
+    if response.get("kind") == "proof_experiment_omission":
+        return redacted_proof_experiment_omission_outcome(response)
     if "continuation" in response:
         return redacted_continuation_outcome(response)
     if response.get("kind") == "fresh_omission_confirmation":
@@ -2841,6 +3029,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
     if value.get("kind") == "proof_experiment_authorization":
         return redacted_proof_experiment_authorization_outcome(value)
+    if value.get("kind") == "proof_experiment_omission":
+        return redacted_proof_experiment_omission_outcome(value)
     if value.get("kind") == "owned_state_transition_proof":
         return redacted_owned_state_transition_outcome(value)
     if value.get("kind") == "owned_read_proof":

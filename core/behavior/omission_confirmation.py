@@ -13,11 +13,18 @@ import copy
 import hmac
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
+from urllib.parse import parse_qsl, urlsplit
 
-from core.cortex.execution_policy import PolicyExecutor
+from core.cortex.execution_policy import DENIED_STATUS, CandidateAction, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
+from core.safety.action_classifier import (
+    OWNED_CREATE,
+    OWNED_UPDATE_LOW_RISK,
+    SAFE_READ,
+)
+from core.safety.proof_budget import endpoint_key
 
 from .admission import COMPILED_ADMISSION_ENV
 from .normalize import stable_hash
@@ -31,6 +38,7 @@ from .omission_boundary import (
     _OmissionAbort,
     _OmissionPreflight,
     _ReservationCursor,
+    _remove_query_binding,
 )
 from .receipts import (
     COMPLETED,
@@ -42,15 +50,18 @@ from .receipts import (
     request_fingerprint,
 )
 from .runtime import CONTROLLED_SEQUENCE_WORKFLOW
+from .safety_contracts import classification_body
 from .scheduler import PRIMARY_ENV
 
 FRESH_OMISSION_CONFIRMATION_ENV = "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION"
 FRESH_OMISSION_CONFIRMATION_MODE = "behavioral_fresh_omission_confirmation_v1"
+FRESH_OMISSION_ADMITTED_MODE = "behavioral_fresh_omission_admitted_v1"
 FRESH_OMISSION_CONFIRMATION_WORKFLOW = "behavioral_state_machine_omission_confirmation"
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _HASH_REF = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{64}$")
 _SEMANTIC = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _CONTROL_REJECTION_STATUSES = frozenset({400, 401, 403, 422})
+_CLEANUP_TERMINAL_STATUSES = frozenset({404, 410})
 _CONFIRMATION_STATUSES = frozenset(
     {
         "not_completed",
@@ -438,6 +449,139 @@ class FreshOmissionConfirmationResult:
         }
 
 
+@dataclass(frozen=True)
+class AdmittedFreshOmissionExecutionResult:
+    """Redacted backend result for one R4B-owned omission reservation."""
+
+    confirmation_id: str
+    experiment_id: str
+    status: str
+    confirmation_status: str
+    baseline_reference_match: bool
+    baseline_terminal_success: bool
+    omission_terminal_success: bool
+    control_terminal_success: bool
+    baseline_terminal_truncated: bool
+    omission_terminal_truncated: bool
+    control_terminal_truncated: bool
+    terminal_body_match: bool
+    capability_object_binding_proven: bool
+    control_response_status: Optional[int]
+    requests_attempted: int
+    requests_sent: int
+    reserved_units_released: int
+    action_slots: int
+    attempted_ordinals: Tuple[int, ...]
+    creates_attempted: int
+    creates_completed: int
+    cleanup_steps_attempted: int
+    cleanup_steps_completed: int
+    cleanup_verifications_attempted: int
+    cleanup_verifications_completed: int
+    policy_denials: int
+    orphaned_owned_state_possible: bool
+    provenance_root: str
+    error_code: Optional[str] = None
+    mode: str = FRESH_OMISSION_ADMITTED_MODE
+    finding_authority: bool = False
+    executable: bool = True
+
+    def __post_init__(self) -> None:
+        counters = (
+            self.requests_attempted,
+            self.requests_sent,
+            self.reserved_units_released,
+            self.action_slots,
+            self.creates_attempted,
+            self.creates_completed,
+            self.cleanup_steps_attempted,
+            self.cleanup_steps_completed,
+            self.cleanup_verifications_attempted,
+            self.cleanup_verifications_completed,
+            self.policy_denials,
+        )
+        if (
+            self.mode != FRESH_OMISSION_ADMITTED_MODE
+            or not self.executable
+            or self.finding_authority
+            or not _hash_ref(self.confirmation_id, "fresh_omission_confirmation")
+            or not _hash_ref(self.experiment_id, "omission_experiment")
+            or self.status not in {"completed", "aborted", "cleanup_failed"}
+            or self.confirmation_status not in _CONFIRMATION_STATUSES
+            or any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+                for value in counters
+            )
+            or self.action_slots == 0
+            or self.requests_sent > self.requests_attempted
+            or self.requests_sent + self.reserved_units_released
+            != self.action_slots
+            or len(self.attempted_ordinals) != self.requests_attempted
+            or self.attempted_ordinals
+            != tuple(sorted(set(self.attempted_ordinals)))
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value < self.action_slots
+                for value in self.attempted_ordinals
+            )
+            or self.creates_completed > self.creates_attempted
+            or self.creates_attempted > 3
+            or self.cleanup_steps_completed > self.cleanup_steps_attempted
+            or self.cleanup_steps_attempted > 3
+            or self.cleanup_verifications_completed
+            > self.cleanup_verifications_attempted
+            or self.cleanup_verifications_attempted > 3
+            or self.policy_denials > self.requests_attempted
+            or not isinstance(self.orphaned_owned_state_possible, bool)
+            or not isinstance(self.provenance_root, str)
+            or len(self.provenance_root) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.provenance_root
+            )
+            or (
+                self.control_response_status is not None
+                and (
+                    isinstance(self.control_response_status, bool)
+                    or not isinstance(self.control_response_status, int)
+                    or not 100 <= self.control_response_status <= 599
+                )
+            )
+            or (
+                self.error_code is not None
+                and (
+                    not isinstance(self.error_code, str)
+                    or _SEMANTIC.fullmatch(self.error_code) is None
+                )
+            )
+        ):
+            raise ValueError("admitted fresh omission result is invalid")
+        if self.status == "completed" and (
+            self.error_code is not None
+            or self.orphaned_owned_state_possible
+            or not self.baseline_reference_match
+            or self.creates_completed != 3
+            or self.cleanup_steps_completed != 3
+            or self.cleanup_verifications_completed != 3
+            or self.confirmation_status == "not_completed"
+        ):
+            raise ValueError("completed admitted omission result is inconsistent")
+        if self.status == "aborted" and self.error_code is None:
+            raise ValueError("aborted admitted omission result requires an error")
+        if self.status == "cleanup_failed" and (
+            self.error_code != "proof_experiment_omission_cleanup_unverified"
+            or not self.orphaned_owned_state_possible
+            or self.capability_object_binding_proven
+        ):
+            raise ValueError("admitted omission cleanup failure is inconsistent")
+        if self.capability_object_binding_proven != (
+            self.status == "completed"
+            and self.confirmation_status == "confirmed_fail_open"
+        ):
+            raise ValueError("admitted omission capability proof is inconsistent")
+
+
 class FreshOmissionConfirmationExecutor(FreshOmissionBoundaryExecutor):
     """Confirm one fail-open using three distinct fresh controlled objects."""
 
@@ -451,6 +595,9 @@ class FreshOmissionConfirmationExecutor(FreshOmissionBoundaryExecutor):
     expected_creates = 3
     proof_goal = "confirm_fresh_state_prerequisite_omission"
     cleanup_proof_goal = "cleanup_fresh_state_omission_confirmation"
+    cleanup_verification_proof_goal = (
+        "verify_cleanup_fresh_state_omission_confirmation"
+    )
 
     def __init__(
         self,
@@ -517,6 +664,213 @@ class FreshOmissionConfirmationExecutor(FreshOmissionBoundaryExecutor):
                 orphan_possible=True,
             )
         return capability
+
+    def _candidate(
+        self,
+        request: Any,
+        *,
+        action_class: str,
+        proof_goal: str,
+    ) -> CandidateAction:
+        is_create = action_class == OWNED_CREATE
+        is_cleanup = action_class == OWNED_UPDATE_LOW_RISK
+        return CandidateAction(
+            method=request.method,
+            url=request.url,
+            body=copy.deepcopy(request.body),
+            hint=action_class,
+            actor_persona_id=self.actor_persona_id,
+            target_owner_persona_id=(
+                None if is_create else self.actor_persona_id
+            ),
+            target_is_researcher_owned=(None if is_create else True),
+            expected_side_effect=(
+                "create_owned_test_object"
+                if is_create
+                else (
+                    "cleanup_owned_test_object" if is_cleanup else "none"
+                )
+            ),
+            proof_goal=proof_goal,
+        )
+
+    @staticmethod
+    def _omitted_terminal_request(
+        preflight: _OmissionPreflight,
+    ) -> Any:
+        matches = tuple(
+            item
+            for item in preflight.bindings
+            if item.binding_id == preflight.experiment.omitted_binding_id
+        )
+        if len(matches) != 1:
+            raise FreshOmissionDenied(
+                "fresh_omission_confirmation_binding_is_missing"
+            )
+        request = preflight.requests[preflight.experiment.terminal_operation_id]
+        return _remove_query_binding(request, matches[0])
+
+    def _admitted_actions(
+        self,
+        preflight: _OmissionPreflight,
+    ) -> Tuple[CandidateAction, ...]:
+        def leg(
+            operation_ids: Sequence[str],
+            *,
+            omit_terminal_binding: bool,
+        ) -> Tuple[CandidateAction, ...]:
+            values = []
+            for operation_id in operation_ids:
+                request = preflight.requests[operation_id]
+                if (
+                    omit_terminal_binding
+                    and operation_id == preflight.experiment.terminal_operation_id
+                ):
+                    request = self._omitted_terminal_request(preflight)
+                action_class = (
+                    OWNED_CREATE
+                    if operation_id == preflight.lifecycle.create_operation_id
+                    else SAFE_READ
+                )
+                values.append(
+                    self._candidate(
+                        request,
+                        action_class=action_class,
+                        proof_goal=self.proof_goal,
+                    )
+                )
+            return tuple(values)
+
+        baseline = leg(
+            preflight.experiment.baseline_operation_ids,
+            omit_terminal_binding=False,
+        )
+        omission = leg(
+            preflight.experiment.omission_operation_ids,
+            omit_terminal_binding=True,
+        )
+        control = leg(
+            preflight.experiment.omission_operation_ids,
+            omit_terminal_binding=False,
+        )
+        cleanup = tuple(
+            self._candidate(
+                preflight.cleanup_request,
+                action_class=OWNED_UPDATE_LOW_RISK,
+                proof_goal=self.cleanup_proof_goal,
+            )
+            for _ in range(3)
+        )
+        terminal = preflight.requests[preflight.experiment.terminal_operation_id]
+        omitted_terminal = self._omitted_terminal_request(preflight)
+        verification = tuple(
+            self._candidate(
+                request,
+                action_class=SAFE_READ,
+                proof_goal=self.cleanup_verification_proof_goal,
+            )
+            for request in (terminal, omitted_terminal, terminal)
+        )
+        return (*baseline, *omission, *control, *cleanup, *verification)
+
+    @staticmethod
+    def _candidate_shape(action: CandidateAction) -> Tuple[Any, ...]:
+        parsed = urlsplit(action.url)
+        query_names = tuple(sorted(key for key, _value in parse_qsl(
+            parsed.query,
+            keep_blank_values=True,
+        )))
+        return (
+            str(action.method).upper(),
+            endpoint_key(action.url),
+            query_names,
+            stable_hash(
+                "fresh_omission_request_body",
+                classification_body(action.body),
+            ),
+            action.hint,
+            action.actor_persona_id,
+            action.target_owner_persona_id,
+            action.target_is_researcher_owned,
+            action.expected_side_effect,
+            action.proof_goal,
+        )
+
+    def validate_admitted_preflight(self) -> str:
+        """Return the stronger R4C2 boundary identity without target traffic."""
+
+        return self._preflight(
+            admitted=True,
+            cleanup_verification_count=3,
+        ).boundary_id
+
+    def preview_admitted_actions(self) -> Tuple[CandidateAction, ...]:
+        """Return the exact R4C2 action grammar without reserving or sending."""
+
+        preflight = self._preflight(
+            admitted=True,
+            cleanup_verification_count=3,
+        )
+        return self._admitted_actions(preflight)
+
+    @staticmethod
+    def _cleanup_marker_observed(response: Any, cleanup_body: Any) -> bool:
+        actual = classification_body(response)
+        expected = classification_body(cleanup_body)
+        if not isinstance(actual, Mapping) or not isinstance(expected, Mapping):
+            return False
+        normalized_actual = {str(key).lower(): value for key, value in actual.items()}
+        for key, expected_value in expected.items():
+            actual_value = normalized_actual.get(str(key).lower())
+            if isinstance(expected_value, str):
+                if str(actual_value).strip().lower() != expected_value.strip().lower():
+                    return False
+            elif actual_value != expected_value:
+                return False
+        return True
+
+    async def _verify_cleanup(
+        self,
+        progress: _LegProgress,
+        cursor: _ReservationCursor,
+    ) -> bool:
+        owned = progress.owned_object
+        request = progress.terminal_request
+        if owned is None or request is None:
+            raise _OmissionAbort(
+                "fresh_omission_cleanup_verification_unavailable",
+                orphan_possible=owned is not None,
+            )
+        try:
+            status, response = await cursor.send(
+                cursor.index,
+                self.executor,
+                replace(
+                    self._candidate(
+                        request,
+                        action_class=SAFE_READ,
+                        proof_goal=self.cleanup_verification_proof_goal,
+                    ),
+                    budget_reservation_id=cursor.reservation_id,
+                ),
+                headers=dict(request.headers),
+            )
+        except Exception as exc:
+            raise _OmissionAbort(
+                "fresh_omission_cleanup_verification_transport_error",
+                orphan_possible=True,
+            ) from exc
+        if status == DENIED_STATUS or bool(
+            getattr(response, "body_truncated", False)
+        ):
+            return False
+        return int(status) in _CLEANUP_TERMINAL_STATUSES or (
+            200 <= int(status) < 300
+            and self._cleanup_marker_observed(
+                response,
+                owned.cleanup_request.body,
+            )
+        )
 
     async def execute(
         self,
@@ -779,6 +1133,291 @@ class FreshOmissionConfirmationExecutor(FreshOmissionBoundaryExecutor):
             finding_authority=finding is not None,
         )
 
+    async def execute_admitted(
+        self,
+        *,
+        expected_actions: Sequence[CandidateAction],
+        budget_reservation_id: str,
+        expected_boundary_id: Optional[str] = None,
+    ) -> AdmittedFreshOmissionExecutionResult:
+        """Execute the stronger omission proof under one existing R4B reservation."""
+
+        actions = tuple(copy.deepcopy(tuple(expected_actions)))
+        if (
+            not actions
+            or any(not isinstance(item, CandidateAction) for item in actions)
+            or not isinstance(budget_reservation_id, str)
+            or not budget_reservation_id
+            or any(item.budget_reservation_id is not None for item in actions)
+        ):
+            raise FreshOmissionDenied(
+                "fresh_omission_admitted_authority_contract_is_invalid"
+            )
+        preflight = await self._claim(
+            expected_boundary_id,
+            admitted=True,
+            budget_reservation_id=budget_reservation_id,
+            cleanup_verification_count=3,
+        )
+        generated = self._admitted_actions(preflight)
+        if (
+            len(actions) != len(generated)
+            or tuple(self._candidate_shape(item) for item in actions)
+            != tuple(self._candidate_shape(item) for item in generated)
+        ):
+            raise FreshOmissionDenied(
+                "fresh_omission_admitted_runtime_action_identity_changed"
+            )
+
+        cursor = _ReservationCursor(
+            self.executor.policy.budget,
+            budget_reservation_id,
+            total_slots=len(preflight.reserved_actions),
+        )
+        cleanup_start = len(preflight.experiment.baseline_operation_ids) + 2 * len(
+            preflight.experiment.omission_operation_ids
+        )
+        verification_start = cleanup_start + 3
+        baseline = _LegProgress()
+        omission = _LegProgress()
+        control = _LegProgress()
+        cleanup_attempted = 0
+        cleanup_completed = 0
+        verification_attempted = 0
+        verification_completed = 0
+        error_code = None
+        confirmation_status = "not_completed"
+        denial_start = len(self.executor.skipped)
+        try:
+            try:
+                await self._run_leg(
+                    preflight,
+                    cursor,
+                    preflight.experiment.baseline_operation_ids,
+                    omit_binding=False,
+                    progress=baseline,
+                )
+                baseline_evidence = baseline.terminal_evidence
+                assert baseline_evidence is not None
+                reference = preflight.experiment.oracle
+                if (
+                    baseline_evidence.status != reference.reference_response_status
+                    or baseline_evidence.body_hash
+                    != reference.reference_response_body_hash
+                    or baseline_evidence.truncated
+                    or not baseline_evidence.success
+                ):
+                    raise _OmissionAbort(
+                        "fresh_omission_baseline_reference_mismatch",
+                        orphan_possible=True,
+                    )
+                capability = self._baseline_capability(preflight, baseline)
+
+                await self._run_leg(
+                    preflight,
+                    cursor,
+                    preflight.experiment.omission_operation_ids,
+                    omit_binding=True,
+                    progress=omission,
+                    disallowed_object_values=(
+                        (baseline.owned_object.value,)
+                        if baseline.owned_object is not None
+                        else ()
+                    ),
+                )
+                omission_evidence = omission.terminal_evidence
+                assert omission_evidence is not None
+                if omission_evidence.truncated:
+                    confirmation_status = "inconclusive_truncated"
+                elif not omission_evidence.success:
+                    confirmation_status = "omission_rejected"
+                elif omission_evidence.body_hash != baseline_evidence.body_hash:
+                    confirmation_status = "response_mismatch"
+                else:
+                    await self._run_leg(
+                        preflight,
+                        cursor,
+                        preflight.experiment.omission_operation_ids,
+                        omit_binding=False,
+                        progress=control,
+                        disallowed_object_values=tuple(
+                            item.value
+                            for item in (
+                                baseline.owned_object,
+                                omission.owned_object,
+                            )
+                            if item is not None
+                        ),
+                        binding_overrides={
+                            preflight.experiment.omitted_binding_id: capability
+                        },
+                    )
+                    control_evidence = control.terminal_evidence
+                    assert control_evidence is not None
+                    if control_evidence.truncated:
+                        confirmation_status = "inconclusive_truncated"
+                    elif (
+                        not control_evidence.success
+                        and control_evidence.status in _CONTROL_REJECTION_STATUSES
+                    ):
+                        confirmation_status = "confirmed_fail_open"
+                    elif control_evidence.success:
+                        confirmation_status = "control_accepted"
+                    else:
+                        confirmation_status = "control_inconclusive"
+            except _OmissionAbort as exc:
+                error_code = exc.code
+            except Exception:
+                error_code = (
+                    "fresh_omission_confirmation_unexpected_execution_error"
+                )
+        finally:
+            progresses = (control, omission, baseline)
+            cursor.skip_until(cleanup_start)
+            cleaned_values = set()
+            for progress in progresses:
+                owned_object = progress.owned_object
+                if (
+                    owned_object is None
+                    or owned_object.value in cleaned_values
+                ):
+                    cursor.skip_until(cursor.index + 1)
+                    continue
+                cleaned_values.add(owned_object.value)
+                cleanup_attempted += 1
+                try:
+                    await self._cleanup(owned_object, cursor)
+                except _OmissionAbort:
+                    continue
+                else:
+                    cleanup_completed += 1
+
+            cursor.skip_until(verification_start)
+            verified_values = set()
+            for progress in progresses:
+                owned_object = progress.owned_object
+                if (
+                    owned_object is None
+                    or owned_object.value in verified_values
+                ):
+                    cursor.skip_until(cursor.index + 1)
+                    continue
+                verified_values.add(owned_object.value)
+                verification_attempted += 1
+                try:
+                    verified = await self._verify_cleanup(progress, cursor)
+                except _OmissionAbort:
+                    continue
+                if verified:
+                    verification_completed += 1
+            cursor.skip_until(cursor.total_slots)
+
+        legs = (baseline, omission, control)
+        creates_attempted = sum(int(item.create_attempted) for item in legs)
+        creates_completed = sum(int(item.create_completed) for item in legs)
+        unique_created_values = {
+            item.owned_object.value for item in legs if item.owned_object is not None
+        }
+        cleanup_unverified = bool(
+            creates_attempted > creates_completed
+            or cleanup_attempted != creates_completed
+            or cleanup_completed != creates_completed
+            or verification_attempted != creates_completed
+            or verification_completed != creates_completed
+            or verification_completed != len(unique_created_values)
+        )
+        if cleanup_unverified:
+            status = "cleanup_failed"
+            error_code = "proof_experiment_omission_cleanup_unverified"
+            confirmation_status = "inconclusive_cleanup_failed"
+        elif (
+            baseline.terminal_evidence is not None
+            and omission.terminal_evidence is not None
+            and control.terminal_evidence is not None
+            and confirmation_status != "not_completed"
+            and error_code is None
+        ):
+            status = "completed"
+        else:
+            status = "aborted"
+            error_code = error_code or "proof_experiment_omission_sequence_incomplete"
+
+        baseline_evidence = baseline.terminal_evidence
+        omission_evidence = omission.terminal_evidence
+        control_evidence = control.terminal_evidence
+        baseline_reference_match = bool(
+            baseline_evidence is not None
+            and baseline_evidence.status
+            == preflight.experiment.oracle.reference_response_status
+            and baseline_evidence.body_hash
+            == preflight.experiment.oracle.reference_response_body_hash
+            and not baseline_evidence.truncated
+            and baseline_evidence.success
+        )
+        body_match = bool(
+            baseline_evidence is not None
+            and omission_evidence is not None
+            and baseline_evidence.body_hash is not None
+            and baseline_evidence.body_hash == omission_evidence.body_hash
+        )
+        capability_binding_proven = bool(
+            status == "completed"
+            and confirmation_status == "confirmed_fail_open"
+            and baseline_reference_match
+            and body_match
+            and control_evidence is not None
+            and not control_evidence.truncated
+            and not control_evidence.success
+            and control_evidence.status in _CONTROL_REJECTION_STATUSES
+        )
+        sink = self.executor.provenance
+        provenance_root = (sink.root() if sink is not None else "") or ""
+        return AdmittedFreshOmissionExecutionResult(
+            confirmation_id=preflight.boundary_id,
+            experiment_id=preflight.experiment.experiment_id,
+            status=status,
+            confirmation_status=confirmation_status,
+            baseline_reference_match=baseline_reference_match,
+            baseline_terminal_success=bool(
+                baseline_evidence and baseline_evidence.success
+            ),
+            omission_terminal_success=bool(
+                omission_evidence and omission_evidence.success
+            ),
+            control_terminal_success=bool(
+                control_evidence and control_evidence.success
+            ),
+            baseline_terminal_truncated=bool(
+                baseline_evidence and baseline_evidence.truncated
+            ),
+            omission_terminal_truncated=bool(
+                omission_evidence and omission_evidence.truncated
+            ),
+            control_terminal_truncated=bool(
+                control_evidence and control_evidence.truncated
+            ),
+            terminal_body_match=body_match,
+            capability_object_binding_proven=capability_binding_proven,
+            control_response_status=(
+                control_evidence.status if control_evidence is not None else None
+            ),
+            requests_attempted=cursor.attempted,
+            requests_sent=cursor.sent,
+            reserved_units_released=cursor.skipped,
+            action_slots=cursor.total_slots,
+            attempted_ordinals=tuple(cursor.attempted_ordinals),
+            creates_attempted=creates_attempted,
+            creates_completed=creates_completed,
+            cleanup_steps_attempted=cleanup_attempted,
+            cleanup_steps_completed=cleanup_completed,
+            cleanup_verifications_attempted=verification_attempted,
+            cleanup_verifications_completed=verification_completed,
+            policy_denials=max(0, len(self.executor.skipped) - denial_start),
+            orphaned_owned_state_possible=cleanup_unverified,
+            provenance_root=provenance_root,
+            error_code=error_code,
+        )
+
 
 @dataclass(frozen=True)
 class FreshOmissionConfirmationAdmissionResult:
@@ -941,6 +1580,8 @@ class FreshOmissionConfirmationAdmission:
 
 
 __all__ = [
+    "FRESH_OMISSION_ADMITTED_MODE",
+    "AdmittedFreshOmissionExecutionResult",
     "FRESH_OMISSION_CONFIRMATION_ENV",
     "FRESH_OMISSION_CONFIRMATION_MODE",
     "FRESH_OMISSION_CONFIRMATION_WORKFLOW",

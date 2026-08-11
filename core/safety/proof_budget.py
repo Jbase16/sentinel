@@ -204,6 +204,19 @@ class ProofBudget:
         with self._lock:
             return len(self._reservations.get(reservation_id, ()))
 
+    def reservation_matches(
+        self,
+        reservation_id: str,
+        actions: Sequence[Tuple[str, str]],
+    ) -> bool:
+        """Return whether one live reservation is exactly the ordered sequence."""
+
+        normalized = tuple(
+            (str(action_class), str(ep_key)) for action_class, ep_key in actions
+        )
+        with self._lock:
+            return self._reservations.get(reservation_id) == normalized
+
     def skip_reservation_entries(self, reservation_id: str, count: int) -> int:
         """Atomically release the next ``count`` unused ordered slots."""
 

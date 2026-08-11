@@ -137,6 +137,8 @@ def test_budget_reservation_is_atomic_and_blocks_unreserved_budget_theft():
 
     assert reason == "ok" and reservation_id is not None
     assert budget.reservation_remaining(reservation_id) == 2
+    assert budget.reservation_matches(reservation_id, sequence) is True
+    assert budget.reservation_matches(reservation_id, tuple(reversed(sequence))) is False
     allowed, denied_reason = budget.allows(
         ac.SAFE_READ,
         endpoint_key("http://h/api/other"),
@@ -166,6 +168,10 @@ def test_releasing_budget_reservation_returns_only_unused_slots():
     )
 
     assert budget.reservation_remaining(reservation_id) == 1
+    assert budget.reservation_matches(
+        reservation_id,
+        ((ac.SAFE_READ, endpoint_key("http://h/b")),),
+    ) is True
     assert budget.release_reservation(reservation_id) == 1
     assert budget.release_reservation(reservation_id) == 0
     assert budget.snapshot()["total_requests"] == 1
