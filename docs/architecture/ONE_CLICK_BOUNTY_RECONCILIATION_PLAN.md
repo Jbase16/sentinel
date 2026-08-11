@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Missing | Authorization, owned-boundary, and omission implementations have separate strict contracts. | Introduce a common experiment, control, witness, cleanup, and verdict contract without weakening each oracle. |
+| Generalized counterexample/oracle SDK | Passive foundation implemented | `ProofExperimentManifest` now seals the payout goal, R3 replan, exact world topology, backend guard requirements, complete action/control/witness sequence, cleanup mapping, full static budget claim, provenance, and non-promoting oracle contract. It is explicit-only and non-executable. | Add atomic admission and durable runtime receipts in R4B, then connect only the existing policy-gated backends in R4C. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -351,6 +351,27 @@ plugged in without giving the planner free control of the target. Every experime
 must arrive with its permission slip, controlled identities, cleanup plan, comparison,
 and proof budget already sealed.
 
+#### Implementation status
+
+- [x] **R4A — Passive sealed experiment SDK.** A content-addressed manifest now binds
+  the selected payout goal and R3 replan to one exact zero-, one-, two-, role-,
+  lifecycle-, or callback-world shape; partitions control actions by their real
+  worlds; requires one-to-one mutation cleanup and verification; claims the entire
+  action budget; preserves backend-specific guard requirements; and limits oracle
+  output to `confirmed`, `refuted`, or `inconclusive` with no finding authority.
+- [ ] **R4B — Atomic experiment admission.** Validate the manifest against the
+  original signed envelope and policy, reserve the complete control/treatment/witness/
+  cleanup budget in one transaction, bind exact runtime worlds, and issue a durable
+  admission identity. A partial reservation must never make a manifest executable.
+- [ ] **R4C — Policy-gated backend execution and receipts.** Adapt the existing
+  authorization and omission executors to admitted manifests without bypassing their
+  stricter checks, stop visibly on uncertain mutation or cleanup, and return a durable
+  evidence receipt for oracle evaluation and adversarial triage.
+
+R4A sends no target traffic, reserves no mutable budget, provisions no browser or
+persona, and grants no execution or finding authority. Those limits are deliberate;
+R4 remains incomplete until R4B and R4C pass their runtime gates.
+
 #### Target traffic and execution authority
 
 This phase introduces new traffic only for a specifically implemented experiment
@@ -361,10 +382,13 @@ receipts, and a fail-closed cleanup contract where mutation is possible.
 #### Exit gate
 
 - [ ] Existing authorization and omission backends conform without weaker checks.
-- [ ] Zero-, one-, and two-world manifests cannot be interchanged or forged.
+  R4A pins their exact guard requirements; runtime adapter conformance remains R4C.
+- [x] Zero-, one-, and two-world manifests cannot be interchanged or forged.
 - [ ] Controls and experiments reserve their complete budgets atomically.
-- [ ] Uncertain mutation or cleanup stops the sequence and remains visible.
-- [ ] Oracle results cannot bypass adversarial triage or finding promotion.
+- [ ] Uncertain mutation or cleanup stops the sequence and remains visible. R4A seals
+  this requirement; runtime enforcement remains R4C.
+- [ ] Oracle results cannot bypass adversarial triage or finding promotion. R4A grants
+  neither authority; runtime receipt-to-triage integration remains R4C.
 
 ### R5 — Expand payout-relevant proof families
 
