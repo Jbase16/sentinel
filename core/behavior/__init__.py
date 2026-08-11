@@ -50,6 +50,8 @@ Payout-goal and proof-topology selection remains passive and explicit-only throu
 :mod:`core.behavior.payout_goals`; importing :mod:`core.behavior` does not expose it.
 Unified target-semantic reconstruction remains passive and explicit-only through
 :mod:`core.behavior.semantic_catalog`; importing :mod:`core.behavior` does not expose it.
+Admitted object-authorization execution remains separately default-off and
+explicit-only through :mod:`core.behavior.experiment_authorization`.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

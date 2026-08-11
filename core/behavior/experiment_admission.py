@@ -12,6 +12,7 @@ import copy
 import hmac
 import os
 import re
+import secrets
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
@@ -817,6 +818,7 @@ class _AdmissionResources:
         self.receipt_reservation_token = receipt_reservation_token
         self._lock = threading.RLock()
         self._state = "active"
+        self._runtime_claim_token: Optional[str] = None
 
     @property
     def state(self) -> str:
@@ -831,7 +833,40 @@ class _AdmissionResources:
                 )
             self._state = "claimed"
 
-    def abort(self, *, expected_state: str, reason: str) -> int:
+    def begin_runtime(self) -> str:
+        """Atomically assign the claimed reservation to one R4C adapter."""
+
+        with self._lock:
+            if self._state != "claimed":
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_claim_is_not_runtime_claimable"
+                )
+            token = secrets.token_urlsafe(32)
+            self._runtime_claim_token = token
+            self._state = "executing"
+            return token
+
+    def _validate_runtime_owner(self, runtime_claim_token: Optional[str]) -> None:
+        if (
+            not isinstance(runtime_claim_token, str)
+            or not runtime_claim_token
+            or self._runtime_claim_token is None
+            or not hmac.compare_digest(
+                runtime_claim_token,
+                self._runtime_claim_token,
+            )
+        ):
+            raise ProofExperimentAdmissionDenied(
+                "proof_experiment_runtime_claim_owner_mismatch"
+            )
+
+    def abort(
+        self,
+        *,
+        expected_state: str,
+        reason: str,
+        runtime_claim_token: Optional[str] = None,
+    ) -> int:
         if _SEMANTIC.fullmatch(reason) is None:
             raise ValueError("proof experiment admission abort reason is invalid")
         with self._lock:
@@ -839,6 +874,8 @@ class _AdmissionResources:
                 raise ProofExperimentAdmissionDenied(
                     "proof_experiment_admission_cannot_be_aborted_from_this_state"
                 )
+            if expected_state == "executing":
+                self._validate_runtime_owner(runtime_claim_token)
             receipt_error: Optional[BaseException] = None
             try:
                 self.receipt_store.abort(
@@ -851,12 +888,63 @@ class _AdmissionResources:
             released = self.budget.release_reservation(
                 self.budget_reservation_id
             )
+            self._runtime_claim_token = None
             self._state = "aborted"
             if receipt_error is not None:
                 raise ProofExperimentAdmissionDenied(
                     "proof_experiment_admission_budget_released_but_receipt_abort_failed"
                 ) from receipt_error
             return released
+
+    def complete(
+        self,
+        *,
+        expected_state: str,
+        outcome: Mapping[str, Any],
+        expected_released_units: int,
+        runtime_claim_token: str,
+    ) -> Any:
+        """Release unused slots and terminalize the reserved receipt exactly once."""
+
+        if (
+            isinstance(expected_released_units, bool)
+            or not isinstance(expected_released_units, int)
+            or expected_released_units < 0
+        ):
+            raise ValueError("proof experiment released-unit count is invalid")
+        with self._lock:
+            if self._state != expected_state:
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_admission_cannot_be_completed_from_this_state"
+                )
+            self._validate_runtime_owner(runtime_claim_token)
+            remaining = self.budget.reservation_remaining(
+                self.budget_reservation_id
+            )
+            if remaining != expected_released_units:
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_budget_completion_mismatch"
+                )
+            released = self.budget.release_reservation(
+                self.budget_reservation_id
+            )
+            if released != expected_released_units:
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_budget_release_changed_during_completion"
+                )
+            try:
+                receipt = self.receipt_store.complete(
+                    self.fingerprint,
+                    reservation_token=self.receipt_reservation_token,
+                    outcome=outcome,
+                )
+            except (OSError, ReceiptStoreError) as exc:
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_receipt_completion_failed"
+                ) from exc
+            self._runtime_claim_token = None
+            self._state = "completed"
+            return receipt
 
 
 class ProofExperimentAdmissionClaim:
@@ -885,7 +973,7 @@ class ProofExperimentAdmissionClaim:
         *,
         manifest_id: str,
         execution_policy_digest: str,
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, str, str]:
         """Private R4C seam; bind secret handles to the admitted immutable identity."""
 
         if (
@@ -896,13 +984,52 @@ class ProofExperimentAdmissionClaim:
             raise ProofExperimentAdmissionDenied(
                 "proof_experiment_claim_identity_mismatch"
             )
+        runtime_claim_token = self._resources.begin_runtime()
         return (
             self._resources.budget_reservation_id,
             self._resources.receipt_reservation_token,
+            runtime_claim_token,
         )
 
     def abort(self, reason: str = "proof_experiment_claim_aborted") -> int:
         return self._resources.abort(expected_state="claimed", reason=reason)
+
+    def _abort_runtime(
+        self,
+        *,
+        runtime_claim_token: str,
+        reason: str,
+    ) -> int:
+        return self._resources.abort(
+            expected_state="executing",
+            reason=reason,
+            runtime_claim_token=runtime_claim_token,
+        )
+
+    def _complete_runtime(
+        self,
+        *,
+        manifest_id: str,
+        execution_policy_digest: str,
+        outcome: Mapping[str, Any],
+        expected_released_units: int,
+        runtime_claim_token: str,
+    ) -> Any:
+        """Private R4C terminalization seam bound to the admitted identity."""
+
+        if (
+            manifest_id != self.contract.manifest_id
+            or execution_policy_digest != self.contract.execution_policy_digest
+        ):
+            raise ProofExperimentAdmissionDenied(
+                "proof_experiment_claim_identity_mismatch"
+            )
+        return self._resources.complete(
+            expected_state="executing",
+            outcome=outcome,
+            expected_released_units=expected_released_units,
+            runtime_claim_token=runtime_claim_token,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {

@@ -73,6 +73,26 @@ _OWNED_READ_PROOF_REF = re.compile(r"^owned_read_proof:[0-9a-f]{64}$")
 _OWNED_STATE_TRANSITION_PROOF_REF = re.compile(
     r"^owned_state_transition_proof:[0-9a-f]{64}$"
 )
+_PROOF_EXPERIMENT_MANIFEST_REF = re.compile(
+    r"^proof_experiment_manifest:[0-9a-f]{64}$"
+)
+_PROOF_EXPERIMENT_ADMISSION_REF = re.compile(
+    r"^proof_experiment_admission:[0-9a-f]{64}$"
+)
+_PROOF_EXPERIMENT_EVALUATION_REF = re.compile(
+    r"^proof_experiment_evaluation:[0-9a-f]{64}$"
+)
+_PROOF_EXPERIMENT_ORACLE_REF = re.compile(
+    r"^proof_experiment_oracle:[0-9a-f]{64}$"
+)
+_PROOF_EXPERIMENT_ACTION_EVIDENCE_REF = re.compile(
+    r"^proof_experiment_action_evidence:[0-9a-f]{64}$"
+)
+_PROOF_EXPERIMENT_FINDING_CANDIDATE_REF = re.compile(
+    r"^proof_experiment_finding_candidate:[0-9a-f]{64}$"
+)
+_BEHAVIORAL_RECEIPT_REF = re.compile(r"^behavioral_receipt:[0-9a-f]{64}$")
+_PROVENANCE_REF = re.compile(r"^provenance:[0-9a-f]{64}$")
 _STATE_TRANSITION_ACTION_REF = re.compile(
     r"^state_transition_action:[0-9a-f]{64}$"
 )
@@ -2606,8 +2626,158 @@ def redacted_continuation_outcome(response: Mapping[str, Any]) -> Dict[str, Any]
     return output
 
 
+def redacted_proof_experiment_authorization_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the content-addressed, non-promoting R4C authorization summary."""
+
+    if value.get("kind") != "proof_experiment_authorization":
+        raise ReceiptStoreError("proof experiment authorization kind is invalid")
+    status = value.get("status")
+    oracle_verdict = value.get("oracle_verdict")
+    legacy_verdict = value.get("legacy_verdict")
+    if (
+        status not in {"completed", "aborted"}
+        or oracle_verdict not in {"confirmed", "refuted", "inconclusive"}
+        or legacy_verdict not in _VALID_LEGACY_VERDICTS
+    ):
+        raise ReceiptStoreError(
+            "proof experiment authorization verdict is invalid"
+        )
+
+    exact_refs = (
+        (value.get("manifest_id"), _PROOF_EXPERIMENT_MANIFEST_REF),
+        (value.get("admission_id"), _PROOF_EXPERIMENT_ADMISSION_REF),
+        (value.get("evaluation_id"), _PROOF_EXPERIMENT_EVALUATION_REF),
+        (value.get("oracle_id"), _PROOF_EXPERIMENT_ORACLE_REF),
+        (value.get("backend_receipt_ref"), _BEHAVIORAL_RECEIPT_REF),
+        (value.get("provenance_root"), _PROVENANCE_REF),
+    )
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item, pattern in exact_refs
+    ):
+        raise ReceiptStoreError(
+            "proof experiment authorization reference is invalid"
+        )
+
+    def evidence_refs(field_name: str) -> tuple[str, ...]:
+        raw = value.get(field_name)
+        if not isinstance(raw, (list, tuple)) or any(
+            not isinstance(item, str)
+            or _PROOF_EXPERIMENT_ACTION_EVIDENCE_REF.fullmatch(item) is None
+            for item in raw
+        ):
+            raise ReceiptStoreError(
+                "proof experiment authorization evidence reference is invalid"
+            )
+        refs = tuple(raw)
+        if refs != tuple(sorted(set(refs))):
+            raise ReceiptStoreError(
+                "proof experiment authorization evidence is not canonical"
+            )
+        return refs
+
+    controls = evidence_refs("control_evidence_refs")
+    treatment = evidence_refs("treatment_evidence_refs")
+    witnesses = evidence_refs("witness_evidence_refs")
+    raw_uncertainty = value.get("uncertainty_reasons")
+    if not isinstance(raw_uncertainty, (list, tuple)) or any(
+        not isinstance(item, str)
+        or _STATE_TRANSITION_SEMANTIC.fullmatch(item) is None
+        for item in raw_uncertainty
+    ):
+        raise ReceiptStoreError(
+            "proof experiment authorization uncertainty is invalid"
+        )
+    uncertainty = tuple(raw_uncertainty)
+    if uncertainty != tuple(sorted(set(uncertainty))):
+        raise ReceiptStoreError(
+            "proof experiment authorization uncertainty is not canonical"
+        )
+
+    attempted = _nonnegative_int(
+        value.get("requests_attempted"), field_name="requests_attempted"
+    )
+    sent = _nonnegative_int(
+        value.get("requests_sent"), field_name="requests_sent"
+    )
+    denials = _nonnegative_int(
+        value.get("policy_denials"), field_name="policy_denials"
+    )
+    released = _nonnegative_int(
+        value.get("reserved_units_released"),
+        field_name="reserved_units_released",
+    )
+    candidate_ref = value.get("finding_candidate_ref")
+    if candidate_ref is not None and (
+        not isinstance(candidate_ref, str)
+        or _PROOF_EXPERIMENT_FINDING_CANDIDATE_REF.fullmatch(candidate_ref) is None
+    ):
+        raise ReceiptStoreError(
+            "proof experiment authorization candidate reference is invalid"
+        )
+    conclusive = oracle_verdict in {"confirmed", "refuted"}
+    all_evidence = controls + treatment + witnesses
+    if (
+        attempted > 4
+        or sent > attempted
+        or denials > attempted
+        or sent + released != 4
+        or len(controls) > 2
+        or len(treatment) > 1
+        or len(witnesses) > 1
+        or len(all_evidence) > attempted
+        or len(set(all_evidence)) != len(all_evidence)
+        or (legacy_verdict == "BOLA_CONFIRMED") != (candidate_ref is not None)
+        or (oracle_verdict == "confirmed" and legacy_verdict != "BOLA_CONFIRMED")
+        or (
+            oracle_verdict == "refuted"
+            and legacy_verdict not in {"DENIED", "NO_CROSS_READ"}
+        )
+        or (conclusive and status != "completed")
+        or (conclusive and (sent != 4 or len(controls) != 2))
+        or (conclusive and (len(treatment) != 1 or len(witnesses) != 1))
+        or (conclusive and uncertainty)
+        or (oracle_verdict == "inconclusive" and status != "aborted")
+        or (oracle_verdict == "inconclusive" and not uncertainty)
+        or value.get("adversarial_triage_required") is not True
+        or value.get("promotion_authority") is not False
+        or value.get("finding_authority") is not False
+    ):
+        raise ReceiptStoreError(
+            "proof experiment authorization outcome is inconsistent"
+        )
+    return {
+        "kind": "proof_experiment_authorization",
+        "status": status,
+        "manifest_id": value["manifest_id"],
+        "admission_id": value["admission_id"],
+        "evaluation_id": value["evaluation_id"],
+        "oracle_id": value["oracle_id"],
+        "oracle_verdict": oracle_verdict,
+        "backend_receipt_ref": value["backend_receipt_ref"],
+        "legacy_verdict": legacy_verdict,
+        "control_evidence_refs": list(controls),
+        "treatment_evidence_refs": list(treatment),
+        "witness_evidence_refs": list(witnesses),
+        "provenance_root": value["provenance_root"],
+        "uncertainty_reasons": list(uncertainty),
+        "requests_attempted": attempted,
+        "requests_sent": sent,
+        "policy_denials": denials,
+        "reserved_units_released": released,
+        "finding_candidate_ref": candidate_ref,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    if response.get("kind") == "proof_experiment_authorization":
+        return redacted_proof_experiment_authorization_outcome(response)
     if "continuation" in response:
         return redacted_continuation_outcome(response)
     if response.get("kind") == "fresh_omission_confirmation":
@@ -2669,6 +2839,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "proof_experiment_authorization":
+        return redacted_proof_experiment_authorization_outcome(value)
     if value.get("kind") == "owned_state_transition_proof":
         return redacted_owned_state_transition_outcome(value)
     if value.get("kind") == "owned_read_proof":

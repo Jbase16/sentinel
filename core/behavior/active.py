@@ -14,8 +14,8 @@ import copy
 import hmac
 import json
 import re
-from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Sequence, Tuple
+from dataclasses import dataclass, replace
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from core.cortex.execution_policy import DENIED_STATUS, CandidateAction, PolicyExecutor
@@ -69,6 +69,9 @@ class ControlledExecutionResult:
     provenance_root: str
     restraint: Dict[str, Any]
     provenance: Dict[str, Any]
+    independent_witness_attempted: bool = False
+    independent_witness_sent: bool = False
+    independent_witness_valid: bool = False
     status: str = "completed"
     authoritative_engine: str = AUTHORITATIVE_ENGINE
 
@@ -89,6 +92,9 @@ class ControlledExecutionResult:
             "requests_attempted": self.requests_attempted,
             "requests_sent": self.requests_sent,
             "policy_denials": self.policy_denials,
+            "independent_witness_attempted": self.independent_witness_attempted,
+            "independent_witness_sent": self.independent_witness_sent,
+            "independent_witness_valid": self.independent_witness_valid,
             "provenance_root": self.provenance_root,
             "restraint": dict(self.restraint),
             "provenance": dict(self.provenance),
@@ -291,8 +297,44 @@ def _response_body(value: Any) -> str:
         return str(value)
 
 
+def _candidate_material(action: CandidateAction) -> Dict[str, Any]:
+    """Return the complete non-secret intent identity used by admitted execution."""
+
+    return {
+        "method": action.method,
+        "url": action.url,
+        "body": action.body,
+        "hint": action.hint,
+        "actor_persona_id": action.actor_persona_id,
+        "target_owner_persona_id": action.target_owner_persona_id,
+        "target_is_researcher_owned": action.target_is_researcher_owned,
+        "expected_side_effect": action.expected_side_effect,
+        "proof_goal": action.proof_goal,
+    }
+
+
+def _candidate_for_request(
+    *,
+    persona: str,
+    owner: str,
+    hint: str,
+    request: bola_replay.ReplayRequest,
+) -> CandidateAction:
+    return CandidateAction(
+        method=request.method,
+        url=request.url,
+        body=request.body,
+        hint=hint,
+        actor_persona_id=persona,
+        target_owner_persona_id=owner,
+        target_is_researcher_owned=True,
+        expected_side_effect="none",
+        proof_goal="single_controlled_authorization_counterexample",
+    )
+
+
 class _PolicyReplayTransport:
-    """Strict three-call adapter from the legacy oracle to PolicyExecutor."""
+    """Strict legacy-oracle adapter with an optional admitted fourth witness."""
 
     def __init__(
         self,
@@ -302,19 +344,29 @@ class _PolicyReplayTransport:
         source_value: str,
         peer_value: str,
         executors: Mapping[str, PolicyExecutor],
+        expected_actions: Optional[Sequence[CandidateAction]] = None,
+        budget_reservation_id: Optional[str] = None,
     ) -> None:
         self.source_persona = source_persona
         self.peer_persona = peer_persona
         self.source_value = source_value
         self.peer_value = peer_value
         self.executors = executors
+        self.expected_actions = (
+            tuple(copy.deepcopy(expected_actions))
+            if expected_actions is not None
+            else None
+        )
+        self.budget_reservation_id = budget_reservation_id
         self.attempted = 0
         self.sent = 0
+        self.independent_witness_attempted = False
+        self.independent_witness_sent = False
+        self.independent_witness_valid = False
+        self._first_request_blob: Optional[str] = None
 
-    async def send(
-        self, persona: str, request: bola_replay.ReplayRequest
-    ) -> bola_replay.ReplayResponse:
-        sequence = (
+    def _sequence(self) -> Tuple[Tuple[str, str, str, str], ...]:
+        return (
             (self.peer_persona, self.peer_value, self.peer_persona, SAFE_READ),
             (self.source_persona, self.source_value, self.source_persona, SAFE_READ),
             (
@@ -323,46 +375,108 @@ class _PolicyReplayTransport:
                 self.peer_persona,
                 POLICY_CROSS_OBJECT_READ,
             ),
+            (self.peer_persona, self.peer_value, self.peer_persona, SAFE_READ),
         )
-        if self.attempted >= len(sequence):
+
+    async def _send_index(
+        self,
+        persona: str,
+        request: bola_replay.ReplayRequest,
+        *,
+        witness: bool,
+    ) -> bola_replay.ReplayResponse:
+        sequence = self._sequence()
+        index = self.attempted
+        if index >= len(sequence) or witness != (index == 3):
             raise _ControlledExecutionAbort("request_budget_exceeded")
-        expected_persona, expected_value, owner, hint = sequence[self.attempted]
+        expected_persona, expected_value, owner, hint = sequence[index]
         self.attempted += 1
         if persona != expected_persona:
             raise _ControlledExecutionAbort("legacy_leg_sequence_changed")
         blob = _request_blob(request)
-        other_value = self.peer_value if expected_value == self.source_value else self.source_value
+        if index == 0:
+            self._first_request_blob = blob
+        if witness and blob != self._first_request_blob:
+            raise _ControlledExecutionAbort("independent_witness_request_changed")
+        other_value = (
+            self.peer_value
+            if expected_value == self.source_value
+            else self.source_value
+        )
         if expected_value not in blob or other_value in blob:
             raise _ControlledExecutionAbort("rehydrated_leg_identifier_mismatch")
 
+        candidate = _candidate_for_request(
+            persona=persona,
+            owner=owner,
+            hint=hint,
+            request=request,
+        )
+        if self.expected_actions is not None:
+            if index >= len(self.expected_actions) or _candidate_material(
+                candidate
+            ) != _candidate_material(self.expected_actions[index]):
+                raise _ControlledExecutionAbort(
+                    "admitted_runtime_action_identity_changed"
+                )
+        if self.budget_reservation_id is not None:
+            candidate = replace(
+                candidate,
+                budget_reservation_id=self.budget_reservation_id,
+            )
+
         executor = self.executors[persona]
-        before = executor.policy.budget.snapshot()["total_requests"]
         status, body = await executor.send_action(
-            CandidateAction(
-                method=request.method,
-                url=request.url,
-                body=request.body,
-                hint=hint,
-                actor_persona_id=persona,
-                target_owner_persona_id=owner,
-                target_is_researcher_owned=True,
-                proof_goal="single_controlled_authorization_counterexample",
-            ),
+            candidate,
             headers=dict(request.headers),
         )
-        after = executor.policy.budget.snapshot()["total_requests"]
-        self.sent += max(0, after - before)
+        sent_now = int(status != DENIED_STATUS)
+        self.sent += sent_now
         response = bola_replay.ReplayResponse(
             status=int(status),
             body=_response_body(body),
             body_truncated=bool(getattr(body, "body_truncated", False)),
         )
-        if self.attempted < 3:
+        if index < 2:
             if status == DENIED_STATUS:
                 raise _ControlledExecutionAbort("baseline_denied_by_policy")
             if not 200 <= int(status) < 300 or bola_replay.is_denied_response(response):
                 raise _ControlledExecutionAbort("baseline_session_is_not_usable")
+        if witness:
+            self.independent_witness_sent = sent_now == 1
         return response
+
+    async def send(
+        self, persona: str, request: bola_replay.ReplayRequest
+    ) -> bola_replay.ReplayResponse:
+        return await self._send_index(persona, request, witness=False)
+
+    async def send_independent_witness(
+        self,
+        persona: str,
+        request: bola_replay.ReplayRequest,
+        *,
+        required_markers: Sequence[str] = (),
+    ) -> bola_replay.ReplayResponse:
+        self.independent_witness_attempted = True
+        response = await self._send_index(persona, request, witness=True)
+        self.independent_witness_valid = bool(
+            self.independent_witness_sent
+            and 200 <= response.status < 300
+            and not response.body_truncated
+            and not bola_replay.is_denied_response(response)
+            and all(marker in response.body for marker in required_markers)
+        )
+        return response
+
+
+@dataclass(frozen=True)
+class _PreparedAuthorization:
+    proposal: AuthorizationExperimentProposal
+    source_value: str
+    peer_value: str
+    operation: bola_replay.ObjectScopedOp
+    peer_operation: bola_replay.ObjectScopedOp
 
 
 class ControlledAuthorizationExecutor:
@@ -411,74 +525,231 @@ class ControlledAuthorizationExecutor:
         """Validate the authorization/policy context without consuming the executor."""
         self._preflight()
 
+    def _prepare(
+        self,
+        proposal: AuthorizationExperimentProposal,
+        source_records: Sequence[Mapping[str, Any]],
+        peer_records: Sequence[Mapping[str, Any]],
+    ) -> _PreparedAuthorization:
+        _validate_capture_origins(source_records, self.target_origin)
+        _validate_capture_origins(peer_records, self.target_origin)
+        validated = _validated_proposal(
+            proposal,
+            source_records,
+            peer_records,
+            self.source_persona,
+            self.peer_persona,
+        )
+        source_value, peer_value = _resolve_identifier_pair(
+            validated, source_records, peer_records
+        )
+        operation = _resolve_legacy_operation(
+            validated,
+            [source_records[validated.source_record_index]],
+            source_value,
+            peer_value,
+        )
+        peer_operation = _resolve_legacy_operation(
+            validated,
+            peer_records,
+            peer_value,
+            source_value,
+        )
+        return _PreparedAuthorization(
+            proposal=validated,
+            source_value=source_value,
+            peer_value=peer_value,
+            operation=operation,
+            peer_operation=peer_operation,
+        )
+
+    def _admitted_actions(
+        self, prepared: _PreparedAuthorization
+    ) -> Tuple[CandidateAction, ...]:
+        peer_request = bola_replay.build_request(
+            prepared.peer_operation,
+            prepared.peer_value,
+            prepared.peer_value,
+        )
+        source_request = bola_replay.build_request(
+            prepared.operation,
+            prepared.source_value,
+            prepared.source_value,
+        )
+        counterfactual_request = bola_replay.build_request(
+            prepared.operation,
+            prepared.peer_value,
+            prepared.source_value,
+        )
+        return (
+            _candidate_for_request(
+                persona=self.peer_persona.persona_id,
+                owner=self.peer_persona.persona_id,
+                hint=SAFE_READ,
+                request=peer_request,
+            ),
+            _candidate_for_request(
+                persona=self.source_persona.persona_id,
+                owner=self.source_persona.persona_id,
+                hint=SAFE_READ,
+                request=source_request,
+            ),
+            _candidate_for_request(
+                persona=self.source_persona.persona_id,
+                owner=self.peer_persona.persona_id,
+                hint=POLICY_CROSS_OBJECT_READ,
+                request=counterfactual_request,
+            ),
+            _candidate_for_request(
+                persona=self.peer_persona.persona_id,
+                owner=self.peer_persona.persona_id,
+                hint=SAFE_READ,
+                request=copy.deepcopy(peer_request),
+            ),
+        )
+
+    def preview_admitted_actions(
+        self,
+        proposal: AuthorizationExperimentProposal,
+        source_records: Sequence[Mapping[str, Any]],
+        peer_records: Sequence[Mapping[str, Any]],
+    ) -> Tuple[CandidateAction, ...]:
+        """Rehydrate the exact four-request admitted sequence without traffic."""
+
+        self._preflight()
+        return self._admitted_actions(
+            self._prepare(proposal, source_records, peer_records)
+        )
+
     async def execute(
         self,
         proposal: AuthorizationExperimentProposal,
         source_records: Sequence[Mapping[str, Any]],
         peer_records: Sequence[Mapping[str, Any]],
     ) -> ControlledExecutionResult:
+        return await self._execute(
+            proposal,
+            source_records,
+            peer_records,
+            expected_actions=None,
+            budget_reservation_id=None,
+            require_independent_witness=False,
+        )
+
+    async def execute_admitted(
+        self,
+        proposal: AuthorizationExperimentProposal,
+        source_records: Sequence[Mapping[str, Any]],
+        peer_records: Sequence[Mapping[str, Any]],
+        *,
+        expected_actions: Sequence[CandidateAction],
+        budget_reservation_id: str,
+    ) -> ControlledExecutionResult:
+        """Execute one exact four-action sequence under an R4B reservation."""
+
+        actions = tuple(copy.deepcopy(expected_actions))
+        if (
+            len(actions) != 4
+            or not isinstance(budget_reservation_id, str)
+            or not budget_reservation_id
+            or any(item.budget_reservation_id is not None for item in actions)
+        ):
+            raise ControlledExecutionDenied(
+                "admitted_execution_authority_contract_is_invalid"
+            )
+        return await self._execute(
+            proposal,
+            source_records,
+            peer_records,
+            expected_actions=actions,
+            budget_reservation_id=budget_reservation_id,
+            require_independent_witness=True,
+        )
+
+    async def _execute(
+        self,
+        proposal: AuthorizationExperimentProposal,
+        source_records: Sequence[Mapping[str, Any]],
+        peer_records: Sequence[Mapping[str, Any]],
+        *,
+        expected_actions: Optional[Sequence[CandidateAction]],
+        budget_reservation_id: Optional[str],
+        require_independent_witness: bool,
+    ) -> ControlledExecutionResult:
         async with self._lock:
             if self._consumed:
                 raise ControlledExecutionDenied("controlled_executor_already_consumed")
             self._preflight()
-            _validate_capture_origins(source_records, self.target_origin)
-            _validate_capture_origins(peer_records, self.target_origin)
-            validated = _validated_proposal(
-                proposal,
-                source_records,
-                peer_records,
-                self.source_persona,
-                self.peer_persona,
-            )
-            source_value, peer_value = _resolve_identifier_pair(
-                validated, source_records, peer_records
-            )
-            op = _resolve_legacy_operation(
-                validated,
-                [source_records[validated.source_record_index]],
-                source_value,
-                peer_value,
-            )
-            peer_op = _resolve_legacy_operation(
-                validated,
-                peer_records,
-                peer_value,
-                source_value,
-            )
+            prepared = self._prepare(proposal, source_records, peer_records)
+            if expected_actions is not None:
+                generated_actions = self._admitted_actions(prepared)
+                if tuple(_candidate_material(item) for item in expected_actions) != tuple(
+                    _candidate_material(item) for item in generated_actions
+                ):
+                    raise ControlledExecutionDenied(
+                        "admitted_runtime_action_identity_changed"
+                    )
             self._consumed = True
 
             transport = _PolicyReplayTransport(
                 source_persona=self.source_persona.persona_id,
                 peer_persona=self.peer_persona.persona_id,
-                source_value=source_value,
-                peer_value=peer_value,
+                source_value=prepared.source_value,
+                peer_value=prepared.peer_value,
                 executors=self.executors,
+                expected_actions=expected_actions,
+                budget_reservation_id=budget_reservation_id,
             )
             status = "completed"
             try:
                 verdict = await bola_replay.classify_operation(
-                    op,
+                    prepared.operation,
                     self.source_persona.persona_id,
                     self.peer_persona.persona_id,
-                    source_value,
-                    peer_value,
+                    prepared.source_value,
+                    prepared.peer_value,
                     transport,
-                    victim_op=peer_op,
+                    victim_op=prepared.peer_operation,
                 )
             except _ControlledExecutionAbort as exc:
                 status = "aborted"
                 verdict = bola_replay.OpVerdict(
-                    validated.operation_label,
+                    prepared.proposal.operation_label,
                     "ERROR",
                     str(exc),
                 )
             except Exception as exc:
                 status = "aborted"
                 verdict = bola_replay.OpVerdict(
-                    validated.operation_label,
+                    prepared.proposal.operation_label,
                     "ERROR",
                     f"transport_{type(exc).__name__}",
                 )
+
+            if require_independent_witness:
+                if status == "completed" and transport.attempted == transport.sent == 3:
+                    peer_request = bola_replay.build_request(
+                        prepared.peer_operation,
+                        prepared.peer_value,
+                        prepared.peer_value,
+                    )
+                    markers = (
+                        tuple(verdict.finding.leaked)
+                        if verdict.finding is not None
+                        else ()
+                    )
+                    try:
+                        await transport.send_independent_witness(
+                            self.peer_persona.persona_id,
+                            peer_request,
+                            required_markers=markers,
+                        )
+                    except Exception:
+                        status = "aborted"
+                    if not transport.independent_witness_valid:
+                        status = "aborted"
+                else:
+                    status = "aborted"
 
             source_executor = self.executors[self.source_persona.persona_id]
             peer_executor = self.executors[self.peer_persona.persona_id]
@@ -489,8 +760,12 @@ class ControlledAuthorizationExecutor:
             )
             restraint["stopped_after_first_proof"] = verdict.finding is not None
             restraint["stopped_after_terminal_verdict"] = True
+            restraint["independent_witness_required"] = require_independent_witness
+            restraint["independent_witness_valid"] = (
+                transport.independent_witness_valid
+            )
             return ControlledExecutionResult(
-                proposal_id=validated.proposal_id,
+                proposal_id=prepared.proposal.proposal_id,
                 legacy_verdict=verdict,
                 requests_attempted=transport.attempted,
                 requests_sent=transport.sent,
@@ -498,5 +773,10 @@ class ControlledAuthorizationExecutor:
                 provenance_root=(sink.root() if sink is not None else "") or "",
                 restraint=restraint,
                 provenance=(sink.summary() if sink is not None else {}),
+                independent_witness_attempted=(
+                    transport.independent_witness_attempted
+                ),
+                independent_witness_sent=transport.independent_witness_sent,
+                independent_witness_valid=transport.independent_witness_valid,
                 status=status,
             )

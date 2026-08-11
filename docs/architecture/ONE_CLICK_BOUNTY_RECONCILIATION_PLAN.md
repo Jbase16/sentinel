@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Manifest and atomic admission implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` now revalidates its signed envelope, exact target, workflows, vault-backed worlds, redacted live-request bindings, complete bounty-safe policy, durable identity, and full atomic `ProofBudget` reservation. Neither boundary dispatches traffic. | Connect only the existing policy-gated authorization and omission backends in R4C, then finalize durable execution and cleanup receipts. |
+| Generalized counterexample/oracle SDK | URL-addressed authorization execution implemented; omission execution pending | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C1 adapter now consumes that exact claim through the existing authorization oracle, adds an independent owner witness, and terminalizes a redacted non-promoting evaluation receipt. | Adapt the existing omission backend in R4C2; generalized body, query, form, and GraphQL ownership locators remain R5A. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -367,35 +367,54 @@ and proof budget already sealed.
   identity before atomically reserving the complete ordered `ProofBudget` sequence;
   denial rolls back every budget slot. The resulting claim is single-use, default-off,
   explicit-only, non-executable, and has no backend-dispatch or finding authority.
-- [ ] **R4C — Policy-gated backend execution and receipts.** Adapt the existing
-  authorization and omission executors to admitted manifests without bypassing their
-  stricter checks, stop visibly on uncertain mutation or cleanup, and return a durable
-  evidence receipt for oracle evaluation and adversarial triage.
+- [x] **R4C1 — Admitted object-authorization execution and receipt.** The separately
+  default-off `AdmittedAuthorizationExperimentExecutor` atomically assigns one exact
+  R4B claim to a single unpersisted runtime-owner token, then revalidates the current
+  manifest, signed authority context, vault-backed worlds,
+  policy digest, ownership proof, capture-derived requests, and runtime binding IDs,
+  then delegates the legacy peer/source/counterfactual oracle through the existing
+  `PolicyExecutor`. A fourth owner read supplies the independently budgeted witness.
+  Missing traffic, policy denial, provenance drift, or witness failure becomes
+  `inconclusive`; even `confirmed` yields only a content-addressed candidate reference
+  and an `ExperimentOracleEvaluation` requiring adversarial triage, never a finding.
+  Unused reservation slots are released and every executed terminal state is stored in
+  the original redacted receipt.
+  Current ownership admission is limited to objects whose researcher-created identity
+  can be proven from the request URL; body, query, form, and GraphQL object bindings
+  remain R5A rather than being accepted on caller assertion.
+- [ ] **R4C2 — Admitted omission execution and cleanup receipt.** Adapt the existing
+  omission executor to the same claim boundary without weakening its fresh-state,
+  single-delta, wrong-object control, mutation uncertainty, or cleanup requirements.
 
 R4A and R4B send no target traffic and provision no browser, persona, or callback.
 R4B does reserve mutable policy budget and creates narrowly scoped eligibility for a
 future backend adapter, but it grants no ambient or direct dispatch authority. Owned
 worlds are checked against the Persona Vault; role, lifecycle, anonymous, and callback
 worlds additionally fail closed without a backend-supplied attestation validator. R4
-remains incomplete until R4C consumes the claim and finalizes its durable receipt.
+remains incomplete until R4C2 consumes an omission claim and preserves its mutation
+and cleanup outcomes in the generalized receipt boundary.
 
 #### Target traffic and execution authority
 
-This phase introduces new traffic only for a specifically implemented experiment
-backend. It does not create ambient authority. Each backend requires an explicit
-workflow/action-class grant, a bounded budget, a policy executor, provenance, durable
-receipts, and a fail-closed cleanup contract where mutation is possible.
+R4C1 introduces up to four read requests only when both admission and authorization
+execution are explicitly enabled: peer baseline, source baseline, cross-object
+counterfactual, and independent owner witness. Every request consumes the exact atomic
+reservation through `PolicyExecutor`; no mutation, cleanup, ambient authority, finding
+promotion, or automatic ordinary-scan activation is introduced. Each later backend
+still requires its own workflow/action-class grant, policy executor, provenance,
+durable receipt, and fail-closed cleanup contract where mutation is possible.
 
 #### Exit gate
 
 - [ ] Existing authorization and omission backends conform without weaker checks.
-  R4A pins their exact guard requirements; runtime adapter conformance remains R4C.
+  URL-addressed authorization conforms through R4C1; generalized locator ownership
+  remains R5A, and omission runtime conformance remains R4C2.
 - [x] Zero-, one-, and two-world manifests cannot be interchanged or forged.
 - [x] Controls and experiments reserve their complete budgets atomically.
-- [ ] Uncertain mutation or cleanup stops the sequence and remains visible. R4A seals
-  this requirement; runtime enforcement remains R4C.
-- [ ] Oracle results cannot bypass adversarial triage or finding promotion. R4A grants
-  neither authority; runtime receipt-to-triage integration remains R4C.
+- [ ] Uncertain mutation or cleanup stops the sequence and remains visible. R4C1 is
+  read-only; runtime enforcement for omission mutations remains R4C2.
+- [ ] Oracle results cannot bypass adversarial triage or finding promotion. R4C1
+  enforces this for authorization; omission receipt-to-triage integration remains R4C2.
 
 ### R5 — Expand payout-relevant proof families
 
