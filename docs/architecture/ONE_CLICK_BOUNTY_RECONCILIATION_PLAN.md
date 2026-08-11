@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Passive foundation implemented | `ProofExperimentManifest` now seals the payout goal, R3 replan, exact world topology, backend guard requirements, complete action/control/witness sequence, cleanup mapping, full static budget claim, provenance, and non-promoting oracle contract. It is explicit-only and non-executable. | Add atomic admission and durable runtime receipts in R4B, then connect only the existing policy-gated backends in R4C. |
+| Generalized counterexample/oracle SDK | Manifest and atomic admission implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` now revalidates its signed envelope, exact target, workflows, vault-backed worlds, redacted live-request bindings, complete bounty-safe policy, durable identity, and full atomic `ProofBudget` reservation. Neither boundary dispatches traffic. | Connect only the existing policy-gated authorization and omission backends in R4C, then finalize durable execution and cleanup receipts. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -359,18 +359,25 @@ and proof budget already sealed.
   worlds; requires one-to-one mutation cleanup and verification; claims the entire
   action budget; preserves backend-specific guard requirements; and limits oracle
   output to `confirmed`, `refuted`, or `inconclusive` with no finding authority.
-- [ ] **R4B — Atomic experiment admission.** Validate the manifest against the
-  original signed envelope and policy, reserve the complete control/treatment/witness/
-  cleanup budget in one transaction, bind exact runtime worlds, and issue a durable
-  admission identity. A partial reservation must never make a manifest executable.
+- [x] **R4B — Atomic experiment admission.** `GeneralizedExperimentAdmission` now
+  strictly revalidates the current envelope signature, target origin, backend workflow
+  grants, manifest authority context, bounty-safe execution policy, provenance seam,
+  Persona Vault ownership, special-world attestations, structural action class, exact
+  actor and endpoint, and redacted request identity. It durably reserves the admission
+  identity before atomically reserving the complete ordered `ProofBudget` sequence;
+  denial rolls back every budget slot. The resulting claim is single-use, default-off,
+  explicit-only, non-executable, and has no backend-dispatch or finding authority.
 - [ ] **R4C — Policy-gated backend execution and receipts.** Adapt the existing
   authorization and omission executors to admitted manifests without bypassing their
   stricter checks, stop visibly on uncertain mutation or cleanup, and return a durable
   evidence receipt for oracle evaluation and adversarial triage.
 
-R4A sends no target traffic, reserves no mutable budget, provisions no browser or
-persona, and grants no execution or finding authority. Those limits are deliberate;
-R4 remains incomplete until R4B and R4C pass their runtime gates.
+R4A and R4B send no target traffic and provision no browser, persona, or callback.
+R4B does reserve mutable policy budget and creates narrowly scoped eligibility for a
+future backend adapter, but it grants no ambient or direct dispatch authority. Owned
+worlds are checked against the Persona Vault; role, lifecycle, anonymous, and callback
+worlds additionally fail closed without a backend-supplied attestation validator. R4
+remains incomplete until R4C consumes the claim and finalizes its durable receipt.
 
 #### Target traffic and execution authority
 
@@ -384,7 +391,7 @@ receipts, and a fail-closed cleanup contract where mutation is possible.
 - [ ] Existing authorization and omission backends conform without weaker checks.
   R4A pins their exact guard requirements; runtime adapter conformance remains R4C.
 - [x] Zero-, one-, and two-world manifests cannot be interchanged or forged.
-- [ ] Controls and experiments reserve their complete budgets atomically.
+- [x] Controls and experiments reserve their complete budgets atomically.
 - [ ] Uncertain mutation or cleanup stops the sequence and remains visible. R4A seals
   this requirement; runtime enforcement remains R4C.
 - [ ] Oracle results cannot bypass adversarial triage or finding promotion. R4A grants
