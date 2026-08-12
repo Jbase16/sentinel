@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. Omission execution preserves three fresh owned states, one omitted binding, a wrong-object control, bounded cleanup, independent cleanup reads, and a redacted non-promoting evaluation receipt. | Generalized body, query, form, and GraphQL ownership locators remain R5A; ordinary one-click selection and dispatch remain later integration work. |
+| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented; passive generalized ownership evidence implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. `GeneralizedOwnershipLocatorCompiler` separately proves exact same-world owned-create response identifiers across path, query, JSON, form, and GraphQL-variable locations without granting authority. | R5A must still bind generalized ownership evidence into admission and execution; ordinary one-click selection and dispatch remain later integration work. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -436,6 +436,49 @@ because another family passed its gate.
 - [ ] Alice/Alice, Bob/Bob, Bob/Alice, anonymous/Alice, and low-role/high-role controls
   where the selected topology and envelope permit them.
 - [ ] Read, mutation, follow-up owner read, and server-produced field semantics.
+
+##### Implementation status
+
+- [x] **R5A1 — Passive generalized ownership-locator evidence.**
+  `GeneralizedOwnershipLocatorCompiler` now derives a content-addressed ownership
+  evidence index from existing capture records. It accepts only an exact, non-sensitive,
+  same-world lineage from a successful safe owned-create response into a later successful
+  request. It classifies URL paths, query parameters, JSON fields, form fields, and
+  GraphQL variables while retaining the exact structural pointer and request-template
+  digest. GraphQL classification requires protocol evidence rather than a caller label or
+  a field named `variables`. Cross-world matches, ambiguous producers, failed uses,
+  consequential creates, token-like capabilities, and caller ownership assertions fail
+  closed. Public output contains no raw URL, identifier, body, persona, or token.
+- [ ] **R5A2 — Proof-manifest and admission binding.** Seal one selected R5A1 evidence
+  claim, its exact locator, owner world, operation, controls, and independent witness into
+  the generalized experiment identity. Revalidate the claim from current capture evidence
+  at admission without registering or dispatching the object.
+- [ ] **R5A3 — Generalized authorization execution.** Extend the separately gated R4C1
+  backend so policy can prove a selected object inside the admitted path, query, JSON,
+  form, or GraphQL-variable location, then execute only the sealed controls and witness.
+
+##### R5A1 technical explanation
+
+R5A1 is an analysis-only compiler over `ValueLineageLedger`. It reuses exact producer-to-
+consumer value hashes, capture-bound request digests, safe-create classification, and
+content-addressed evidence contracts. It does not write to `OwnershipRegistry`, reserve a
+`ProofBudget`, build runtime `CandidateAction` authority, call `PolicyExecutor`, or emit a
+finding. Its current limitation is deliberate: it proves captured ownership semantics but
+does not yet authorize a counterfactual request using those semantics.
+
+##### R5A1 non-technical explanation
+
+Sentinel can now recognize Alice's server-created document when its ID later appears in a
+URL, a query box, a JSON or form submission, or a GraphQL variable. For example, it can
+prove that `documentId` in a captured GraphQL request came from Alice's earlier successful
+document creation instead of trusting someone to label it "Alice's." It still cannot use
+that new proof to test Bob-versus-Alice automatically; R5A2 and R5A3 add that safely.
+
+##### R5A1 target traffic and execution authority
+
+R5A1 sends no target traffic and grants no execution authority. It analyzes only records
+already captured through existing authorized workflows. It creates no accounts or objects,
+does not mutate or clean up target state, and cannot promote evidence into a finding.
 
 #### R5B — Generalized lifecycle prerequisite enforcement
 

@@ -50,6 +50,8 @@ Payout-goal and proof-topology selection remains passive and explicit-only throu
 :mod:`core.behavior.payout_goals`; importing :mod:`core.behavior` does not expose it.
 Unified target-semantic reconstruction remains passive and explicit-only through
 :mod:`core.behavior.semantic_catalog`; importing :mod:`core.behavior` does not expose it.
+Generalized ownership-locator evidence remains passive and explicit-only through
+:mod:`core.behavior.ownership_locators`; importing :mod:`core.behavior` does not expose it.
 Admitted object-authorization execution remains separately default-off and
 explicit-only through :mod:`core.behavior.experiment_authorization`.
 Admitted prerequisite-omission execution remains separately default-off and
