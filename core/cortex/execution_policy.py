@@ -32,6 +32,10 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from core.safety.action_classifier import CROSS_OBJECT_READ, DESTRUCTIVE, OWNED_CREATE, classify
+from core.safety.ownership_locator import (
+    LocatorOwnershipProof,
+    LocatorOwnershipVerification,
+)
 from core.safety.ownership_registry import OwnershipRegistry
 from core.safety.proof_budget import ProofBudget, endpoint_key
 from core.safety.proof_mode import ProofMode, rules_for
@@ -134,6 +138,65 @@ class ExecutionPolicy:
         return self.evaluate_action(CandidateAction(
             method, url, body, hint=hint,
             target_is_researcher_owned=target_is_researcher_owned))
+
+    def verify_locator_ownership(
+        self,
+        action: CandidateAction,
+        proof: LocatorOwnershipProof,
+    ) -> LocatorOwnershipVerification:
+        """Validate generalized ownership without authorizing or recording an action.
+
+        R5A3a deliberately keeps this verifier separate from ``evaluate_action``.
+        A verified result consumes no budget and cannot reach ``PolicyExecutor``;
+        a later admitted adapter must explicitly bind it to execution authority.
+        """
+
+        proof_ref = proof.proof_ref if isinstance(proof, LocatorOwnershipProof) else None
+
+        def denied(reason: str) -> LocatorOwnershipVerification:
+            return LocatorOwnershipVerification(False, reason, proof_ref)
+
+        if not isinstance(action, CandidateAction):
+            return denied("locator_ownership_action_is_invalid")
+        if self.mode != ProofMode.BOUNTY_SAFE:
+            return denied("locator_ownership_requires_bounty_safe_policy")
+        if self.budget.allow_real_user_data_access:
+            return denied("locator_ownership_requires_owned_data_only_policy")
+        if self.scope_filter is None:
+            return denied("locator_ownership_scope_filter_is_unavailable")
+        try:
+            in_scope = bool(self.scope_filter(action.url))
+        except Exception:
+            in_scope = False
+        if not in_scope:
+            return denied("locator_ownership_action_is_out_of_scope")
+        try:
+            action_class = classify(
+                action.method,
+                action.url,
+                action.body,
+                hint=action.hint,
+            )
+        except Exception:
+            return denied("locator_ownership_action_classification_failed")
+        if action_class != CROSS_OBJECT_READ:
+            return denied("locator_ownership_requires_cross_object_read")
+        if action.target_is_researcher_owned is not True:
+            return denied("locator_ownership_intent_is_missing")
+        if self.ownership_registry is None:
+            return denied("locator_ownership_registry_is_unavailable")
+        actor = str(action.actor_persona_id or "").strip()
+        owner = str(action.target_owner_persona_id or "").strip()
+        if not actor or not owner or actor == owner:
+            return denied("locator_ownership_actor_or_owner_mismatch")
+        return self.ownership_registry.verify_locator_proof(
+            proof,
+            actor_persona_id=actor,
+            target_owner_persona_id=owner,
+            method=action.method,
+            url=action.url,
+            body=action.body,
+        )
 
     def record(
         self,

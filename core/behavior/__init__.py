@@ -55,6 +55,9 @@ Generalized ownership-locator evidence remains passive and explicit-only through
 Generalized ownership experiment binding and passive admission remain explicit-only
 through :mod:`core.behavior.ownership_experiment`; importing :mod:`core.behavior` does
 not expose them or create a runtime claim.
+Locator-aware request ownership verification remains a non-authorizing policy primitive
+in :mod:`core.safety.ownership_locator`; no generalized proof is attached to a
+``CandidateAction`` by importing this package.
 Admitted object-authorization execution remains separately default-off and
 explicit-only through :mod:`core.behavior.experiment_authorization`.
 Admitted prerequisite-omission execution remains separately default-off and

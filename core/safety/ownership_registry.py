@@ -20,10 +20,24 @@ needing to know the by-id template in advance. Unknown/mismatched refs fail clos
 
 from __future__ import annotations
 
+import hashlib
 import re
+import secrets
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
+
+from core.safety.ownership_locator import (
+    LocatorOwnershipDenied,
+    LocatorOwnershipProof,
+    LocatorOwnershipVerification,
+    OwnedRequestLocatorKind,
+    build_locator_proof,
+    extract_locator_value,
+    proof_material,
+    request_origin,
+    seal_matches,
+)
 
 Key = Tuple[str, str, str]   # (origin, collection_noun, object_id)
 
@@ -108,6 +122,17 @@ class OwnershipRegistry:
     structure the policy consults; it may hold raw ids."""
 
     _owned: Dict[Key, Dict[str, Any]] = field(default_factory=dict)
+    _seal_key: bytes = field(
+        default_factory=lambda: secrets.token_bytes(32),
+        repr=False,
+        compare=False,
+    )
+
+    @property
+    def registry_ref(self) -> str:
+        """Opaque identity for this session-local registry instance."""
+
+        return f"ownership_registry:{hashlib.sha256(self._seal_key).hexdigest()}"
 
     def register_created(self, create_url: str, response: Any, *,
                          actor_persona: Optional[str] = None) -> Optional[Key]:
@@ -177,6 +202,172 @@ class OwnershipRegistry:
             "create_ref": witness.create_ref,
         }
         return key
+
+    def _locator_matches(
+        self,
+        *,
+        origin: str,
+        object_id: str,
+        target_owner_persona_id: str,
+    ) -> Tuple[Tuple[Key, Dict[str, Any]], ...]:
+        return tuple(
+            (key, entry)
+            for key, entry in self._owned.items()
+            if key[0].lower() == origin
+            and key[2] == object_id
+            and entry.get("actor_persona") == target_owner_persona_id
+        )
+
+    def issue_locator_proof(
+        self,
+        *,
+        source_proof_ref: str,
+        source_role_binding_ref: str,
+        actor_persona_id: str,
+        target_owner_persona_id: str,
+        method: str,
+        url: str,
+        body: Any,
+        locator_kind: OwnedRequestLocatorKind,
+        locator_pointer: str,
+    ) -> LocatorOwnershipProof:
+        """Seal one exact request only after resolving its value to owned state.
+
+        The caller cannot supply an object ID or collection assertion. Both are
+        extracted or resolved inside the registry. Ambiguous same-ID ownership
+        across collections fails closed.
+        """
+
+        actor = str(actor_persona_id or "").strip()
+        owner = str(target_owner_persona_id or "").strip()
+        if not actor or not owner or actor == owner:
+            raise LocatorOwnershipDenied(
+                "locator_ownership_requires_distinct_actor_and_owner"
+            )
+        object_id = extract_locator_value(
+            kind=locator_kind,
+            pointer=locator_pointer,
+            url=url,
+            body=body,
+        )
+        matches = self._locator_matches(
+            origin=request_origin(url),
+            object_id=object_id,
+            target_owner_persona_id=owner,
+        )
+        if len(matches) != 1:
+            raise LocatorOwnershipDenied(
+                "locator_owned_object_is_missing_or_ambiguous"
+            )
+        key, _ = matches[0]
+        try:
+            payload, seal = proof_material(
+                self._seal_key,
+                registry_ref=self.registry_ref,
+                source_proof_ref=source_proof_ref,
+                source_role_binding_ref=source_role_binding_ref,
+                actor_persona_id=actor,
+                target_owner_persona_id=owner,
+                method=method,
+                url=url,
+                body=body,
+                object_id=object_id,
+                collection=key[1],
+                locator_kind=locator_kind,
+                locator_pointer=locator_pointer,
+            )
+            return build_locator_proof(payload, seal)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LocatorOwnershipDenied(
+                "locator_ownership_source_contract_is_invalid"
+            ) from exc
+
+    def verify_locator_proof(
+        self,
+        proof: LocatorOwnershipProof,
+        *,
+        actor_persona_id: str,
+        target_owner_persona_id: str,
+        method: str,
+        url: str,
+        body: Any,
+    ) -> LocatorOwnershipVerification:
+        """Verify a sealed proof without consuming budget or granting authority."""
+
+        proof_ref = proof.proof_ref if isinstance(proof, LocatorOwnershipProof) else None
+        if not isinstance(proof, LocatorOwnershipProof):
+            return LocatorOwnershipVerification(
+                False,
+                "locator_ownership_proof_is_invalid",
+            )
+        if proof.registry_ref != self.registry_ref:
+            return LocatorOwnershipVerification(
+                False,
+                "locator_ownership_registry_mismatch",
+                proof_ref,
+            )
+        actor = str(actor_persona_id or "").strip()
+        owner = str(target_owner_persona_id or "").strip()
+        if not actor or not owner or actor == owner:
+            return LocatorOwnershipVerification(
+                False,
+                "locator_ownership_actor_or_owner_mismatch",
+                proof_ref,
+            )
+        try:
+            object_id = extract_locator_value(
+                kind=proof.locator_kind,
+                pointer=proof.locator_pointer,
+                url=url,
+                body=body,
+            )
+            matches = self._locator_matches(
+                origin=request_origin(url),
+                object_id=object_id,
+                target_owner_persona_id=owner,
+            )
+            if len(matches) != 1:
+                return LocatorOwnershipVerification(
+                    False,
+                    "locator_owned_object_is_missing_or_ambiguous",
+                    proof_ref,
+                )
+            key, _ = matches[0]
+            payload, seal = proof_material(
+                self._seal_key,
+                registry_ref=self.registry_ref,
+                source_proof_ref=proof.source_proof_ref,
+                source_role_binding_ref=proof.source_role_binding_ref,
+                actor_persona_id=actor,
+                target_owner_persona_id=owner,
+                method=method,
+                url=url,
+                body=body,
+                object_id=object_id,
+                collection=key[1],
+                locator_kind=proof.locator_kind,
+                locator_pointer=proof.locator_pointer,
+            )
+            expected = build_locator_proof(payload, seal)
+        except (KeyError, TypeError, ValueError, LocatorOwnershipDenied) as exc:
+            reason = str(exc) if isinstance(exc, LocatorOwnershipDenied) else ""
+            if not reason.startswith("locator_ownership_"):
+                reason = "locator_ownership_request_drift"
+            return LocatorOwnershipVerification(False, reason, proof_ref)
+        if expected.to_dict() != proof.to_dict() or not seal_matches(
+            self._seal_key,
+            proof,
+        ):
+            return LocatorOwnershipVerification(
+                False,
+                "locator_ownership_request_or_proof_mismatch",
+                proof_ref,
+            )
+        return LocatorOwnershipVerification(
+            True,
+            "locator_ownership_verified",
+            proof_ref,
+        )
 
     def is_owned(self, read_url: str) -> bool:
         """True iff the object this read targets was researcher-created in this session."""

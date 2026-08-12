@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented; passive generalized ownership binding and admission implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. R5A now proves exact same-world owned-create response identifiers across path, query, JSON, form, and GraphQL-variable locations, binds an actor/target-owner pair to one manifest, and reconstructs both captures under the current signed authority without granting a runtime claim. | R5A must still consume the passive ownership admission through a separately gated executor; ordinary one-click selection and dispatch remain later integration work. |
+| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented; generalized ownership proof and non-authorizing policy guard implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. R5A now proves exact same-world owned-create response identifiers across path, query, JSON, form, and GraphQL-variable locations, binds an actor/target-owner pair to one manifest, reconstructs both captures under the current signed authority, and can verify the exact future request against session-owned state without allowing or sending it. | R5A must still connect the verified proof to a separately gated, single-use executor; ordinary one-click selection and dispatch remain later integration work. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -461,9 +461,20 @@ because another family passed its gate.
   origin, the current envelope signature, authorized workflow, target identity, and
   authority context, then emits only a non-executable admission contract. It neither
   creates an R4B lease nor exposes a runtime claim.
-- [ ] **R5A3 — Generalized authorization execution.** Extend the separately gated R4C1
-  backend so policy can prove a selected object inside the admitted path, query, JSON,
-  form, or GraphQL-variable location, then execute only the sealed controls and witness.
+- [x] **R5A3a — Locator-aware policy ownership guard.**
+  `LocatorOwnershipProof` is now issued only by the session's `OwnershipRegistry` after
+  the registry extracts the object value at one exact path, query occurrence, JSON
+  pointer, form occurrence, or GraphQL-variable pointer and resolves it to exactly one
+  object created by the stated controlled owner. The proof HMAC-seals the registry,
+  R5A2 proof and role references, distinct actor and owner, complete method/URL/body
+  fingerprint, object, collection, locator, and pointer. Public serialization exposes
+  only opaque references and the structural locator. `ExecutionPolicy` can separately
+  verify this proof with scope and cross-object semantics, but the result explicitly
+  carries no execution authority and does not affect `evaluate_action`.
+- [ ] **R5A3b — Generalized authorization execution.** Add a separately default-off,
+  single-use adapter that consumes one current R5A2 admission, resolves and seals the
+  R5A3a proof, binds it to the exact R4 budget reservation and runtime actions, and only
+  then executes the legitimate controls, treatment, and independent owner witness.
 
 ##### R5A1 technical explanation
 
@@ -514,6 +525,41 @@ R5A2 sends no target traffic and grants no execution authority. It performs no o
 registry writes, budget reservations, world provisioning, target mutations, cleanup,
 backend dispatch, or finding promotion. Its admission artifact explicitly has no single-
 use runtime claim; an R5A3 adapter must be separately designed, gated, and verified.
+
+##### R5A3a technical explanation
+
+R5A3a introduces `OwnedRequestLocatorKind`, `LocatorOwnershipProof`, and
+`LocatorOwnershipVerification` in the safety layer. The registry—not a caller—extracts
+the located raw value and requires one unambiguous `(origin, collection, object ID)`
+entry for the stated target-owner persona. A session-random secret produces opaque actor,
+owner, request, object, and collection references and authenticates the complete proof.
+Verification repeats structural extraction, current registry resolution, request
+fingerprinting, and constant-time seal comparison. `ExecutionPolicy.verify_locator_ownership`
+also requires scope, a classified `CROSS_OBJECT_READ`, explicit controlled ownership
+intent, and distinct actor/owner identities. It does not call or modify
+`evaluate_action`, `ProofBudget`, provenance, or transport. The current fingerprint is
+the exact method, normalized URL, and body material; R5A3b remains responsible for
+binding the admitted runtime/session context and transport-owned headers.
+
+##### R5A3a non-technical explanation
+
+Sentinel's safety lock can now open the sealed blueprint and check the actual proposed
+request without sending it. If Alice's document ID is supposed to be the second query
+parameter, a nested JSON field, a form value, or a GraphQL variable, the lock extracts
+that exact location and confirms the value belongs to Alice in Sentinel's live controlled
+registry. Changing the method, URL, any body material, account, owner, ID, collection,
+field, occurrence, or registry makes the proof fail. A successful check still leaves the
+request stopped at the gate; R5A3b will be the separately controlled mechanism that can
+use this evidence to run the four-part experiment.
+
+##### R5A3a target traffic and execution authority
+
+R5A3a sends no target traffic and grants no execution authority. Proof issuance and
+verification consume no request budget, write no new ownership, record no provenance,
+create no runtime lease or claim, and cannot reach `PolicyExecutor.raw_send`.
+`CandidateAction` deliberately has no generalized proof field, and ordinary policy
+evaluation continues to deny non-URL cross-object ownership even after the passive guard
+has verified it. That connection is reserved for the separately gated R5A3b slice.
 
 #### R5B — Generalized lifecycle prerequisite enforcement
 
