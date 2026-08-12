@@ -113,7 +113,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented; passive generalized ownership evidence implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. `GeneralizedOwnershipLocatorCompiler` separately proves exact same-world owned-create response identifiers across path, query, JSON, form, and GraphQL-variable locations without granting authority. | R5A must still bind generalized ownership evidence into admission and execution; ordinary one-click selection and dispatch remain later integration work. |
+| Generalized counterexample/oracle SDK | Authorization and prerequisite-omission adapters implemented; passive generalized ownership binding and admission implemented | `ProofExperimentManifest` seals the passive proof plan; `GeneralizedExperimentAdmission` revalidates its authority and atomically reserves the complete budget; the default-off R4C adapters consume that exact claim through the existing authorization or omission oracle. R5A now proves exact same-world owned-create response identifiers across path, query, JSON, form, and GraphQL-variable locations, binds an actor/target-owner pair to one manifest, and reconstructs both captures under the current signed authority without granting a runtime claim. | R5A must still consume the passive ownership admission through a separately gated executor; ordinary one-click selection and dispatch remain later integration work. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -449,10 +449,18 @@ because another family passed its gate.
   a field named `variables`. Cross-world matches, ambiguous producers, failed uses,
   consequential creates, token-like capabilities, and caller ownership assertions fail
   closed. Public output contains no raw URL, identifier, body, persona, or token.
-- [ ] **R5A2 — Proof-manifest and admission binding.** Seal one selected R5A1 evidence
-  claim, its exact locator, owner world, operation, controls, and independent witness into
-  the generalized experiment identity. Revalidate the claim from current capture evidence
-  at admission without registering or dispatching the object.
+- [x] **R5A2 — Proof-manifest and admission binding.**
+  `GeneralizedOwnershipExperimentCompiler` now seals a matched actor/target-owner
+  ownership pair into one content-addressed proof over the existing R4 manifest. Each
+  side binds its capture digest, exact R5A1 evidence and use IDs, lineage binding, world,
+  operation, endpoint, capability, value hash, protocol, and structural locator. The
+  proof additionally binds the manifest's distinct legitimate controls, actor treatment,
+  owner witness, oracle, backend conformance, source contract, goal, and authority
+  context. `GeneralizedOwnershipExperimentAdmission` deep-copies and reconstructs both
+  current captures, rejects same-object or non-equivalent pairs, rechecks every capture
+  origin, the current envelope signature, authorized workflow, target identity, and
+  authority context, then emits only a non-executable admission contract. It neither
+  creates an R4B lease nor exposes a runtime claim.
 - [ ] **R5A3 — Generalized authorization execution.** Extend the separately gated R4C1
   backend so policy can prove a selected object inside the admitted path, query, JSON,
   form, or GraphQL-variable location, then execute only the sealed controls and witness.
@@ -479,6 +487,33 @@ that new proof to test Bob-versus-Alice automatically; R5A2 and R5A3 add that sa
 R5A1 sends no target traffic and grants no execution authority. It analyzes only records
 already captured through existing authorized workflows. It creates no accounts or objects,
 does not mutate or clean up target state, and cannot promote evidence into a finding.
+
+##### R5A2 technical explanation
+
+R5A2 composes `GeneralizedOwnershipIndex`, `ProofExperimentManifest`, the signed
+`AuthorizationEnvelope`, and the existing R4 control/oracle contracts without importing
+`PolicyExecutor`, `OwnershipRegistry`, or `ProofBudget`. It requires distinct controlled
+values with identical capability, create operation, consumer operation, normalized
+endpoint, locator kind and pointer, and protocol. The manifest must contain exactly two
+owned worlds, two independently bound legitimate controls, one actor-side cross-object
+treatment, and one target-owner witness. Admission recompiles the proof from copied
+captures and returns no lease, claim token, dispatch authority, or finding authority.
+
+##### R5A2 non-technical explanation
+
+Sentinel now seals both halves of the intended test: Bob's legitimate document request
+and Alice's equivalent document request. It proves they use the same kind of operation
+and the same exact ID location, then locks those facts to the planned Bob/Alice test and
+Alice verification read. If the account, object, field, request, website, permission
+envelope, control, or witness changes, admission refuses the blueprint. Sentinel still
+does not send that blueprint to the target; R5A3 is the execution pass.
+
+##### R5A2 target traffic and execution authority
+
+R5A2 sends no target traffic and grants no execution authority. It performs no ownership-
+registry writes, budget reservations, world provisioning, target mutations, cleanup,
+backend dispatch, or finding promotion. Its admission artifact explicitly has no single-
+use runtime claim; an R5A3 adapter must be separately designed, gated, and verified.
 
 #### R5B — Generalized lifecycle prerequisite enforcement
 
