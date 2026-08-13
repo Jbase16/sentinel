@@ -13,10 +13,18 @@ import hashlib
 import hmac
 import json
 import re
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Optional, Sequence, Tuple
-from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
+from urllib.parse import (
+    parse_qsl,
+    quote,
+    unquote,
+    urlencode,
+    urlsplit,
+    urlunsplit,
+)
 
 
 LOCATOR_OWNERSHIP_MODE = "locator_ownership_guard_v1"
@@ -267,13 +275,15 @@ def _object_id(value: Any) -> str:
     return result
 
 
-def extract_locator_value(
+def extract_locator_native_value(
     *,
     kind: OwnedRequestLocatorKind,
     pointer: str,
     url: Any,
     body: Any,
-) -> str:
+) -> Any:
+    """Extract one validated locator value while retaining its JSON scalar type."""
+
     if not isinstance(kind, OwnedRequestLocatorKind):
         raise LocatorOwnershipDenied("locator_ownership_kind_is_invalid")
     if kind is OwnedRequestLocatorKind.PATH:
@@ -288,28 +298,203 @@ def extract_locator_value(
         ]
         if desired >= len(segments):
             raise LocatorOwnershipDenied("locator_ownership_path_value_is_missing")
-        return _object_id(segments[desired])
+        value: Any = segments[desired]
+        _object_id(value)
+        return value
     if kind is OwnedRequestLocatorKind.QUERY:
         pairs = parse_qsl(
             urlsplit(_normalized_url(url)).query,
             keep_blank_values=True,
         )
-        return _object_id(_key_occurrence(pairs, pointer))
+        value = _key_occurrence(pairs, pointer)
+        _object_id(value)
+        return value
     if kind is OwnedRequestLocatorKind.FORM:
         if not isinstance(body, str):
             raise LocatorOwnershipDenied("locator_ownership_form_body_is_invalid")
-        return _object_id(
-            _key_occurrence(parse_qsl(body, keep_blank_values=True), pointer)
+        value = _key_occurrence(
+            parse_qsl(body, keep_blank_values=True),
+            pointer,
         )
+        _object_id(value)
+        return value
     if kind is OwnedRequestLocatorKind.GRAPHQL_VARIABLE:
         if not _graphql_protocol_is_proven(url, body, pointer):
             raise LocatorOwnershipDenied(
                 "locator_ownership_graphql_protocol_is_unproven"
             )
-        return _object_id(_json_pointer_value(_json_body(body), pointer))
+        value = _json_pointer_value(_json_body(body), pointer)
+        _object_id(value)
+        return value
     if kind is OwnedRequestLocatorKind.JSON:
-        return _object_id(_json_pointer_value(_json_body(body), pointer))
+        value = _json_pointer_value(_json_body(body), pointer)
+        _object_id(value)
+        return value
     raise LocatorOwnershipDenied("locator_ownership_kind_is_invalid")
+
+
+def extract_locator_value(
+    *,
+    kind: OwnedRequestLocatorKind,
+    pointer: str,
+    url: Any,
+    body: Any,
+) -> str:
+    return _object_id(extract_locator_native_value(
+        kind=kind,
+        pointer=pointer,
+        url=url,
+        body=body,
+    ))
+
+
+def _replace_parameter_occurrence(
+    pairs: Sequence[Tuple[str, str]],
+    pointer: str,
+    replacement: str,
+) -> Tuple[Tuple[str, str], ...]:
+    tokens = _decode_pointer(pointer)
+    if len(tokens) != 2 or not tokens[0]:
+        raise LocatorOwnershipDenied(
+            "locator_ownership_parameter_pointer_is_invalid"
+        )
+    key, raw_occurrence = tokens
+    desired = _occurrence_index(raw_occurrence)
+    seen = 0
+    replaced = False
+    output = []
+    for current_key, current_value in pairs:
+        if current_key == key:
+            if seen == desired:
+                current_value = replacement
+                replaced = True
+            seen += 1
+        output.append((current_key, current_value))
+    if not replaced:
+        raise LocatorOwnershipDenied("locator_ownership_parameter_is_missing")
+    return tuple(output)
+
+
+def _replace_json_pointer(value: Any, pointer: str, replacement: Any) -> Any:
+    tokens = _decode_pointer(pointer)
+    if not tokens:
+        raise LocatorOwnershipDenied("locator_ownership_json_pointer_is_invalid")
+    current = value
+    for token in tokens[:-1]:
+        if isinstance(current, Mapping):
+            if token not in current:
+                raise LocatorOwnershipDenied(
+                    "locator_ownership_json_value_is_missing"
+                )
+            current = current[token]
+        elif isinstance(current, list):
+            index = _occurrence_index(token)
+            if index >= len(current):
+                raise LocatorOwnershipDenied(
+                    "locator_ownership_json_value_is_missing"
+                )
+            current = current[index]
+        else:
+            raise LocatorOwnershipDenied(
+                "locator_ownership_json_value_is_missing"
+            )
+    final = tokens[-1]
+    if isinstance(current, dict):
+        if final not in current:
+            raise LocatorOwnershipDenied(
+                "locator_ownership_json_value_is_missing"
+            )
+        current[final] = copy.deepcopy(replacement)
+    elif isinstance(current, list):
+        index = _occurrence_index(final)
+        if index >= len(current):
+            raise LocatorOwnershipDenied(
+                "locator_ownership_json_value_is_missing"
+            )
+        current[index] = copy.deepcopy(replacement)
+    else:
+        raise LocatorOwnershipDenied("locator_ownership_json_value_is_missing")
+    return value
+
+
+def replace_locator_value(
+    *,
+    kind: OwnedRequestLocatorKind,
+    pointer: str,
+    url: Any,
+    body: Any,
+    expected_value: str,
+    replacement_value: Any,
+) -> Tuple[str, Any]:
+    """Replace one exact locator without granting budget or transport authority."""
+
+    normalized_url = _normalized_url(url)
+    if extract_locator_value(
+        kind=kind,
+        pointer=pointer,
+        url=normalized_url,
+        body=body,
+    ) != expected_value:
+        raise LocatorOwnershipDenied("locator_ownership_source_value_changed")
+    replacement_text = _object_id(replacement_value)
+    if replacement_text == expected_value:
+        raise LocatorOwnershipDenied("locator_ownership_replacement_did_not_change")
+    parsed = urlsplit(normalized_url)
+    output_url = normalized_url
+    output_body = copy.deepcopy(body)
+    if kind is OwnedRequestLocatorKind.PATH:
+        tokens = _decode_pointer(pointer)
+        if len(tokens) != 2 or tokens[0] != "segments":
+            raise LocatorOwnershipDenied(
+                "locator_ownership_path_pointer_is_invalid"
+            )
+        desired = _occurrence_index(tokens[1])
+        segments = parsed.path.split("/")
+        populated = [index for index, value in enumerate(segments) if value]
+        if desired >= len(populated):
+            raise LocatorOwnershipDenied(
+                "locator_ownership_path_value_is_missing"
+            )
+        segments[populated[desired]] = quote(replacement_text, safe="")
+        output_url = urlunsplit(parsed._replace(path="/".join(segments)))
+    elif kind is OwnedRequestLocatorKind.QUERY:
+        pairs = _replace_parameter_occurrence(
+            parse_qsl(parsed.query, keep_blank_values=True),
+            pointer,
+            replacement_text,
+        )
+        output_url = urlunsplit(parsed._replace(query=urlencode(pairs)))
+    elif kind is OwnedRequestLocatorKind.FORM:
+        if not isinstance(body, str):
+            raise LocatorOwnershipDenied("locator_ownership_form_body_is_invalid")
+        pairs = _replace_parameter_occurrence(
+            parse_qsl(body, keep_blank_values=True),
+            pointer,
+            replacement_text,
+        )
+        output_body = urlencode(pairs)
+    elif kind in {
+        OwnedRequestLocatorKind.JSON,
+        OwnedRequestLocatorKind.GRAPHQL_VARIABLE,
+    }:
+        was_text = isinstance(body, str)
+        value = copy.deepcopy(_json_body(body))
+        output = _replace_json_pointer(value, pointer, replacement_value)
+        output_body = (
+            json.dumps(output, sort_keys=True, separators=(",", ":"))
+            if was_text
+            else output
+        )
+    else:
+        raise LocatorOwnershipDenied("locator_ownership_kind_is_invalid")
+    if extract_locator_value(
+        kind=kind,
+        pointer=pointer,
+        url=output_url,
+        body=output_body,
+    ) != replacement_text:
+        raise LocatorOwnershipDenied("locator_ownership_replacement_failed")
+    return output_url, output_body
 
 
 def _proof_payload(
@@ -553,4 +738,7 @@ __all__ = [
     "LocatorOwnershipProof",
     "LocatorOwnershipVerification",
     "OwnedRequestLocatorKind",
+    "extract_locator_native_value",
+    "extract_locator_value",
+    "replace_locator_value",
 ]

@@ -60,6 +60,8 @@ in :mod:`core.safety.ownership_locator`; no generalized proof is attached to a
 ``CandidateAction`` by importing this package.
 Admitted object-authorization execution remains separately default-off and
 explicit-only through :mod:`core.behavior.experiment_authorization`.
+Generalized locator-bound authorization execution remains separately default-off and
+explicit-only through :mod:`core.behavior.experiment_generalized_authorization`.
 Admitted prerequisite-omission execution remains separately default-off and
 explicit-only through :mod:`core.behavior.experiment_omission`.
 """

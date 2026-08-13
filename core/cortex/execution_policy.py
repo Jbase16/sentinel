@@ -28,6 +28,7 @@ so the executor is a transparent pass-through and existing behavior is unchanged
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -74,6 +75,166 @@ class Decision:
     action_class: str
 
 
+class LocatorRuntimeAuthorityDenied(RuntimeError):
+    """A single-use admitted locator action no longer matches its authority."""
+
+
+def _candidate_runtime_fingerprint(action: CandidateAction) -> str:
+    value = body_hash({
+        "method": str(action.method or "").strip().upper(),
+        "url": str(action.url),
+        "body": action.body,
+        "hint": action.hint,
+        "actor_persona_id": action.actor_persona_id,
+        "target_owner_persona_id": action.target_owner_persona_id,
+        "target_is_researcher_owned": action.target_is_researcher_owned,
+        "expected_side_effect": action.expected_side_effect,
+        "proof_goal": action.proof_goal,
+    })
+    if value is None:
+        raise LocatorRuntimeAuthorityDenied(
+            "locator_runtime_action_identity_is_invalid"
+        )
+    return value
+
+
+class LocatorRuntimePermit:
+    """One in-memory R4 claim capability for one exact locator-bound action.
+
+    Construction is restricted to the R4 admission handoff.  The permit commits
+    to the unreserved action identity, the exact reservation, the R5A2 admission,
+    and the R5A3a proof.  Its admission-owned callback makes consumption atomic
+    with the live claim rather than trusting a caller-supplied boolean.
+    """
+
+    def __init__(
+        self,
+        *,
+        runtime_action_binding_id: str,
+        action_fingerprint: str,
+        budget_reservation_id: str,
+        locator_proof_ref: str,
+        source_admission_ref: str,
+        source_plan_ref: str,
+        transport_context_ref: str,
+        runtime_claim_token: str,
+        consume_callback: Callable[[str, str], None],
+    ) -> None:
+        material = {
+            "runtime_action_binding_id": runtime_action_binding_id,
+            "action_fingerprint": action_fingerprint,
+            "budget_reservation_id": budget_reservation_id,
+            "locator_proof_ref": locator_proof_ref,
+            "source_admission_ref": source_admission_ref,
+            "source_plan_ref": source_plan_ref,
+            "transport_context_ref": transport_context_ref,
+        }
+        authority_hash = body_hash(material)
+        if (
+            authority_hash is None
+            or not runtime_action_binding_id.startswith(
+                "experiment_runtime_action_binding:"
+            )
+            or not action_fingerprint.startswith("sha256:")
+            or not budget_reservation_id
+            or not locator_proof_ref.startswith("locator_ownership_proof:")
+            or not source_admission_ref.startswith(
+                "ownership_experiment_admission:"
+            )
+            or not source_plan_ref.startswith(
+                "generalized_authorization_plan:"
+            )
+            or not transport_context_ref.startswith(
+                "locator_transport_context:"
+            )
+            or not runtime_claim_token
+            or not callable(consume_callback)
+        ):
+            raise ValueError("locator runtime permit contract is invalid")
+        self.authority_ref = authority_hash.replace(
+            "sha256:", "locator_runtime_authority:", 1
+        )
+        self.runtime_action_binding_id = runtime_action_binding_id
+        self.locator_proof_ref = locator_proof_ref
+        self.source_admission_ref = source_admission_ref
+        self.source_plan_ref = source_plan_ref
+        self.transport_context_ref = transport_context_ref
+        self._action_fingerprint = action_fingerprint
+        self._budget_reservation_id = budget_reservation_id
+        self._runtime_claim_token = runtime_claim_token
+        self._consume_callback = consume_callback
+        self._lock = threading.Lock()
+        self._consumed = False
+
+    def __repr__(self) -> str:
+        return (
+            "LocatorRuntimePermit("
+            f"authority_ref={self.authority_ref!r}, capability=REDACTED)"
+        )
+
+    def _consume(
+        self,
+        action: CandidateAction,
+        proof: LocatorOwnershipProof,
+        transport_context_ref: str,
+    ) -> None:
+        with self._lock:
+            if self._consumed:
+                raise LocatorRuntimeAuthorityDenied(
+                    "locator_runtime_authority_already_consumed"
+                )
+            if (
+                not isinstance(action, CandidateAction)
+                or not isinstance(proof, LocatorOwnershipProof)
+                or action.budget_reservation_id
+                != self._budget_reservation_id
+                or proof.proof_ref != self.locator_proof_ref
+                or transport_context_ref != self.transport_context_ref
+                or _candidate_runtime_fingerprint(action)
+                != self._action_fingerprint
+            ):
+                raise LocatorRuntimeAuthorityDenied(
+                    "locator_runtime_authority_identity_mismatch"
+                )
+            try:
+                self._consume_callback(
+                    self._runtime_claim_token,
+                    self.authority_ref,
+                )
+            except Exception as exc:
+                raise LocatorRuntimeAuthorityDenied(
+                    "locator_runtime_authority_is_not_active"
+                ) from exc
+            self._consumed = True
+
+
+def _issue_locator_runtime_permit(
+    *,
+    runtime_action_binding_id: str,
+    action: CandidateAction,
+    budget_reservation_id: str,
+    locator_proof_ref: str,
+    source_admission_ref: str,
+    source_plan_ref: str,
+    transport_context_ref: str,
+    runtime_claim_token: str,
+    consume_callback: Callable[[str, str], None],
+) -> LocatorRuntimePermit:
+    """Private construction seam used only by an active R4 admission claim."""
+
+    return LocatorRuntimePermit(
+        runtime_action_binding_id=runtime_action_binding_id,
+        action_fingerprint=_candidate_runtime_fingerprint(action),
+        budget_reservation_id=budget_reservation_id,
+        locator_proof_ref=locator_proof_ref,
+        source_admission_ref=source_admission_ref,
+        source_plan_ref=source_plan_ref,
+        transport_context_ref=transport_context_ref,
+        runtime_claim_token=runtime_claim_token,
+        consume_callback=consume_callback,
+    )
+
+
 class ExecutionPolicy:
     def __init__(self, mode: str, *, scope_filter: Optional[ScopeFilter] = None,
                  budget: Optional[ProofBudget] = None,
@@ -87,7 +248,12 @@ class ExecutionPolicy:
         # in this session — not merely one the caller labelled researcher-owned.
         self.ownership_registry = ownership_registry
 
-    def evaluate_action(self, a: CandidateAction) -> Decision:
+    def _evaluate_action(
+        self,
+        a: CandidateAction,
+        *,
+        locator_ownership_verified: bool = False,
+    ) -> Decision:
         # 1. Scope — never touch anything outside the declared scope.
         if self.scope_filter is not None:
             try:
@@ -116,8 +282,11 @@ class ExecutionPolicy:
         if ac == CROSS_OBJECT_READ and not self.budget.allow_real_user_data_access:
             if a.target_is_researcher_owned is not True:
                 return Decision(False, "cross_object_read_requires_researcher_owned_target", ac)
-            if (self.ownership_registry is not None
-                    and not self.ownership_registry.is_owned(a.url)):
+            if (
+                self.ownership_registry is not None
+                and not locator_ownership_verified
+                and not self.ownership_registry.is_owned(a.url)
+            ):
                 return Decision(False, "cross_object_read_target_not_proven_researcher_created", ac)
 
         # 5. Budget.
@@ -130,6 +299,35 @@ class ExecutionPolicy:
             return Decision(False, reason, ac)
 
         return Decision(True, "ok", ac)
+
+    def evaluate_action(self, a: CandidateAction) -> Decision:
+        """Evaluate the ordinary URL-owned action path without locator authority."""
+
+        return self._evaluate_action(a)
+
+    def evaluate_locator_action(
+        self,
+        action: CandidateAction,
+        proof: LocatorOwnershipProof,
+    ) -> Decision:
+        """Evaluate one exact locator proof without treating it as ambient authority."""
+
+        verification = self.verify_locator_ownership(action, proof)
+        if not verification.verified:
+            try:
+                action_class = classify(
+                    action.method,
+                    action.url,
+                    action.body,
+                    hint=action.hint,
+                )
+            except Exception:
+                action_class = "UNKNOWN"
+            return Decision(False, verification.reason, action_class)
+        return self._evaluate_action(
+            action,
+            locator_ownership_verified=True,
+        )
 
     def evaluate(self, method: str, url: str, body: Any = None, *,
                  hint: Optional[str] = None,
@@ -261,6 +459,125 @@ class PolicyExecutor:
         self._emit_provenance(action, decision, allowed=True, status=status, resp=resp)
         return status, resp
 
+    async def send_locator_action(
+        self,
+        action: CandidateAction,
+        proof: LocatorOwnershipProof,
+        *,
+        runtime_permit: LocatorRuntimePermit,
+        **kw: Any,
+    ) -> Tuple[int, Any]:
+        """Send one locator-owned action under an exact single-use R4 permit."""
+
+        authority_ref = (
+            runtime_permit.authority_ref
+            if isinstance(runtime_permit, LocatorRuntimePermit)
+            else None
+        )
+        source_admission_ref = (
+            runtime_permit.source_admission_ref
+            if isinstance(runtime_permit, LocatorRuntimePermit)
+            else None
+        )
+        source_plan_ref = (
+            runtime_permit.source_plan_ref
+            if isinstance(runtime_permit, LocatorRuntimePermit)
+            else None
+        )
+        transport_context_ref = (
+            runtime_permit.transport_context_ref
+            if isinstance(runtime_permit, LocatorRuntimePermit)
+            else None
+        )
+        proof_ref = proof.proof_ref if isinstance(proof, LocatorOwnershipProof) else None
+        try:
+            if not isinstance(runtime_permit, LocatorRuntimePermit):
+                raise LocatorRuntimeAuthorityDenied(
+                    "locator_runtime_authority_is_invalid"
+                )
+            registry = self.policy.ownership_registry
+            if registry is None:
+                raise LocatorRuntimeAuthorityDenied(
+                    "locator_runtime_ownership_registry_is_unavailable"
+                )
+            try:
+                actual_transport_context_ref = registry.transport_context_ref(
+                    kw.get("headers") or {}
+                )
+            except Exception as exc:
+                raise LocatorRuntimeAuthorityDenied(
+                    "locator_runtime_transport_context_is_invalid"
+                ) from exc
+            runtime_permit._consume(
+                action,
+                proof,
+                actual_transport_context_ref,
+            )
+            decision = self.policy.evaluate_locator_action(action, proof)
+        except LocatorRuntimeAuthorityDenied as exc:
+            try:
+                action_class = classify(
+                    action.method,
+                    action.url,
+                    action.body,
+                    hint=action.hint,
+                )
+            except Exception:
+                action_class = "UNKNOWN"
+            decision = Decision(False, str(exc), action_class)
+        if not decision.allowed:
+            self.skipped.append({
+                "method": action.method,
+                "url": action.url,
+                "class": decision.action_class,
+                "reason": decision.reason,
+            })
+            logger.info(
+                "[execution_policy] DENIED %s %s — %s (%s)",
+                action.method,
+                action.url,
+                decision.reason,
+                decision.action_class,
+            )
+            self._emit_provenance(
+                action,
+                decision,
+                allowed=False,
+                status=None,
+                resp=None,
+                ownership_proof_ref=proof_ref,
+                runtime_authority_ref=authority_ref,
+                source_admission_ref=source_admission_ref,
+                source_plan_ref=source_plan_ref,
+                transport_context_ref=transport_context_ref,
+            )
+            return DENIED_STATUS, {"_policy_denied": decision.reason}
+        status, resp = await self.raw_send(
+            action.method,
+            action.url,
+            action.body,
+            **kw,
+        )
+        self.policy.record(
+            decision.action_class,
+            action.url,
+            status,
+            reservation_id=action.budget_reservation_id,
+        )
+        self._emit_provenance(
+            action,
+            decision,
+            allowed=True,
+            status=status,
+            resp=resp,
+            ownership_proof_ref=proof_ref,
+            runtime_authority_ref=authority_ref,
+            source_admission_ref=source_admission_ref,
+            source_plan_ref=source_plan_ref,
+            transport_context_ref=transport_context_ref,
+        )
+        return status, resp
+
     def _register_ownership(self, action: CandidateAction, decision: Decision,
                             status: Optional[int], resp: Any) -> None:
         """After a successful OWNED_CREATE, record the created object so a later
@@ -276,7 +593,12 @@ class PolicyExecutor:
                            type(exc).__name__, exc)
 
     def _emit_provenance(self, action: CandidateAction, decision: Decision, *,
-                         allowed: bool, status: Optional[int], resp: Any) -> None:
+                         allowed: bool, status: Optional[int], resp: Any,
+                         ownership_proof_ref: Optional[str] = None,
+                         runtime_authority_ref: Optional[str] = None,
+                         source_admission_ref: Optional[str] = None,
+                         source_plan_ref: Optional[str] = None,
+                         transport_context_ref: Optional[str] = None) -> None:
         """Record one conduct block for this action. Best-effort: a provenance fault
         must never break the proof path (the request has already happened)."""
         if self.provenance is None:
@@ -289,6 +611,11 @@ class PolicyExecutor:
                 denial_reason=(None if allowed else decision.reason),
                 target_owner_persona_id=action.target_owner_persona_id,
                 target_is_researcher_owned=action.target_is_researcher_owned,
+                ownership_proof_ref=ownership_proof_ref,
+                runtime_authority_ref=runtime_authority_ref,
+                source_admission_ref=source_admission_ref,
+                source_plan_ref=source_plan_ref,
+                transport_context_ref=transport_context_ref,
                 status=status, request_body_hash=body_hash(action.body),
                 response_body_hash=(body_hash(resp) if allowed else None),
                 response_summary=(response_shape(resp) if allowed else {}),

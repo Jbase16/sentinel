@@ -91,6 +91,24 @@ _PROOF_EXPERIMENT_ACTION_EVIDENCE_REF = re.compile(
 _PROOF_EXPERIMENT_FINDING_CANDIDATE_REF = re.compile(
     r"^proof_experiment_finding_candidate:[0-9a-f]{64}$"
 )
+_OWNERSHIP_EXPERIMENT_PROOF_REF = re.compile(
+    r"^ownership_experiment_proof:[0-9a-f]{64}$"
+)
+_OWNERSHIP_EXPERIMENT_ADMISSION_REF = re.compile(
+    r"^ownership_experiment_admission:[0-9a-f]{64}$"
+)
+_LOCATOR_OWNERSHIP_PROOF_REF = re.compile(
+    r"^locator_ownership_proof:[0-9a-f]{64}$"
+)
+_LOCATOR_RUNTIME_AUTHORITY_REF = re.compile(
+    r"^locator_runtime_authority:[0-9a-f]{64}$"
+)
+_GENERALIZED_AUTHORIZATION_PLAN_REF = re.compile(
+    r"^generalized_authorization_plan:[0-9a-f]{64}$"
+)
+_LOCATOR_TRANSPORT_CONTEXT_REF = re.compile(
+    r"^locator_transport_context:[0-9a-f]{64}$"
+)
 _BEHAVIORAL_RECEIPT_REF = re.compile(r"^behavioral_receipt:[0-9a-f]{64}$")
 _PROVENANCE_REF = re.compile(r"^provenance:[0-9a-f]{64}$")
 _STATE_TRANSITION_ACTION_REF = re.compile(
@@ -2774,6 +2792,57 @@ def redacted_proof_experiment_authorization_outcome(
     }
 
 
+def redacted_proof_experiment_generalized_authorization_outcome(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate R5A3b's R4 outcome plus its locator authority chain."""
+
+    if value.get("kind") != "proof_experiment_generalized_authorization":
+        raise ReceiptStoreError(
+            "proof experiment generalized authorization kind is invalid"
+        )
+    exact_refs = (
+        (value.get("ownership_proof_id"), _OWNERSHIP_EXPERIMENT_PROOF_REF),
+        (
+            value.get("ownership_admission_id"),
+            _OWNERSHIP_EXPERIMENT_ADMISSION_REF,
+        ),
+        (value.get("locator_proof_ref"), _LOCATOR_OWNERSHIP_PROOF_REF),
+        (
+            value.get("runtime_authority_ref"),
+            _LOCATOR_RUNTIME_AUTHORITY_REF,
+        ),
+        (
+            value.get("execution_plan_ref"),
+            _GENERALIZED_AUTHORIZATION_PLAN_REF,
+        ),
+        (
+            value.get("transport_context_ref"),
+            _LOCATOR_TRANSPORT_CONTEXT_REF,
+        ),
+    )
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item, pattern in exact_refs
+    ):
+        raise ReceiptStoreError(
+            "proof experiment generalized authorization reference is invalid"
+        )
+    base = dict(value)
+    base["kind"] = "proof_experiment_authorization"
+    output = redacted_proof_experiment_authorization_outcome(base)
+    output.update({
+        "kind": "proof_experiment_generalized_authorization",
+        "ownership_proof_id": value["ownership_proof_id"],
+        "ownership_admission_id": value["ownership_admission_id"],
+        "locator_proof_ref": value["locator_proof_ref"],
+        "runtime_authority_ref": value["runtime_authority_ref"],
+        "execution_plan_ref": value["execution_plan_ref"],
+        "transport_context_ref": value["transport_context_ref"],
+    })
+    return output
+
+
 def redacted_proof_experiment_omission_outcome(
     value: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -2962,6 +3031,10 @@ def redacted_proof_experiment_omission_outcome(
 
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    if response.get("kind") == "proof_experiment_generalized_authorization":
+        return redacted_proof_experiment_generalized_authorization_outcome(
+            response
+        )
     if response.get("kind") == "proof_experiment_authorization":
         return redacted_proof_experiment_authorization_outcome(response)
     if response.get("kind") == "proof_experiment_omission":
@@ -3027,6 +3100,10 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "proof_experiment_generalized_authorization":
+        return redacted_proof_experiment_generalized_authorization_outcome(
+            value
+        )
     if value.get("kind") == "proof_experiment_authorization":
         return redacted_proof_experiment_authorization_outcome(value)
     if value.get("kind") == "proof_experiment_omission":

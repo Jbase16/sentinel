@@ -21,10 +21,12 @@ needing to know the by-id template in advance. Unknown/mismatched refs fail clos
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import re
 import secrets
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 from core.safety.ownership_locator import (
@@ -133,6 +135,37 @@ class OwnershipRegistry:
         """Opaque identity for this session-local registry instance."""
 
         return f"ownership_registry:{hashlib.sha256(self._seal_key).hexdigest()}"
+
+    def transport_context_ref(self, headers: Mapping[str, Any]) -> str:
+        """HMAC one replay-header context without exposing guessable raw hashes."""
+
+        if not isinstance(headers, Mapping):
+            raise LocatorOwnershipDenied(
+                "locator_transport_context_is_invalid"
+            )
+        normalized = tuple(
+            sorted(
+                ((str(key), str(value)) for key, value in headers.items()),
+                key=lambda item: (item[0].lower(), item[0]),
+            )
+        )
+        lowered = [key.lower() for key, _ in normalized]
+        if len(lowered) != len(set(lowered)):
+            raise LocatorOwnershipDenied(
+                "locator_transport_context_is_ambiguous"
+            )
+        encoded = json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        digest = hmac.new(
+            self._seal_key,
+            b"locator_transport_context\x00" + encoded,
+            hashlib.sha256,
+        ).hexdigest()
+        return f"locator_transport_context:{digest}"
 
     def register_created(self, create_url: str, response: Any, *,
                          actor_persona: Optional[str] = None) -> Optional[Key]:

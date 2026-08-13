@@ -320,6 +320,49 @@ class GeneralizedOwnershipIndex:
         )
         return matches[0] if len(matches) == 1 else None
 
+    def rehydrate_use(
+        self,
+        *,
+        evidence_id: str,
+        use_id: str,
+    ) -> Any:
+        """Return one exact capture-bound request for an explicit R5 adapter.
+
+        The value remains ephemeral and raw material is never added to public
+        serialization.  Both content-addressed evidence identities and the
+        underlying observation digest are rechecked before rehydration.
+        """
+
+        evidence_matches = tuple(
+            item for item in self.evidence if item.evidence_id == evidence_id
+        )
+        if len(evidence_matches) != 1:
+            raise RehydrationDenied(
+                "ownership evidence is unavailable for rehydration"
+            )
+        use_matches = tuple(
+            item
+            for item in evidence_matches[0].uses
+            if item.use_id == use_id
+        )
+        if len(use_matches) != 1:
+            raise RehydrationDenied(
+                "ownership use is unavailable for rehydration"
+            )
+        use = use_matches[0]
+        observations = tuple(
+            item
+            for item in self.ledger.observations
+            if item.source_ref == use.source_ref
+            and item.operation_id == use.operation_id
+            and item.request_digest == use.request_digest
+        )
+        if len(observations) != 1:
+            raise RehydrationDenied(
+                "ownership use observation is ambiguous or stale"
+            )
+        return self.ledger._rehydrate_observation(observations[0])
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "schema_version": 1,

@@ -284,7 +284,11 @@ def _record_headers(rec: Dict[str, Any]) -> Dict[str, str]:
     return {}
 
 
-def _clean_headers(headers: Dict[str, str], *, default_content_type: Optional[str] = None) -> Dict[str, str]:
+def sanitize_replay_headers(
+    headers: Dict[str, str],
+    *,
+    default_content_type: Optional[str] = None,
+) -> Dict[str, str]:
     """Drop browser-owned/forbidden headers (fetch would reject them) while keeping
     everything meaningful — above all the CSRF token — and ensure a content-type."""
     out: Dict[str, str] = {}
@@ -306,14 +310,18 @@ def build_request(op: ObjectScopedOp, use_id: str, attacker_id: str) -> ReplayRe
         swapped = _deep_swap(op.op_payload, attacker_id, use_id)
         return ReplayRequest(
             method="POST", url=op.url, body=_json.dumps([swapped]),
-            headers=_clean_headers(_deep_swap(op.headers, attacker_id, use_id),
-                                   default_content_type="application/json"))
+            headers=sanitize_replay_headers(
+                _deep_swap(op.headers, attacker_id, use_id),
+                default_content_type="application/json",
+            ))
     # REST
     return ReplayRequest(
         method=op.method,
         url=op.url.replace(attacker_id, use_id),
         body=(op.raw_body.replace(attacker_id, use_id) if op.raw_body else None),
-        headers=_clean_headers(_deep_swap(op.headers, attacker_id, use_id)))
+        headers=sanitize_replay_headers(
+            _deep_swap(op.headers, attacker_id, use_id)
+        ))
 
 
 # ─────────────────────────── marker extraction + diff ───────────────────────────
@@ -365,6 +373,78 @@ def is_denied_response(resp: ReplayResponse) -> bool:
                                 "access denied", "unauthorized", "not permitted"))
 
 
+def classify_responses(
+    op: ObjectScopedOp,
+    attacker: str,
+    victim_id: str,
+    attacker_id: str,
+    victim_base: ReplayResponse,
+    attacker_base: ReplayResponse,
+    attack: ReplayResponse,
+) -> OpVerdict:
+    """Apply the established marker-diff oracle to an acquired three-leg sequence."""
+
+    if victim_base.body_truncated or attacker_base.body_truncated:
+        return OpVerdict(
+            op.label,
+            "AMBIGUOUS",
+            "baseline response exceeded the bounded replay limit",
+        )
+    if attack.body_truncated:
+        return OpVerdict(
+            op.label,
+            "AMBIGUOUS",
+            "counterfactual response exceeded the bounded replay limit",
+        )
+    if not (200 <= attack.status < 300):
+        return OpVerdict(op.label, "DENIED", f"attack HTTP {attack.status}")
+    if is_denied_response(attack):
+        return OpVerdict(
+            op.label,
+            "DENIED",
+            "attack returned an authorization error",
+        )
+
+    markers = extract_victim_markers(
+        victim_base.body,
+        attacker_base.body,
+        exclude={attacker_id, victim_id},
+    )
+    if not markers:
+        return OpVerdict(
+            op.label,
+            "AMBIGUOUS",
+            "no victim-private marker isolable (victim baseline empty or "
+            "indistinguishable from attacker baseline)",
+        )
+    leaked = [marker for marker in markers if _contains(attack.body, marker)]
+    if not leaked:
+        return OpVerdict(
+            op.label,
+            "NO_CROSS_READ",
+            "attack 2xx but carried no victim-private marker",
+        )
+    ref = f"{op.method} {op.url} [{op.label}]"
+    finding = BolaFinding(
+        object_ref=ref,
+        method=op.method,
+        leaked=leaked[:8],
+        victim=victim_id,
+        evidence=(
+            f"HTTP {attack.status}; attacker session '{attacker}' sent op "
+            f"{op.label!r} with victim id {victim_id!r} ({op.id_where}) and "
+            "the response carried victim-private marker(s) absent from the "
+            f"attacker's own baseline: {leaked[:8]}"
+        ),
+    )
+    return OpVerdict(
+        op.label,
+        "BOLA_CONFIRMED",
+        "cross-tenant read confirmed",
+        finding,
+    )
+
+
 async def _classify(
     op: ObjectScopedOp, attacker: str, victim: str, attacker_id: str, victim_id: str,
     transport: ReplayTransport, victim_op: Optional[ObjectScopedOp] = None,
@@ -391,36 +471,15 @@ async def _classify(
     # 3. the attack — attacker session, victim's id swapped in.
     attack = await transport.send(attacker, build_request(op, victim_id, attacker_id))
 
-    if attack.body_truncated:
-        return OpVerdict(
-            op.label,
-            "AMBIGUOUS",
-            "counterfactual response exceeded the bounded replay limit",
-        )
-
-    if not (200 <= attack.status < 300):
-        return OpVerdict(op.label, "DENIED", f"attack HTTP {attack.status}")
-    if is_denied_response(attack):
-        return OpVerdict(op.label, "DENIED", "attack returned an authorization error")
-
-    markers = extract_victim_markers(victim_base.body, atk_base.body,
-                                     exclude={attacker_id, victim_id})
-    if not markers:
-        return OpVerdict(op.label, "AMBIGUOUS",
-                         "no victim-private marker isolable (victim baseline empty or "
-                         "indistinguishable from attacker baseline)")
-    leaked = [m for m in markers if _contains(attack.body, m)]
-    if not leaked:
-        # 2xx but only the attacker's own data / nothing of the victim's.
-        return OpVerdict(op.label, "NO_CROSS_READ",
-                         "attack 2xx but carried no victim-private marker")
-    ref = f"{op.method} {op.url} [{op.label}]"
-    finding = BolaFinding(
-        object_ref=ref, method=op.method, leaked=leaked[:8], victim=victim_id,
-        evidence=(f"HTTP {attack.status}; attacker session '{attacker}' sent op {op.label!r} with "
-                  f"victim id {victim_id!r} ({op.id_where}) and the response carried victim-private "
-                  f"marker(s) absent from the attacker's own baseline: {leaked[:8]}"))
-    return OpVerdict(op.label, "BOLA_CONFIRMED", "cross-tenant read confirmed", finding)
+    return classify_responses(
+        op,
+        attacker,
+        victim_id,
+        attacker_id,
+        victim_base,
+        atk_base,
+        attack,
+    )
 
 
 async def classify_operation(

@@ -18,10 +18,16 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
-from core.cortex.execution_policy import CandidateAction, PolicyExecutor
+from core.cortex.execution_policy import (
+    CandidateAction,
+    LocatorRuntimePermit,
+    PolicyExecutor,
+    _issue_locator_runtime_permit,
+)
 from core.foundry.authorization import AuthorizationEnvelope
 from core.foundry.vault import PersonaVault
 from core.safety.action_classifier import classify
+from core.safety.ownership_locator import LocatorOwnershipProof
 from core.safety.proof_budget import ProofBudget, endpoint_key
 from core.safety.proof_mode import ProofMode
 
@@ -819,6 +825,7 @@ class _AdmissionResources:
         self._lock = threading.RLock()
         self._state = "active"
         self._runtime_claim_token: Optional[str] = None
+        self._runtime_authorities: Dict[str, bool] = {}
 
     @property
     def state(self) -> str:
@@ -843,6 +850,7 @@ class _AdmissionResources:
                 )
             token = secrets.token_urlsafe(32)
             self._runtime_claim_token = token
+            self._runtime_authorities.clear()
             self._state = "executing"
             return token
 
@@ -859,6 +867,48 @@ class _AdmissionResources:
             raise ProofExperimentAdmissionDenied(
                 "proof_experiment_runtime_claim_owner_mismatch"
             )
+
+    def register_runtime_authority(
+        self,
+        runtime_claim_token: str,
+        authority_ref: str,
+    ) -> None:
+        with self._lock:
+            if self._state != "executing":
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_runtime_authority_is_not_registerable"
+                )
+            self._validate_runtime_owner(runtime_claim_token)
+            if (
+                not _hash_ref(authority_ref, "locator_runtime_authority")
+                or authority_ref in self._runtime_authorities
+            ):
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_runtime_authority_is_invalid"
+                )
+            self._runtime_authorities[authority_ref] = False
+
+    def consume_runtime_authority(
+        self,
+        runtime_claim_token: str,
+        authority_ref: str,
+    ) -> None:
+        with self._lock:
+            if self._state != "executing":
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_runtime_authority_is_not_active"
+                )
+            self._validate_runtime_owner(runtime_claim_token)
+            consumed = self._runtime_authorities.get(authority_ref)
+            if consumed is None:
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_runtime_authority_is_unknown"
+                )
+            if consumed:
+                raise ProofExperimentAdmissionDenied(
+                    "proof_experiment_runtime_authority_is_consumed"
+                )
+            self._runtime_authorities[authority_ref] = True
 
     def abort(
         self,
@@ -889,6 +939,7 @@ class _AdmissionResources:
                 self.budget_reservation_id
             )
             self._runtime_claim_token = None
+            self._runtime_authorities.clear()
             self._state = "aborted"
             if receipt_error is not None:
                 raise ProofExperimentAdmissionDenied(
@@ -943,6 +994,7 @@ class _AdmissionResources:
                     "proof_experiment_receipt_completion_failed"
                 ) from exc
             self._runtime_claim_token = None
+            self._runtime_authorities.clear()
             self._state = "completed"
             return receipt
 
@@ -1005,6 +1057,67 @@ class ProofExperimentAdmissionClaim:
             reason=reason,
             runtime_claim_token=runtime_claim_token,
         )
+
+    def _issue_locator_runtime_permit(
+        self,
+        *,
+        runtime_claim_token: str,
+        action_binding: ExperimentRuntimeActionBinding,
+        action: CandidateAction,
+        locator_proof_ref: str,
+        source_admission_ref: str,
+        source_plan_ref: str,
+        transport_context_ref: str,
+    ) -> LocatorRuntimePermit:
+        """Bind one locator send to this claim's exact admitted treatment."""
+
+        if (
+            self.state != "executing"
+            or not isinstance(action_binding, ExperimentRuntimeActionBinding)
+            or action_binding.action_class
+            is not ExperimentActionClass.CROSS_OBJECT_READ
+            or action_binding.runtime_action_binding_id
+            not in self.contract.action_binding_ids
+            or not isinstance(action, CandidateAction)
+            or action.budget_reservation_id
+            != self._resources.budget_reservation_id
+            or action_binding.request_material_fingerprint
+            != request_fingerprint(_request_material(action))
+            or not _hash_ref(locator_proof_ref, "locator_ownership_proof")
+            or not _hash_ref(
+                source_admission_ref,
+                "ownership_experiment_admission",
+            )
+            or not _hash_ref(
+                source_plan_ref,
+                "generalized_authorization_plan",
+            )
+            or not _hash_ref(
+                transport_context_ref,
+                "locator_transport_context",
+            )
+        ):
+            raise ProofExperimentAdmissionDenied(
+                "proof_experiment_locator_runtime_identity_mismatch"
+            )
+        permit = _issue_locator_runtime_permit(
+            runtime_action_binding_id=(
+                action_binding.runtime_action_binding_id
+            ),
+            action=action,
+            budget_reservation_id=self._resources.budget_reservation_id,
+            locator_proof_ref=locator_proof_ref,
+            source_admission_ref=source_admission_ref,
+            source_plan_ref=source_plan_ref,
+            transport_context_ref=transport_context_ref,
+            runtime_claim_token=runtime_claim_token,
+            consume_callback=self._resources.consume_runtime_authority,
+        )
+        self._resources.register_runtime_authority(
+            runtime_claim_token,
+            permit.authority_ref,
+        )
+        return permit
 
     def _complete_runtime(
         self,
@@ -1084,6 +1197,9 @@ class GeneralizedExperimentAdmission:
         runtime_actions: Mapping[str, CandidateAction],
         runtime_world_ids: Mapping[str, str],
         persona_vault: PersonaVault,
+        locator_ownership_proofs: Optional[
+            Mapping[str, LocatorOwnershipProof]
+        ] = None,
         world_attestation_refs: Optional[Mapping[str, Sequence[str]]] = None,
         world_attestation_validator: Optional[WorldAttestationValidator] = None,
         config: Optional[ProofExperimentAdmissionConfig] = None,
@@ -1108,6 +1224,14 @@ class GeneralizedExperimentAdmission:
         self.runtime_world_ids = {
             str(key): str(value) for key, value in runtime_world_ids.items()
         }
+        try:
+            self.locator_ownership_proofs = copy.deepcopy(
+                dict(locator_ownership_proofs or {})
+            )
+        except Exception as exc:
+            raise TypeError(
+                "locator ownership proofs must be safely copyable"
+            ) from exc
         self.persona_vault = persona_vault
         self.world_attestation_refs = {
             str(key): tuple(value)
@@ -1264,6 +1388,21 @@ class GeneralizedExperimentAdmission:
             raise ProofExperimentAdmissionDenied(
                 "proof_experiment_runtime_action_set_mismatch"
             )
+        cross_object_ids = {
+            item.action_id
+            for item in self.manifest.actions
+            if item.action_class is ExperimentActionClass.CROSS_OBJECT_READ
+        }
+        if (
+            not set(self.locator_ownership_proofs).issubset(cross_object_ids)
+            or any(
+                not isinstance(item, LocatorOwnershipProof)
+                for item in self.locator_ownership_proofs.values()
+            )
+        ):
+            raise ProofExperimentAdmissionDenied(
+                "proof_experiment_locator_ownership_proof_set_mismatch"
+            )
         values = []
         for action in self.manifest.actions:
             candidate = self.runtime_actions[action.action_id]
@@ -1274,16 +1413,37 @@ class GeneralizedExperimentAdmission:
                 runtime_worlds=runtime_worlds,
             )
             if action.action_class is ExperimentActionClass.CROSS_OBJECT_READ:
-                registry = self.executor.policy.ownership_registry
-                if (
-                    registry is None
-                    or registry.owner_of(candidate.url)
-                    != candidate.target_owner_persona_id
-                ):
-                    raise ProofExperimentAdmissionDenied(
-                        "proof_experiment_cross_object_owner_proof_mismatch"
+                locator_proof = self.locator_ownership_proofs.get(
+                    action.action_id
+                )
+                if locator_proof is not None:
+                    verification = (
+                        self.executor.policy.verify_locator_ownership(
+                            candidate,
+                            locator_proof,
+                        )
                     )
-            decision = self.executor.policy.evaluate_action(candidate)
+                    if not verification.verified:
+                        raise ProofExperimentAdmissionDenied(
+                            "proof_experiment_cross_object_owner_proof_mismatch"
+                        )
+                    decision = self.executor.policy.evaluate_locator_action(
+                        candidate,
+                        locator_proof,
+                    )
+                else:
+                    registry = self.executor.policy.ownership_registry
+                    if (
+                        registry is None
+                        or registry.owner_of(candidate.url)
+                        != candidate.target_owner_persona_id
+                    ):
+                        raise ProofExperimentAdmissionDenied(
+                            "proof_experiment_cross_object_owner_proof_mismatch"
+                        )
+                    decision = self.executor.policy.evaluate_action(candidate)
+            else:
+                decision = self.executor.policy.evaluate_action(candidate)
             if (
                 not decision.allowed
                 or decision.action_class != action.action_class.value

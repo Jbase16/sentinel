@@ -101,6 +101,11 @@ class ProvenanceEvent:
     denial_reason: Optional[str] = None
     target_owner_persona_id: Optional[str] = None
     target_is_researcher_owned: Optional[bool] = None
+    ownership_proof_ref: Optional[str] = None
+    runtime_authority_ref: Optional[str] = None
+    source_admission_ref: Optional[str] = None
+    source_plan_ref: Optional[str] = None
+    transport_context_ref: Optional[str] = None
     status: Optional[int] = None
     request_body_hash: Optional[str] = None
     response_body_hash: Optional[str] = None
@@ -109,7 +114,7 @@ class ProvenanceEvent:
 
     def to_payload(self) -> Dict[str, Any]:
         # Deterministic: NO timestamps. seq is carried in the block meta, not here.
-        return {
+        payload = {
             "actor_persona_id": self.actor_persona_id,
             "method": self.method,
             "url_path": self.url_path,
@@ -125,6 +130,17 @@ class ProvenanceEvent:
             "response_summary": self.response_summary,
             "budget_after": self.budget_snapshot_after,
         }
+        if self.ownership_proof_ref is not None:
+            payload["ownership_proof_ref"] = self.ownership_proof_ref
+        if self.runtime_authority_ref is not None:
+            payload["runtime_authority_ref"] = self.runtime_authority_ref
+        if self.source_admission_ref is not None:
+            payload["source_admission_ref"] = self.source_admission_ref
+        if self.source_plan_ref is not None:
+            payload["source_plan_ref"] = self.source_plan_ref
+        if self.transport_context_ref is not None:
+            payload["transport_context_ref"] = self.transport_context_ref
+        return payload
 
 
 class ProvenanceSink:
