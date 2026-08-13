@@ -670,7 +670,8 @@ per-endpoint traffic ceiling.
   from exact same-world value lineage.
 - [x] **R5B2:** Graph-bound experiment compilation with an explicit supported-
   topology matrix and fresh controlled baseline requirements.
-- [ ] **R5B3:** Separately admitted graph-bound omission and reordering execution.
+- [x] **R5B3a:** Signed-context graph-bound manifest and fail-closed static admission.
+- [ ] **R5B3b:** Separately admitted graph-bound omission and reordering execution.
 - [ ] Replay and stale-state specifications after their capability-freshness and
   post-cleanup effect oracles are defined.
 - [ ] Zero-persona and one-persona workflows in addition to paired accounts.
@@ -753,6 +754,50 @@ retains blockers requiring a graph-bound manifest, fresh controlled state, an in
 effect oracle, and separate experiment admission. The current default-off narrow omission
 backend is unchanged and remains the only lifecycle execution path; R5B2 specifications
 cannot reach it or any transport.
+
+##### R5B3a technical explanation
+
+R5B3a adds `GraphBoundManifestAdmissionPlanner` as an analysis-only boundary in the
+ordinary behavioral orchestrator. For each R5B2 specification without unresolved safety
+or cleanup blockers, it validates the current `AuthorizationEnvelope` signature, expiry,
+disclosure attestation, target origin, and explicit
+`behavioral_graph_bound_prerequisite_experiment` workflow. It then content-addresses the
+authorization context without serializing the envelope id or signature, binds the exact
+target, actor/world, R5B2 compilation and lifecycle capture, policy digest, graph, delta,
+fresh-state requirement, cleanup requirement, and effect oracle, and creates three
+planned fresh-world slots. Every slot requires a later ownership proof and freshness
+attestation and carries the exact lifecycle and cleanup-lineage bindings. The manifest
+also calculates separate baseline, treatment, independent-control, and cleanup request
+units. Its total must fit both the current policy's total-request limit and a fixed
+96-request manifest ceiling. Expected omission or reordering backend gaps transfer into
+the manifest as explicit pending blockers; any unknown R5B2 blocker prevents manifest
+compilation. Static admission returns deterministic `not_requested`, source-blocked,
+authority-denied, no-admissible-specification, or ready-for-explicit-boundary results.
+
+##### R5B3a non-technical explanation
+
+Sentinel can now turn each experiment blueprint into a tamper-evident permission packet.
+The packet proves which approved target and researcher identity it belongs to, which
+workflow and one-change test it describes, which three fresh controlled test worlds must
+exist, how ownership and cleanup must be proved, and the maximum number of requests the
+complete experiment would need. A copied packet cannot silently be pointed at another
+site, person, graph, policy, or experiment. An unsigned, changed, expired, wrong-target,
+wrong-workflow, unsafe, incomplete-cleanup, or over-budget packet is refused. “Ready” at
+this stage means only that the packet is complete enough to present to the future
+execution gate. Sentinel still cannot create the fresh objects, construct the concrete
+requests, reserve the budget, run the experiment, or claim a vulnerability from it.
+
+##### R5B3a target traffic and execution authority
+
+R5B3a sends no target traffic and grants no provisioning, mutation, budget reservation,
+backend dispatch, execution, finding, promotion, or reporting authority. It never calls
+the policy scope callback, `PolicyExecutor`, receipt store, budget reservation API, or a
+transport. Every manifest retains blockers for endpoint/action policy preflight, atomic
+budget reservation, a single-use receipt, fresh-state provisioning, independent-oracle
+execution, cleanup verification, and the family-specific backend. Its world slots remain
+`provisioned=false`, its budget remains `reserved=false`, and the manifest and result
+remain `dispatch_authority=false`, `finding_authority=false`, `target_requests_sent=0`,
+and `executable=false`. R5B3b must introduce a separate default-off active boundary.
 
 #### R5C — Authority monotonicity and role enforcement
 

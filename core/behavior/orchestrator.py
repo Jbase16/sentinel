@@ -56,6 +56,10 @@ from .prerequisite_experiments import (
     GraphBoundExperimentCompilationResult,
     GraphBoundPrerequisiteExperimentCompiler,
 )
+from .prerequisite_admission import (
+    GraphBoundManifestAdmissionPlanner,
+    GraphBoundManifestAdmissionResult,
+)
 from .semantic_catalog import (
     TargetSemanticCatalog,
     TargetSemanticCatalogBuilder,
@@ -105,6 +109,7 @@ def _run_identity_payload(
     state_machine: StateMachineLegalityResult,
     omissions: OmissionCompilationResult,
     prerequisite_experiments: GraphBoundExperimentCompilationResult,
+    prerequisite_admission: GraphBoundManifestAdmissionResult,
     interactions: InteractionIntentCatalog,
     interaction_admission: InteractionAdmissionResult,
     experiment_stage: "OwnedExperimentShadowStage",
@@ -127,6 +132,7 @@ def _run_identity_payload(
         "state_machine_result_id": state_machine.result_id,
         "omission_result_id": omissions.result_id,
         "prerequisite_experiment_result_id": prerequisite_experiments.result_id,
+        "prerequisite_admission_result_id": prerequisite_admission.result_id,
         "interaction_catalog_id": interactions.catalog_id,
         "interaction_admission_result_id": interaction_admission.result_id,
         "experiment_stage": experiment_stage.to_dict(),
@@ -283,6 +289,10 @@ class BehavioralShadowRun:
         repr=False,
         compare=False,
     )
+    prerequisite_admission: GraphBoundManifestAdmissionResult = field(
+        repr=False,
+        compare=False,
+    )
     interactions: InteractionIntentCatalog = field(repr=False, compare=False)
     interaction_admission: InteractionAdmissionResult = field(
         repr=False,
@@ -326,6 +336,13 @@ class BehavioralShadowRun:
             != self.lifecycle.capture_digest
             or self.prerequisite_experiments.executable
             or self.prerequisite_experiments.finding_authority
+            or self.prerequisite_admission.compilation_result_id
+            != self.prerequisite_experiments.result_id
+            or self.prerequisite_admission.target_ref != self.graph.target_ref
+            or self.prerequisite_admission.executable
+            or self.prerequisite_admission.dispatch_authority
+            or self.prerequisite_admission.finding_authority
+            or self.prerequisite_admission.target_requests_sent != 0
             or any(
                 state_candidate_graphs.get(item.state_machine_candidate_id)
                 != item.prerequisite_graph_id
@@ -379,6 +396,7 @@ class BehavioralShadowRun:
             state_machine=self.state_machine,
             omissions=self.omissions,
             prerequisite_experiments=self.prerequisite_experiments,
+            prerequisite_admission=self.prerequisite_admission,
             interactions=self.interactions,
             interaction_admission=self.interaction_admission,
             experiment_stage=self.experiment_stage,
@@ -406,6 +424,7 @@ class BehavioralShadowRun:
             "state_machine": self.state_machine.to_dict(),
             "omissions": self.omissions.to_dict(),
             "prerequisite_experiments": self.prerequisite_experiments.to_dict(),
+            "prerequisite_admission": self.prerequisite_admission.to_dict(),
             "interactions": self.interactions.to_dict(),
             "interaction_admission": self.interaction_admission.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
@@ -441,6 +460,9 @@ class BehavioralShadowOrchestrator:
         prerequisite_experiment_compiler: Optional[
             GraphBoundPrerequisiteExperimentCompiler
         ] = None,
+        prerequisite_admission_planner: Optional[
+            GraphBoundManifestAdmissionPlanner
+        ] = None,
         interaction_miner: Optional[InteractionIntentMiner] = None,
         interaction_selector: Optional[InteractionIntentSelector] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
@@ -461,6 +483,10 @@ class BehavioralShadowOrchestrator:
         self.prerequisite_experiment_compiler = (
             prerequisite_experiment_compiler
             or GraphBoundPrerequisiteExperimentCompiler()
+        )
+        self.prerequisite_admission_planner = (
+            prerequisite_admission_planner
+            or GraphBoundManifestAdmissionPlanner()
         )
         self.interaction_miner = interaction_miner or InteractionIntentMiner()
         self.interaction_selector = (
@@ -791,6 +817,27 @@ class BehavioralShadowOrchestrator:
             interactions=interactions,
             interaction_source_world_ref=stable_hash("world", world_id),
         )
+        prerequisite_admission = self.prerequisite_admission_planner.plan(
+            compilation=prerequisite_experiments,
+            target_origin=target_origin,
+            target_ref=graph.target_ref,
+            world_id=world_id,
+            authorization=(
+                experiment_context.authorization
+                if experiment_context is not None
+                else None
+            ),
+            executor=(
+                experiment_context.executor
+                if experiment_context is not None
+                else None
+            ),
+            actor_persona_id=(
+                experiment_context.actor_persona_id
+                if experiment_context is not None
+                else None
+            ),
+        )
         semantic_catalog = self.semantic_catalog_builder.build(
             primary_records,
             target_ref=graph.target_ref,
@@ -888,6 +935,7 @@ class BehavioralShadowOrchestrator:
                     state_machine=state_machine,
                     omissions=omissions,
                     prerequisite_experiments=prerequisite_experiments,
+                    prerequisite_admission=prerequisite_admission,
                     interactions=interactions,
                     interaction_admission=interaction_admission,
                     experiment_stage=experiment_stage,
@@ -906,6 +954,7 @@ class BehavioralShadowOrchestrator:
             state_machine=state_machine,
             omissions=omissions,
             prerequisite_experiments=prerequisite_experiments,
+            prerequisite_admission=prerequisite_admission,
             interactions=interactions,
             interaction_admission=interaction_admission,
             experiment_stage=experiment_stage,

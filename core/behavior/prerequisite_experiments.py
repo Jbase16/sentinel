@@ -54,7 +54,7 @@ _INSTANCE_ROLES = (
     "independent_control",
     "valid_baseline",
 )
-_REQUIRED_BLOCKERS = frozenset(
+GRAPH_BOUND_PREREQUISITE_REQUIRED_BLOCKERS = frozenset(
     {
         "analysis_only_no_execution_authority",
         "experiment_admission_required",
@@ -63,6 +63,7 @@ _REQUIRED_BLOCKERS = frozenset(
         "independent_effect_oracle_required",
     }
 )
+_REQUIRED_BLOCKERS = GRAPH_BOUND_PREREQUISITE_REQUIRED_BLOCKERS
 
 
 def _hash_ref(value: Any, prefix: Optional[str] = None) -> bool:
@@ -1642,6 +1643,7 @@ class GraphBoundPrerequisiteExperimentCompiler:
 
 __all__ = [
     "GRAPH_BOUND_PREREQUISITE_EXPERIMENT_MODE",
+    "GRAPH_BOUND_PREREQUISITE_REQUIRED_BLOCKERS",
     "GraphBoundExperimentCompilationResult",
     "GraphBoundExperimentDiagnostics",
     "GraphBoundPrerequisiteExperimentCompiler",
