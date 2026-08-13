@@ -803,6 +803,16 @@ async def run_behavioral_authorization_endpoint(
         AdaptiveProofHandoffDenied,
     )
     from core.behavior.feedback import ReceiptDispositionAdapter
+    from core.behavior.experiment_admission import (
+        ProofExperimentAdmissionConfig,
+    )
+    from core.behavior.experiment_generalized_authorization import (
+        GeneralizedAuthorizationExecutionConfig,
+    )
+    from core.behavior.generalized_authorization_one_click import (
+        GeneralizedAuthorizationOneClickDenied,
+        GeneralizedAuthorizationOneClickDispatcher,
+    )
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
     from core.foundry.authorization import get_envelope
@@ -986,6 +996,12 @@ async def run_behavioral_authorization_endpoint(
     omission_confirmation_config = (
         FreshOmissionConfirmationConfig.from_environment()
     )
+    proof_experiment_admission_config = (
+        ProofExperimentAdmissionConfig.from_environment()
+    )
+    generalized_authorization_execution_config = (
+        GeneralizedAuthorizationExecutionConfig.from_environment()
+    )
     if omission_confirmation_config.enabled:
         missing_workflows = sorted(
             {
@@ -1017,6 +1033,7 @@ async def run_behavioral_authorization_endpoint(
     }
     shadow_artifacts = []
     controlled_executor = None
+    generalized_authorization_executor = None
     fresh_boundary_executor = None
     omission_confirmation_admission = None
     executors = None
@@ -1194,6 +1211,56 @@ async def run_behavioral_authorization_endpoint(
         except ControlledExecutionDenied as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+        if (
+            proof_experiment_admission_config.enabled
+            and generalized_authorization_execution_config.enabled
+        ):
+            generalized_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=4,
+                    max_requests_per_endpoint=4,
+                    max_cross_object_reads=1,
+                    max_privilege_mutations=0,
+                    max_creates=0,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+                ownership_registry=OwnershipRegistry(),
+            )
+            generalized_provenance = ProvenanceSink()
+            generalized_provenance.record_context(
+                target=target_origin,
+                proof_mode="bounty_safe_generalized_authorization",
+                policy_digest=generalized_policy.digest(),
+            )
+            generalized_executors = {
+                source_persona.persona_id: make_executor(
+                    source_persona.persona_id,
+                    generalized_policy,
+                    generalized_provenance,
+                ),
+                peer_persona.persona_id: make_executor(
+                    peer_persona.persona_id,
+                    generalized_policy,
+                    generalized_provenance,
+                ),
+            }
+            generalized_authorization_executor = (
+                ControlledAuthorizationExecutor(
+                    target_origin=target_origin,
+                    authorization=envelope,
+                    source_persona=source_persona,
+                    peer_persona=peer_persona,
+                    executors=generalized_executors,
+                )
+            )
+            try:
+                generalized_authorization_executor.validate_preflight()
+            except ControlledExecutionDenied as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
         receipt_store = BehavioralReceiptStore()
         try:
             receipt_fingerprint = request_fingerprint({
@@ -1215,6 +1282,12 @@ async def run_behavioral_authorization_endpoint(
                         omission_confirmation_config.enabled
                     ),
                     "bounded_continuation": continuation_config.enabled,
+                    "proof_experiment_admission": (
+                        proof_experiment_admission_config.enabled
+                    ),
+                    "generalized_authorization_execution": (
+                        generalized_authorization_execution_config.enabled
+                    ),
                 },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
@@ -2884,8 +2957,42 @@ async def run_behavioral_authorization_endpoint(
         return response
 
     adaptive_proof_handoff = None
+    generalized_one_click_run = None
     try:
-        if cross_persona_proof_run is not None:
+        if (
+            cross_persona_proof_run is None
+            and shadow_run is not None
+            and controlled_executor is not None
+            and receipt_store is not None
+        ):
+            generalized_one_click_run = await (
+                GeneralizedAuthorizationOneClickDispatcher(
+                    target_origin=target_origin,
+                    authorization=envelope,
+                    backend=(
+                        generalized_authorization_executor
+                        or controlled_executor
+                    ),
+                    persona_vault=vault,
+                    receipt_store=receipt_store,
+                    admission_config=proof_experiment_admission_config,
+                    execution_config=(
+                        generalized_authorization_execution_config
+                    ),
+                ).run(
+                    actor_records=source_records,
+                    owner_records=peer_records,
+                    payout_goal_plan=shadow_run.payout_goal_plan,
+                    operations=(
+                        shadow_run.semantic_catalog.planner_operations()
+                    ),
+                )
+            )
+        if generalized_one_click_run is not None and (
+            generalized_one_click_run.dispatched
+        ):
+            response = generalized_one_click_run.execution_response()
+        elif cross_persona_proof_run is not None:
             run = cross_persona_proof_run
         elif shadow_run is None:
             # Disabled mode has no execution authority. Preserve its diagnostic
@@ -2928,6 +3035,7 @@ async def run_behavioral_authorization_endpoint(
         ControlledSequenceDenied,
         FreshOwnedBoundaryDenied,
         FreshOmissionDenied,
+        GeneralizedAuthorizationOneClickDenied,
     ) as exc:
         if (
             receipt_store is not None
@@ -2961,7 +3069,15 @@ async def run_behavioral_authorization_endpoint(
             except (OSError, ReceiptStoreError):
                 logger.exception("failed to terminate errored behavioral receipt")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    response = run.to_dict()
+    if not (
+        generalized_one_click_run is not None
+        and generalized_one_click_run.dispatched
+    ):
+        response = run.to_dict()
+        if generalized_one_click_run is not None:
+            response["generalized_authorization_one_click"] = (
+                generalized_one_click_run.to_dict()
+            )
     effective_shadow_run = (
         cross_persona_proof_shadow or shadow_run
     )
@@ -3142,6 +3258,12 @@ async def run_behavioral_authorization_from_url_endpoint(
         BoundedContinuationDenied,
     )
     from core.behavior.scheduler import PrimaryPlannerConfig
+    from core.behavior.experiment_admission import (
+        ProofExperimentAdmissionConfig,
+    )
+    from core.behavior.experiment_generalized_authorization import (
+        GeneralizedAuthorizationExecutionConfig,
+    )
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
     from core.server.routers.driver import (
@@ -3193,6 +3315,12 @@ async def run_behavioral_authorization_from_url_endpoint(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     omission_confirmation_config = (
         FreshOmissionConfirmationConfig.from_environment()
+    )
+    proof_experiment_admission_config = (
+        ProofExperimentAdmissionConfig.from_environment()
+    )
+    generalized_authorization_execution_config = (
+        GeneralizedAuthorizationExecutionConfig.from_environment()
     )
     interaction_acquisition_config = (
         InteractionAcquisitionConfig.from_environment()
@@ -3332,6 +3460,12 @@ async def run_behavioral_authorization_from_url_endpoint(
                     omission_confirmation_config.enabled
                 ),
                 "bounded_continuation": continuation_config.enabled,
+                "proof_experiment_admission": (
+                    proof_experiment_admission_config.enabled
+                ),
+                "generalized_authorization_execution": (
+                    generalized_authorization_execution_config.enabled
+                ),
             },
             "target_url": target_url,
             "envelope_id": req.envelope_id,

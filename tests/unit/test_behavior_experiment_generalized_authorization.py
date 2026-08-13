@@ -281,7 +281,7 @@ def test_mutating_or_unproven_post_is_rejected_before_planning():
         GeneralizedAuthorizationExecutionDenied,
         match="graphql_read_is_unproven",
     ):
-        generalized_module._validate_read_semantics(
+        generalized_module.validate_generalized_read_semantics(
             method="POST",
             body=json.dumps({
                 "query": "mutation ChangeDocument { changeDocument { id } }",
@@ -295,7 +295,7 @@ def test_mutating_or_unproven_post_is_rejected_before_planning():
         GeneralizedAuthorizationExecutionDenied,
         match="request_is_not_proven_read_only",
     ):
-        generalized_module._validate_read_semantics(
+        generalized_module.validate_generalized_read_semantics(
             method="POST",
             body=json.dumps({"documentId": ACTOR_OBJECT}),
             kind=OwnedRequestLocatorKind.JSON,

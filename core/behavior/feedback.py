@@ -381,10 +381,11 @@ class ReceiptDispositionAdapter:
             if outcome.get("kind") in {
                 "compiled_sequence",
                 "fresh_omission_boundary",
+                "proof_experiment_generalized_authorization",
             }:
-                # A setup sequence can prove that owned state was manufactured and
-                # cleaned up. The evidence-only omission comparison cannot resolve
-                # an obligation without its independent capability-binding control.
+                # Setup receipts and the non-promoting R5 authorization candidate
+                # do not yet carry a graph-resolution binding. They cannot resolve
+                # an obligation without inventing that missing relationship.
                 unsupported += 1
                 continue
             if outcome.get("kind") == "fresh_omission_confirmation":

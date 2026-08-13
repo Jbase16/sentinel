@@ -49,6 +49,12 @@ def test_endpoint_key_collapses_ids():
     assert endpoint_key("http://h/api/notes/release_notes") != endpoint_key(
         "http://h/api/notes/security_notes"
     )
+    assert endpoint_key("http://h/api/files/RlLB9Tjpk7YfkTaBB0SpzA") == endpoint_key(
+        "http://h/api/files/9QsBs4y23m6HH4aB38ffkA"
+    )
+    assert endpoint_key("http://h/api/long/administration") != endpoint_key(
+        "http://h/api/long/documentation"
+    )
 
 
 def test_policy_digest_commits_to_total_and_endpoint_request_limits():

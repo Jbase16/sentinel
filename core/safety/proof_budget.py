@@ -31,6 +31,17 @@ _PREFIXED_OPAQUE_RE = re.compile(
     r"^[A-Za-z][A-Za-z0-9_-]*_[A-Za-z0-9]{12,}$"
 )  # note_7fa9f13a2b4c5d6e
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.IGNORECASE)
+_OPAQUE_RE = re.compile(r"^[A-Za-z0-9_-]{16,}$")
+
+
+def _is_object_id_segment(segment: str) -> bool:
+    return bool(
+        _NUM_RE.match(segment)
+        or _IDT_RE.match(segment)
+        or _PREFIXED_OPAQUE_RE.match(segment)
+        or _UUID_RE.match(segment)
+        or (_OPAQUE_RE.match(segment) and any(char.isdigit() for char in segment))
+    )
 
 
 def endpoint_key(url: str) -> str:
@@ -41,14 +52,10 @@ def endpoint_key(url: str) -> str:
         p = None
     path = (p.path if (p and p.path) else (url or ""))
     host = p.netloc if p else ""
-    out = ["*" if (seg and (
-               _NUM_RE.match(seg)
-               or _IDT_RE.match(seg)
-               or _PREFIXED_OPAQUE_RE.match(seg)
-               or _UUID_RE.match(seg)
-           ))
-           else seg
-           for seg in path.split("/")]
+    out = [
+        "*" if seg and _is_object_id_segment(seg) else seg
+        for seg in path.split("/")
+    ]
     return f"{host}{'/'.join(out)}"
 
 

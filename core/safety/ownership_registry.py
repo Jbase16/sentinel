@@ -47,6 +47,13 @@ _DESTINATION_REF = re.compile(r"^interaction_destination:[0-9a-f]{64}$")
 _CREATION_REF = re.compile(r"^interaction_creation:[0-9a-f]{64}$")
 _PROOF_REF = re.compile(r"^native_ownership_witness:[0-9a-f]{64}$")
 _PERSONA_ID = re.compile(r"^[0-9a-f]{32}$")
+_OWNERSHIP_EXPERIMENT_PROOF_REF = re.compile(
+    r"^ownership_experiment_proof:[0-9a-f]{64}$"
+)
+_OWNERSHIP_EXPERIMENT_ROLE_REF = re.compile(
+    r"^ownership_experiment_role:[0-9a-f]{64}$"
+)
+_CAPTURE_DIGEST = re.compile(r"^capture_set:[0-9a-f]{64}$")
 
 
 def _origin(url: str) -> str:
@@ -202,6 +209,54 @@ class OwnershipRegistry:
         }
         return key
 
+    def register_admitted_capture_value(
+        self,
+        create_url: str,
+        object_id: Any,
+        *,
+        actor_persona: str,
+        source_proof_ref: str,
+        source_role_binding_ref: str,
+        capture_digest: str,
+    ) -> Optional[Key]:
+        """Register an exact R5 ownership value admitted from this capture.
+
+        This is not a caller-supplied ownership assertion.  The behavioral
+        dispatcher may call it only after R5A2 has reconstructed and admitted
+        the exact create-to-use lineage for the same persona, proof, role, and
+        capture.  Locator proof issuance below retains those bindings.
+        """
+
+        if (
+            _PERSONA_ID.fullmatch(str(actor_persona or "")) is None
+            or _OWNERSHIP_EXPERIMENT_PROOF_REF.fullmatch(
+                str(source_proof_ref or "")
+            )
+            is None
+            or _OWNERSHIP_EXPERIMENT_ROLE_REF.fullmatch(
+                str(source_role_binding_ref or "")
+            )
+            is None
+            or _CAPTURE_DIGEST.fullmatch(str(capture_digest or "")) is None
+        ):
+            return None
+        key = _created_key(create_url, object_id)
+        if key is None:
+            return None
+        existing = self._owned.get(key)
+        if existing is not None:
+            return key if existing.get("actor_persona") == actor_persona else None
+        self._owned[key] = {
+            "actor_persona": actor_persona,
+            "collection": key[1],
+            "object_id": key[2],
+            "proof_source": "admitted_capture_ownership",
+            "proof_ref": source_proof_ref,
+            "role_binding_ref": source_role_binding_ref,
+            "capture_digest": capture_digest,
+        }
+        return key
+
     def register_native_witnessed_read(
         self,
         read_url: str,
@@ -292,7 +347,14 @@ class OwnershipRegistry:
             raise LocatorOwnershipDenied(
                 "locator_owned_object_is_missing_or_ambiguous"
             )
-        key, _ = matches[0]
+        key, entry = matches[0]
+        if entry.get("proof_source") == "admitted_capture_ownership" and (
+            entry.get("proof_ref") != source_proof_ref
+            or entry.get("role_binding_ref") != source_role_binding_ref
+        ):
+            raise LocatorOwnershipDenied(
+                "locator_ownership_admitted_capture_binding_mismatch"
+            )
         try:
             payload, seal = proof_material(
                 self._seal_key,

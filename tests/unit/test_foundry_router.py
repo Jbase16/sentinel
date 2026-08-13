@@ -49,6 +49,14 @@ def _isolate(monkeypatch, tmp_path):
         raising=False,
     )
     monkeypatch.delenv("SENTINELFORGE_BEHAVIOR_CONTINUATION", raising=False)
+    monkeypatch.delenv(
+        "SENTINELFORGE_BEHAVIOR_PROOF_EXPERIMENT_ADMISSION",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
+        raising=False,
+    )
     _reset_bus_for_tests()
     yield
     _reset_bus_for_tests()
@@ -2427,6 +2435,205 @@ class TestBehavioralAuthorizationEndpoint:
         assert captures == 1
         assert len(traffic) == 3
         assert len(list((tmp_path / "behavioral_receipts").glob("*.json"))) == 2
+
+    def test_one_click_dispatches_generalized_owned_capture_without_manual_wiring(
+        self,
+        monkeypatch,
+    ):
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, capture_request, source_persona, peer_persona = (
+            self._one_click_request()
+        )
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_PROOF_EXPERIMENT_ADMISSION",
+            "1",
+        )
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
+            "1",
+        )
+
+        def records(persona_id, object_id, marker):
+            return (
+                {
+                    "persona_id": persona_id,
+                    "method": "POST",
+                    "url": f"{self.ORIGIN}/api/documents",
+                    "request_body": json.dumps(
+                        {"title": "controlled ownership marker"}
+                    ),
+                    "response_status": 201,
+                    "response_body": json.dumps({"documentId": object_id}),
+                },
+                {
+                    "persona_id": persona_id,
+                    "method": "GET",
+                    "url": f"{self.ORIGIN}/api/documents/{object_id}",
+                    "response_status": 200,
+                    "response_body": json.dumps(
+                        {"documentId": object_id, "privateMarker": marker}
+                    ),
+                },
+            )
+
+        source_records = records(
+            source_persona.persona_id,
+            self.SOURCE_ID,
+            "SourcePrivateMarker",
+        )
+        peer_records = records(
+            peer_persona.persona_id,
+            self.PEER_ID,
+            "PeerPrivateMarker",
+        )
+        capture_request.source_records = list(source_records)
+        capture_request.peer_records = list(peer_records)
+        traffic = []
+
+        async def validate_windows(persona_ids):
+            assert tuple(persona_ids) == (
+                source_persona.persona_id,
+                peer_persona.persona_id,
+            )
+
+        async def capture_pair(**_kwargs):
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=source_persona.persona_id,
+                    path="/private/source-capture.jsonl",
+                    records=source_records,
+                    captured_bytes=321,
+                    limit_reached=False,
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=peer_persona.persona_id,
+                    path="/private/peer-capture.jsonl",
+                    records=peer_records,
+                    captured_bytes=654,
+                    limit_reached=False,
+                ),
+                (),
+            )
+
+        async def fake_send(_transport, persona, replay_request):
+            traffic.append((persona, replay_request))
+            if self.PEER_ID in replay_request.url:
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "documentId": self.PEER_ID,
+                            "privateMarker": "PeerPrivateMarker",
+                        }
+                    ),
+                )
+            return ReplayResponse(
+                200,
+                json.dumps(
+                    {
+                        "documentId": self.SOURCE_ID,
+                        "privateMarker": "SourcePrivateMarker",
+                    }
+                ),
+            )
+
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+
+        result = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+
+        assert result["kind"] == "proof_experiment_generalized_authorization"
+        assert result["status"] == "completed"
+        assert result["oracle_verdict"] == "confirmed"
+        assert result["one_click_selection"]["dispatched"] is True
+        assert result["finding"] is None
+        assert result["finding_authority"] is False
+        assert result["promotion_authority"] is False
+        assert len(traffic) == 4
+        assert [persona for persona, _ in traffic] == [
+            peer_persona.persona_id,
+            source_persona.persona_id,
+            source_persona.persona_id,
+            peer_persona.persona_id,
+        ]
+
+    def test_one_click_keeps_legacy_fallback_isolated_when_r5_has_no_lineage(
+        self,
+        monkeypatch,
+    ):
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, capture_request, source_persona, peer_persona = (
+            self._one_click_request()
+        )
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_PROOF_EXPERIMENT_ADMISSION",
+            "1",
+        )
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
+            "1",
+        )
+        traffic = []
+
+        async def validate_windows(_persona_ids):
+            return None
+
+        async def capture_pair(**_kwargs):
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=source_persona.persona_id,
+                    path="/private/source-capture.jsonl",
+                    records=tuple(capture_request.source_records),
+                    captured_bytes=123,
+                    limit_reached=False,
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=peer_persona.persona_id,
+                    path="/private/peer-capture.jsonl",
+                    records=tuple(capture_request.peer_records),
+                    captured_bytes=456,
+                    limit_reached=False,
+                ),
+                (),
+            )
+
+        async def fake_send(_transport, persona, replay_request):
+            traffic.append((persona, replay_request))
+            if persona == peer_persona.persona_id:
+                return ReplayResponse(200, '{"owner":"PeerPrivateMarker"}')
+            if self.SOURCE_ID in (replay_request.body or ""):
+                return ReplayResponse(200, '{"owner":"SourcePrivateMarker"}')
+            return ReplayResponse(200, '{"owner":"PeerPrivateMarker"}')
+
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+
+        result = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+
+        assert result["status"] == "completed"
+        assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
+        assert result["generalized_authorization_one_click"]["status"] == (
+            "no_eligible_candidate"
+        )
+        assert len(traffic) == 3
 
     def test_one_click_real_driver_discovers_hidden_read_then_proves_it(
         self, monkeypatch, tmp_path

@@ -104,7 +104,7 @@ def _canonical_origin(value: str) -> str:
     return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
 
 
-def _validate_read_semantics(
+def validate_generalized_read_semantics(
     *,
     method: str,
     body: Any,
@@ -445,7 +445,7 @@ class GeneralizedAuthorizationExecutionPlanner:
             raise GeneralizedAuthorizationExecutionDenied(
                 "generalized_authorization_owned_value_changed"
             )
-        _validate_read_semantics(
+        validate_generalized_read_semantics(
             method=request.method,
             body=request.body,
             kind=kind,
@@ -1260,4 +1260,5 @@ __all__ = [
     "GeneralizedAuthorizationExperimentExecutor",
     "GeneralizedAuthorizationExperimentResult",
     "PreparedGeneralizedAuthorizationExperiment",
+    "validate_generalized_read_semantics",
 ]
