@@ -673,7 +673,12 @@ per-endpoint traffic ceiling.
 - [x] **R5B3a:** Signed-context graph-bound manifest and fail-closed static admission.
 - [x] **R5B3b1:** Concrete request, action-policy, and endpoint-budget binding with
   non-consuming reservation preview.
-- [ ] **R5B3b2:** Separately admitted graph-bound omission and reordering execution.
+- [x] **R5B3b2a:** Default-off, single-use graph-bound claim admission with a
+  durable non-renewable receipt and atomic ordered budget reservation.
+- [ ] **R5B3b2b:** Claim-consuming fresh-world provisioning and exact runtime
+  lineage substitution without experiment dispatch.
+- [ ] **R5B3b2c:** Separately admitted omission and reordering dispatch, effect
+  comparison, cleanup terminalization, and replay evidence.
 - [ ] Replay and stale-state specifications after their capability-freshness and
   post-cleanup effect oracles are defined.
 - [ ] Zero-persona and one-persona workflows in addition to paired accounts.
@@ -851,8 +856,65 @@ scope and policy evaluators, but never calls `PolicyExecutor`, `raw_send`, a rec
 store, `try_reserve`, or transport. `preview_reservation` is read-only. Every plan remains
 `budget_reserved=false`, `single_use_claim_acquired=false`,
 `dispatch_authority=false`, `finding_authority=false`, `target_requests_sent=0`, and
-`executable=false`. R5B3b2 must validate these bindings again at a separate default-off,
-single-use active boundary before it may allocate state or send a request.
+`executable=false`. R5B3b2a introduces the separate default-off, single-use claim
+boundary that validates these bindings again; later R5B3b2 passes must still allocate
+fresh state and connect a backend before any request may be sent.
+
+##### R5B3b2a technical explanation
+
+R5B3b2a adds `GraphBoundExecutionClaimAdmission` as an explicit, default-off boundary.
+It re-runs `GraphBoundManifestAdmissionPlanner` against a fresh copy of the signed
+authorization and current policy, then re-runs `GraphBoundRequestBinder` against the
+current capture, lifecycle, state-machine, compilation, and static manifest. Both fresh
+public artifacts must exactly equal the caller-supplied artifacts. The boundary selects
+one explicit prepared plan and uses only the fresh binder's private request material to
+reconstruct its complete ordered action/endpoint sequence. It previews the sequence
+again immediately before any write.
+
+Admission content-addresses the selected plan, authority, policy, action bindings,
+budget bindings, and request count without persisting URLs, endpoint keys, headers,
+bodies, tokens, or reservation secrets. `BehavioralReceiptStore.reserve` first acquires
+one durable non-renewable receipt; `ProofBudget.try_reserve` then atomically holds the
+entire ordered sequence. A budget race aborts the new receipt, and contract-construction
+failure releases the budget and aborts the receipt. The returned thread-safe lease can
+move from `active` to `claimed` once, or either the unclaimed lease or claimed handle can
+abort and release the unused budget. A durable abort remains terminal, so the same
+fingerprint cannot be retried. If durable abort fails, the budget is still released and
+the in-memory lease is closed while the receipt remains fail-closed in `reserved` state.
+
+Focused tests cover the default-off gate, deterministic side-effect-free revalidation,
+exact reservation identity, public redaction, one-use claiming, terminal replay denial,
+capture and authority revalidation, a post-receipt budget race, abort-store failure, and
+content-addressed contract tamper rejection. The lease still has no way to provision a
+world, substitute returned runtime values, dispatch a request, compare an effect,
+terminalize successful execution, or create a finding.
+
+##### R5B3b2a non-technical explanation
+
+Sentinel can now turn one inspected experiment plan into a sealed, one-use ticket. Before
+issuing it, Sentinel checks the signed permission, the latest recorded workflow, every
+request, and the full request allowance again. It then stamps the ticket into a durable
+ledger and holds the complete allowance at once, so another task cannot spend half of it
+while this experiment is waiting. For example, an approved invoice-export omission plan
+can reserve exactly its normal run, one-change run, independent comparison, and cleanup
+calls as one indivisible packet. Claiming that ticket twice is impossible, and aborting
+it frees the unused request allowance but does not create a second ticket.
+
+This still does not create the three fresh controlled accounts or objects, fill newly
+returned IDs into later requests, send the experiment, decide whether behavior differs,
+clean up live data, or prove a bounty. It secures the one-use permission and capacity
+needed before those active steps can be connected.
+
+##### R5B3b2a target traffic and execution authority
+
+R5B3b2a sends zero target requests. It grants only local claim authority: when
+`SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM` is explicitly enabled and the
+boundary is explicitly invoked, Sentinel may write one redacted durable receipt, reserve
+the exact ordered `ProofBudget` sequence, and transition the returned lease to `claimed`
+once. Raw receipt tokens and budget reservation IDs never enter public artifacts. The
+claim exposes no transport call, runtime world manager, provisioning method, policy
+execution method, effect oracle, cleanup sender, findings store, promotion path, or
+backend-dispatch authority; it remains `target_requests_sent=0` and `executable=false`.
 
 #### R5C — Authority monotonicity and role enforcement
 
