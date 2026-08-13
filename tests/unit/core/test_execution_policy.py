@@ -157,6 +157,31 @@ def test_budget_reservation_is_atomic_and_blocks_unreserved_budget_theft():
     assert budget.snapshot()["total_requests"] == 0
 
 
+def test_budget_reservation_preview_is_non_mutating_and_matches_real_admission():
+    budget = ProofBudget(
+        max_total_requests=2,
+        max_requests_per_endpoint=1,
+        max_creates=1,
+    )
+    sequence = (
+        (ac.SAFE_READ, endpoint_key("http://h/api/input")),
+        (ac.OWNED_CREATE, endpoint_key("http://h/api/notes")),
+    )
+
+    allowed, reason = budget.preview_reservation(sequence)
+
+    assert (allowed, reason) == (True, "ok")
+    assert budget.snapshot()["total_requests"] == 0
+    reservation_id, reserve_reason = budget.try_reserve(sequence)
+    assert reserve_reason == reason and reservation_id is not None
+    denied, denied_reason = budget.preview_reservation(
+        ((ac.SAFE_READ, endpoint_key("http://h/api/other")),)
+    )
+    assert denied is False
+    assert denied_reason == "total_request_budget_exhausted"
+    assert budget.reservation_remaining(reservation_id) == len(sequence)
+
+
 def test_releasing_budget_reservation_returns_only_unused_slots():
     budget = ProofBudget(max_total_requests=3)
     reservation_id, _ = budget.try_reserve(

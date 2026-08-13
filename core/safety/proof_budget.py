@@ -158,40 +158,14 @@ class ProofBudget:
     ) -> Tuple[Optional[str], str]:
         """Atomically reserve an ordered sequence without counting it as traffic."""
 
-        if not actions:
-            return None, "budget_reservation_requires_actions"
-        normalized = tuple((str(action_class), str(ep_key)) for action_class, ep_key in actions)
+        normalized = tuple(
+            (str(action_class), str(ep_key))
+            for action_class, ep_key in actions
+        )
         with self._lock:
-            reserved_total, reserved_per, reserved_cross, reserved_priv, reserved_creates = (
-                self._reserved_counts()
-            )
-            total = self._total + reserved_total
-            per_endpoint = dict(self._per_endpoint)
-            for key, count in reserved_per.items():
-                per_endpoint[key] = per_endpoint.get(key, 0) + count
-            cross = self._cross + reserved_cross
-            privilege = self._priv + reserved_priv
-            creates = self._creates + reserved_creates
-            for action_class, ep_key in normalized:
-                allowed, reason = self._allows_counts(
-                    action_class,
-                    ep_key,
-                    total=total,
-                    per_endpoint=per_endpoint,
-                    cross=cross,
-                    privilege=privilege,
-                    creates=creates,
-                )
-                if not allowed:
-                    return None, reason
-                total += 1
-                per_endpoint[ep_key] = per_endpoint.get(ep_key, 0) + 1
-                if action_class == CROSS_OBJECT_READ:
-                    cross += 1
-                elif action_class == PRIVILEGE_MUTATION:
-                    privilege += 1
-                elif action_class == OWNED_CREATE:
-                    creates += 1
+            allowed, reason = self._preview_reservation_locked(normalized)
+            if not allowed:
+                return None, reason
             self._reservation_counter += 1
             reservation_id = (
                 f"budget_reservation:{self._reservation_counter}:"
@@ -199,6 +173,57 @@ class ProofBudget:
             )
             self._reservations[reservation_id] = normalized
             return reservation_id, "ok"
+
+    def preview_reservation(
+        self,
+        actions: Sequence[Tuple[str, str]],
+    ) -> Tuple[bool, str]:
+        """Check one ordered reservation without allocating or consuming it."""
+
+        normalized = tuple(
+            (str(action_class), str(ep_key))
+            for action_class, ep_key in actions
+        )
+        with self._lock:
+            return self._preview_reservation_locked(normalized)
+
+    def _preview_reservation_locked(
+        self,
+        normalized: Tuple[Tuple[str, str], ...],
+    ) -> Tuple[bool, str]:
+        if not normalized:
+            return False, "budget_reservation_requires_actions"
+        reserved_total, reserved_per, reserved_cross, reserved_priv, reserved_creates = (
+            self._reserved_counts()
+        )
+        total = self._total + reserved_total
+        per_endpoint = dict(self._per_endpoint)
+        for key, count in reserved_per.items():
+            per_endpoint[key] = per_endpoint.get(key, 0) + count
+        cross = self._cross + reserved_cross
+        privilege = self._priv + reserved_priv
+        creates = self._creates + reserved_creates
+        for action_class, ep_key in normalized:
+            allowed, reason = self._allows_counts(
+                action_class,
+                ep_key,
+                total=total,
+                per_endpoint=per_endpoint,
+                cross=cross,
+                privilege=privilege,
+                creates=creates,
+            )
+            if not allowed:
+                return False, reason
+            total += 1
+            per_endpoint[ep_key] = per_endpoint.get(ep_key, 0) + 1
+            if action_class == CROSS_OBJECT_READ:
+                cross += 1
+            elif action_class == PRIVILEGE_MUTATION:
+                privilege += 1
+            elif action_class == OWNED_CREATE:
+                creates += 1
+        return True, "ok"
 
     def release_reservation(self, reservation_id: str) -> int:
         """Release all unused slots and return how many were freed."""

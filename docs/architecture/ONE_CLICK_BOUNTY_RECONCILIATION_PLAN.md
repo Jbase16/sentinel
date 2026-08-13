@@ -671,7 +671,9 @@ per-endpoint traffic ceiling.
 - [x] **R5B2:** Graph-bound experiment compilation with an explicit supported-
   topology matrix and fresh controlled baseline requirements.
 - [x] **R5B3a:** Signed-context graph-bound manifest and fail-closed static admission.
-- [ ] **R5B3b:** Separately admitted graph-bound omission and reordering execution.
+- [x] **R5B3b1:** Concrete request, action-policy, and endpoint-budget binding with
+  non-consuming reservation preview.
+- [ ] **R5B3b2:** Separately admitted graph-bound omission and reordering execution.
 - [ ] Replay and stale-state specifications after their capability-freshness and
   post-cleanup effect oracles are defined.
 - [ ] Zero-persona and one-persona workflows in addition to paired accounts.
@@ -798,6 +800,59 @@ execution, cleanup verification, and the family-specific backend. Its world slot
 `provisioned=false`, its budget remains `reserved=false`, and the manifest and result
 remain `dispatch_authority=false`, `finding_authority=false`, `target_requests_sent=0`,
 and `executable=false`. R5B3b must introduce a separate default-off active boundary.
+
+##### R5B3b1 technical explanation
+
+R5B3b1 adds `GraphBoundRequestBinder` between static admission and any active backend.
+It independently re-mines and requires exact equality for the current lifecycle and
+state-machine artifacts, recompiles R5B2, reconstructs the exact `BackwardPlan` and
+`RehydrationRecipe`, and rehydrates baseline request templates and owned cleanup
+templates in memory. It emits three explicit sequences per manifest: the
+captured valid baseline, the graph-bound treatment, and an independent control, with
+conditional cleanup immediately following each world. Omission treatments remove only
+the exact query, JSON, or form locator and lineage binding sealed by the delta;
+reordering treatments preserve the same requests and bindings while applying only the
+sealed independent-operation order. Each request is bound to its source and template
+digest, operation, fresh-world slot, input lineage bindings, method, classified action,
+expected effect, hashed endpoint key, and current policy decision. Raw URLs, headers,
+bodies, values, and endpoint keys remain ephemeral and never enter `to_dict()`.
+
+The complete ordered endpoint/action sequence must match the R5B3a baseline, treatment,
+control, cleanup, and total request-unit counts. A new `ProofBudget.preview_reservation`
+uses the same locked cumulative total, per-endpoint, cross-object, privilege, and create
+calculation as `try_reserve`, but allocates no reservation. Unknown reconstruction,
+origin, safety, policy, action-class, phase-count, locator, capture, per-endpoint, or
+budget mismatches fail closed. Successfully bound plans resolve only the manifest's
+endpoint-binding and action-policy-preflight blockers; receipt, reservation, fresh-state,
+oracle, cleanup-verification, active-boundary, and backend blockers remain.
+
+##### R5B3b1 non-technical explanation
+
+Sentinel can now fill the permission packet with the exact captured request templates it
+would use. It lays out the normal run, the one-change test, the independent comparison,
+and cleanup for all three controlled worlds. It checks that an omission really removes
+only the approved field, or that a reordering really changes only the approved order.
+It then asks the safety policy about every request and simulates reserving the entire
+request allowance, including repeated calls to the same endpoint. The simulation cannot
+consume or hold that allowance. Secret tokens, request bodies, account data, and concrete
+endpoint keys stay in memory and the public artifact contains only typed hashes.
+
+This does not yet mean the three fresh worlds exist. Their newly created IDs and tokens
+must still be substituted during active execution, under the sealed lineage bindings.
+Sentinel has a fully inspected request plan, but it has not acquired the one-time right
+to run it, reserved the real budget, sent anything, observed an effect, cleaned up live
+state, or proved a vulnerability.
+
+##### R5B3b1 target traffic and execution authority
+
+R5B3b1 sends no target traffic and grants no provisioning, reservation, receipt, backend
+dispatch, execution, finding, promotion, or reporting authority. It may call the local
+scope and policy evaluators, but never calls `PolicyExecutor`, `raw_send`, a receipt
+store, `try_reserve`, or transport. `preview_reservation` is read-only. Every plan remains
+`budget_reserved=false`, `single_use_claim_acquired=false`,
+`dispatch_authority=false`, `finding_authority=false`, `target_requests_sent=0`, and
+`executable=false`. R5B3b2 must validate these bindings again at a separate default-off,
+single-use active boundary before it may allocate state or send a request.
 
 #### R5C — Authority monotonicity and role enforcement
 
