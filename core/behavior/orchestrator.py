@@ -52,6 +52,10 @@ from .proposals import (
     ProposalBatch,
     compile_authorization_proposals,
 )
+from .prerequisite_experiments import (
+    GraphBoundExperimentCompilationResult,
+    GraphBoundPrerequisiteExperimentCompiler,
+)
 from .semantic_catalog import (
     TargetSemanticCatalog,
     TargetSemanticCatalogBuilder,
@@ -100,6 +104,7 @@ def _run_identity_payload(
     affordances: LatentAffordanceResult,
     state_machine: StateMachineLegalityResult,
     omissions: OmissionCompilationResult,
+    prerequisite_experiments: GraphBoundExperimentCompilationResult,
     interactions: InteractionIntentCatalog,
     interaction_admission: InteractionAdmissionResult,
     experiment_stage: "OwnedExperimentShadowStage",
@@ -121,6 +126,7 @@ def _run_identity_payload(
         "affordance_artifact_digest": affordances.artifact_digest,
         "state_machine_result_id": state_machine.result_id,
         "omission_result_id": omissions.result_id,
+        "prerequisite_experiment_result_id": prerequisite_experiments.result_id,
         "interaction_catalog_id": interactions.catalog_id,
         "interaction_admission_result_id": interaction_admission.result_id,
         "experiment_stage": experiment_stage.to_dict(),
@@ -273,6 +279,10 @@ class BehavioralShadowRun:
     affordances: LatentAffordanceResult = field(repr=False, compare=False)
     state_machine: StateMachineLegalityResult = field(repr=False, compare=False)
     omissions: OmissionCompilationResult = field(repr=False, compare=False)
+    prerequisite_experiments: GraphBoundExperimentCompilationResult = field(
+        repr=False,
+        compare=False,
+    )
     interactions: InteractionIntentCatalog = field(repr=False, compare=False)
     interaction_admission: InteractionAdmissionResult = field(
         repr=False,
@@ -294,6 +304,10 @@ class BehavioralShadowRun:
         interaction_intent_ids = {
             item.intent_id for item in self.interactions.intents
         }
+        state_candidate_graphs = {
+            item.candidate_id: item.prerequisite_graph.graph_id
+            for item in self.state_machine.candidates
+        }
         admitted_interaction = self.interaction_admission.admission
         if (
             self.run_id != stable_hash("behavioral_shadow_run", payload)
@@ -306,6 +320,17 @@ class BehavioralShadowRun:
             or self.payout_goal_plan.target_ref != self.graph.target_ref
             or self.payout_goal_plan.graph_digest != self.graph.graph_digest
             or self.payout_goal_plan.executable
+            or self.prerequisite_experiments.state_machine_result_id
+            != self.state_machine.result_id
+            or self.prerequisite_experiments.lifecycle_capture_digest
+            != self.lifecycle.capture_digest
+            or self.prerequisite_experiments.executable
+            or self.prerequisite_experiments.finding_authority
+            or any(
+                state_candidate_graphs.get(item.state_machine_candidate_id)
+                != item.prerequisite_graph_id
+                for item in self.prerequisite_experiments.specifications
+            )
             or self.interaction_admission.catalog_id
             != self.interactions.catalog_id
             or self.interaction_admission.frontier_ref
@@ -353,6 +378,7 @@ class BehavioralShadowRun:
             affordances=self.affordances,
             state_machine=self.state_machine,
             omissions=self.omissions,
+            prerequisite_experiments=self.prerequisite_experiments,
             interactions=self.interactions,
             interaction_admission=self.interaction_admission,
             experiment_stage=self.experiment_stage,
@@ -379,6 +405,7 @@ class BehavioralShadowRun:
             "affordances": self.affordances.to_dict(),
             "state_machine": self.state_machine.to_dict(),
             "omissions": self.omissions.to_dict(),
+            "prerequisite_experiments": self.prerequisite_experiments.to_dict(),
             "interactions": self.interactions.to_dict(),
             "interaction_admission": self.interaction_admission.to_dict(),
             "experiment_stage": self.experiment_stage.to_dict(),
@@ -411,6 +438,9 @@ class BehavioralShadowOrchestrator:
         affordance_miner: Optional[LatentAffordanceMiner] = None,
         state_machine_miner: Optional[StateMachineLegalityMiner] = None,
         omission_compiler: Optional[MinimizedOmissionCompiler] = None,
+        prerequisite_experiment_compiler: Optional[
+            GraphBoundPrerequisiteExperimentCompiler
+        ] = None,
         interaction_miner: Optional[InteractionIntentMiner] = None,
         interaction_selector: Optional[InteractionIntentSelector] = None,
         experiment_factory: Optional[OwnedExperimentFactory] = None,
@@ -428,6 +458,10 @@ class BehavioralShadowOrchestrator:
             state_machine_miner or StateMachineLegalityMiner()
         )
         self.omission_compiler = omission_compiler or MinimizedOmissionCompiler()
+        self.prerequisite_experiment_compiler = (
+            prerequisite_experiment_compiler
+            or GraphBoundPrerequisiteExperimentCompiler()
+        )
         self.interaction_miner = interaction_miner or InteractionIntentMiner()
         self.interaction_selector = (
             interaction_selector or InteractionIntentSelector()
@@ -727,6 +761,12 @@ class BehavioralShadowOrchestrator:
             lifecycle=lifecycle,
             state_machine=state_machine,
         )
+        prerequisite_experiments = self.prerequisite_experiment_compiler.compile(
+            primary_records,
+            world_id=world_id,
+            lifecycle=lifecycle,
+            state_machine=state_machine,
+        )
         interactions = self.interaction_miner.mine(
             controls,
             target_origin=target_origin,
@@ -847,6 +887,7 @@ class BehavioralShadowOrchestrator:
                     affordances=affordances,
                     state_machine=state_machine,
                     omissions=omissions,
+                    prerequisite_experiments=prerequisite_experiments,
                     interactions=interactions,
                     interaction_admission=interaction_admission,
                     experiment_stage=experiment_stage,
@@ -864,6 +905,7 @@ class BehavioralShadowOrchestrator:
             affordances=affordances,
             state_machine=state_machine,
             omissions=omissions,
+            prerequisite_experiments=prerequisite_experiments,
             interactions=interactions,
             interaction_admission=interaction_admission,
             experiment_stage=experiment_stage,

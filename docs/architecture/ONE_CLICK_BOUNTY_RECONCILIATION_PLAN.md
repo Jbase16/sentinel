@@ -668,9 +668,11 @@ per-endpoint traffic ceiling.
 
 - [x] **R5B1:** Passive multiple-prerequisite and non-linear lifecycle topology
   from exact same-world value lineage.
-- [ ] **R5B2:** Graph-bound experiment compilation with an explicit supported-
+- [x] **R5B2:** Graph-bound experiment compilation with an explicit supported-
   topology matrix and fresh controlled baseline requirements.
-- [ ] Omission, reordering, replay, and stale-state experiments.
+- [ ] **R5B3:** Separately admitted graph-bound omission and reordering execution.
+- [ ] Replay and stale-state specifications after their capability-freshness and
+  post-cleanup effect oracles are defined.
 - [ ] Zero-persona and one-persona workflows in addition to paired accounts.
 
 ##### R5B1 technical explanation
@@ -710,6 +712,47 @@ relation explicitly records `necessity_proven=false`, `enforcement_proven=false`
 execution remains limited by its unchanged lifecycle, policy, ownership, budget, and
 admission gates; the new graph is an additional reconstruction invariant, not a new
 permission path.
+
+##### R5B2 technical explanation
+
+R5B2 adds a bounded `GraphBoundPrerequisiteExperimentCompiler` to the ordinary passive
+orchestrator. Its complete 4-by-4 support matrix makes each combination of linear,
+joining, branching, or branch-join topology and omission, reordering, replay, or stale-
+state family explicitly supported or deferred. The compiler currently supports one
+direct isolated-producer omission for a query, JSON, or form binding on linear, joining,
+and branch-join graphs, plus one adjacent independent-operation reordering when both
+operations feed a common downstream consumer on a joining or branch-join graph. Each
+specification content-addresses the R5B1 candidate, graph, topology rule, exact delta,
+three-instance fresh-state requirement, captured successful non-truncated reference
+state, owned lifecycle cleanup bindings, independent control/effect oracle requirements,
+and all unresolved safety/admission blockers. It reconstructs the compiler plan, recipe,
+lineage bindings, source states, success observations, and graph before emitting a spec.
+The result retains at most 64 specifications; truncation remains an explicit incomplete-
+work diagnostic. Replay and stale-state rows are deliberately deferred because their
+capability-freshness and post-cleanup effect semantics are not interchangeable with
+prerequisite enforcement.
+
+##### R5B2 non-technical explanation
+
+Sentinel can now turn the workflow blueprint into a sealed test design. If “approve the
+workflow” produces the one token consumed by “export,” it can describe an exact test
+that removes only that approval step and token. If two independent preparation steps
+both feed the final export, it can separately describe reversing just those two steps.
+Every design says that Sentinel must first prove the normal sequence works on one fresh
+controlled object, try the one changed sequence on a second, run an independent control
+on a third, and clean up and verify all three. It refuses unsafe path deletion and does
+not pretend that repeating an expiring token or using an archived object is the same
+kind of test. These are complete blueprints, not executed vulnerability findings.
+
+##### R5B2 target traffic and execution authority
+
+R5B2 sends no target traffic and grants no world provisioning, request mutation, budget,
+admission, execution, finding, promotion, or reporting authority. Every specification is
+`admission_ready=false`, `finding_authority=false`, and `executable=false`, and always
+retains blockers requiring a graph-bound manifest, fresh controlled state, an independent
+effect oracle, and separate experiment admission. The current default-off narrow omission
+backend is unchanged and remains the only lifecycle execution path; R5B2 specifications
+cannot reach it or any transport.
 
 #### R5C — Authority monotonicity and role enforcement
 
