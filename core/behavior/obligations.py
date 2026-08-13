@@ -679,6 +679,7 @@ class SecurityObligationGraphBuilder:
                     candidate.catalog_digest,
                     candidate.recipe_id,
                     candidate.evidence_digest,
+                    candidate.prerequisite_graph.graph_id,
                     *candidate.source_refs,
                     *candidate.lineage_binding_ids,
                 )

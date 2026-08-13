@@ -23,6 +23,7 @@ from .compiler import (
 from .lifecycle import LifecycleMiningResult, OwnedLifecycleCandidate
 from .lineage import LineageBinding, LocatorKind, PlanRehydrator, ValueLineageLedger
 from .normalize import normalize_exchange, stable_hash
+from .prerequisite_graph import compile_observed_prerequisite_graph
 from .state_machine import (
     MAX_STATE_MACHINE_PLAN_STEPS,
     MAX_STATE_MACHINE_RECORDS,
@@ -558,6 +559,8 @@ class MinimizedOmissionCompiler:
         operations = {item.operation_id: item for item in ledger.operations}
         observations = {item.source_ref: item for item in ledger.observations}
         records_by_source: Dict[str, Tuple[Mapping[str, Any], str]] = {}
+        state_ids_by_source_ref: Dict[str, str] = {}
+        successful_source_refs = set()
         raw_world_ids: Dict[str, set[str]] = {}
         for index, record in enumerate(record_values):
             raw_world = str(record.get("persona_id") or world_id)
@@ -573,6 +576,9 @@ class MinimizedOmissionCompiler:
                 record,
                 str(record.get("id") or index),
             )
+            state_ids_by_source_ref[exchange.source_id] = exchange.state_id
+            if 200 <= exchange.response_status < 300:
+                successful_source_refs.add(exchange.source_id)
             raw_world_ids.setdefault(exchange.world_id, set()).add(raw_world)
 
         experiments: Dict[str, MinimizedOmissionExperiment] = {}
@@ -608,12 +614,24 @@ class MinimizedOmissionCompiler:
             raw_world = next(iter(raw_worlds))
             recipe = rehydrator.build_recipe(plan, world_id=raw_world)
             binding_ids = tuple(sorted(item.binding_id for item in recipe.bindings))
+            try:
+                prerequisite_graph = compile_observed_prerequisite_graph(
+                    recipe.bindings,
+                    state_ids_by_source_ref=state_ids_by_source_ref,
+                    successful_source_refs=tuple(sorted(successful_source_refs)),
+                    operation_ids=plan.step_ids,
+                    terminal_operation_id=plan.terminal_operation_id,
+                )
+            except (TypeError, ValueError):
+                reconstruction_mismatches += 1
+                continue
             if (
                 recipe.status != "ready"
                 or recipe.recipe_id != candidate.recipe_id
                 or tuple(item.source_ref for item in recipe.steps)
                 != candidate.source_refs
                 or binding_ids != candidate.lineage_binding_ids
+                or prerequisite_graph != candidate.prerequisite_graph
             ):
                 reconstruction_mismatches += 1
                 continue

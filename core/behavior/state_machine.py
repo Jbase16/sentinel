@@ -23,8 +23,12 @@ from .compiler import (
 )
 from .lineage import PlanRehydrator, ValueLineageLedger
 from .normalize import normalize_exchange, stable_hash
+from .prerequisite_graph import (
+    ObservedPrerequisiteGraph,
+    compile_observed_prerequisite_graph,
+)
 
-STATE_MACHINE_LEGALITY_MODE = "behavioral_state_machine_legality_v1"
+STATE_MACHINE_LEGALITY_MODE = "behavioral_state_machine_legality_v2"
 MAX_STATE_MACHINE_RECORDS = 4_096
 MAX_STATE_MACHINE_GOALS = 64
 MAX_STATE_MACHINE_CANDIDATES = 64
@@ -90,6 +94,7 @@ def _candidate_identity_payload(
     catalog_digest: str,
     recipe_id: str,
     lineage_binding_ids: Sequence[str],
+    prerequisite_graph_id: str,
     evidence_digest: str,
     risk_class: str,
 ) -> Dict[str, Any]:
@@ -101,6 +106,7 @@ def _candidate_identity_payload(
         "catalog_digest": catalog_digest,
         "recipe_id": recipe_id,
         "lineage_binding_ids": list(lineage_binding_ids),
+        "prerequisite_graph_id": prerequisite_graph_id,
         "evidence_digest": evidence_digest,
         "risk_class": risk_class,
     }
@@ -117,12 +123,15 @@ class StateMachineLegalityCandidate:
     recipe_id: str
     source_refs: Tuple[str, ...]
     lineage_binding_ids: Tuple[str, ...]
+    prerequisite_graph: ObservedPrerequisiteGraph
     evidence_digest: str
     risk_class: str
     mode: str = STATE_MACHINE_LEGALITY_MODE
     executable: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.prerequisite_graph, ObservedPrerequisiteGraph):
+            raise ValueError("state-machine prerequisite graph is invalid")
         identity = _candidate_identity_payload(
             world_ref=self.world_ref,
             terminal_operation_id=self.terminal_operation_id,
@@ -131,6 +140,7 @@ class StateMachineLegalityCandidate:
             catalog_digest=self.catalog_digest,
             recipe_id=self.recipe_id,
             lineage_binding_ids=self.lineage_binding_ids,
+            prerequisite_graph_id=self.prerequisite_graph.graph_id,
             evidence_digest=self.evidence_digest,
             risk_class=self.risk_class,
         )
@@ -140,7 +150,36 @@ class StateMachineLegalityCandidate:
                 "source_refs": list(self.source_refs),
                 "recipe_id": self.recipe_id,
                 "lineage_binding_ids": list(self.lineage_binding_ids),
+                "prerequisite_graph_id": self.prerequisite_graph.graph_id,
             },
+        )
+        step_ids = (*self.prerequisite_operation_ids, self.terminal_operation_id)
+        operation_positions = {
+            operation_id: index for index, operation_id in enumerate(step_ids)
+        }
+        graph_binding_ids = tuple(
+            sorted(
+                relation.lineage_binding_id
+                for relation in self.prerequisite_graph.relations
+            )
+        )
+        graph_source_refs = {
+            source_ref
+            for relation in self.prerequisite_graph.relations
+            for source_ref in (
+                relation.producer_source_ref,
+                relation.consumer_source_ref,
+            )
+        }
+        graph_matches_plan = (
+            self.prerequisite_graph.operation_ids == tuple(sorted(step_ids))
+            and all(
+                relation.producer_operation_id in operation_positions
+                and relation.consumer_operation_id in operation_positions
+                and operation_positions[relation.producer_operation_id]
+                < operation_positions[relation.consumer_operation_id]
+                for relation in self.prerequisite_graph.relations
+            )
         )
         if (
             self.candidate_id
@@ -175,6 +214,12 @@ class StateMachineLegalityCandidate:
                 not _hash_ref(item, "lineage_binding")
                 for item in self.lineage_binding_ids
             )
+            or self.prerequisite_graph.world_ref != self.world_ref
+            or self.prerequisite_graph.terminal_operation_id
+            != self.terminal_operation_id
+            or not graph_matches_plan
+            or graph_binding_ids != self.lineage_binding_ids
+            or not graph_source_refs <= set(self.source_refs)
             or self.evidence_digest != expected_evidence
             or self.risk_class not in {"read", "state_mutation"}
         ):
@@ -191,6 +236,7 @@ class StateMachineLegalityCandidate:
             "recipe_id": self.recipe_id,
             "source_refs": list(self.source_refs),
             "lineage_binding_ids": list(self.lineage_binding_ids),
+            "prerequisite_graph": self.prerequisite_graph.to_dict(),
             "evidence_digest": self.evidence_digest,
             "risk_class": self.risk_class,
             "mode": self.mode,
@@ -224,6 +270,10 @@ class StateMachineLegalityDiagnostics:
     goals_blocked: int
     terminal_only_goals: int
     ordered_chains: int
+    observed_relations: int
+    multi_prerequisite_candidates: int
+    non_linear_candidates: int
+    topology_rejections: int
     lineage_rejections: int
     ambiguous_chains: int
     cross_world_rejections: int
@@ -242,7 +292,12 @@ class StateMachineLegalityDiagnostics:
 
     @property
     def incomplete_work(self) -> int:
-        return self.invalid_records + self.dropped_goals + self.dropped_candidates
+        return (
+            self.invalid_records
+            + self.topology_rejections
+            + self.dropped_goals
+            + self.dropped_candidates
+        )
 
     def to_dict(self) -> Dict[str, int]:
         return dict(vars(self))
@@ -309,6 +364,21 @@ class StateMachineLegalityResult:
                 for item in self.candidates
             )
             or self.diagnostics.ordered_chains < len(self.candidates)
+            or self.diagnostics.observed_relations
+            != sum(
+                len(item.prerequisite_graph.relations)
+                for item in self.candidates
+            )
+            or self.diagnostics.multi_prerequisite_candidates
+            != sum(
+                item.prerequisite_graph.is_multi_prerequisite
+                for item in self.candidates
+            )
+            or self.diagnostics.non_linear_candidates
+            != sum(
+                item.prerequisite_graph.is_non_linear
+                for item in self.candidates
+            )
             or self.diagnostics.goals_analyzed
             + self.diagnostics.dropped_goals
             != self.diagnostics.high_value_goals
@@ -327,7 +397,7 @@ class StateMachineLegalityResult:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "result_id": self.result_id,
             **_result_payload(
                 status=self.status,
@@ -469,6 +539,10 @@ class StateMachineLegalityMiner:
             goals_blocked=0,
             terminal_only_goals=0,
             ordered_chains=0,
+            observed_relations=0,
+            multi_prerequisite_candidates=0,
+            non_linear_candidates=0,
+            topology_rejections=0,
             lineage_rejections=0,
             ambiguous_chains=0,
             cross_world_rejections=0,
@@ -523,6 +597,12 @@ class StateMachineLegalityMiner:
             record_values,
             world_id=world_id,
         )
+        state_ids_by_source_ref = {
+            item.source_ref: item.state_id for item in observations
+        }
+        successful_source_refs = tuple(
+            sorted(item.source_ref for item in observations if item.successful)
+        )
         capture_digest = stable_hash(
             "state_machine_capture",
             {
@@ -568,6 +648,7 @@ class StateMachineLegalityMiner:
         goals_blocked = 0
         terminal_only_goals = 0
         ordered_chains = 0
+        topology_rejections = 0
         lineage_rejections = 0
         ambiguous_chains = 0
         cross_world_rejections = 0
@@ -628,12 +709,24 @@ class StateMachineLegalityMiner:
                 ):
                     dropped_candidates += 1
                     continue
+                try:
+                    prerequisite_graph = compile_observed_prerequisite_graph(
+                        recipe.bindings,
+                        state_ids_by_source_ref=state_ids_by_source_ref,
+                        successful_source_refs=successful_source_refs,
+                        operation_ids=plan.step_ids,
+                        terminal_operation_id=plan.terminal_operation_id,
+                    )
+                except (TypeError, ValueError):
+                    topology_rejections += 1
+                    continue
                 evidence_digest = stable_hash(
                     "state_machine_legality_evidence",
                     {
                         "source_refs": list(source_refs),
                         "recipe_id": recipe.recipe_id,
                         "lineage_binding_ids": list(lineage_binding_ids),
+                        "prerequisite_graph_id": prerequisite_graph.graph_id,
                     },
                 )
                 identity = _candidate_identity_payload(
@@ -644,6 +737,7 @@ class StateMachineLegalityMiner:
                     catalog_digest=plan.catalog_digest,
                     recipe_id=recipe.recipe_id,
                     lineage_binding_ids=lineage_binding_ids,
+                    prerequisite_graph_id=prerequisite_graph.graph_id,
                     evidence_digest=evidence_digest,
                     risk_class=self._risk_class(terminal),
                 )
@@ -660,6 +754,7 @@ class StateMachineLegalityMiner:
                     recipe_id=recipe.recipe_id,
                     source_refs=source_refs,
                     lineage_binding_ids=lineage_binding_ids,
+                    prerequisite_graph=prerequisite_graph,
                     evidence_digest=evidence_digest,
                     risk_class=self._risk_class(terminal),
                 )
@@ -682,6 +777,19 @@ class StateMachineLegalityMiner:
             goals_blocked=goals_blocked,
             terminal_only_goals=terminal_only_goals,
             ordered_chains=ordered_chains,
+            observed_relations=sum(
+                len(item.prerequisite_graph.relations)
+                for item in ordered_candidates
+            ),
+            multi_prerequisite_candidates=sum(
+                item.prerequisite_graph.is_multi_prerequisite
+                for item in ordered_candidates
+            ),
+            non_linear_candidates=sum(
+                item.prerequisite_graph.is_non_linear
+                for item in ordered_candidates
+            ),
+            topology_rejections=topology_rejections,
             lineage_rejections=lineage_rejections,
             ambiguous_chains=ambiguous_chains,
             cross_world_rejections=cross_world_rejections,

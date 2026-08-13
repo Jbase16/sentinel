@@ -106,7 +106,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Latent capability-directed discovery | Passive and cataloged | Capability-linked JavaScript, source-map, and OpenAPI routes become published or specified semantic operations; unmatched and ambiguous routes remain coverage deficits. | Feed every source through ordinary acquisition and actively confirm only through separately admitted R4-R8 workflows. |
 | Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
-| State-machine prerequisite omission oracle | Implemented, narrow | Exact capability-linked lifecycle omissions can be recreated, compared, and independently confirmed. | Generalize prerequisite types, lifecycle shapes, and non-account state machines. |
+| State-machine prerequisite omission oracle | Passive topology generalized; execution narrow | Exact same-world lineage now preserves multiple prerequisites, observed states, branches, and joins as a content-addressed DAG. The executable oracle remains limited to the pre-existing narrow lifecycle omission shape. | Compile graph-bound omission, reordering, replay, and stale-state experiments without treating observed data flow as proof of server enforcement. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
 | Ordinary one-click behavioral bridge | Implemented | The native Scan UI can send paired-persona or anonymous-passive profiles to the backend. | Replace manual proof-topology choice with an evidence-driven recommendation and permitted automatic selection. |
 | Proof topology selector | Implemented, passive and bounded | `PayoutGoalTopologyPlanner` now consumes R2 semantic projections and selects the minimum supported zero-, one-, two-, role-, lifecycle-, or callback-world topology from evidence, proof-backend availability, owned worlds, and envelope authority. | Generalize executable worlds in R4 and let the ordinary-click coordinator consume the decision in R8. |
@@ -666,9 +666,50 @@ per-endpoint traffic ceiling.
 
 #### R5B — Generalized lifecycle prerequisite enforcement
 
-- [ ] Multiple prerequisites and non-linear lifecycle states.
+- [x] **R5B1:** Passive multiple-prerequisite and non-linear lifecycle topology
+  from exact same-world value lineage.
+- [ ] **R5B2:** Graph-bound experiment compilation with an explicit supported-
+  topology matrix and fresh controlled baseline requirements.
 - [ ] Omission, reordering, replay, and stale-state experiments.
 - [ ] Zero-persona and one-persona workflows in addition to paired accounts.
+
+##### R5B1 technical explanation
+
+R5B1 adds `ObservedPrerequisiteRelation` and `ObservedPrerequisiteGraph`. Each relation
+binds one compiler capability and exact `LineageBinding` to the producing and consuming
+operation, capture source, and normalized observed state. The graph validates one
+same-world acyclic dependency topology, requires every retained prerequisite to reach
+the high-value terminal operation, and derives roots, direct terminal prerequisites,
+branches, joins, and maximum dependency depth. `StateMachineLegalityCandidate` v2 now
+content-addresses this graph instead of exposing only a flat topological order. The
+ordinary passive orchestrator carries the graph into its state-machine artifact and
+security-obligation evidence, while the existing omission compiler must reconstruct the
+same graph before accepting its already-supported narrow experiment. The ordinary miner
+retains its existing 16-step plan ceiling, permits at most 32 exact relations per graph,
+and retains at most 64 state-machine candidates per run.
+This pass still requires one unambiguous successful captured observation per operation;
+repeated same-operation instances and alternative producer paths remain unresolved.
+
+##### R5B1 non-technical explanation
+
+Sentinel no longer remembers a workflow merely as “do A, then B, then C.” It can now
+preserve that A produced one piece needed by both B and C, while B produced a second
+piece also needed by C. For example, it can distinguish “create an order and create an
+address, then use both to export an invoice” from a simple three-step line. Every arrow
+comes from an exact value that Sentinel watched move between controlled requests; route
+names and error prose cannot invent an arrow. This is the blueprint needed for smarter
+workflow tests, but it is not yet proof that skipping, reordering, replaying, or using a
+stale step succeeds, and it is not itself a vulnerability finding.
+
+##### R5B1 target traffic and execution authority
+
+R5B1 sends no target traffic and grants no execution, mutation, admission, budget,
+finding, or promotion authority. It analyzes records already present in the scan. Every
+relation explicitly records `necessity_proven=false`, `enforcement_proven=false`,
+`finding_authority=false`, and `executable=false`. Existing default-off omission
+execution remains limited by its unchanged lifecycle, policy, ownership, budget, and
+admission gates; the new graph is an additional reconstruction invariant, not a new
+permission path.
 
 #### R5C — Authority monotonicity and role enforcement
 

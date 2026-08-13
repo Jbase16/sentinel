@@ -4,21 +4,26 @@ from __future__ import annotations
 
 import ast
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import core.behavior as behavior_package
+import core.behavior.prerequisite_graph as prerequisite_graph_module
 import core.behavior.state_machine as state_machine_module
 from core.behavior.state_machine import (
     STATE_MACHINE_LEGALITY_MODE,
     StateMachineLegalityLimits,
     StateMachineLegalityMiner,
 )
+from core.behavior.normalize import normalize_exchange
 
 ORIGIN = "https://api.example.test"
 WORKFLOW_ID = "workflow_7fa9f13a2b4c5d6e"
 EXPORT_TOKEN = "token_4a5b6c7d8e9f0123"
+ORDER_ID = "order_6e7f8a9b0c1d2e3f"
+ADDRESS_ID = "address_6e7f8a9b0c1d2e3f"
 
 
 def _records(*, persona: str = "alice"):
@@ -55,6 +60,53 @@ def _records(*, persona: str = "alice"):
     )
 
 
+def _joining_records():
+    prerequisites = (
+        {
+            "id": "create-order",
+            "persona_id": "alice",
+            "method": "POST",
+            "url": f"{ORIGIN}/api/orders",
+            "request_body": "{}",
+            "response_status": 201,
+            "response_body": json.dumps({"orderId": ORDER_ID}),
+        },
+        {
+            "id": "create-address",
+            "persona_id": "alice",
+            "method": "POST",
+            "url": f"{ORIGIN}/api/addresses",
+            "request_body": "{}",
+            "response_status": 201,
+            "response_body": json.dumps({"addressId": ADDRESS_ID}),
+        },
+    )
+    ordered = tuple(
+        sorted(
+            prerequisites,
+            key=lambda record: normalize_exchange(
+                record,
+                source_id=record["id"],
+                world_id="alice",
+            ).action_id,
+        )
+    )
+    return (
+        *ordered,
+        {
+            "id": "export-order",
+            "persona_id": "alice",
+            "method": "GET",
+            "url": (
+                f"{ORIGIN}/api/export?orderId={ORDER_ID}"
+                f"&addressId={ADDRESS_ID}"
+            ),
+            "response_status": 200,
+            "response_body": '{"status":"ready"}',
+        },
+    )
+
+
 def test_miner_derives_exact_same_world_ordered_prerequisite_relation():
     result = StateMachineLegalityMiner().mine(_records(), world_id="alice")
 
@@ -67,8 +119,66 @@ def test_miner_derives_exact_same_world_ordered_prerequisite_relation():
     assert len(candidate.source_refs) == 3
     assert len(candidate.lineage_binding_ids) == 3
     assert candidate.risk_class == "read"
+    assert candidate.prerequisite_graph.shape == "branching_joining"
+    assert candidate.prerequisite_graph.is_multi_prerequisite
+    assert candidate.prerequisite_graph.is_non_linear
+    assert len(candidate.prerequisite_graph.relations) == 3
+    assert len(candidate.prerequisite_graph.branch_operation_ids) == 1
+    assert candidate.prerequisite_graph.join_operation_ids == (
+        candidate.terminal_operation_id,
+    )
+    assert candidate.prerequisite_graph.max_depth == 3
+    assert all(
+        not relation.necessity_proven
+        and not relation.enforcement_proven
+        and not relation.finding_authority
+        and not relation.executable
+        for relation in candidate.prerequisite_graph.relations
+    )
     assert result.diagnostics.ordered_chains == 1
+    assert result.diagnostics.observed_relations == 3
+    assert result.diagnostics.multi_prerequisite_candidates == 1
+    assert result.diagnostics.non_linear_candidates == 1
     assert result.diagnostics.incomplete_work == 0
+    assert result.to_dict()["schema_version"] == 2
+
+
+def test_independent_prerequisites_are_preserved_as_one_joining_topology():
+    result = StateMachineLegalityMiner().mine(
+        _joining_records(),
+        world_id="alice",
+    )
+
+    assert result.status == "ready"
+    candidate = next(
+        item
+        for item in result.candidates
+        if len(item.prerequisite_operation_ids) == 2
+    )
+    graph = candidate.prerequisite_graph
+    assert graph.shape == "joining"
+    assert len(graph.root_operation_ids) == 2
+    assert len(graph.direct_terminal_prerequisite_operation_ids) == 2
+    assert graph.branch_operation_ids == ()
+    assert graph.join_operation_ids == (candidate.terminal_operation_id,)
+    assert graph.max_depth == 2
+    assert len(graph.relations) == 2
+    encoded = json.dumps(graph.to_dict(), sort_keys=True)
+    assert ORDER_ID not in encoded
+    assert ADDRESS_ID not in encoded
+
+
+def test_prerequisite_topology_cannot_be_relabelled_without_readdressing():
+    candidate = StateMachineLegalityMiner().mine(
+        _records(),
+        world_id="alice",
+    ).candidates[0]
+
+    with pytest.raises(
+        ValueError,
+        match="observed prerequisite graph contract is invalid",
+    ):
+        replace(candidate.prerequisite_graph, shape="linear")
 
 
 def test_result_is_deterministic_and_contains_no_raw_target_values():
@@ -188,26 +298,28 @@ def test_input_contract_rejects_non_mapping_records():
         StateMachineLegalityMiner().mine(("not-a-record",))
 
 
-def test_state_machine_module_has_no_transport_or_execution_surface():
-    tree = ast.parse(Path(state_machine_module.__file__).read_text())
-    imported_roots = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported_roots.update(
-                alias.name.split(".", 1)[0] for alias in node.names
-            )
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported_roots.add(node.module.split(".", 1)[0])
+def test_state_machine_analysis_modules_have_no_transport_or_execution_surface():
+    for module in (state_machine_module, prerequisite_graph_module):
+        tree = ast.parse(Path(module.__file__).read_text())
+        imported_roots = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_roots.update(
+                    alias.name.split(".", 1)[0] for alias in node.names
+                )
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported_roots.add(node.module.split(".", 1)[0])
 
-    assert not imported_roots & {
-        "aiohttp",
-        "httpx",
-        "requests",
-        "socket",
-        "urllib3",
-        "websockets",
-    }
-    assert not any(
-        isinstance(node, ast.AsyncFunctionDef) for node in ast.walk(tree)
-    )
+        assert not imported_roots & {
+            "aiohttp",
+            "httpx",
+            "requests",
+            "socket",
+            "urllib3",
+            "websockets",
+        }
+        assert not any(
+            isinstance(node, ast.AsyncFunctionDef) for node in ast.walk(tree)
+        )
     assert not hasattr(behavior_package, "StateMachineLegalityMiner")
+    assert not hasattr(behavior_package, "ObservedPrerequisiteGraph")
