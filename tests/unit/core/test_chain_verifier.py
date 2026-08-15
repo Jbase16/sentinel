@@ -57,14 +57,21 @@ async def test_refuted_when_a_testable_step_fails():
 
 
 @pytest.mark.asyncio
-async def test_inconclusive_step_does_not_refute():
-    # One step confirms, the other is inconclusive (None) -> VERIFIED, not refuted.
+async def test_partial_confirmation_stays_hypothesized_with_per_step_outcomes():
+    # One step confirms, the other is inconclusive (None): the chain is not
+    # refuted, but it is also not fully proved and must never be promoted.
     chain = _omega_chain([("idor_pattern", "https://x.test/u/1"),
                           ("ssrf_pattern", "https://x.test/fetch")])
     step = _mock({"https://x.test/u/1": True})  # fetch -> None (inconclusive)
     res = await cv.ChainVerifier().verify_chain(chain, step)
-    assert res.verdict == cv.VERIFIED
+    assert res.verdict == cv.HYPOTHESIZED
+    assert chain.epistemic == cv.HYPOTHESIZED
     assert res.confirmed == 1
+    assert [item.outcome for item in res.steps] == ["confirmed", "inconclusive"]
+    assert [item["outcome"] for item in res.to_dict()["verification"]["steps"]] == [
+        "confirmed",
+        "inconclusive",
+    ]
 
     # ALL steps inconclusive -> stays hypothesized, never refuted.
     chain2 = _omega_chain([("idor_pattern", "https://x.test/u/9")])
@@ -102,9 +109,27 @@ async def test_step_error_is_not_a_refutation():
     chain = _omega_chain([("idor_pattern", "https://x.test/u/1"),
                           ("ssrf_pattern", "https://x.test/fetch")])
     res = await cv.ChainVerifier().verify_chain(chain, boom_then_ok)
-    # idor errored (skipped, not refuted); ssrf confirmed -> VERIFIED
-    assert res.verdict == cv.VERIFIED
+    # idor errored (inconclusive, not refuted); one confirmed step is still
+    # insufficient to promote the whole chain.
+    assert res.verdict == cv.HYPOTHESIZED
     assert res.confirmed == 1
+    assert [item.outcome for item in res.steps] == ["inconclusive", "confirmed"]
+
+
+@pytest.mark.asyncio
+async def test_unattempted_step_beyond_proof_cap_prevents_promotion():
+    chain = _omega_chain([
+        ("idor_pattern", "https://x.test/u/1"),
+        ("ssrf_pattern", "https://x.test/fetch"),
+    ])
+    res = await cv.ChainVerifier(max_steps_per_chain=1).verify_chain(
+        chain,
+        _mock({"https://x.test/u/1": True, "https://x.test/fetch": True}),
+    )
+    assert res.verdict == cv.HYPOTHESIZED
+    assert res.tested == 1
+    assert [item.outcome for item in res.steps] == ["confirmed", "inconclusive"]
+    assert res.steps[1].evidence == "step proof budget exhausted"
 
 
 @pytest.mark.asyncio

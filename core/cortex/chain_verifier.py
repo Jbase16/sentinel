@@ -60,6 +60,26 @@ VerifyStep = Callable[[str, str], Awaitable[Tuple[Optional[bool], str]]]
 
 
 @dataclass
+class StepVerification:
+    """Tri-state result retained for every live-testable primitive."""
+
+    primitive_type: str
+    vuln_class: str
+    url: str
+    outcome: str                       # confirmed | refuted | inconclusive
+    evidence: str = ""
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "primitive_type": self.primitive_type,
+            "vuln_class": self.vuln_class,
+            "url": self.url,
+            "outcome": self.outcome,
+            "evidence": self.evidence,
+        }
+
+
+@dataclass
 class ChainVerification:
     """Outcome of re-testing one chain."""
     proposal: ChainProposal
@@ -67,6 +87,7 @@ class ChainVerification:
     tested: int = 0                    # live-testable steps attempted
     confirmed: int = 0                 # of those, confirmed
     evidence: str = ""
+    steps: List[StepVerification] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d = self.proposal.to_dict()
@@ -77,6 +98,7 @@ class ChainVerification:
                 "tested_steps": self.tested,
                 "confirmed_steps": self.confirmed,
                 "evidence": self.evidence,
+                "steps": [step.to_dict() for step in self.steps],
             },
         })
         return d
@@ -114,40 +136,66 @@ class ChainVerifier:
         if proposal.epistemic != HYPOTHESIZED:
             return ChainVerification(proposal, proposal.epistemic, evidence="not a hypothesis")
 
-        steps = _testable_steps(proposal)[: self._max_steps]
-        if not steps:
+        all_steps = _testable_steps(proposal)
+        if not all_steps:
             return ChainVerification(proposal, HYPOTHESIZED, evidence="no live-testable steps")
 
+        attempted = all_steps[: self._max_steps]
         confirmed = 0
-        for ptype, vclass, url in steps:
+        tested = 0
+        results: List[StepVerification] = []
+        refuted: Optional[StepVerification] = None
+        for ptype, vclass, url in attempted:
+            tested += 1
             try:
                 outcome, ev = await verify_step(vclass, url)
             except Exception as e:
                 logger.debug("[ChainVerifier] step error %s @ %s: %s", vclass, url, e)
-                # An error is inconclusive, not a refutation — keep testing.
+                results.append(StepVerification(
+                    ptype, vclass, url, "inconclusive",
+                    f"step verifier error: {type(e).__name__}",
+                ))
                 continue
             if outcome is True:
                 confirmed += 1
+                results.append(StepVerification(ptype, vclass, url, "confirmed", str(ev)))
             elif outcome is False:
-                # A step we COULD test and that was DISPROVEN breaks the chain.
-                proposal.epistemic = REFUTED
-                return ChainVerification(
-                    proposal, REFUTED, tested=len(steps), confirmed=confirmed,
-                    evidence=f"step refuted: {ptype} disproven at {url} ({ev})",
-                )
-            # outcome is None -> inconclusive; absence of signal never refutes.
+                refuted = StepVerification(ptype, vclass, url, "refuted", str(ev))
+                results.append(refuted)
+                break
+            else:
+                results.append(StepVerification(ptype, vclass, url, "inconclusive", str(ev)))
 
-        if confirmed == 0:
+        # Do not spend more proof budget after an explicit refutation or beyond the
+        # per-chain cap, but retain those steps as inconclusive rather than erasing
+        # them from the verification record.
+        for ptype, vclass, url in all_steps[len(results):]:
+            reason = "not attempted after an earlier refutation" if refuted else "step proof budget exhausted"
+            results.append(StepVerification(ptype, vclass, url, "inconclusive", reason))
+
+        if refuted is not None:
+            proposal.epistemic = REFUTED
             return ChainVerification(
-                proposal, HYPOTHESIZED, tested=len(steps), confirmed=0,
-                evidence="no step could be confirmed (inconclusive) — left hypothesized",
+                proposal, REFUTED, tested=tested, confirmed=confirmed,
+                evidence=(f"step refuted: {refuted.primitive_type} disproven at "
+                          f"{refuted.url} ({refuted.evidence})"),
+                steps=results,
+            )
+
+        if confirmed != len(all_steps):
+            inconclusive = len(all_steps) - confirmed
+            return ChainVerification(
+                proposal, HYPOTHESIZED, tested=tested, confirmed=confirmed,
+                evidence=(f"{confirmed}/{len(all_steps)} live-testable step(s) confirmed; "
+                          f"{inconclusive} inconclusive — left hypothesized"),
+                steps=results,
             )
 
         proposal.epistemic = VERIFIED
         return ChainVerification(
-            proposal, VERIFIED, tested=len(steps), confirmed=confirmed,
-            evidence=f"{confirmed}/{len(steps)} live-testable step(s) confirmed; "
-                     f"goal={proposal.goal}",
+            proposal, VERIFIED, tested=tested, confirmed=confirmed,
+            evidence=f"{confirmed}/{len(all_steps)} live-testable step(s) confirmed; "
+                     f"goal={proposal.goal}", steps=results,
         )
 
     async def verify(

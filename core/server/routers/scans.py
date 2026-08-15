@@ -15,6 +15,7 @@ from core.server.routers.auth import verify_sensitive_token, verify_token
 from core.errors import SentinelError, ErrorCode, ToolError
 from core.data.db import Database
 from core.safety.proof_mode import ProofMode
+from core.wraith.active_proof import OwnedLabManifest
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +159,9 @@ class ScanRequest(BaseModel):
     modules: Optional[List[str]] = None
     force: bool = False
     mode: str = "standard"
+    # Required authority binding for Wraith's high-impact capability/exfiltration
+    # helpers. ``owned_lab`` mode alone grants those helpers no execution right.
+    owned_lab_manifest: Optional[OwnedLabManifest] = None
     # Optional per-scan knowledge configuration used by internal verification tools.
     # These are intentionally kept minimal and opt-in; missing config simply disables
     # the corresponding internal tools (wraith_persona_diff / wraith_oob_probe).
@@ -286,7 +290,6 @@ class ScanRequest(BaseModel):
             if name is not None and (not isinstance(name, str) or not name.strip()):
                 raise ValueError(f"personas[{idx}].name must be a non-empty string")
         return v
-
     @field_validator("oob")
     @classmethod
     def validate_oob(cls, v: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -328,6 +331,13 @@ class ScanRequest(BaseModel):
                 "behavioral_one_click requires bug_bounty scan mode"
             )
         return self
+
+
+def _should_run_active_verification(mode: str, *, passive_only: bool) -> bool:
+    """Keep owned-lab proof traffic on the same explicit phase as bounty verification."""
+
+    normalized = str(mode or "").strip().lower()
+    return normalized in {"bug_bounty", "bounty", "owned_lab"} and not passive_only
 
 
 def _resolve_business_logic_proof_mode(
@@ -1131,15 +1141,15 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         )
 
                 # --- Phase 3: active verification (Run #26 wiring) -----------
-                # In bug_bounty mode, after recon, probe a curated set of
-                # common parameterized endpoints on in-scope hosts using
+                # In bug_bounty or explicit owned_lab mode, after recon, probe a
+                # curated set of common parameterized endpoints on in-scope hosts using
                 # VulnVerifier (boundary payloads, error/timing detection).
                 # Confirmed verifications are added to the session as HIGH-
                 # severity findings — they appear in the Findings tab, the AI
                 # briefing, and reports, with zero extra plumbing.
                 # Scope-strict mode hard-gates probes through the same scope
                 # registry the scan uses for tools (single source of truth).
-                if req.mode in ("bug_bounty", "bounty") and not passive_only:
+                if _should_run_active_verification(req.mode, passive_only=passive_only):
                     try:
                         from core.wraith.verify_phase import run_verify_phase
                         # Build candidate target set: original + any hosts the
@@ -1305,12 +1315,23 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     # breach the auth wall instead of converging.
                                     if ("idor" in _want) and not (_id_headers or _id_cookies):
                                         try:
-                                            from core.wraith.capability import acquire_capability
+                                            from core.wraith.active_proof import run_capability_acquisition
                                             # The full library tries login-SQLi, then
                                             # default credentials. Forge-elevation
                                             # (alg:none / weak HMAC) fires only when a
                                             # token is already held + verifiable.
-                                            _cap = await acquire_capability(req.target, scope_filter)
+                                            _cap_outcome = await run_capability_acquisition(
+                                                scan_mode=req.mode,
+                                                target=req.target,
+                                                manifest=req.owned_lab_manifest,
+                                                scope_filter=scope_filter,
+                                            )
+                                            _cap = _cap_outcome.value if _cap_outcome.admitted else None
+                                            if not _cap_outcome.admitted:
+                                                session.log(
+                                                    f"[capability] active proof refused: "
+                                                    f"{_cap_outcome.reason}"
+                                                )
                                         except Exception as _cap_exc:
                                             logger.warning("[scan] capability acquire failed: %s", _cap_exc)
                                             _cap = None
@@ -1413,10 +1434,24 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     if (scope_filter is not None and not scope_filter(_sqli_url)) or _cv_probes["n"] >= _CV_CAP:
                                         continue
                                     try:
-                                        from core.wraith.exfiltration import exfiltrate_credentials, default_fetch
+                                        from core.wraith.active_proof import run_union_exfiltration
                                         from urllib.parse import parse_qsl as _parse_qsl
                                         _ex_param = next((k for k, _ in _parse_qsl(_urlparse(_sqli_url).query)), "q")
-                                        _exfil = await exfiltrate_credentials(_sqli_url, _ex_param, default_fetch(), max_attempts=40)
+                                        _exfil_outcome = await run_union_exfiltration(
+                                            scan_mode=req.mode,
+                                            target=req.target,
+                                            manifest=req.owned_lab_manifest,
+                                            url=_sqli_url,
+                                            param=_ex_param,
+                                            scope_filter=scope_filter,
+                                            max_attempts=40,
+                                        )
+                                        _exfil = _exfil_outcome.value if _exfil_outcome.admitted else None
+                                        if not _exfil_outcome.admitted:
+                                            session.log(
+                                                f"[exfil] active proof refused: "
+                                                f"{_exfil_outcome.reason}"
+                                            )
                                     except Exception as _ex_exc:
                                         logger.warning("[scan] exfiltration failed: %s", _ex_exc)
                                         _exfil = None
