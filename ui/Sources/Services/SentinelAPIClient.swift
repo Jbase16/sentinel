@@ -97,11 +97,10 @@ public struct SentinelAPIClient: Sendable {
 
     // MARK: - Health Check
 
-    /// Health check - does not require authentication
+    /// Authenticated health check.
     public func ping() async -> Bool {
         guard let url = URL(string: "/v1/ping", relativeTo: baseURL) else { return false }
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
+        let request = authenticatedRequest(url: url, method: "GET")
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -620,7 +619,7 @@ public struct SentinelAPIClient: Sendable {
         format: String,
         includeAttackPaths: Bool,
         maxPaths: Int,
-        sessionId: String? = nil
+        sessionId: String
     ) async throws -> ReportGenerateResponse {
         guard let url = URL(string: "/v1/cortex/reporting/generate", relativeTo: baseURL) else {
             throw APIError.badStatus
@@ -637,12 +636,9 @@ public struct SentinelAPIClient: Sendable {
         if let scope {
             body["scope"] = scope
         }
-        // Scope the report to the active scan session so it describes THIS
-        // scan, not the global cross-session finding store. The backend also
-        // falls back to the most-recent session when this is omitted.
-        if let sessionId, !sessionId.isEmpty {
-            body["session_id"] = sessionId
-        }
+        // The backend rejects unbound reports: the explicit session selects
+        // the only findings/evidence set this request may read.
+        body["session_id"] = sessionId
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
@@ -652,13 +648,16 @@ public struct SentinelAPIClient: Sendable {
         return try JSONDecoder().decode(ReportGenerateResponse.self, from: data)
     }
 
-    func fetchPoC(findingId: String) async throws -> PoCResponse {
+    func fetchPoC(findingId: String, sessionId: String) async throws -> PoCResponse {
         guard
-            let url = URL(
-                string: "/v1/cortex/reporting/poc/\(findingId)", relativeTo: baseURL)
+            let basePoCURL = URL(
+                string: "/v1/cortex/reporting/poc/\(findingId)", relativeTo: baseURL),
+            var components = URLComponents(url: basePoCURL, resolvingAgainstBaseURL: true)
         else {
             throw APIError.badStatus
         }
+        components.queryItems = [URLQueryItem(name: "session_id", value: sessionId)]
+        guard let url = components.url else { throw APIError.badStatus }
         let request = authenticatedRequest(url: url, method: "GET")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

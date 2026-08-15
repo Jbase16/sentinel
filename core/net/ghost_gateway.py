@@ -1,16 +1,9 @@
-import asyncio
 import logging
-import time
-from typing import AsyncIterator, MutableMapping
-from urllib.parse import urlparse
 
 import httpx
 from curl_cffi import requests as curl_requests
 from curl_cffi.requests.errors import RequestsError
 from curl_cffi.curl import CurlError
-
-from core.foundry.driver_native import GhostNativeDriver
-from core.server.routers.driver import node_manager
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +11,9 @@ class GhostGatewayTransport(httpx.AsyncBaseTransport):
     """
     A persistent, device-attested HTTP proxy layer that severs the browser from the request path.
     Uses curl_cffi to match Safari 15.5 JA3/HTTP2 fingerprints.
-    Falls back to the native UI Oracle for cf_clearance cookie harvesting if heavily challenged.
+
+    Browser-cookie harvesting is deliberately quarantined. Challenge responses are
+    returned to the scanner unchanged instead of importing cookies from a UI session.
     """
     
     def __init__(self):
@@ -30,11 +25,6 @@ class GhostGatewayTransport(httpx.AsyncBaseTransport):
         # Oracle User-Agent to strictly match WebKit native
         self.oracle_ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)"
         
-        # Self-Heal Guards
-        self._heal_lock = asyncio.Lock()
-        self._last_heal_timestamp = 0.0
-        self._heal_cooldown = 30.0  # seconds to prevent thundering herd
-
     async def handle_async_request(
         self, request: httpx.Request
     ) -> httpx.Response:
@@ -114,37 +104,16 @@ class GhostGatewayTransport(httpx.AsyncBaseTransport):
 
     async def _trigger_self_heal(self) -> bool:
         """
-        The Fallback: Engages the native UI Oracle to harvest fresh cookies.
-        Gracefully degrades (returns False) if the Oracle is not connected.
+        Fail closed while browser-cookie transfer is quarantined.
+
+        Re-enabling this requires an admitted, target-bound workflow with explicit
+        cookie provenance and operator authorization; a gateway retry is not one.
         """
-        if node_manager.active_node is None:
-            logger.info("[GhostGateway] SND Bridge disconnected. Graceful degradation: passing block.")
-            return False
-            
-        async with self._heal_lock:
-            if time.time() - self._last_heal_timestamp < self._heal_cooldown:
-                logger.info("[GhostGateway] Cooldown active. Skipping redundant self-heal.")
-                return True # Assuming a concurrent thread just healed it
-                
-            try:
-                driver = await GhostNativeDriver.launch(headless=True)
-                logger.info("[GhostGateway] Oracle launching. Parking on edge for challenge resolution...")
-                await driver.navigate('https://www.whatnot.com/')
-                
-                # Give the native browser time to solve the JS/CAPTCHA challenge natively
-                await asyncio.sleep(15.0)
-                
-                logger.info("[GhostGateway] Harvesting Oracle cookies...")
-                cookies = await driver._send('get_cookies')
-                
-                if cookies:
-                    self.session.cookies.update(cookies)
-                    self._last_heal_timestamp = time.time()
-                    return True
-                return False
-            except Exception as e:
-                logger.error(f"[GhostGateway] Self-heal failed: {e}")
-                return False
+        logger.warning(
+            "[GhostGateway] Browser-cookie self-heal is quarantined; "
+            "preserving the blocked response."
+        )
+        return False
 
     def _translate_response(
         self, 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 
 from core.cortex.models import (
@@ -44,7 +44,11 @@ def get_insight_engine() -> InsightEngine:
 # Analysis Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/analysis/topology", response_model=TopologyResponse)
+@router.post(
+    "/analysis/topology",
+    response_model=TopologyResponse,
+    dependencies=[Depends(verify_token)],
+)
 async def analyze_topology(
     request: TopologyRequest,
     analyzer: GraphAnalyzer = Depends(get_graph_analyzer),
@@ -58,7 +62,11 @@ async def analyze_topology(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/analysis/insights", response_model=InsightResponse)
+@router.post(
+    "/analysis/insights",
+    response_model=InsightResponse,
+    dependencies=[Depends(verify_token)],
+)
 async def generate_insights(
     request: InsightRequest,
     engine: InsightEngine = Depends(get_insight_engine),
@@ -133,12 +141,10 @@ class ReportGenerateRequest(BaseModel):
     format: str = Field("markdown", description="markdown|json")
     include_attack_paths: bool = Field(True)
     max_paths: int = Field(5, ge=1, le=50)
-    # Scope the report to a specific scan session. If omitted, the most
-    # recent session is used. Without this, the report read the GLOBAL
-    # cross-session finding store (every finding from every scan ever) —
-    # producing findings/evidence that didn't belong to the scan the
-    # operator was looking at (Calibration Run #21).
-    session_id: Optional[str] = Field(None)
+    # Reports are always bound to one explicit session. Falling back to the
+    # latest session makes a caller-selected target ambiguous and can expose
+    # findings/evidence from a different scan.
+    session_id: str = Field(..., min_length=1)
 
 
 class ReportGenerateResponse(BaseModel):
@@ -172,23 +178,36 @@ class _ListStore:
         return list(self._items)
 
 
-async def _resolve_session_id(db, requested: Optional[str]) -> Optional[str]:
-    """Explicit session_id wins; otherwise fall back to the most-recent
-    session so the report describes the scan the operator just ran."""
-    if requested:
-        return requested
-    try:
-        rows = await db.fetch_all(
-            "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1"
+def _require_session_target(
+    *,
+    session_data: Optional[dict],
+    requested_target: Optional[str],
+) -> str:
+    """Return the authoritative target for an existing, matching session."""
+    if not session_data:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session_target = str(session_data.get("target") or "").strip()
+    if not session_target:
+        raise HTTPException(
+            status_code=409,
+            detail="Session has no authoritative target",
         )
-        if rows:
-            return rows[0][0]
-    except Exception as e:  # noqa: BLE001
-        logger.warning("[reporting] could not resolve latest session: %s", e)
-    return None
+
+    if requested_target is not None and requested_target.strip() != session_target:
+        raise HTTPException(
+            status_code=403,
+            detail="Target is not authorized for the requested session",
+        )
+
+    return session_target
 
 
-@router.post("/reporting/generate", response_model=ReportGenerateResponse)
+@router.post(
+    "/reporting/generate",
+    response_model=ReportGenerateResponse,
+    dependencies=[Depends(verify_token)],
+)
 async def generate_report(
     req: ReportGenerateRequest,
     graph_analyzer: GraphAnalyzer = Depends(get_graph_analyzer),
@@ -196,32 +215,21 @@ async def generate_report(
     from core.data.db import Database
 
     db = Database.instance()
-    session_id = await _resolve_session_id(db, req.session_id)
+    session_data = await db.get_session(req.session_id)
+    target = _require_session_target(
+        session_data=session_data,
+        requested_target=req.target,
+    )
 
-    if session_id:
-        # Session-scoped: pull THIS scan's findings + evidence from the DB,
-        # not the global cross-session singletons. This is what makes the
-        # report agree with the Target Scan tab and the Bounty report.
-        findings = await db.get_findings(session_id)
-        evidence = await db.get_evidence(session_id)
-        composer = ReportComposer(
-            finding_store=_ListStore(findings),
-            evidence_ledger=_ListStore(evidence),
-            graph_analyzer=graph_analyzer,
-        )
-        # Prefer the session's real target if the caller didn't pin one.
-        session_data = await db.get_session(session_id)
-        target = req.target or (session_data or {}).get("target") or "target"
-    else:
-        # No sessions at all — fall back to the global stores (legacy path).
-        from core.data.findings_store import get_finding_store
-        from core.data.evidence_store import EvidenceStore
-        composer = ReportComposer(
-            finding_store=get_finding_store(),
-            evidence_ledger=EvidenceStore.instance(),
-            graph_analyzer=graph_analyzer,
-        )
-        target = req.target
+    # Pull only this session's findings/evidence. There is intentionally no
+    # latest-session or global-store fallback on this sensitive read path.
+    findings = await db.get_findings(req.session_id)
+    evidence = await db.get_evidence(req.session_id)
+    composer = ReportComposer(
+        finding_store=_ListStore(findings),
+        evidence_ledger=_ListStore(evidence),
+        graph_analyzer=graph_analyzer,
+    )
 
     artifact = composer.generate(
         target=target,
@@ -241,25 +249,34 @@ async def generate_report(
     )
 
 
-@router.get("/reporting/poc/{finding_id}", response_model=PoCResponse)
+@router.get(
+    "/reporting/poc/{finding_id}",
+    response_model=PoCResponse,
+    dependencies=[Depends(verify_token)],
+)
 async def get_poc(
     finding_id: str,
+    session_id: str = Query(..., min_length=1),
     target: Optional[str] = None,
     poc: PoCGenerator = Depends(get_poc_generator),
-    finding_store=Depends(get_finding_store),
 ) -> PoCResponse:
-    # 1. Try in-memory store (populated during active scans)
-    finding = finding_store.get(finding_id)
+    from core.data.db import Database
 
-    # 2. Fall back to DB — handles restarts and cross-session PoC generation
-    if not finding:
-        from core.data.db import Database
-        db = Database.instance()
-        all_findings = await db.get_findings()
-        for f in all_findings:
-            if str(f.get("id")) == str(finding_id):
-                finding = f
-                break
+    db = Database.instance()
+    session_data = await db.get_session(session_id)
+    session_target = _require_session_target(
+        session_data=session_data,
+        requested_target=target,
+    )
+
+    finding = next(
+        (
+            item
+            for item in await db.get_findings(session_id)
+            if str(item.get("id")) == str(finding_id)
+        ),
+        None,
+    )
 
     if not finding:
         raise HTTPException(status_code=404, detail="Finding not found")
@@ -267,7 +284,7 @@ async def get_poc(
     try:
         artifact = poc.generate_for_finding(
             finding=finding,
-            target_hint=target,
+            target_hint=session_target,
         )
     except PoCSafetyError as e:
         raise HTTPException(

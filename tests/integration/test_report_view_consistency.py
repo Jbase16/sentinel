@@ -24,6 +24,7 @@ import json
 from typing import Any, Dict, List
 
 import pytest
+from pydantic import ValidationError
 
 from core.reporting.report_composer import ReportComposer
 from core.reporting.bounty_report import build_reports
@@ -247,12 +248,12 @@ class TestEndpointSessionScoping:
         assert "sess-A" in fake.get_findings_calls
         assert f"**{len(seeded_findings())} finding(s)**" in resp.content
 
-    async def test_none_session_resolves_to_latest(self, monkeypatch):
-        # No session_id → must resolve to the most-recent session via fetch_all.
-        fake = _FakeDB({"old": [], "latest": seeded_findings()})
-        resp = await self._call(fake, monkeypatch, None)
-        assert "latest" in fake.get_findings_calls
-        assert f"**{len(seeded_findings())} finding(s)**" in resp.content
+    async def test_missing_session_id_is_rejected(self):
+        # Sensitive artifact reads must never guess which session owns them.
+        from core.server.routers import cortex
+
+        with pytest.raises(ValidationError):
+            cortex.ReportGenerateRequest(target=_TARGET, format="markdown")
 
     async def test_other_sessions_findings_do_not_leak(self, monkeypatch):
         # Requesting sess-A must NOT include sess-B's findings — the exact

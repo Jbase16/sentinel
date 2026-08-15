@@ -47,7 +47,7 @@ echo "🔧 Starting backend server on http://127.0.0.1:8765"
 echo "📝 Logs will be written to ~/.sentinelforge/sentinel.log"
 echo ""
 echo "API documentation: http://127.0.0.1:8765/docs"
-echo "Health check: curl http://127.0.0.1:8765/v1/ping"
+echo 'Health check: curl -H "Authorization: Bearer $(cat ~/.sentinelforge/api_token)" http://127.0.0.1:8765/v1/ping'
 echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""

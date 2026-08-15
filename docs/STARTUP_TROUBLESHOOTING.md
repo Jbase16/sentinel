@@ -89,7 +89,8 @@ uvicorn core.server.api:app --host 127.0.0.1 --port 8765 --reload
 Open a new terminal and run:
 
 ```bash
-curl http://127.0.0.1:8765/v1/ping
+SENTINEL_TOKEN="$(cat ~/.sentinelforge/api_token)"
+curl -H "Authorization: Bearer $SENTINEL_TOKEN" http://127.0.0.1:8765/v1/ping
 ```
 
 Expected response:
@@ -100,7 +101,7 @@ Expected response:
 Also check the status endpoint:
 
 ```bash
-curl http://127.0.0.1:8765/v1/status
+curl -H "Authorization: Bearer $SENTINEL_TOKEN" http://127.0.0.1:8765/v1/status
 ```
 
 Expected response should include:
@@ -299,7 +300,7 @@ SENTINEL_API_PORT=8766 python -m sentinelforge.cli.sentinel start
 ## Checklist Before Running Xcode
 
 - [ ] Backend server is running on `http://127.0.0.1:8765`
-- [ ] API health check passes: `curl http://127.0.0.1:8765/v1/ping`
+- [ ] Authenticated API health check passes using `~/.sentinelforge/api_token`
 - [ ] Status endpoint returns valid JSON with `scan_running` field
 - [ ] API token exists at `~/.sentinelforge/api_token`
 - [ ] Ollama is running (optional, for AI features): `ollama serve`

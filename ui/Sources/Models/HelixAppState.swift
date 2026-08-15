@@ -1171,13 +1171,22 @@ extension HelixAppState {
     // MARK: - Reporting & Proof of Concept (Phase 12)
 
     func generateReport(target: String, scope: String? = nil, format: String = "markdown") async {
+        guard let sessionID = currentChatSessionID() else {
+            await MainActor.run {
+                self.activeReportMeta = nil
+                self.activeReportMarkdown = "Report generation requires an active scan session."
+            }
+            return
+        }
+
         do {
             let decoded = try await apiClient.generateReport(
                 target: target,
                 scope: scope,
                 format: format,
                 includeAttackPaths: true,
-                maxPaths: 5
+                maxPaths: 5,
+                sessionId: sessionID
             )
             await MainActor.run {
                 self.activeReportMeta = decoded
@@ -1195,8 +1204,26 @@ extension HelixAppState {
     }
 
     func fetchPoC(findingId: String) async {
+        guard let sessionID = currentChatSessionID() else {
+            await MainActor.run {
+                self.activePoCByFindingId[findingId] = PoCResponse(
+                    finding_id: findingId,
+                    title: "PoC unavailable",
+                    risk: "unknown",
+                    safe: false,
+                    commands: [],
+                    notes: ["PoC generation requires an active scan session."],
+                    created_at: ""
+                )
+            }
+            return
+        }
+
         do {
-            let decoded = try await apiClient.fetchPoC(findingId: findingId)
+            let decoded = try await apiClient.fetchPoC(
+                findingId: findingId,
+                sessionId: sessionID
+            )
             await MainActor.run {
                 self.activePoCByFindingId[findingId] = decoded
             }

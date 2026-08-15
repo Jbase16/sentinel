@@ -7,7 +7,7 @@ instead of spawning a real server thread (which causes cleanup issues).
 import os
 import sys
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Ensure we can import core
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 def mock_config():
     """Create a mock config for testing."""
     conf = MagicMock()
-    conf.security.require_auth = False  # Disable auth for simpler tests
+    conf.security.require_auth = True
     conf.security.api_token = "test-token-12345"
     conf.security.allowed_origins = ("http://localhost:*", "http://127.0.0.1:*")
     conf.security.terminal_enabled = True
@@ -35,16 +35,20 @@ async def async_client(mock_config):
     """Create an async test client using ASGI transport."""
     import httpx
     
-    with patch("core.base.config.get_config", return_value=mock_config):
-        with patch("core.base.config.SecurityInterlock.verify_safe_boot"):
-            # Import after patching to get mocked config
-            from core.server.api import app
-            
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app),
-                base_url="http://test"
-            ) as client:
-                yield client
+    with (
+        patch("core.base.config.get_config", return_value=mock_config),
+        patch("core.server.routers.auth.get_config", return_value=mock_config),
+        patch("core.base.config.SecurityInterlock.verify_safe_boot"),
+    ):
+        # Import after patching to get mocked config.
+        from core.server.api import app
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
+            headers={"Authorization": "Bearer test-token-12345"},
+        ) as client:
+            yield client
 
 
 class TestCoreAPI:
@@ -131,23 +135,27 @@ class TestCoreAPI:
                    for detail in data["detail"])
 
     @pytest.mark.asyncio
-    async def test_08_scan_start_valid_http_url(self, async_client):
+    async def test_08_scan_start_valid_http_url(self, async_client, monkeypatch):
         """Test scan start accepts valid HTTP URL."""
+        start = AsyncMock(return_value="local-http-session")
+        monkeypatch.setattr("core.server.routers.scans.begin_scan_logic", start)
+
         response = await async_client.post(
             "/v1/scans/start",
             json={"target": "http://localhost:3002"}
         )
-        # Should return 202 Accepted (scan started) or 422 if auth fails
-        # We're just checking it doesn't fail URL validation
-        assert response.status_code in (202, 401, 403)
+        assert response.status_code == 202
+        start.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_09_scan_start_valid_https_url(self, async_client):
+    async def test_09_scan_start_valid_https_url(self, async_client, monkeypatch):
         """Test scan start accepts valid HTTPS URL."""
+        start = AsyncMock(return_value="local-https-session")
+        monkeypatch.setattr("core.server.routers.scans.begin_scan_logic", start)
+
         response = await async_client.post(
             "/v1/scans/start",
-            json={"target": "https://example.com"}
+            json={"target": "https://localhost:3002"}
         )
-        # Should return 202 Accepted (scan started) or 422 if auth fails
-        # We're just checking it doesn't fail URL validation
-        assert response.status_code in (202, 401, 403)
+        assert response.status_code == 202
+        start.assert_awaited_once()

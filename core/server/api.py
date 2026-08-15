@@ -21,13 +21,14 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, APIRouter, Request
+from fastapi import FastAPI, APIRouter, Request, Depends
 from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.base.config import get_config, setup_logging, SecurityInterlock, normalize_tool_path
 from core.server.state import get_state
+from core.server.routers.auth import verify_token
 from core.data.db import Database
 from core.errors import SentinelError
 
@@ -285,7 +286,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-@app.get("/health", include_in_schema=False)
+@app.get(
+    "/health",
+    include_in_schema=False,
+    dependencies=[Depends(verify_token)],
+)
 def health_alias():
     return {
         "status": "ok",
@@ -320,11 +325,11 @@ if config.security.allowed_origins:
 
 v1_router = APIRouter(prefix="/v1")
 
-@v1_router.get("/ping")
+@v1_router.get("/ping", dependencies=[Depends(verify_token)])
 async def ping():
     return {"status": "ok"}
 
-@v1_router.get("/status")
+@v1_router.get("/status", dependencies=[Depends(verify_token)])
 async def status():
     """
     Comprehensive status endpoint matching Swift EngineStatus structure.
@@ -382,7 +387,7 @@ async def status():
     
     return response
 
-@v1_router.get("/health")
+@v1_router.get("/health", dependencies=[Depends(verify_token)])
 async def health():
     """
     Readiness health endpoint.
@@ -395,7 +400,7 @@ async def health():
 
 
 # Import routers AFTER v1_router exists
-from core.server.routers import auth, scans, ai, system, realtime, cortex, ghost, forge, verify, foundry, driver
+from core.server.routers import scans, ai, system, realtime, cortex, ghost, forge, verify, foundry, driver
 
 v1_router.include_router(scans.router)
 v1_router.include_router(ai.router)

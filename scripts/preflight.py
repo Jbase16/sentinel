@@ -211,7 +211,29 @@ def check_modelfile_path() -> CheckResult:
 
 def check_backend(host: str, port: int) -> CheckResult:
     try:
-        with urllib.request.urlopen(f"http://{host}:{port}/v1/health", timeout=2.0) as resp:
+        token = TOKEN_PATH.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        return CheckResult(
+            "sentinel backend",
+            False,
+            f"API token unavailable ({exc})",
+            remediation="start backend and verify ~/.sentinelforge/api_token",
+        )
+
+    if not token:
+        return CheckResult(
+            "sentinel backend",
+            False,
+            "API token file is empty",
+            remediation="restart backend to regenerate the API token",
+        )
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/v1/health",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2.0) as resp:
             body = json.loads(resp.read())
             status = body.get("status", "unknown")
     except (urllib.error.URLError, socket.timeout, ConnectionRefusedError) as exc:

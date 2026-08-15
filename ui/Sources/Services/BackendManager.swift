@@ -205,6 +205,13 @@ class BackendManager: ObservableObject {
 
         var request = URLRequest(url: requestURL)
         request.timeoutInterval = timeoutInterval  // Allow more time for slow responses
+        let tokenPath = SentinelRuntimePaths.file("api_token")
+        if let token = try? String(contentsOf: tokenPath, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !token.isEmpty
+        {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
