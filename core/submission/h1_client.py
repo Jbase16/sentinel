@@ -211,6 +211,12 @@ class H1SubmissionClient:
         if transport is not None:
             client_kwargs["transport"] = transport
         self._client = httpx.Client(**client_kwargs)
+        from core.net.egress import SyncEgressBroker, same_origin_authorizer
+
+        self._egress = SyncEgressBroker(
+            self._client,
+            same_origin_authorizer(self._base_url),
+        )
 
     @classmethod
     def from_token_store(cls) -> "H1SubmissionClient":
@@ -312,7 +318,7 @@ class H1SubmissionClient:
 
         url = f"{self._base_url}/reports"
         try:
-            r = self._client.post(url, content=json.dumps(submission.payload))
+            r = self._egress.post(url, content=json.dumps(submission.payload))
         except Exception as e:
             submission.last_error = f"transport: {type(e).__name__}: {e}"
             submission.record_state_change(SubmissionState.FAILED, note=submission.last_error)
@@ -363,7 +369,7 @@ class H1SubmissionClient:
             return submission
         url = f"{self._base_url}/reports/{submission.h1_report_id}"
         try:
-            r = self._client.get(url)
+            r = self._egress.get(url)
         except Exception as e:
             submission.last_error = f"poll transport: {type(e).__name__}: {e}"
             save_submission_log(submission)

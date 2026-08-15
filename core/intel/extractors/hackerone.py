@@ -179,8 +179,13 @@ class HackerOneExtractor(Extractor):
 
         try:
             import httpx
+            from core.net.egress import EgressBroker, same_origin_authorizer
+
             async with http_factory() as client:
-                response = await client.get(
+                response = await EgressBroker(
+                    client,
+                    same_origin_authorizer(_H1_API_BASE),
+                ).get(
                     url,
                     auth=httpx.BasicAuth(*auth),
                     headers={

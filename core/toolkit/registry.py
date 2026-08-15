@@ -246,7 +246,7 @@ _tool_data = [
         name="httpx",
         label="httpx (Headed probing via curl)",
         cmd_template=[
-            "curl", "-s", "-I", "-L", "-m", "5",
+            "curl", "-s", "-I", "--max-redirs", "0", "-m", "5",
             "{target}"
         ],
         aggressive=False,

@@ -72,7 +72,7 @@ class ReplayRequest:
     body: Optional[str] = None
     headers: Dict[str, str] = field(default_factory=dict)
     max_response_chars: Optional[int] = None
-    redirect_mode: str = "follow"
+    redirect_mode: str = "manual"
 
     def __post_init__(self) -> None:
         if self.redirect_mode not in {"follow", "manual"}:
@@ -580,12 +580,22 @@ class SNDReplayTransport:
     replies `{status, headers, body}`.
     """
 
-    def __init__(self, *, timeout: float = 30.0):
+    def __init__(self, *, scope_filter, timeout: float = 30.0):
+        if not callable(scope_filter):
+            raise ValueError("native replay requires an explicit scope filter")
+        self.scope_filter = scope_filter
         self.timeout = timeout
 
     async def send(self, persona: str, req: ReplayRequest) -> ReplayResponse:
         import uuid
+        from core.net.egress import admit_egress
         from core.server.routers.driver import node_manager  # lazy: server-only dep
+
+        admit_egress(req.url, self.scope_filter)
+        if req.redirect_mode != "manual":
+            raise ValueError(
+                "native replay cannot follow redirects without per-hop admission"
+            )
 
         result = await node_manager.send_command({
             "request_id": uuid.uuid4().hex,
@@ -593,7 +603,7 @@ class SNDReplayTransport:
             "args": {"persona": persona, "method": req.method, "url": req.url,
                      "headers": req.headers, "body": req.body,
                      "max_response_chars": req.max_response_chars,
-                     "redirect_mode": req.redirect_mode},
+                     "redirect_mode": "manual"},
         }, timeout=self.timeout) or {}
         return ReplayResponse(
             status=int(result.get("status", 0) or 0),

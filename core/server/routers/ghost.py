@@ -65,6 +65,16 @@ class GhostStartResponse(BaseModel):
     cert_path: Optional[str] = None
 
 
+class GhostScopeRequest(BaseModel):
+    """Exact HTTP(S) origins admitted through the operator proxy."""
+
+    origins: List[str]
+
+
+class GhostScopeResponse(BaseModel):
+    allowed_origins: List[str]
+
+
 class GhostStopResponse(BaseModel):
     """Response when stopping Ghost Protocol."""
     status: str
@@ -128,12 +138,58 @@ def _get_or_create_ghost_session():
         # Imported lazily so this router can load even if the session
         # subsystem isn't fully initialized (test scaffolding etc.).
         from core.base.session import ScanSession
+        from core.base.context import ScopeContext
+        from core.base.execution_policy import ExecutionPolicy as TransportExecutionPolicy
+        from core.base.scope import ScopeRegistry
+
         _GHOST_SESSION = ScanSession(target="ghost://operator-driven")
         _GHOST_SESSION.knowledge = getattr(_GHOST_SESSION, "knowledge", None) or {}
+        _GHOST_SESSION.scope_context = ScopeContext(
+            registry=ScopeRegistry(bounty_mode=True),
+            policy=TransportExecutionPolicy(),
+            mode="BOUNTY",
+            strict_scope=True,
+            scan_id=_GHOST_SESSION.id,
+        )
         logger.info(
             f"[Ghost] created operator session id={_GHOST_SESSION.id}"
         )
     return _GHOST_SESSION
+
+
+@router.post("/scope", response_model=GhostScopeResponse)
+async def set_ghost_scope(
+    req: GhostScopeRequest,
+    _: bool = Depends(verify_sensitive_token),
+) -> GhostScopeResponse:
+    """Replace Ghost's scope with an explicit canonical-origin allowlist."""
+
+    from core.base.scope import (
+        AssetType,
+        ScopeDecision,
+        ScopeRegistry,
+        ScopeRule,
+        canonical_origin,
+    )
+
+    registry = ScopeRegistry(bounty_mode=True)
+    normalized: List[str] = []
+    for raw in req.origins:
+        origin = canonical_origin(raw)
+        if origin is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid HTTP(S) origin: {raw!r}",
+            )
+        rendered = origin.as_url()
+        registry.add_rule(
+            ScopeRule(AssetType.ORIGIN, rendered, ScopeDecision.ALLOW)
+        )
+        normalized.append(rendered)
+
+    session = _get_or_create_ghost_session()
+    session.scope_context.registry = registry
+    return GhostScopeResponse(allowed_origins=sorted(set(normalized)))
 
 
 # ───────────────────────────── endpoints ─────────────────────────────
@@ -558,12 +614,26 @@ async def diff_flow_endpoint(
     # Resolve Bob's identity. The persona_auth path is the canonical
     # approach (matches Phase 3); the explicit headers/cookies path is
     # for when the operator already has tokens (test scaffolding, CLI).
+    from core.base.scope import canonical_origin
+
+    captured_origins = {
+        origin
+        for step in flow.steps
+        if (origin := canonical_origin(step.url)) is not None
+    }
+
+    def flow_scope(candidate: str) -> bool:
+        return canonical_origin(candidate) in captured_origins
+
     bob_headers: Dict[str, str] = dict(req.bob_headers)
     bob_cookies: Dict[str, str] = dict(req.bob_cookies)
     if req.bob_persona_spec and req.bob_persona_spec.get("login_url"):
         from core.wraith.persona_auth import authenticate_persona
         try:
-            h, c = await authenticate_persona(req.bob_persona_spec)
+            h, c = await authenticate_persona(
+                req.bob_persona_spec,
+                scope_filter=flow_scope,
+            )
             bob_headers.update(h)
             bob_cookies.update(c)
         except Exception as e:
@@ -587,6 +657,7 @@ async def diff_flow_endpoint(
         bob_persona_name=req.bob_persona_name,
         bob_headers=bob_headers,
         bob_cookies=bob_cookies,
+        scope_filter=flow_scope,
         per_step_timeout=req.per_step_timeout,
     )
     return diff.to_dict()

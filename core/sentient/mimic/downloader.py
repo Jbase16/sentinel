@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -249,6 +249,7 @@ class AssetDownloader:
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
         rate_limit: int = DEFAULT_RATE_LIMIT,
         cache_dir: Optional[Path] = None,
+        scope_filter: Optional[Callable[[str], bool]] = None,
     ):
         """
         Initialize AssetDownloader.
@@ -263,6 +264,7 @@ class AssetDownloader:
         self._max_concurrent = max_concurrent
         self._rate_limit = rate_limit
         self._cache_dir = cache_dir
+        self._scope_filter = scope_filter
         self._download_count = 0
         self._robots_disallow: Set[str] = set()
         self._downloaded_assets: Dict[str, DownloadedAsset] = {}
@@ -334,8 +336,14 @@ class AssetDownloader:
         if self._rate_limit > 0:
             await asyncio.sleep(1.0 / float(self._rate_limit))
 
-        async with create_async_client() as client:
-            response = await client.get(url, timeout=timeout)
+        from core.net.egress import EgressBroker, same_origin_authorizer
+
+        authorize = self._scope_filter or same_origin_authorizer(url)
+        async with create_async_client(follow_redirects=False) as client:
+            response = await EgressBroker(client, authorize).get(
+                url,
+                timeout=timeout,
+            )
             response.raise_for_status()
             content_bytes = response.content
 
@@ -394,6 +402,10 @@ class AssetDownloader:
         parsed = urlparse(target)
         if parsed.scheme not in ("http", "https"):
             raise ValueError(f"Invalid target scheme: {parsed.scheme}")
+        if self._scope_filter is None:
+            from core.net.egress import same_origin_authorizer
+
+            self._scope_filter = same_origin_authorizer(target)
 
         # Check robots.txt in safe mode
         if self._safe_mode:
@@ -409,9 +421,12 @@ class AssetDownloader:
             target=parsed.netloc,
             base_url=target.rstrip("/"),
         )
-        async with create_async_client() as client:
+        from core.net.egress import EgressBroker
+
+        async with create_async_client(follow_redirects=False) as client:
+            broker = EgressBroker(client, self._scope_filter)
             try:
-                response = await client.get(target, timeout=8.0)
+                response = await broker.get(target, timeout=8.0)
                 if response.status_code == 200:
                     text = response.text
                     # JavaScript sources from script tags.
@@ -432,7 +447,7 @@ class AssetDownloader:
             for probe in ("/manifest.json", "/asset-manifest.json", "/vite-manifest.json", "/webpack-stats.json"):
                 probe_url = urljoin(manifest.base_url + "/", probe)
                 try:
-                    resp = await client.get(probe_url, timeout=4.0)
+                    resp = await broker.get(probe_url, timeout=4.0)
                     if resp.status_code == 200:
                         manifest.add_asset(probe_url)
                 except Exception:
@@ -600,8 +615,14 @@ class AssetDownloader:
         self._robots_loaded_for.add(base)
         robots_url = urljoin(base + "/", "robots.txt")
         try:
-            async with create_async_client() as client:
-                response = await client.get(robots_url, timeout=4.0)
+            from core.net.egress import EgressBroker, same_origin_authorizer
+
+            authorize = self._scope_filter or same_origin_authorizer(base)
+            async with create_async_client(follow_redirects=False) as client:
+                response = await EgressBroker(client, authorize).get(
+                    robots_url,
+                    timeout=4.0,
+                )
             if response.status_code != 200:
                 return
 

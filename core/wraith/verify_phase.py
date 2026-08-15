@@ -245,7 +245,10 @@ async def run_verify_phase(
                 continue
             name = str(p.get("name") or "anon")
             try:
-                p_headers, p_cookies = await authenticate_persona(p)
+                p_headers, p_cookies = await authenticate_persona(
+                    p,
+                    scope_filter=scope_filter,
+                )
             except Exception as e:
                 logger.warning(
                     f"[verify_phase] persona {name!r} auth failed: "
@@ -257,7 +260,7 @@ async def run_verify_phase(
         identity_contexts.append(("anonymous", headers or {}, cookies or {}))
 
     verifier = VulnVerifier(session)
-    engine = MutationEngine()
+    engine = MutationEngine(scope_filter=scope_filter)
     confirmed: List[Dict[str, Any]] = []
     # Endpoints where a vuln confirmed with NO credentials → emit a companion
     # missing-auth primitive once each (it's the chain entry point that lets
@@ -442,8 +445,10 @@ async def _run_multi_principal_idor(
         → high confidence (0.85).
       * Otherwise distinct bodies of similar status → mid confidence (0.60).
     """
-    import httpx
     from urllib.parse import urlparse
+    from core.base.scope import canonical_origin
+    from core.net.egress import EgressBroker
+    from core.net.http_factory import create_async_client
 
     findings: List[Dict[str, Any]] = []
     # Filter to IDOR-shaped candidates only. Cross-principal SQLi etc. is
@@ -463,9 +468,19 @@ async def _run_multi_principal_idor(
 
     # Single shared client (connection-reuse). HTTP/2 disabled to keep the
     # error surface small; we don't need its features here.
-    async with httpx.AsyncClient(
+    admitted_origins = {
+        origin
+        for url, _label, _vc in idor_candidates
+        if (origin := canonical_origin(url)) is not None
+    }
+    authorize = scope_filter or (
+        lambda candidate: canonical_origin(candidate) in admitted_origins
+    )
+
+    async with create_async_client(
         timeout=timeout, follow_redirects=False, http2=False,
     ) as client:
+        broker = EgressBroker(client, authorize)
         for url, label, _vc in idor_candidates:
             # Belt-and-suspenders scope check — even though the candidates
             # were already filtered by scope_filter upstream, re-check here
@@ -487,7 +502,7 @@ async def _run_multi_principal_idor(
                     )
                     if cookie_header:
                         headers["Cookie"] = cookie_header
-                    resp = await client.get(url, headers=headers)
+                    resp = await broker.get(url, headers=headers)
                     status = int(resp.status_code)
                     body = resp.text or ""
                 except Exception as e:

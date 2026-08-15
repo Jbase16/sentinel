@@ -365,12 +365,15 @@ async def _perform_registration(
 
     try:
         async with http_factory() as client:
+            from core.net.egress import EgressBroker, same_origin_authorizer
+
+            broker = EgressBroker(client, same_origin_authorizer(url))
             if flow.content_type == "application/json":
-                response = await client.request(
+                response = await broker.request(
                     flow.method, url, json=payload, headers=headers, timeout=timeout,
                 )
             else:
-                response = await client.request(
+                response = await broker.request(
                     flow.method, url, data=payload, headers=headers, timeout=timeout,
                 )
     except Exception as e:  # noqa: BLE001 - any failure is a soft fail

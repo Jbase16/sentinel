@@ -427,8 +427,8 @@ class NetworkConfig:
     connect_timeout: float = 5.0
     request_timeout: float = 15.0
 
-    # Follow redirects by default (most scanner workflows need this)
-    follow_redirects: bool = True
+    # Redirects are re-admitted one hop at a time by core.net.egress.
+    follow_redirects: bool = False
 
     @property
     def verify(self):
@@ -905,7 +905,7 @@ class SentinelConfig:
             ca_bundle=ca_bundle_path if ca_bundle_path else None,
             connect_timeout=float(os.getenv("SENTINEL_CONNECT_TIMEOUT", "5.0")),
             request_timeout=float(os.getenv("SENTINEL_REQUEST_TIMEOUT", "15.0")),
-            follow_redirects=os.getenv("SENTINEL_FOLLOW_REDIRECTS", "true").lower() == "true",
+            follow_redirects=os.getenv("SENTINEL_FOLLOW_REDIRECTS", "false").lower() == "true",
         )
 
         return cls(

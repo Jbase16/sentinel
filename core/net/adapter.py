@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import httpx
 import logging
-from typing import Any, Dict, Optional, Mapping
+from typing import Any, Optional
 
 from core.base.context import ScopeContext
-from core.base.scope import ScopeDecision
-from core.base.exceptions import ScopePolicyViolationError, ExecutionPolicyViolationError
+from core.base.exceptions import ExecutionPolicyViolationError
+from core.net.egress import EgressBroker, scope_context_authorizer
 from core.net.http_factory import create_async_client
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,7 @@ class SentinelHTTPClient:
     def __init__(self, context: ScopeContext, underlying_client: Optional[httpx.AsyncClient] = None):
         self.context = context
         self.client = underlying_client or create_async_client()
+        self.broker = EgressBroker(self.client, scope_context_authorizer(context))
         
     async def request(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         """
@@ -73,31 +74,8 @@ class SentinelHTTPClient:
                      f"Payload size {estimated_size} exceeds policy limit of {self.context.policy.allow_payload_size}."
                  )
 
-        # --- 4. The Absolute Scope Invariant Guard ---
-        decision = self.context.registry.resolve(url)
-        
-        # In BOUNTY mode or if strictly unknown -> deny by default.
-        is_bounty = self.context.mode.upper() == "BOUNTY"
-        if decision.verdict == ScopeDecision.DENY or (decision.verdict == ScopeDecision.UNKNOWN and is_bounty):
-            # Log exact reason
-            logger.warning(
-                f"[SCOPE GUARD] Blocked {method_upper} to {url}. "
-                f"Mode: {self.context.mode}, Verdict: {decision.verdict.value}, Reason: {decision.reason_code}"
-            )
-            
-            # Record decision in DecisionLedger (will be handled by caller catching this if they want to log the specific tool failed, 
-            # but we can optionally log here too. Generally, the proxy caller will catch ScopePolicyViolationError).
-            raise ScopePolicyViolationError(
-                f"Request to {url} blocked by ScopeRegistry. Verdict: {decision.verdict.value} ({decision.reason_code})",
-                decision=decision
-            )
-
-        # --- Emit to transport layer ---
-        try:
-            return await self.client.request(method, url, **kwargs)
-        except Exception as e:
-            # Let transport errors bubble up to caller (like Timeout, ConnectError)
-            raise e
+        # --- 4. Per-hop scope admission + transport dispatch ---
+        return await self.broker.request(method, url, **kwargs)
 
     async def get(self, url: str, **kwargs: Any) -> httpx.Response:
         return await self.request("GET", url, **kwargs)

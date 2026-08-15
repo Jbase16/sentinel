@@ -33,9 +33,9 @@ Design rules:
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
-import httpx
+import httpx  # noqa: F401 - public monkeypatch seam retained for offline tests
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ async def authenticate_persona(
     persona: Dict[str, Any],
     *,
     timeout: float = 10.0,
+    scope_filter: Optional[Callable[[str], bool]] = None,
 ) -> Tuple[Dict[str, str], Dict[str, str]]:
     """Log in with the persona, return (headers, cookies) for downstream probes.
 
@@ -146,11 +147,18 @@ async def authenticate_persona(
         request_kwargs["json"] = body
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            if method == "POST":
-                resp = await client.post(login_url, **request_kwargs)
-            else:
-                resp = await client.request(method, login_url, **request_kwargs)
+        from core.net.egress import EgressBroker, same_origin_authorizer
+        from core.net.http_factory import create_async_client
+
+        authorize = scope_filter or same_origin_authorizer(login_url)
+        async with create_async_client(follow_redirects=False) as client:
+            broker = EgressBroker(client, authorize)
+            resp = await broker.request(
+                method,
+                login_url,
+                follow_redirects=True,
+                **request_kwargs,
+            )
     except Exception as e:
         logger.warning(
             f"[persona_auth] login transport failure for {name!r}: "

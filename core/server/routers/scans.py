@@ -173,8 +173,8 @@ class ScanRequest(BaseModel):
     #   "!staging.example.com"   — explicit exclusion (prefix with !)
     #   "10.0.0.0/24"            — CIDR block
     #   "/regex/"                — regex pattern (surrounded by slashes)
-    # If omitted, all targets are allowed (permissive mode).
-    # Set strict=true to reject targets that don't match any inclusion rule.
+    # If omitted, non-bounty scans are bound to the sealed primary origin.
+    # Bug-bounty scans require an explicit program scope.
     scope: Optional[List[str]] = None
     scope_strict: bool = False
     
@@ -673,7 +673,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         # ─── Scope enforcement ────────────────────────────────────────────
         from core.base.scope import ScopeRegistry, ScopeRule, AssetType, ScopeDecision
         from core.base.context import ScopeContext
-        from core.base.execution_policy import ExecutionPolicy
+        from core.base.execution_policy import ExecutionPolicy as TransportExecutionPolicy
         from core.cortex.capability_tiers import ExecutionMode
         
         registry = ScopeRegistry()
@@ -743,6 +743,39 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 ) from exc
             parse_to_registry(dto, registry)
 
+        # A scan without a separate program scope is still bound to the sealed
+        # primary target. Explicit URLs authorize one canonical origin; a bare
+        # host authorizes that host because the operator did not select a
+        # scheme/port. Unknown destinations are never implicitly admitted.
+        if (
+            str(req.mode).strip().lower() not in {"bug_bounty", "bounty"}
+            and not req.scope
+            and not req.bounty_json
+            and not req.bounty_handle
+        ):
+            from core.base.scope import canonical_origin
+
+            if "://" in req.target:
+                target_origin = canonical_origin(req.target)
+                if target_origin is not None:
+                    registry.add_rule(
+                        ScopeRule(
+                            AssetType.ORIGIN,
+                            target_origin.as_url(),
+                            ScopeDecision.ALLOW,
+                        )
+                    )
+            else:
+                target_host = registry.normalize(req.target).host
+                if target_host:
+                    registry.add_rule(
+                        ScopeRule(
+                            AssetType.DOMAIN,
+                            target_host,
+                            ScopeDecision.ALLOW,
+                        )
+                    )
+
         # 3. Create Context
         # Map the validated scan-mode vocabulary (standard/bug_bounty/stealth/
         # passive) onto the two execution tiers (research/bounty). bug_bounty is
@@ -771,7 +804,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         # is the parsed body of a ``<program>-restrictions.json`` produced by
         # ``sentinel-ingest``; the policy_enforcer translates it into the
         # PolicyEnforcement struct, then we copy fields onto ExecutionPolicy.
-        execution_policy = ExecutionPolicy()
+        execution_policy = TransportExecutionPolicy.for_scan_mode(req.mode)
         enforcement = None
         scope_strict_effective = req.scope_strict
         if req.restrictions:
@@ -860,6 +893,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             registry=registry,
             policy=execution_policy,
             mode=emode.value,
+            strict_scope=scope_strict_effective,
             identity_headers=identity_headers,
             scan_id=session.id,
         )
@@ -1147,7 +1181,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # Confirmed verifications are added to the session as HIGH-
                 # severity findings — they appear in the Findings tab, the AI
                 # briefing, and reports, with zero extra plumbing.
-                # Scope-strict mode hard-gates probes through the same scope
+                # Every probe is hard-gated through the same sealed scope
                 # registry the scan uses for tools (single source of truth).
                 if _should_run_active_verification(req.mode, passive_only=passive_only):
                     try:
@@ -1166,17 +1200,16 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 _h = _meta.get("host")
                                 if isinstance(_h, str) and _h:
                                     target_set.add(_h)
-                        # Scope filter: in scope_strict, only probe URLs the
-                        # session's scope registry resolves as in-scope.
+                        # Active verification is always bound to the sealed
+                        # session registry.  ``scope_strict`` also changes
+                        # admission-time UNKNOWN handling, but it must not be
+                        # the switch that decides whether target traffic is
+                        # scope-checked at all.
                         scope_filter = None
                         _sc = getattr(session, "scope_context", None)
-                        if req.scope_strict and _sc is not None and getattr(_sc, "registry", None) is not None:
-                            def scope_filter(_url: str, _reg=_sc.registry) -> bool:
-                                try:
-                                    decision = _reg.resolve(_url)
-                                    return bool(getattr(decision, "in_scope", False))
-                                except Exception:
-                                    return False
+                        if _sc is not None and getattr(_sc, "registry", None) is not None:
+                            from core.net.egress import scope_context_authorizer
+                            scope_filter = scope_context_authorizer(_sc)
                         # Pass personas through so the verify phase can run
                         # authenticated identity contexts (enables IDOR /
                         # authenticated-SQLi confirmation). Personas were
@@ -1242,12 +1275,15 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 if req.personas:
                                     try:
                                         from core.wraith.persona_auth import authenticate_persona
-                                        _id_headers, _id_cookies = await authenticate_persona(req.personas[0])
+                                        _id_headers, _id_cookies = await authenticate_persona(
+                                            req.personas[0],
+                                            scope_filter=scope_filter,
+                                        )
                                     except Exception:
                                         _id_headers, _id_cookies = {}, {}
                                 _authed = bool(_id_headers or _id_cookies)
                                 _cv_verifier = VulnVerifier(session)
-                                _cv_engine = MutationEngine()
+                                _cv_engine = MutationEngine(scope_filter=scope_filter)
                                 _cv_probes = {"n": 0}
                                 _CV_CAP = 30  # hard cap on chain + escalation probes
 
@@ -1490,8 +1526,9 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         # objects we own, confirm invariant violations, clean up.
                         # Best-effort; never kills the scan.
                         try:
-                            import httpx as _bl_httpx
                             import os as _bl_os
+                            from core.net.adapter import SentinelHTTPClient as _ScopedHTTPClient
+                            from core.net.http_factory import create_async_client as _create_http_client
                             from core.wraith.logic_probe import (
                                 acquire_low_priv_session, probe_business_logic,
                                 probe_registration_mass_assignment,
@@ -1505,13 +1542,16 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             # for this phase behind ONE shared policy + proof budget.
                             # In explicit owned-lab mode the executor is a transparent
                             # pass-through. Every other request mode is constrained.
-                            from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
+                            from core.cortex.execution_policy import (
+                                ExecutionPolicy as CortexExecutionPolicy,
+                                PolicyExecutor,
+                            )
                             from core.safety.ownership_registry import OwnershipRegistry
                             _bl_mode = _resolve_business_logic_proof_mode(
                                 req,
                                 environment_limit=_bl_os.getenv("SENTINEL_PROOF_MODE"),
                             )
-                            _bl_follow = _bl_mode == ProofMode.LAB   # else don't auto-follow off-scope
+                            _bl_follow = False
 
                             _bl_hdrs = {"User-Agent": "SentinelForge-Logic"}
                             _bl_bb = _bl_os.getenv("SENTINEL_GHOST_BB_VALUE", "").strip()
@@ -1524,26 +1564,58 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     f"researcher={_bl_os.getenv('SENTINEL_RESEARCHER_HANDLE') or 'n/a'}; "
                                     f"program={_bl_os.getenv('SENTINEL_PROGRAM') or 'n/a'})")
 
+                            async def _bl_http_request(
+                                method,
+                                url,
+                                *,
+                                body=None,
+                                headers=None,
+                                cookies=None,
+                            ):
+                                async with _create_http_client(
+                                    timeout=10.0,
+                                    follow_redirects=False,
+                                    cookies=cookies or None,
+                                ) as _underlying:
+                                    _client = _ScopedHTTPClient(
+                                        context=scope_context,
+                                        underlying_client=_underlying,
+                                    )
+                                    return await _client.request(
+                                        method,
+                                        url,
+                                        json=body,
+                                        headers=headers or {},
+                                        follow_redirects=_bl_follow,
+                                    )
+
                             async def _bl_send_raw(method, url, body=None, _auth=None):
                                 if scope_filter is not None and not scope_filter(url):
                                     return 599, {}
                                 _h = dict(_bl_hdrs)
                                 if _auth:
                                     _h["Authorization"] = f"Bearer {_auth}"
-                                async with _bl_httpx.AsyncClient(timeout=10.0, follow_redirects=_bl_follow) as _c:
-                                    _r = await _c.request(method, url, json=body, headers=_h)
-                                    try:
-                                        _j = _r.json()
-                                    except Exception:
-                                        _j = {}
-                                    return _r.status_code, _j
+                                _r = await _bl_http_request(
+                                    method,
+                                    url,
+                                    body=body,
+                                    headers=_h,
+                                )
+                                try:
+                                    _j = _r.json()
+                                except Exception:
+                                    _j = {}
+                                return _r.status_code, _j
 
                             # Proof-backed ownership: a CROSS_OBJECT_READ in bounty_safe is
                             # only allowed against an object a researcher persona provably
                             # CREATED this session (populated at the seam from OWNED_CREATE
                             # responses). Harmless in lab (the ownership guard is skipped there).
-                            _bl_policy = ExecutionPolicy(_bl_mode, scope_filter=scope_filter,
-                                                         ownership_registry=OwnershipRegistry())
+                            _bl_policy = CortexExecutionPolicy(
+                                _bl_mode,
+                                scope_filter=scope_filter,
+                                ownership_registry=OwnershipRegistry(),
+                            )
                             _bl_send = PolicyExecutor(_bl_send_raw, _bl_policy).send
 
                             # Blunt routing: only an explicit owned-lab request may
@@ -1663,23 +1735,28 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                     from core.wraith.persona_auth import authenticate_persona
                                     from core.cortex.escalation_amplification import discover_candidate_refs
                                     from core.cortex.kill_chain import compose_amplified_bola_chain
-                                    _amp_h, _amp_c = await authenticate_persona(req.personas[0])
+                                    _amp_h, _amp_c = await authenticate_persona(
+                                        req.personas[0],
+                                        scope_filter=scope_filter,
+                                    )
                                     if _amp_h or _amp_c:
                                         async def _amp_send_raw(method, url, body=None):
                                             if scope_filter is not None and not scope_filter(url):
                                                 return 599, {}
                                             _h = dict(_bl_hdrs)
                                             _h.update(_amp_h)
-                                            async with _bl_httpx.AsyncClient(
-                                                timeout=10.0, follow_redirects=_bl_follow,
-                                                cookies=_amp_c or None,
-                                            ) as _c:
-                                                _r = await _c.request(method, url, json=body, headers=_h)
-                                                try:
-                                                    _j = _r.json()
-                                                except Exception:
-                                                    _j = {}
-                                                return _r.status_code, _j
+                                            _r = await _bl_http_request(
+                                                method,
+                                                url,
+                                                body=body,
+                                                headers=_h,
+                                                cookies=_amp_c,
+                                            )
+                                            try:
+                                                _j = _r.json()
+                                            except Exception:
+                                                _j = {}
+                                            return _r.status_code, _j
 
                                         # Gate through the SAME shared policy/budget.
                                         _amp_send = PolicyExecutor(_amp_send_raw, _bl_policy).send
@@ -1736,21 +1813,27 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                     return 599, {}
                                                 _hh = dict(_bl_hdrs)
                                                 _hh.update(_ph)
-                                                async with _bl_httpx.AsyncClient(
-                                                    timeout=10.0, follow_redirects=_bl_follow,
-                                                    cookies=_pc or None,
-                                                ) as _cl:
-                                                    _r = await _cl.request(method, url, json=body, headers=_hh)
-                                                    try:
-                                                        _j = _r.json()
-                                                    except Exception:
-                                                        _j = {}
-                                                    return _r.status_code, _j
+                                                _r = await _bl_http_request(
+                                                    method,
+                                                    url,
+                                                    body=body,
+                                                    headers=_hh,
+                                                    cookies=_pc,
+                                                )
+                                                try:
+                                                    _j = _r.json()
+                                                except Exception:
+                                                    _j = {}
+                                                return _r.status_code, _j
                                             # Share the ONE policy/budget AND conduct trail.
                                             return PolicyExecutor(_raw, _bl_policy, provenance=_prov)
 
-                                        _pa_h, _pa_c = await authenticate_persona(req.personas[0])   # accessor A
-                                        _pb_h, _pb_c = await authenticate_persona(req.personas[1])   # owner B
+                                        _pa_h, _pa_c = await authenticate_persona(
+                                            req.personas[0], scope_filter=scope_filter,
+                                        )  # accessor A
+                                        _pb_h, _pb_c = await authenticate_persona(
+                                            req.personas[1], scope_filter=scope_filter,
+                                        )  # owner B
                                         _exA = _mk_persona_executor(_pa_h, _pa_c)
                                         _exB = _mk_persona_executor(_pb_h, _pb_c)
 
@@ -1759,7 +1842,9 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                         # walk-away/teardown can't cancel it mid-read and
                                         # lose the finding.
                                         async def _relogin_A():
-                                            _h2, _c2 = await authenticate_persona(req.personas[0])
+                                            _h2, _c2 = await authenticate_persona(
+                                                req.personas[0], scope_filter=scope_filter,
+                                            )
                                             return (_mk_persona_executor(_h2, _c2).send
                                                     if (_h2 or _c2) else None)
 
@@ -1921,7 +2006,13 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         db = Database.instance()
                         _issues_before = session.issues.get_all()
                         if _issues_before:
-                            _rep = await _verify_gate(_issues_before, drop_refuted=True)
+                            from core.net.egress import scope_context_authorizer
+
+                            _rep = await _verify_gate(
+                                _issues_before,
+                                drop_refuted=True,
+                                scope_filter=scope_context_authorizer(scope_context),
+                            )
                             _keep = _rep["keep_ids"]
                             # Suppress every original row whose id didn't survive
                             # (refuted findings + dedup-collapsed duplicates).

@@ -1078,10 +1078,12 @@ class TestBehavioralAuthorizationEndpoint:
             "manual",
             "manual",
         ]
+        # Browser Fetch cannot expose every intermediate redirect for scope
+        # admission, so the bridge must keep every proof request manual.
         assert [item[1].redirect_mode for item in sent[3:]] == [
-            "follow",
-            "follow",
-            "follow",
+            "manual",
+            "manual",
+            "manual",
         ]
 
     def test_foundry_executes_reports_and_deduplicates_exact_omission_proof(

@@ -1093,7 +1093,7 @@ async def run_behavioral_authorization_endpoint(
             "executable": False,
         }
     if config.enabled:
-        transport = SNDReplayTransport()
+        transport = SNDReplayTransport(scope_filter=scope_filter)
         policy = ExecutionPolicy(
             "bounty_safe",
             scope_filter=scope_filter,
@@ -1124,7 +1124,7 @@ async def run_behavioral_authorization_endpoint(
             async def raw_send(method, url, body=None, **kwargs):
                 headers = kwargs.get("headers") or {}
                 response_cap = kwargs.get("_max_response_chars")
-                redirect_mode = kwargs.get("_redirect_mode", "follow")
+                redirect_mode = kwargs.get("_redirect_mode", "manual")
                 if (
                     isinstance(response_cap, bool)
                     or not isinstance(response_cap, int)
@@ -3683,7 +3683,7 @@ async def run_owned_read_proof_endpoint(
             persona_id=persona.persona_id,
             snapshot=capture_persona_interaction_snapshot,
             resolve_navigation=resolve_interaction_navigation,
-            transport=SNDReplayTransport(),
+            transport=SNDReplayTransport(scope_filter=envelope.authorizes_origin),
             store_artifact=ContentAddressableStorage().store,
             receipt_store=BehavioralReceiptStore(),
             acquisition_config=InteractionAcquisitionConfig.from_environment(),
@@ -3740,7 +3740,7 @@ async def run_owned_state_transition_proof_endpoint(
             contract=contract,
             envelope=envelope,
             persona_id=persona.persona_id,
-            transport=SNDReplayTransport(),
+            transport=SNDReplayTransport(scope_filter=envelope.authorizes_origin),
             store_artifact=ContentAddressableStorage().store,
             receipt_store=BehavioralReceiptStore(),
         )

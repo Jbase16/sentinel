@@ -433,6 +433,23 @@ class ZombieHunter:
         # Build full URL
         full_url = urljoin(base_url, endpoint.path)
 
+        # ``urljoin`` accepts absolute endpoint paths. Re-admit the resolved
+        # URL before creating/using a transport so a mined archive record
+        # cannot turn this probe into cross-origin SSRF.
+        from core.net.egress import admit_egress, same_origin_authorizer
+
+        try:
+            admit_egress(full_url, same_origin_authorizer(base_url))
+        except Exception as exc:
+            return ZombieProbe(
+                endpoint=endpoint,
+                status=ActiveStatus.ERROR,
+                status_code=None,
+                response_time_ms=None,
+                confidence=0.0,
+                error_message=str(exc),
+            )
+
         logger.debug(f"[ZombieHunter] Probing: {method} {full_url}")
 
         # Wait for rate limiter

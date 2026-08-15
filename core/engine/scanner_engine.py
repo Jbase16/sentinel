@@ -1721,13 +1721,12 @@ class ScannerEngine:
         # strictly against the ScopeContext before execution.
         _scope_context = getattr(self.session, "scope_context", None) if self.session else None
         if _scope_context is not None:
-            from core.base.scope import ScopeDecision
-            decision = _scope_context.registry.resolve(target)
-            is_bounty = _scope_context.mode.upper() == "BOUNTY"
-            
-            # In BOUNTY mode, unresolvable or poorly formed targets are strictly denied (Conservative Fallback).
-            if decision.verdict == ScopeDecision.DENY or (decision.verdict == ScopeDecision.UNKNOWN and is_bounty):
-                msg = f"[{exec_id}] SCOPE BLOCK — {tool} on {target!r}: Verdict={decision.verdict.value} Reason={decision.reason_code}"
+            from core.net.egress import admit_egress, scope_context_authorizer
+
+            try:
+                admit_egress(target, scope_context_authorizer(_scope_context))
+            except Exception as exc:
+                msg = f"[{exec_id}] SCOPE BLOCK — {tool} on {target!r}: {exc}"
                 logger.warning("[ScopeEnforcer] %s", msg)
                 await queue.put(msg)
                 return []

@@ -116,18 +116,18 @@ class GhostAddon:
         # SCOPE ENFORCEMENT GUARD (security — runs before anything else)
         # ═══════════════════════════════════════════════════════════════
         scope_context = getattr(self.session, "scope_context", None)
-        if scope_context:
-            try:
-                from core.base.scope import ScopeDecision
-                decision = scope_context.registry.resolve(url)
-                is_bounty = scope_context.mode.upper() == "BOUNTY"
-                if decision.verdict == ScopeDecision.DENY or (decision.verdict == ScopeDecision.UNKNOWN and is_bounty):
-                    logger.warning(f"[Ghost] SCOPE BLOCK - {method} {url} (Reason: {decision.reason_code})")
-                    from mitmproxy.http import Response
-                    flow.response = Response.make(403, b"Blocked by SentinelForge ScopeGuard")
-                    return
-            except Exception as e:
-                logger.error(f"[Ghost] scope check error: {e}")
+        try:
+            from core.net.egress import scope_context_authorizer
+
+            admitted = scope_context is not None and scope_context_authorizer(scope_context)(url)
+        except Exception as e:
+            admitted = False
+            logger.error(f"[Ghost] scope check error: {e}")
+        if not admitted:
+            logger.warning(f"[Ghost] SCOPE BLOCK - {method} {url}")
+            from mitmproxy.http import Response
+            flow.response = Response.make(403, b"Blocked by SentinelForge ScopeGuard")
+            return
 
         # ═══════════════════════════════════════════════════════════════
         # CAPTURE FIRST — record the step BEFORE any analysis.
@@ -469,4 +469,3 @@ class GhostInterceptor:
         self._task = None
         self.master = None
         logger.info("[*] Ghost Protocol Deactivated (port released).")
-

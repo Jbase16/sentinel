@@ -153,6 +153,26 @@ class OOBProvider(abc.ABC):
         """
         return "".join(random.choices(string.ascii_lowercase + string.digits, k=16))
 
+    @staticmethod
+    def _sync_get(client: Any, url: str, **kwargs: Any):
+        from core.net.egress import SyncEgressBroker, same_origin_authorizer
+
+        return SyncEgressBroker(client, same_origin_authorizer(url)).get(
+            url,
+            follow_redirects=True,
+            **kwargs,
+        )
+
+    @staticmethod
+    async def _async_get(client: Any, url: str, **kwargs: Any):
+        from core.net.egress import EgressBroker, same_origin_authorizer
+
+        return await EgressBroker(client, same_origin_authorizer(url)).get(
+            url,
+            follow_redirects=True,
+            **kwargs,
+        )
+
 
 class InteractshProvider(OOBProvider):
     """Provider for interact.sh-compatible callback services."""
@@ -181,7 +201,7 @@ class InteractshProvider(OOBProvider):
     def verify_connectivity(self) -> bool:
         """Verify connectivity to interact.sh service."""
         try:
-            response = self.session.get(
+            response = self._sync_get(self.session,
                 f"{self.api_url}/register",
                 timeout=self.timeout_s,
             )
@@ -209,7 +229,7 @@ class InteractshProvider(OOBProvider):
                     allow_external=True,
                 )
             else:
-                response = await client.get(
+                response = await self._async_get(client,
                     f"{self.api_url}/register",
                     **request_kwargs,
                 )
@@ -229,7 +249,7 @@ class InteractshProvider(OOBProvider):
             raise ValueError("base_domain is required for interact.sh provider")
 
         try:
-            response = self.session.get(
+            response = self._sync_get(self.session,
                 f"{self.api_url}/log",
                 params={"url": self.base_domain},
                 timeout=self.timeout_s,
@@ -268,7 +288,7 @@ class InteractshProvider(OOBProvider):
                     allow_external=True,
                 )
             else:
-                response = await client.get(
+                response = await self._async_get(client,
                     f"{self.api_url}/log",
                     **request_kwargs,
                 )
@@ -345,7 +365,7 @@ class BurpCollaboratorProvider(OOBProvider):
     def verify_connectivity(self) -> bool:
         """Verify connectivity to Burp Collaborator service."""
         try:
-            response = self.session.get(
+            response = self._sync_get(self.session,
                 f"{self.api_url}/interact",
                 params={"apikey": self.api_key},
                 timeout=self.timeout_s,
@@ -377,7 +397,7 @@ class BurpCollaboratorProvider(OOBProvider):
                     allow_external=True,
                 )
             else:
-                response = await client.get(
+                response = await self._async_get(client,
                     f"{self.api_url}/interact",
                     **request_kwargs,
                 )
@@ -397,7 +417,7 @@ class BurpCollaboratorProvider(OOBProvider):
             raise ValueError("base_domain is required for Burp Collaborator")
 
         try:
-            response = self.session.get(
+            response = self._sync_get(self.session,
                 f"{self.api_url}/interact",
                 params={
                     "apikey": self.api_key,
@@ -439,7 +459,7 @@ class BurpCollaboratorProvider(OOBProvider):
                     allow_external=True,
                 )
             else:
-                response = await client.get(
+                response = await self._async_get(client,
                     f"{self.api_url}/interact",
                     **request_kwargs,
                 )
@@ -506,7 +526,11 @@ class CustomWebhookProvider(OOBProvider):
     def verify_connectivity(self) -> bool:
         """Verify connectivity to webhook endpoint."""
         try:
-            response = self.session.get(self.webhook_url, timeout=self.timeout_s)
+            response = self._sync_get(
+                self.session,
+                self.webhook_url,
+                timeout=self.timeout_s,
+            )
             return response.status_code < 500
         except requests.RequestException as e:
             logger.warning(f"Webhook connectivity check failed: {e}")
@@ -536,7 +560,7 @@ class CustomWebhookProvider(OOBProvider):
                     allow_external=True,
                 )
             else:
-                response = await client.get(
+                response = await self._async_get(client,
                     self.webhook_url,
                     **request_kwargs,
                 )
@@ -566,7 +590,11 @@ class CustomWebhookProvider(OOBProvider):
             List of interaction records
         """
         try:
-            response = self.session.get(self.webhook_url, timeout=self.timeout_s)
+            response = self._sync_get(
+                self.session,
+                self.webhook_url,
+                timeout=self.timeout_s,
+            )
             response.raise_for_status()
             return self._parse_interactions_payload(response.json())
         except requests.RequestException as e:
@@ -601,7 +629,7 @@ class CustomWebhookProvider(OOBProvider):
                     allow_external=True,
                 )
             else:
-                response = await client.get(
+                response = await self._async_get(client,
                     self.webhook_url,
                     **request_kwargs,
                 )

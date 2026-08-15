@@ -102,6 +102,7 @@ class WraithAutomator:
         """
         import httpx
         from core.wraith.evasion import WraithEngine
+        from core.net.egress import EgressBroker, same_origin_authorizer
         from core.net.http_factory import create_async_client
 
         vuln_class = ftype.split("::")[-1] if "::" in ftype else "unknown"
@@ -117,11 +118,12 @@ class WraithAutomator:
         async with create_async_client(
             timeout=httpx.Timeout(10.0, connect=5.0),
         ) as client:
+            broker = EgressBroker(client, same_origin_authorizer(target_url))
             # --- Capture baseline response for differential analysis ---
             baseline_status = None
             baseline_length = 0
             try:
-                baseline = await client.get(target_url)
+                baseline = await broker.get(target_url)
                 baseline_status = baseline.status_code
                 baseline_length = len(baseline.text)
             except Exception:
@@ -132,7 +134,7 @@ class WraithAutomator:
                     continue
                 try:
                     result = await evasion.stealth_send(
-                        client, target_url, "GET", payload, vuln_class.lower(),
+                        broker, target_url, "GET", payload, vuln_class.lower(),
                     )
 
                     resp = result.get("response")

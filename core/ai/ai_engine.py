@@ -207,9 +207,17 @@ class OllamaClient:
         
         # Error handling block.
         try:
+            from core.net.egress import EgressBroker, same_origin_authorizer
+
             config = get_config()
-            async with httpx.AsyncClient(timeout=config.ai.request_timeout) as client:
-                resp = await client.post(url, json=payload)
+            async with httpx.AsyncClient(
+                timeout=config.ai.request_timeout,
+                follow_redirects=False,
+            ) as client:
+                resp = await EgressBroker(
+                    client,
+                    same_origin_authorizer(self.base_url),
+                ).post(url, json=payload)
                 if resp.status_code == 200:
                     result = resp.json()
                     response = result.get('response')
@@ -239,9 +247,20 @@ class OllamaClient:
         
         # Error handling block.
         try:
+            from core.net.egress import admit_egress, same_origin_authorizer
+
+            admit_egress(url, same_origin_authorizer(self.base_url))
             config = get_config()
-            async with httpx.AsyncClient(timeout=config.ai.request_timeout) as client:
-                async with client.stream("POST", url, json=payload) as response:
+            async with httpx.AsyncClient(
+                timeout=config.ai.request_timeout,
+                follow_redirects=False,
+            ) as client:
+                async with client.stream(
+                    "POST",
+                    url,
+                    json=payload,
+                    follow_redirects=False,
+                ) as response:
                     logger.info(f"Ollama Response Status: {response.status_code}")
                     if response.status_code != 200:
                         yield f"[Error: Ollama returned {response.status_code}]"
@@ -266,8 +285,14 @@ class OllamaClient:
         """Function check_connection."""
         # Error handling block.
         try:
-            with httpx.Client(timeout=2.0) as client:
-                resp = client.get(f"{self.base_url}/api/tags")
+            from core.net.egress import SyncEgressBroker, same_origin_authorizer
+
+            url = f"{self.base_url}/api/tags"
+            with httpx.Client(timeout=2.0, follow_redirects=False) as client:
+                resp = SyncEgressBroker(
+                    client,
+                    same_origin_authorizer(self.base_url),
+                ).get(url)
                 return resp.status_code == 200
         except Exception:
             return False
@@ -535,8 +560,14 @@ class AIEngine:
             return []
         # Error handling block.
         try:
-            with httpx.Client(timeout=1.0) as client:
-                resp = client.get(f"{self.client.base_url}/api/tags")
+            from core.net.egress import SyncEgressBroker, same_origin_authorizer
+
+            url = f"{self.client.base_url}/api/tags"
+            with httpx.Client(timeout=1.0, follow_redirects=False) as client:
+                resp = SyncEgressBroker(
+                    client,
+                    same_origin_authorizer(self.client.base_url),
+                ).get(url)
                 payload = resp.json()
             models = payload.get("models") or []
             names: List[str] = []

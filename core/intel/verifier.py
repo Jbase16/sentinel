@@ -173,13 +173,16 @@ async def _attempt_login(
     timeout = httpx.Timeout(LOGIN_TIMEOUT_SECONDS)
 
     async with http_factory() as client:
+        from core.net.egress import EgressBroker, same_origin_authorizer
+
+        broker = EgressBroker(client, same_origin_authorizer(url))
         if login_flow.content_type == "application/json":
-            response = await client.request(
+            response = await broker.request(
                 method, url, json=payload_body, headers=headers, timeout=timeout,
             )
         else:
             # application/x-www-form-urlencoded or anything else: form data.
-            response = await client.request(
+            response = await broker.request(
                 method, url, data=payload_body, headers=headers, timeout=timeout,
             )
 

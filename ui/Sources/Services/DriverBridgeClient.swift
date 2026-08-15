@@ -569,14 +569,24 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             sendError(reqId: reqId, error: "no authenticated window for persona '\(args["persona"] ?? "?")'")
             return
         }
+        guard let requestedURL = args["url"] as? String,
+              window.isAuthorizedRequestURL(requestedURL) else {
+            sendError(
+                reqId: reqId,
+                error: "replay URL is outside the window's authorized origins"
+            )
+            return
+        }
         
         let params: [String: Any] = [
-            "url":     args["url"]     as? String ?? "",
+            "url":     requestedURL,
             "method":  args["method"]  as? String ?? "POST",
             "headers": args["headers"] as? [String: String] ?? [:],
             "body":    args["body"]    as? String as Any,
             "maxResponseChars": args["max_response_chars"] as? Int as Any,
-            "redirectMode": args["redirect_mode"] as? String ?? "follow",
+            // Fetch cannot expose each redirect hop portably. Keep it manual;
+            // Python must re-admit a destination before issuing another call.
+            "redirectMode": "manual",
         ]
         
         let js = """
@@ -585,7 +595,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             method: p.method, headers: p.headers,
             body: (p.method === 'GET' || p.method === 'HEAD') ? undefined : p.body,
             credentials: 'include',
-            redirect: p.redirectMode === 'manual' ? 'manual' : 'follow'
+            redirect: 'manual'
         });
         const cap = Number.isInteger(p.maxResponseChars) && p.maxResponseChars > 0
             ? p.maxResponseChars : 2097152;

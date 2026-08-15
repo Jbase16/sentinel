@@ -226,7 +226,12 @@ class PersonaSession:
                     logger.error(f"Login flow blocked by policy for '{self.persona.name}': {e}")
                     return False
             else:
-                resp = await self.client.request(
+                from core.net.egress import EgressBroker, same_origin_authorizer
+
+                resp = await EgressBroker(
+                    self.client,
+                    same_origin_authorizer(self.persona.base_url or login_url),
+                ).request(
                     flow.method,
                     login_url,
                     json=body if flow.content_type == "application/json" else None,
@@ -338,7 +343,7 @@ class PersonaSession:
             "json": mutation_request.body if isinstance(mutation_request.body, dict) else None,
             "content": mutation_request.body if isinstance(mutation_request.body, str) else None,
             "timeout": mutation_request.timeout,
-            "follow_redirects": True,
+            "follow_redirects": False,
         }
 
         # Execute request via centralized policy runtime when configured.
@@ -353,7 +358,12 @@ class PersonaSession:
                     tier_hint=CapabilityTier.T2a_SAFE_VERIFY,
                 )
             else:
-                resp = await self.client.request(
+                from core.net.egress import EgressBroker, same_origin_authorizer
+
+                resp = await EgressBroker(
+                    self.client,
+                    same_origin_authorizer(self.persona.base_url or mutation_request.url),
+                ).request(
                     mutation_request.method.value,
                     mutation_request.url,
                     **request_kwargs,

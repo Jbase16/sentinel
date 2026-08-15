@@ -11,10 +11,14 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         init?(url: URL) {
             guard let rawScheme = url.scheme?.lowercased(),
                   ["http", "https"].contains(rawScheme),
-                  let rawHost = url.host?.lowercased(),
-                  !rawHost.isEmpty else { return nil }
+                  let rawHost = url.host?.lowercased() else { return nil }
+            var normalizedHost = rawHost
+            while normalizedHost.hasSuffix(".") {
+                normalizedHost.removeLast()
+            }
+            guard !normalizedHost.isEmpty else { return nil }
             scheme = rawScheme
-            host = rawHost
+            host = normalizedHost
             port = url.port ?? (rawScheme == "https" ? 443 : 80)
         }
     }
@@ -315,8 +319,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             return
         }
 
-        if !authorizedNavigationOrigins.isEmpty,
-           !isAuthorizedNavigation(requestedURL) {
+        if !isAuthorizedNavigation(requestedURL) {
             decisionHandler(.cancel)
             refusePendingNavigation(
                 "Authorization blocked an out-of-scope main-frame navigation"
@@ -352,8 +355,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
         return authorizedNavigationOrigins.contains { allowed in
             guard let components = URLComponents(string: allowed),
                   let scheme = components.scheme?.lowercased(),
-                  let host = components.host?.lowercased() else {
+                  let rawHost = components.host?.lowercased() else {
                 return false
+            }
+            var host = rawHost
+            while host.hasSuffix(".") {
+                host.removeLast()
             }
             let port = components.port ?? (scheme == "https" ? 443 : 80)
             guard requested.scheme == scheme, requested.port == port else {
@@ -387,6 +394,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             )
         }
         authorizedNavigationOrigins = origins
+    }
+
+    public func isAuthorizedRequestURL(_ rawURL: String) -> Bool {
+        guard !authorizedNavigationOrigins.isEmpty,
+              let url = URL(string: rawURL) else { return false }
+        return isAuthorizedNavigation(url)
     }
     
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -477,6 +490,16 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     public func navigate(url: String) async throws {
         guard let nsurl = URL(string: url) else {
             throw NSError(domain: "SND", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid URL"])
+        }
+        guard isAuthorizedRequestURL(url) else {
+            throw NSError(
+                domain: "SND",
+                code: 403,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Navigation requires an explicit matching origin authorization"
+                ]
+            )
         }
         if networkCaptureEnabled {
             guard let origin = CaptureOrigin(url: nsurl) else {

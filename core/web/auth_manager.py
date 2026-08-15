@@ -45,7 +45,22 @@ class AuthManager:
             if profile.password:
                 data["password"] = profile.password
 
-            resp = ctx.client.post(login_url, data=data)
+            from core.net.egress import SyncEgressBroker, same_origin_authorizer
+
+            if ctx.scope_enforcer is not None:
+                def authorize(candidate: str) -> bool:
+                    try:
+                        ctx.scope_enforcer.assert_in_scope(candidate)
+                    except Exception:
+                        return False
+                    return True
+            else:
+                authorize = same_origin_authorizer(login_url)
+
+            resp = SyncEgressBroker(ctx.client, authorize).post(
+                login_url,
+                data=data,
+            )
             if resp.status_code >= 400:
                 raise ValueError(f"Deterministic login failed for {profile.principal_id} at {login_url} (HTTP {resp.status_code})")
                 

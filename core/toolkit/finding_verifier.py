@@ -258,6 +258,7 @@ async def gate(
     *,
     drop_refuted: bool = True,
     timeout: float = 10.0,
+    scope_filter=None,
 ) -> Dict[str, Any]:
     """Run the full gate: dedup, then live re-test each candidate.
 
@@ -266,8 +267,10 @@ async def gate(
     (when drop_refuted); unverifiable ones are kept but labelled so they're
     never presented as confirmed fact.
     """
-    import httpx
     import os
+    from core.base.scope import canonical_origin
+    from core.net.egress import EgressBroker
+    from core.net.http_factory import create_async_client
 
     unique, deduped_count = dedup(findings)
     kept: List[Dict[str, Any]] = []
@@ -285,9 +288,23 @@ async def gate(
     if _bb:
         _hdrs[os.getenv("SENTINEL_GHOST_BB_HEADER", "X-Bug-Bounty").strip()] = _bb
 
-    async with httpx.AsyncClient(
-        verify=True, timeout=timeout, follow_redirects=True, headers=_hdrs,
-    ) as client:
+    finding_origins = {
+        origin
+        for finding in unique
+        if (url := _extract_url(finding))
+        if (origin := canonical_origin(url)) is not None
+    }
+    authorize = scope_filter or (
+        lambda candidate: canonical_origin(candidate) in finding_origins
+    )
+
+    async with create_async_client(
+        verify=True,
+        timeout=timeout,
+        follow_redirects=False,
+        headers=_hdrs,
+    ) as transport:
+        client = EgressBroker(transport, authorize)
         for f in unique:
             verdict, evidence = await verify_finding(f, client, timeout=timeout)
             counts[verdict] = counts.get(verdict, 0) + 1

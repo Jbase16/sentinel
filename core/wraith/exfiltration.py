@@ -175,13 +175,19 @@ async def exfiltrate_credentials(
 def default_fetch(timeout: float = 10.0):
     """Real httpx GET fetcher carrying the deconfliction header."""
     async def _fetch(url: str) -> Tuple[int, str]:
-        import httpx
         import os
+        from core.net.egress import EgressBroker, same_origin_authorizer
+        from core.net.http_factory import create_async_client
+
         headers = {"User-Agent": "SentinelForge-Exfil"}
         _bb = os.getenv("SENTINEL_GHOST_BB_VALUE", "").strip()
         if _bb:
             headers[os.getenv("SENTINEL_GHOST_BB_HEADER", "X-Bug-Bounty").strip()] = _bb
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
-            r = await c.get(url, headers=headers)
+        async with create_async_client(timeout=timeout, follow_redirects=False) as client:
+            r = await EgressBroker(client, same_origin_authorizer(url)).get(
+                url,
+                headers=headers,
+                follow_redirects=True,
+            )
             return r.status_code, r.text
     return _fetch

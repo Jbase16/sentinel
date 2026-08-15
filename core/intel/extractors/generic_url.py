@@ -180,7 +180,12 @@ class GenericUrlExtractor(Extractor):
 
         try:
             async with factory() as client:
-                response = await client.get(
+                from core.net.egress import EgressBroker, same_origin_authorizer
+
+                response = await EgressBroker(
+                    client,
+                    same_origin_authorizer(url),
+                ).get(
                     url,
                     headers={
                         # A vanilla browser-ish UA so we don't get

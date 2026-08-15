@@ -228,7 +228,7 @@ class TestPersonaAwareVerifyPhase:
 
         # Stub the authenticator to return obviously-authenticated creds
         # without touching the network.
-        async def fake_auth(persona):
+        async def fake_auth(persona, **_kwargs):
             return ({"Authorization": "Bearer FAKE"}, {})
         monkeypatch.setattr(
             "core.wraith.persona_auth.authenticate_persona", fake_auth
@@ -300,7 +300,7 @@ class TestPersonaAwareVerifyPhase:
         """Two personas × N candidates → each candidate probed twice."""
         from core.wraith.vuln_verifier import VulnVerifier
 
-        async def fake_auth(persona):
+        async def fake_auth(persona, **_kwargs):
             return ({"X-Identity": persona["name"]}, {})
         monkeypatch.setattr(
             "core.wraith.persona_auth.authenticate_persona", fake_auth
@@ -405,7 +405,7 @@ class TestMultiPrincipalIDOR:
             return await orig(*args, **kwargs)
         monkeypatch.setattr(vp_mod, "_run_multi_principal_idor", watcher)
 
-        async def fake_auth(p):
+        async def fake_auth(p, **_kwargs):
             return ({"Authorization": "Bearer X"}, {})
         monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
 
@@ -430,7 +430,7 @@ class TestMultiPrincipalIDOR:
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
         # alice + bob personas.
-        async def fake_auth(p):
+        async def fake_auth(p, **_kwargs):
             name = p["name"]
             return ({"Authorization": f"Bearer {name}"}, {})
         monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
@@ -499,7 +499,7 @@ class TestMultiPrincipalIDOR:
             return ([], 0)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        async def fake_auth(p):
+        async def fake_auth(p, **_kwargs):
             return ({"Authorization": f"Bearer {p['name']}"}, {})
         monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
 
@@ -548,7 +548,7 @@ class TestMultiPrincipalIDOR:
             return ([], 0)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        async def fake_auth(p):
+        async def fake_auth(p, **_kwargs):
             return ({"Authorization": f"Bearer {p['name']}"}, {})
         monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
 
@@ -608,7 +608,7 @@ class TestMultiPrincipalIDOR:
             return ([], 0)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        async def fake_auth(p):
+        async def fake_auth(p, **_kwargs):
             return ({"Authorization": f"Bearer {p['name']}"}, {})
         monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
 
@@ -660,7 +660,7 @@ class TestMultiPrincipalIDOR:
             return ([], 0)
         monkeypatch.setattr(VulnVerifier, "verify_finding", fake_verify)
 
-        async def fake_auth(p):
+        async def fake_auth(p, **_kwargs):
             return ({"Authorization": f"Bearer {p['name']}"}, {})
         monkeypatch.setattr("core.wraith.persona_auth.authenticate_persona", fake_auth)
 

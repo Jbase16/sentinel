@@ -84,7 +84,7 @@ class ReplayGenerator:
             pid = state.principal_id.value.replace('-', '_')
             clients.append(pid)
             script.append(f"    # Principal {state.principal_id.value}")
-            script.append(f"    client_{pid} = httpx.Client(verify={repr(self._tls_verify)}, follow_redirects=True)")
+            script.append(f"    client_{pid} = httpx.Client(verify={repr(self._tls_verify)}, follow_redirects=False)")
             if state.cookies:
                 script.append(f"    client_{pid}.cookies.update({repr(state.cookies)})")
             script.append("")

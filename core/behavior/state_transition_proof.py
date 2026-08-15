@@ -270,7 +270,7 @@ async def execute_owned_state_transition_proof(
                 body=body if isinstance(body, str) or body is None else str(body),
                 headers={str(key): str(value) for key, value in (kwargs.get("headers") or {}).items()},
                 max_response_chars=_MAX_RESPONSE_CHARS,
-                redirect_mode="follow",
+                redirect_mode="manual",
             ),
         )
         bounded = BoundedResponseText(response.body, body_truncated=response.body_truncated)

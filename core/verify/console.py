@@ -43,7 +43,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
+from core.base.scope import canonical_origin
 
 from core.ghost.flow import FlowStep
 
@@ -52,13 +52,8 @@ logger = logging.getLogger(__name__)
 
 def _origin_of(url: str) -> Optional[str]:
     """Return scheme://netloc of url, or None if unparseable / no host."""
-    try:
-        p = urlparse(url)
-    except Exception:
-        return None
-    if not p.scheme or not p.netloc:
-        return None
-    return f"{p.scheme}://{p.netloc}"
+    origin = canonical_origin(url)
+    return origin.as_url() if origin is not None else None
 
 
 @dataclass

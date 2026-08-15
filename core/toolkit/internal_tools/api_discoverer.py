@@ -147,13 +147,22 @@ class APIDiscovererTool(InternalTool):
 
                 try:
                     if method == "POST" and "graphql" in path:
-                        resp = await client.post(
-                            probe_url,
-                            content=_GRAPHQL_INTROSPECTION,
-                            headers={"Content-Type": "application/json"},
+                        resp = await policy_runtime.execute_http(
+                            client=client,
+                            method="POST",
+                            url=probe_url,
+                            request_kwargs={
+                                "content": _GRAPHQL_INTROSPECTION,
+                                "headers": {"Content-Type": "application/json"},
+                            },
                         )
                     else:
-                        resp = await client.get(probe_url)
+                        resp = await policy_runtime.execute_http(
+                            client=client,
+                            method="GET",
+                            url=probe_url,
+                            request_kwargs={},
+                        )
 
                     probed += 1
                     status = resp.status_code
@@ -233,7 +242,13 @@ class APIDiscovererTool(InternalTool):
             # Strategy 4: Parse OpenAPI/Swagger spec if found
             if spec_url:
                 await self.log(queue, f"Parsing OpenAPI spec from {spec_url}")
-                spec_findings = await self._parse_openapi_spec(client, spec_url, base_url, dedup)
+                spec_findings = await self._parse_openapi_spec(
+                    client,
+                    policy_runtime,
+                    spec_url,
+                    base_url,
+                    dedup,
+                )
                 all_findings.extend(spec_findings)
                 await self.log(queue, f"OpenAPI spec: {len(spec_findings)} endpoints extracted")
 
@@ -376,6 +391,7 @@ class APIDiscovererTool(InternalTool):
     async def _parse_openapi_spec(
         self,
         client: httpx.AsyncClient,
+        policy_runtime,
         spec_url: str,
         base_url: str,
         dedup: Set[str],
@@ -383,7 +399,12 @@ class APIDiscovererTool(InternalTool):
         """Fetch and parse an OpenAPI/Swagger spec, extracting all endpoints."""
         findings: List[Dict[str, Any]] = []
         try:
-            resp = await client.get(spec_url)
+            resp = await policy_runtime.execute_http(
+                client=client,
+                method="GET",
+                url=spec_url,
+                request_kwargs={},
+            )
             if resp.status_code != 200:
                 return findings
 

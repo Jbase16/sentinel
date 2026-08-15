@@ -60,6 +60,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from core.base.scope import canonical_origin
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,16 +86,6 @@ class AuthorizationContext(str, Enum):
     """Whether an action is operating under disclosed authorization."""
     APPROVED = "approved"        # valid, attested, in-scope envelope
     UNAPPROVED = "unapproved"    # no valid envelope
-
-
-def _origin_of(url_or_origin: str) -> Optional[str]:
-    s = (url_or_origin or "").strip()
-    if not s:
-        return None
-    parsed = urlparse(s if "://" in s else "https://" + s)
-    if not parsed.netloc:
-        return None
-    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 @dataclass
@@ -226,22 +218,37 @@ class AuthorizationEnvelope:
     # ── enforcement ──
 
     def authorizes_origin(self, url_or_origin: str) -> bool:
-        origin = _origin_of(url_or_origin)
+        origin = canonical_origin(url_or_origin)
         if origin is None:
             return False
         for allowed in self.authorized_origins:
-            a = _origin_of(allowed)
-            if a is None:
-                continue
-            if origin == a:
-                return True
+            normalized_allowed = str(allowed).strip()
+            if "://" not in normalized_allowed:
+                normalized_allowed = f"https://{normalized_allowed}"
             # Wildcard subdomain support: an authorized origin of
             # "https://*.staging.example" matches "https://x.staging.example".
-            if "*." in allowed:
-                suffix = allowed.split("*.", 1)[1]
-                host = origin.split("://", 1)[-1]
-                if host.endswith(suffix.split("://")[-1]):
+            parsed = urlparse(normalized_allowed)
+            allowed_host = (parsed.hostname or "").lower().rstrip(".")
+            if allowed_host.startswith("*."):
+                try:
+                    suffix = allowed_host[2:].encode("idna").decode("ascii")
+                except UnicodeError:
+                    continue
+                scheme = parsed.scheme.lower()
+                try:
+                    port = parsed.port or (443 if scheme == "https" else 80)
+                except ValueError:
+                    continue
+                if (
+                    scheme == origin.scheme
+                    and port == origin.port
+                    and origin.host != suffix
+                    and origin.host.endswith(f".{suffix}")
+                ):
                     return True
+                continue
+            if canonical_origin(normalized_allowed) == origin:
+                return True
         return False
 
     def permits_workflow(self, workflow: str) -> bool:

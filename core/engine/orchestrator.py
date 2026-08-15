@@ -125,8 +125,6 @@ class Orchestrator:
         """
         The God-Tier Logic. Decides WHICH engine to deploy.
         """
-        import httpx
-        
         total = len(opportunities)
         # Loop over items.
         for idx, op in enumerate(opportunities, 1):
@@ -144,9 +142,14 @@ class Orchestrator:
                 if tool == "wraith_evasion":
                     # Deploy Wraith for WAF bypass
                     logger.info(f"      [Wraith] Deploying Evasion against {sub_target}")
+                    from core.net.egress import EgressBroker, same_origin_authorizer
+
                     async with create_async_client(timeout=httpx.Timeout(30.0)) as client:
                         result = await WraithEngine.instance().stealth_send(
-                            client=client,
+                            client=EgressBroker(
+                                client,
+                                same_origin_authorizer(sub_target),
+                            ),
                             url=sub_target,
                             method="GET",
                             base_payload=payload or "<script>alert(1)</script>",

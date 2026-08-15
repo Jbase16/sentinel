@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TYPE_CH
 from urllib.parse import urlencode, urlparse, urljoin, parse_qsl
 
 import httpx
+from core.base.exceptions import ScopePolicyViolationError
 from core.net.http_factory import create_async_client
 from core.wraith.execution_policy import PolicyViolation
 
@@ -140,7 +141,7 @@ class MutationRequest:
             "cookies": dict(self.cookies),
             "params": dict(self.query_params) if self.query_params else None,
             "timeout": self.timeout,
-            "follow_redirects": True,
+            "follow_redirects": False,
         }
         
         if self.body is not None:
@@ -820,6 +821,7 @@ class MutationEngine:
         rate_limit_ms: int = 100,      # Minimum ms between requests to same host
         max_retries: int = 2,
         policy_runtime: Optional["ExecutionPolicyRuntime"] = None,
+        scope_filter: Optional[Callable[[str], bool]] = None,
     ):
         """Initialize MutationEngine.
         
@@ -834,6 +836,7 @@ class MutationEngine:
         self._rate_limit_ms = rate_limit_ms
         self._max_retries = max_retries
         self._policy_runtime = policy_runtime
+        self._scope_filter = scope_filter
         self._last_request_time: Dict[str, float] = {}  # host → timestamp
         self._baselines: Dict[str, MutationResponse] = {}  # url → baseline response
         self._waf_cache: Dict[str, Optional[str]] = {}  # host → detected WAF name
@@ -946,7 +949,17 @@ class MutationEngine:
 
         start = time.monotonic()
         try:
-            resp = await client.request(**kwargs)
+            from core.net.egress import EgressBroker, same_origin_authorizer
+
+            request_kwargs = dict(kwargs)
+            method = request_kwargs.pop("method")
+            url = request_kwargs.pop("url")
+            authorize = self._scope_filter or same_origin_authorizer(url)
+            resp = await EgressBroker(client, authorize).request(
+                method,
+                url,
+                **request_kwargs,
+            )
             elapsed_ms = (time.monotonic() - start) * 1000
             return MutationResponse.from_httpx(resp, elapsed_ms)
         except httpx.TimeoutException:
@@ -961,7 +974,7 @@ class MutationEngine:
                 evidence=[],
                 outcome=ActionOutcome.TIMEOUT,
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, ScopePolicyViolationError) as exc:
             elapsed_ms = (time.monotonic() - start) * 1000
             return MutationResponse(
                 status_code=0,

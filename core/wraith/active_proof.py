@@ -326,12 +326,25 @@ def _exact_scope(origin: str, scope_filter: Optional[ScopeFilter]) -> ScopeFilte
     return allowed
 
 
-async def _default_raw_send(method: str, url: str, body: Any = None) -> Tuple[int, Any]:
-    import httpx
+async def _default_raw_send(
+    method: str,
+    url: str,
+    body: Any = None,
+    *,
+    scope_filter: Optional[ScopeFilter] = None,
+) -> Tuple[int, Any]:
+    from core.net.egress import EgressBroker, same_origin_authorizer
+    from core.net.http_factory import create_async_client
 
     headers = {"User-Agent": "SentinelForge-OwnedLab-Proof"}
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
-        response = await client.request(method, url, json=body, headers=headers)
+    authorize = scope_filter or same_origin_authorizer(url)
+    async with create_async_client(timeout=10.0, follow_redirects=False) as client:
+        response = await EgressBroker(client, authorize).request(
+            method,
+            url,
+            json=body,
+            headers=headers,
+        )
     return response.status_code, {
         "headers": {key: value for key, value in response.headers.items()},
         "text": response.text,
@@ -366,7 +379,17 @@ def _executor(
         proof_mode=ProofMode.LAB,
         policy_digest=policy.digest(),
     )
-    transport = raw_send or _default_raw_send
+    exact_scope = _exact_scope(origin, scope_filter)
+    if raw_send is None:
+        async def transport(method: str, url: str, body: Any = None, **kwargs: Any):
+            return await _default_raw_send(
+                method,
+                url,
+                body,
+                scope_filter=exact_scope,
+            )
+    else:
+        transport = raw_send
 
     async def durable_transport(method: str, url: str, body: Any = None, **kwargs: Any):
         # A receipt failure is a stop condition. PolicyExecutor deliberately treats

@@ -11,13 +11,14 @@ import socket
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import List, Optional
 from urllib.parse import urlparse
 
 class AssetType(str, Enum):
     DOMAIN = "domain"
     WILDCARD = "wildcard"
     CIDR = "cidr"
+    ORIGIN = "origin"
     URL = "url"
     PATH = "path"
 
@@ -25,6 +26,42 @@ class ScopeDecision(str, Enum):
     ALLOW = "allow"
     DENY = "deny"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class CanonicalOrigin:
+    """Network identity used for scope and redirect decisions."""
+
+    scheme: str
+    host: str
+    port: int
+
+    def as_url(self) -> str:
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        default_port = 443 if self.scheme == "https" else 80
+        suffix = "" if self.port == default_port else f":{self.port}"
+        return f"{self.scheme}://{host}{suffix}"
+
+
+def canonical_origin(raw: str) -> Optional[CanonicalOrigin]:
+    """Return a canonical HTTP(S) origin, rejecting ambiguous inputs."""
+
+    try:
+        parsed = urlparse(str(raw).strip())
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"} or not parsed.hostname:
+            return None
+        host = parsed.hostname.rstrip(".")
+        try:
+            host = str(ipaddress.ip_address(host.strip("[]")))
+        except ValueError:
+            host = host.encode("idna").decode("ascii").lower()
+        port = parsed.port or (443 if scheme == "https" else 80)
+        if not (1 <= port <= 65535):
+            return None
+        return CanonicalOrigin(scheme=scheme, host=host, port=port)
+    except (TypeError, ValueError, UnicodeError):
+        return None
 
 @dataclass(frozen=True)
 class ScopeTarget:
@@ -51,7 +88,12 @@ class ScopeRule:
         # Precompute regex and network if not set
         if self.asset_type == AssetType.WILDCARD and not self.regex:
             # *.example.com matches a.example.com and sub.example.com, but NOT example.com.
-            escaped = re.escape(self.target.replace('*.', ''))
+            suffix = self.target.removeprefix("*.").rstrip(".")
+            try:
+                suffix = suffix.encode("idna").decode("ascii").lower()
+            except UnicodeError:
+                suffix = ""
+            escaped = re.escape(suffix)
             self.regex = re.compile(f"^.+\\.{escaped}$", re.IGNORECASE)
         elif self.asset_type == AssetType.CIDR and not self.network:
             try:
@@ -63,6 +105,7 @@ class ScopeRule:
     def specificity(self) -> int:
         levels = {
             AssetType.URL: 50,
+            AssetType.ORIGIN: 45,
             AssetType.PATH: 40,
             AssetType.DOMAIN: 30,
             AssetType.WILDCARD: 20,
@@ -125,9 +168,9 @@ class ScopeRegistry:
             # Unicode/punycode normalization
             if host:
                 try:
-                    host = host.encode('idna').decode('ascii').lower()
+                    host = host.rstrip(".").encode('idna').decode('ascii').lower()
                 except Exception:
-                    host = host.lower()
+                    host = host.rstrip(".").lower()
                 
             ip_str = None
             is_ipv6 = False
@@ -194,9 +237,9 @@ class ScopeRegistry:
         
         # Path rules apply only when scheme+host match is already in-scope by a host/IP rule
         if primary_match.asset_type == AssetType.PATH and primary_match.decision == ScopeDecision.ALLOW:
-            host_allowed = any(r.asset_type in (AssetType.DOMAIN, AssetType.WILDCARD, AssetType.CIDR, AssetType.URL) and r.decision == ScopeDecision.ALLOW for r in matches)
+            host_allowed = any(r.asset_type in (AssetType.DOMAIN, AssetType.WILDCARD, AssetType.CIDR, AssetType.ORIGIN, AssetType.URL) and r.decision == ScopeDecision.ALLOW for r in matches)
             if not host_allowed:
-                host_denied = next((r for r in matches if r.asset_type in (AssetType.DOMAIN, AssetType.WILDCARD, AssetType.CIDR) and r.decision == ScopeDecision.DENY), None)
+                host_denied = next((r for r in matches if r.asset_type in (AssetType.DOMAIN, AssetType.WILDCARD, AssetType.CIDR, AssetType.ORIGIN) and r.decision == ScopeDecision.DENY), None)
                 if host_denied:
                     return ScopeCheckDecision(
                         target.raw, target.host, target.ip, target.port, target.scheme, target.path,
@@ -223,7 +266,7 @@ class ScopeRegistry:
 
     def _rule_matches(self, rule: ScopeRule, target: ScopeTarget) -> bool:
         if rule.asset_type == AssetType.DOMAIN:
-            return rule.target == target.host
+            return self.normalize(rule.target).host == target.host
         elif rule.asset_type == AssetType.WILDCARD:
             if rule.regex:
                 return bool(rule.regex.match(target.host))
@@ -237,7 +280,19 @@ class ScopeRegistry:
             return False
         elif rule.asset_type == AssetType.URL:
             normalized_rule = self.normalize(rule.target)
-            return normalized_rule.host == target.host and normalized_rule.path == target.path
+            return (
+                normalized_rule.scheme == target.scheme
+                and normalized_rule.host == target.host
+                and normalized_rule.port == target.port
+                and normalized_rule.path == target.path
+            )
+        elif rule.asset_type == AssetType.ORIGIN:
+            normalized_rule = self.normalize(rule.target)
+            return (
+                normalized_rule.scheme == target.scheme
+                and normalized_rule.host == target.host
+                and normalized_rule.port == target.port
+            )
         elif rule.asset_type == AssetType.PATH:
             return target.path.startswith(rule.target)
         return False

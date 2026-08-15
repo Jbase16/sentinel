@@ -228,14 +228,20 @@ class _ScopeOnlyPolicy:
         # HttpCrawler is sync, so we use a sync httpx client here. The
         # caller of `discover_candidates()` runs the whole crawl inside
         # an executor thread so this doesn't block the asyncio loop.
-        import httpx
+        from core.net.egress import SyncEgressBroker, same_origin_authorizer
+        from core.net.http_factory import create_sync_client
 
         req_headers = {"User-Agent": self._ua}
         if headers:
             req_headers.update(headers)
         try:
-            with httpx.Client(timeout=self._timeout, follow_redirects=True) as client:
-                resp = client.get(url, headers=req_headers)
+            authorize = self._scope_filter or same_origin_authorizer(url)
+            with create_sync_client(timeout=self._timeout, follow_redirects=False) as client:
+                resp = SyncEgressBroker(client, authorize).get(
+                    url,
+                    headers=req_headers,
+                    follow_redirects=True,
+                )
         except Exception as e:
             # Return a synthetic (502, {}, b"") tuple — the crawler
             # tolerates non-200 bodies (just gets no links to parse).
@@ -291,7 +297,8 @@ def _mine_js_endpoints(
     never raises. Returns full URLs on the target origin; routes without a
     query get a synthetic `?q=test` (so classify_url emits a SQLi candidate)
     or an `/1` id segment for collection routes (→ IDOR candidate)."""
-    import httpx
+    from core.net.egress import SyncEgressBroker, same_origin_authorizer
+    from core.net.http_factory import create_sync_client
 
     parsed = urlparse(target if "://" in target else "http://" + target)
     if not parsed.netloc:
@@ -306,9 +313,16 @@ def _mine_js_endpoints(
             except Exception:
                 return ""
         try:
-            with httpx.Client(timeout=timeout, follow_redirects=True,
-                              headers={"User-Agent": "SentinelForge/discovery"}) as c:
-                r = c.get(url)
+            authorize = scope_filter or same_origin_authorizer(origin)
+            with create_sync_client(
+                timeout=timeout,
+                follow_redirects=False,
+                headers={"User-Agent": "SentinelForge/discovery"},
+            ) as client:
+                r = SyncEgressBroker(client, authorize).get(
+                    url,
+                    follow_redirects=True,
+                )
                 return r.text if r.status_code < 400 else ""
         except Exception:
             return ""

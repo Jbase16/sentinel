@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from core.base.scope import canonical_origin
 from core.cortex.capability_tiers import (
     CapabilityGate,
     CapabilityTier,
@@ -41,14 +42,13 @@ class PolicyViolation(RuntimeError):
 
 
 def _origin(url: str) -> str:
-    parsed = urlparse(url)
-    scheme = parsed.scheme
-    netloc = parsed.netloc
-    return f"{scheme}://{netloc}" if scheme and netloc else ""
+    origin = canonical_origin(url)
+    return origin.as_url() if origin is not None else ""
 
 
 def _host(url: str) -> str:
-    return str(urlparse(url).hostname or "").lower()
+    origin = canonical_origin(url)
+    return origin.host if origin is not None else ""
 
 
 def _to_mode(value: Any) -> ExecutionMode:
@@ -294,7 +294,23 @@ class ExecutionPolicyRuntime:
                     safe_client = SentinelHTTPClient(context=self.scope_context, underlying_client=client)
                     response = await safe_client.request(method, url, **request_kwargs)
                 else:
-                    response = await client.request(method, url, **request_kwargs)
+                    from core.net.egress import EgressBroker, same_origin_authorizer
+
+                    if allow_external:
+                        def authorize(candidate: str) -> bool:
+                            candidate_host = _host(candidate)
+                            return bool(candidate_host) and any(
+                                candidate_host == allowed
+                                or candidate_host.endswith(f".{allowed}")
+                                for allowed in self.allowed_external_hosts
+                            )
+                    else:
+                        authorize = same_origin_authorizer(self.scope_target or url)
+                    response = await EgressBroker(client, authorize).request(
+                        method,
+                        url,
+                        **request_kwargs,
+                    )
             except httpx.RequestError:
                 if not self._can_retry(retries_for_request):
                     raise

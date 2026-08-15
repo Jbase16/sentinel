@@ -458,14 +458,21 @@ async def acquire_auth_via_login_sqli(
 
 def _default_send(timeout: float) -> Send:
     async def _send(url: str, body: Dict[str, Any]) -> Tuple[int, Dict[str, str], str]:
-        import httpx
         import os
+        from core.net.egress import EgressBroker, same_origin_authorizer
+        from core.net.http_factory import create_async_client
+
         headers = {"Content-Type": "application/json",
                    "User-Agent": "SentinelForge-Capability"}
         _bb = os.getenv("SENTINEL_GHOST_BB_VALUE", "").strip()
         if _bb:
             headers[os.getenv("SENTINEL_GHOST_BB_HEADER", "X-Bug-Bounty").strip()] = _bb
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
-            r = await c.post(url, json=body, headers=headers)
+        async with create_async_client(timeout=timeout, follow_redirects=False) as client:
+            r = await EgressBroker(client, same_origin_authorizer(url)).post(
+                url,
+                json=body,
+                headers=headers,
+                follow_redirects=True,
+            )
             return r.status_code, {k: v for k, v in r.headers.items()}, r.text
     return _send

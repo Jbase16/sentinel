@@ -222,7 +222,10 @@ async def bind_persona(
     if req.persona_spec and req.persona_spec.get("login_url"):
         from core.wraith.persona_auth import authenticate_persona
         try:
-            h, c = await authenticate_persona(req.persona_spec)
+            h, c = await authenticate_persona(
+                req.persona_spec,
+                scope_filter=sess.is_in_scope,
+            )
             resolved_headers.update(h)
             resolved_cookies.update(c)
         except Exception as e:
@@ -352,7 +355,10 @@ async def send_exchange(
     """
     import time as _t
     import httpx
+    from core.base.exceptions import ScopePolicyViolationError
     from core.ghost.flow import FlowStep, MAX_BODY_BYTES
+    from core.net.egress import EgressBroker
+    from core.net.http_factory import create_async_client
     from core.verify.console import get_session
 
     sess = get_session(session_id)
@@ -390,17 +396,18 @@ async def send_exchange(
     # ── Step 4 — network I/O.
     started = _t.time()
     try:
-        async with httpx.AsyncClient(
-            timeout=req.timeout_s,
-            follow_redirects=req.follow_redirects,
+        async with create_async_client(
+            timeout=httpx.Timeout(req.timeout_s),
+            follow_redirects=False,
         ) as client:
-            httpx_req = client.build_request(
+            broker = EgressBroker(client, sess.is_in_scope)
+            resp = await broker.request(
                 method=req.method,
                 url=req.url,
                 headers=merged_headers,
                 content=(req.body.encode("utf-8") if req.body else None),
+                follow_redirects=req.follow_redirects,
             )
-            resp = await client.send(httpx_req)
         status = int(resp.status_code)
         body_bytes = resp.content or b""
         truncated = len(body_bytes) > MAX_BODY_BYTES
@@ -411,6 +418,11 @@ async def send_exchange(
         # The URL the response actually came from (post-redirect if any).
         final_url = str(resp.url)
         content_type = response_headers.get("content-type")
+    except ScopePolicyViolationError as e:
+        raise ScopeViolationError(
+            url=str(getattr(e, "target_url", req.url)),
+            allowed_origins=sorted(sess.allowed_origins),
+        ) from e
     except httpx.TimeoutException as e:
         # Capture the timeout as a step with status=0 (matches the
         # Phase 4 replay-engine convention for failed exchanges).

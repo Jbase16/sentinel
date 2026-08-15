@@ -73,7 +73,8 @@ class GhostGatewayTransport(httpx.AsyncBaseTransport):
                 url=str(request.url),
                 headers=stripped_headers,
                 data=request.content, # raw bytes
-                timeout=timeout_val
+                timeout=timeout_val,
+                allow_redirects=False,
             )
         except RequestsError as e:
             if "Timeout" in str(e) or "timeout" in str(e).lower():

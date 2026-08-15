@@ -383,9 +383,19 @@ class TimeMachine:
         await self._rate_limiter.acquire()
 
         try:
+            from core.net.egress import admit_egress, same_origin_authorizer
+
+            admit_egress(
+                WAYBACK_CDX_URL,
+                same_origin_authorizer(WAYBACK_CDX_URL),
+            )
             timeout = aiohttp.ClientTimeout(total=self._request_timeout)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(WAYBACK_CDX_URL, params=params) as response:
+                async with session.get(
+                    WAYBACK_CDX_URL,
+                    params=params,
+                    allow_redirects=False,
+                ) as response:
                     if response.status != 200:
                         logger.error(
                             f"[TimeMachine] Wayback CDX error: {response.status}"
@@ -470,9 +480,18 @@ class TimeMachine:
         await self._rate_limiter.acquire()
 
         try:
+            from core.net.egress import admit_egress, same_origin_authorizer
+
+            admit_egress(
+                wayback_url,
+                same_origin_authorizer(WAYBACK_SNAPSHOT_URL),
+            )
             timeout = aiohttp.ClientTimeout(total=self._request_timeout)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(wayback_url) as response:
+                async with session.get(
+                    wayback_url,
+                    allow_redirects=False,
+                ) as response:
                     if response.status != 200:
                         return None
 

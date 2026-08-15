@@ -373,7 +373,7 @@ class TestBindPersonaEndpoint:
         )
         called = {"n": 0}
 
-        async def fake_auth(persona):
+        async def fake_auth(persona, **_kwargs):
             called["n"] += 1
             # Return fake creds derived from the spec name.
             return ({"Authorization": "Bearer FROM-SPEC"}, {"sid": "abc"})

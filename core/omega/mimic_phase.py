@@ -118,7 +118,12 @@ class MIMICPhaseOrchestrator:
         self.target = target.rstrip("/")
         self.safe_mode = safe_mode
         self.event_bus = get_event_bus()
-        self.downloader = AssetDownloader(safe_mode=safe_mode)
+        from core.net.egress import same_origin_authorizer
+
+        self.downloader = AssetDownloader(
+            safe_mode=safe_mode,
+            scope_filter=same_origin_authorizer(self.target),
+        )
         self.shadow_spec = ShadowSpec()
         self.asset_graph: Dict[str, AssetGraphNode] = {}
         self._parsed_routes: List[Dict[str, Any]] = []
@@ -195,11 +200,14 @@ class MIMICPhaseOrchestrator:
         Probe for build manifests in priority order.
         Returns (ManifestType, manifest_data) or (NONE, None).
         """
+        from core.net.egress import EgressBroker, same_origin_authorizer
+
         async with create_async_client(follow_redirects=False) as client:
+            broker = EgressBroker(client, same_origin_authorizer(self.target))
             for probe_path in self.MANIFEST_PROBES:
                 url = urljoin(self.target, probe_path)
                 try:
-                    resp = await client.get(url, timeout=5.0)
+                    resp = await broker.get(url, timeout=5.0)
                     if resp.status_code == 200:
                         try:
                             data = resp.json()
@@ -214,7 +222,10 @@ class MIMICPhaseOrchestrator:
         # Check for Next.js __NEXT_DATA__ in HTML
         try:
             async with create_async_client(follow_redirects=False) as client:
-                resp = await client.get(self.target, timeout=5.0)
+                resp = await EgressBroker(
+                    client,
+                    same_origin_authorizer(self.target),
+                ).get(self.target, timeout=5.0)
                 if resp.status_code == 200 and "__NEXT_DATA__" in resp.text:
                     # Extract __NEXT_DATA__ from script tag
                     match = re.search(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text, re.DOTALL)
@@ -318,8 +329,13 @@ class MIMICPhaseOrchestrator:
 
         # Fetch root HTML to find script tags
         try:
+            from core.net.egress import EgressBroker, same_origin_authorizer
+
             async with create_async_client(follow_redirects=False) as client:
-                resp = await client.get(self.target, timeout=5.0)
+                resp = await EgressBroker(
+                    client,
+                    same_origin_authorizer(self.target),
+                ).get(self.target, timeout=5.0)
                 if resp.status_code == 200:
                     # Extract script src attributes
                     script_srcs = re.findall(r'<script[^>]*src=["\'](.*?)["\']', resp.text)

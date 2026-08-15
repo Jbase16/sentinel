@@ -322,7 +322,21 @@ async def replay_flow(
     if transport is not None:
         client_kwargs["transport"] = transport
 
-    async with httpx.AsyncClient(**client_kwargs) as client:
+    from core.base.scope import canonical_origin
+    from core.net.egress import EgressBroker
+    from core.net.http_factory import create_async_client
+
+    captured_origins = {
+        origin
+        for step in flow.steps
+        if (origin := canonical_origin(step.url)) is not None
+    }
+    authorize = scope_filter or (
+        lambda candidate: canonical_origin(candidate) in captured_origins
+    )
+
+    async with create_async_client(**client_kwargs) as client:
+        broker = EgressBroker(client, authorize)
         # Seed cookies if provided.
         if initial_cookies:
             for k, v in initial_cookies.items():
@@ -399,7 +413,7 @@ async def replay_flow(
             # Send the request. Errors become a diverged step, not a raise.
             step_started = time.time()
             try:
-                req = client.build_request(
+                resp = await broker.request(
                     method=step_to_send.method,
                     url=step_to_send.url,
                     headers=merged_headers,
@@ -408,7 +422,6 @@ async def replay_flow(
                         if step_to_send.request_body else None
                     ),
                 )
-                resp = await client.send(req)
                 status = int(resp.status_code)
                 body = resp.text or ""
                 response_headers = {k: v for k, v in resp.headers.items()}

@@ -16,8 +16,8 @@ Usage
     with create_sync_client() as client:
         resp = client.get("https://example.com")
 
-Override any default per call-site when the scanner truly needs it
-(e.g. ``follow_redirects=False`` for redirect-detection tests).
+Redirect following is never delegated to the transport. Callers that need it
+must use ``core.net.egress.EgressBroker`` so every hop is re-admitted.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def create_async_client(
     timeout : httpx.Timeout | None
         Override timeout.  ``None`` = use ``NetworkConfig.timeout``.
     follow_redirects : bool | None
-        Override redirect following.  ``None`` = use ``NetworkConfig.follow_redirects``.
+        Must be false/None. Redirects are handled by ``EgressBroker``.
     high_evasion : bool
         If True, injects the GhostGatewayTransport to inherit native macOS/WebKit TLS fingerprint
         and Cloudflare evasion capabilities.
@@ -63,6 +63,8 @@ def create_async_client(
         Forwarded to ``httpx.AsyncClient()``.
     """
     cfg = _get_network_config()
+    if follow_redirects:
+        raise ValueError("transport redirect following is disabled; use EgressBroker")
     
     if high_evasion:
         from core.net.ghost_gateway import GhostGatewayTransport
@@ -73,7 +75,7 @@ def create_async_client(
     return httpx.AsyncClient(
         verify=cfg.verify if verify is None else verify,
         timeout=timeout if timeout is not None else cfg.timeout,
-        follow_redirects=cfg.follow_redirects if follow_redirects is None else follow_redirects,
+        follow_redirects=False,
         **kwargs,
     )
 
@@ -92,9 +94,11 @@ def create_sync_client(
     Same parameter semantics as :func:`create_async_client`.
     """
     cfg = _get_network_config()
+    if follow_redirects:
+        raise ValueError("transport redirect following is disabled; use SyncEgressBroker")
     return httpx.Client(
         verify=cfg.verify if verify is None else verify,
         timeout=timeout if timeout is not None else cfg.timeout,
-        follow_redirects=cfg.follow_redirects if follow_redirects is None else follow_redirects,
+        follow_redirects=False,
         **kwargs,
     )
