@@ -14,6 +14,7 @@ from core.server.state import get_state
 from core.server.routers.auth import verify_sensitive_token, verify_token
 from core.errors import SentinelError, ErrorCode, ToolError
 from core.data.db import Database
+from core.safety.proof_mode import ProofMode
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +257,15 @@ class ScanRequest(BaseModel):
             "bugbounty": "bug_bounty",
             "stealth": "stealth",
             "passive": "passive",
+            "recon": "passive",
+            "owned_lab": "owned_lab",
+            "owned-lab": "owned_lab",
         }
         normalized = aliases.get(raw)
         if not normalized:
-            allowed = ", ".join(sorted({"standard", "bug_bounty", "stealth", "passive"}))
+            allowed = ", ".join(
+                sorted({"standard", "bug_bounty", "stealth", "passive", "owned_lab"})
+            )
             raise ValueError(f"Invalid scan mode '{v}'. Allowed modes: {allowed}")
         return normalized
 
@@ -322,6 +328,21 @@ class ScanRequest(BaseModel):
                 "behavioral_one_click requires bug_bounty scan mode"
             )
         return self
+
+
+def _resolve_business_logic_proof_mode(
+    req: ScanRequest,
+    *,
+    environment_limit: Optional[str] = None,
+) -> str:
+    """Resolve the business-logic posture without granting ambient authority."""
+    resolved = ProofMode.for_scan_mode(
+        req.mode,
+        environment_limit=environment_limit,
+    )
+    if req.mode == "bug_bounty" and resolved == ProofMode.LAB:
+        raise RuntimeError("refusing bug_bounty business logic in LAB proof mode")
+    return resolved
 
 
 async def _run_anonymous_passive_one_click_phase(
@@ -730,6 +751,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             "standard": ExecutionMode.RESEARCH,
             "stealth": ExecutionMode.RESEARCH,
             "passive": ExecutionMode.RESEARCH,
+            "owned_lab": ExecutionMode.RESEARCH,
         }
         emode = _MODE_TO_EXEC.get(str(req.mode).strip().lower(), ExecutionMode.RESEARCH)
 
@@ -1446,12 +1468,14 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             _bl_origin = f"{_bl_p.scheme}://{_bl_p.netloc}"
                             # Bounty-safe execution policy: gate EVERY active request
                             # for this phase behind ONE shared policy + proof budget.
-                            # In lab mode (default) the executor is a transparent
-                            # pass-through, so existing behavior/tests are unchanged.
+                            # In explicit owned-lab mode the executor is a transparent
+                            # pass-through. Every other request mode is constrained.
                             from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
                             from core.safety.ownership_registry import OwnershipRegistry
-                            from core.safety.proof_mode import ProofMode
-                            _bl_mode = ProofMode.normalize(_bl_os.getenv("SENTINEL_PROOF_MODE", "lab"))
+                            _bl_mode = _resolve_business_logic_proof_mode(
+                                req,
+                                environment_limit=_bl_os.getenv("SENTINEL_PROOF_MODE"),
+                            )
                             _bl_follow = _bl_mode == ProofMode.LAB   # else don't auto-follow off-scope
 
                             _bl_hdrs = {"User-Agent": "SentinelForge-Logic"}
@@ -1487,12 +1511,14 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                                          ownership_registry=OwnershipRegistry())
                             _bl_send = PolicyExecutor(_bl_send_raw, _bl_policy).send
 
-                            # Blunt routing: bounty-safe uses the owned two-persona
-                            # proof ONLY (no self-registration, no enumeration); lab/
-                            # passive keep the enumeration + amplification path. One
-                            # algorithm per mode — don't build a knife that dispenses bees.
-                            _bl_sess = (None if _bl_mode == ProofMode.BOUNTY_SAFE
-                                        else await acquire_low_priv_session(_bl_origin, _bl_send))
+                            # Blunt routing: only an explicit owned-lab request may
+                            # self-register or enumerate. Bounty-safe uses the owned
+                            # two-persona proof; passive performs no active setup.
+                            _bl_sess = (
+                                await acquire_low_priv_session(_bl_origin, _bl_send)
+                                if _bl_mode == ProofMode.LAB
+                                else None
+                            )
                             if _bl_sess:
                                 _bl_token, _bl_ctx = _bl_sess
 
@@ -1593,11 +1619,11 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 )
 
                             # Persona-based escalation-amplified BOLA (ENUMERATION —
-                            # lab/passive only). Reaches login-only / opaque-id targets;
+                            # explicit owned-lab mode only). Reaches login-only /
+                            # opaque-id targets;
                             # autonomously enumerates object refs then verifies escalation
-                            # expands access. Skipped in bounty-safe mode (enumeration is
-                            # exactly what the envelope forbids there).
-                            if req.personas and _bl_mode != ProofMode.BOUNTY_SAFE:
+                            # expands access. All constrained modes skip this enumeration.
+                            if req.personas and _bl_mode == ProofMode.LAB:
                                 try:
                                     from core.wraith.persona_auth import authenticate_persona
                                     from core.cortex.escalation_amplification import discover_candidate_refs

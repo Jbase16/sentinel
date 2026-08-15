@@ -33,9 +33,63 @@ class ProofMode:
     _ALIASES = {"bounty": BOUNTY_SAFE, "bounty_safe": BOUNTY_SAFE, "safe": BOUNTY_SAFE,
                 "lab": LAB, "passive": PASSIVE, "recon": PASSIVE}
 
+    _SCAN_MODE_DEFAULTS = {
+        "standard": BOUNTY_SAFE,
+        "bug_bounty": BOUNTY_SAFE,
+        "stealth": BOUNTY_SAFE,
+        "passive": PASSIVE,
+        "owned_lab": LAB,
+    }
+    _RESTRICTIVENESS = {
+        LAB: 0,
+        BOUNTY_SAFE: 1,
+        PASSIVE: 2,
+    }
+
     @classmethod
     def normalize(cls, value: Optional[str]) -> str:
-        return cls._ALIASES.get((value or "lab").strip().lower(), cls.LAB)
+        """Normalize a proof posture, failing closed to PASSIVE.
+
+        LAB must be selected deliberately. Missing or unknown configuration can
+        disable active proof, but can never grant unrestricted execution.
+        """
+        return cls._ALIASES.get((value or "").strip().lower(), cls.PASSIVE)
+
+    @classmethod
+    def for_scan_mode(
+        cls,
+        scan_mode: str,
+        *,
+        environment_limit: Optional[str] = None,
+    ) -> str:
+        """Resolve proof posture from a validated scan mode.
+
+        The request mode supplies the maximum authority. An optional process
+        setting is a constraint only: it may select a more restrictive posture,
+        never a less restrictive one. Only the explicit ``owned_lab`` request
+        mode can resolve to LAB.
+        """
+        normalized_scan_mode = str(scan_mode or "").strip().lower()
+        try:
+            resolved = cls._SCAN_MODE_DEFAULTS[normalized_scan_mode]
+        except KeyError as exc:
+            raise ValueError(
+                f"unsupported scan mode for proof policy: {scan_mode!r}"
+            ) from exc
+
+        if environment_limit is not None and environment_limit.strip():
+            configured_limit = cls.normalize(environment_limit)
+            if (
+                cls._RESTRICTIVENESS[configured_limit]
+                > cls._RESTRICTIVENESS[resolved]
+            ):
+                resolved = configured_limit
+
+        if normalized_scan_mode == "bug_bounty" and resolved == cls.LAB:
+            raise RuntimeError("bug_bounty scans may not use LAB proof mode")
+        if resolved == cls.LAB and normalized_scan_mode != "owned_lab":
+            raise RuntimeError("LAB proof mode requires an owned_lab scan request")
+        return resolved
 
 
 _BOUNTY_ALLOWED: Set[str] = {
