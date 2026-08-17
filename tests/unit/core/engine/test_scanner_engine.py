@@ -8,12 +8,31 @@ Covers:
 import asyncio
 import json
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, AsyncMock, patch
+from core.base.context import ScopeContext
+from core.base.scope import AssetType, ScopeDecision, ScopeRegistry, ScopeRule
 from core.engine.scanner_engine import ScannerEngine, ResourceGuard, ResourceExhaustedError, ScanTransaction
 
 @pytest.fixture
 def engine():
-    return ScannerEngine()
+    registry = ScopeRegistry()
+    registry.add_rule(
+        ScopeRule(AssetType.ORIGIN, "https://example.com", ScopeDecision.ALLOW)
+    )
+    session = SimpleNamespace(
+        id="test-session",
+        session_id="test-session",
+        scan_id="test-session",
+        knowledge={},
+        scope_context=ScopeContext(
+            registry=registry,
+            scan_id="test-session",
+            authorization_envelope_id="scan-admission:test",
+            authorization_envelope_ref=f"authorization_envelope:{'a' * 64}",
+        ),
+    )
+    return ScannerEngine(session=session)
 
 # ============================================================================
 # ResourceGuard Tests
@@ -160,7 +179,9 @@ async def test_nikto_exit_code_one_still_classifies(monkeypatch, engine):
         return fake_proc
 
     router = MagicMock()
-    router.handle_tool_output = AsyncMock(return_value=None)
+    router.handle_tool_output = AsyncMock(
+        return_value={"findings": [{"type": "Nikto Finding", "severity": "HIGH"}]}
+    )
     classify_mock = MagicMock(return_value=[{"type": "Nikto Finding", "severity": "HIGH"}])
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
@@ -192,7 +213,9 @@ async def test_nikto_native_exit_code_one_still_classifies(monkeypatch, engine):
         return fake_proc
 
     router = MagicMock()
-    router.handle_tool_output = AsyncMock(return_value=None)
+    router.handle_tool_output = AsyncMock(
+        return_value={"findings": [{"type": "Nikto Finding", "severity": "MEDIUM"}]}
+    )
     classify_mock = MagicMock(return_value=[{"type": "Nikto Finding", "severity": "MEDIUM"}])
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
@@ -224,7 +247,7 @@ async def test_nonzero_exit_still_skips_other_tools(monkeypatch, engine):
         return fake_proc
 
     router = MagicMock()
-    router.handle_tool_output = AsyncMock(return_value=None)
+    router.handle_tool_output = AsyncMock(return_value={"findings": []})
     classify_mock = MagicMock(return_value=[{"type": "Open Port", "severity": "LOW"}])
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
@@ -234,7 +257,7 @@ async def test_nonzero_exit_still_skips_other_tools(monkeypatch, engine):
     findings = await engine._run_tool_task(
         exec_id="nmap:test5678",
         tool="nmap",
-        target="127.0.0.1",
+        target="https://example.com",
         queue=queue,
         args=None,
         cancel_flag=cancel_flag,

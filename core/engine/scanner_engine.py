@@ -2,14 +2,14 @@
 
 PURPOSE
 - macOS-compatible active scanner engine for SentinelForge.
-- Orchestrates tool execution, streams live output, classifies results into findings,
-  and persists findings/evidence/issues atomically via ScanTransaction.
+- Orchestrates tool execution, streams live output, and routes evidence/findings
+  through the canonical EvidenceLedger before publishing transactional read views.
 
 KEY RESPONSIBILITIES
 - Detect installed tools and filter via Vanguard.
 - Execute multiple tools concurrently with resource limits and cancellation.
 - Normalize and deduplicate findings deterministically.
-- Stage all scan artifacts (findings, evidence, issues) and commit them atomically.
+- Stage canonical finding projections and derived issues, then commit read views.
 
 INTEGRATION
 - Depends on:
@@ -18,9 +18,7 @@ INTEGRATION
   - core.toolkit.vuln_rules (issue/rule engine)
   - core.data.db (SQLite persistence)
   - core.engine.vanguard (preflight tool compatibility)
-- Used by:
-  - ScanSession / UI event pipeline (via session-scoped stores)
-  - Legacy global behavior (when session is None)
+- Used by ScanSession / UI event pipeline; sessionless scans fail closed.
 """
 
 from __future__ import annotations
@@ -47,6 +45,7 @@ from core.base.task_router import TaskRouter
 from core.cortex.correlator import GraphCorrelator
 from core.base.config import get_config
 from core.errors import ToolError
+from core.identity import scanner_evidence_context
 
 logger = logging.getLogger(__name__)
 
@@ -747,6 +746,68 @@ class ScannerEngine:
         # Cancel state
         self._cancel_event: Optional[asyncio.Event] = None
 
+    async def _route_tool_output(
+        self,
+        *,
+        exec_id: str,
+        tool: str,
+        target: str,
+        output: str,
+        exit_code: int,
+        findings: Optional[List[dict]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[dict]:
+        """Admit one completed tool output to the canonical evidence spine."""
+
+        if self.session is None:
+            raise RuntimeError("scanner evidence requires an explicit ScanSession")
+        session_id = getattr(self.session, "session_id", None)
+        scope_context = getattr(self.session, "scope_context", None)
+        if not isinstance(session_id, str) or not session_id:
+            raise RuntimeError("scanner session identity is unavailable")
+        envelope_id = getattr(scope_context, "authorization_envelope_id", None)
+        envelope_ref = getattr(scope_context, "authorization_envelope_ref", None)
+        if not isinstance(envelope_id, str) or not isinstance(envelope_ref, str):
+            raise RuntimeError("scanner admission envelope is unavailable")
+
+        knowledge = getattr(self.session, "knowledge", {})
+        knowledge = knowledge if isinstance(knowledge, dict) else {}
+        reset_epoch = knowledge.get("target_reset_epoch", 0)
+        if isinstance(reset_epoch, bool) or not isinstance(reset_epoch, int):
+            reset_epoch = 0
+        world_id = knowledge.get("world_id")
+        if not isinstance(world_id, str) or not world_id.strip():
+            world_id = None
+        evidence_context = scanner_evidence_context(
+            session_id=session_id,
+            authorization_envelope_id=envelope_id,
+            authorization_envelope_ref=envelope_ref,
+            target=target,
+            tool_name=tool,
+            exec_id=exec_id,
+            exit_code=exit_code,
+            target_reset_epoch=reset_epoch,
+            world_id=world_id,
+        )
+        event_metadata = {
+            **dict(metadata or {}),
+            "target": target,
+            "exec_id": exec_id,
+            "session_id": session_id,
+        }
+        result = await TaskRouter.instance().handle_tool_output(
+            tool_name=tool,
+            stdout=output,
+            stderr="",
+            rc=exit_code,
+            metadata=event_metadata,
+            identity=evidence_context.identity,
+            operation_family=evidence_context.operation_family,
+            operation_instance=evidence_context.operation_instance,
+            scanner_findings=findings or (),
+        )
+        return list(result.get("findings", []))
+
     # ----------------------------
     # Env timeouts
     # ----------------------------
@@ -842,6 +903,8 @@ class ScannerEngine:
         Entire scan is under _scan_lock to protect engine state.
         """
         async with self._scan_lock:
+            if self.session is None:
+                raise RuntimeError("ScannerEngine.scan requires an explicit ScanSession")
             from core.engine.vanguard import Vanguard
 
             installed = self._detect_installed()
@@ -882,7 +945,7 @@ class ScannerEngine:
 
             yield f"Installed tools: {', '.join(tools_to_run)}"
 
-            sess_id = self.session.session_id if self.session else "global_scan"
+            sess_id = self.session.session_id
 
             self.resource_guard.reset()
 
@@ -1031,6 +1094,13 @@ class ScannerEngine:
                     # ================================================================
                     # Stage findings (no UI store updates until commit succeeds)
                     for f in normalized:
+                        metadata = f.get("metadata", {})
+                        if not isinstance(metadata, dict) or not str(
+                            metadata.get("canonical_commitment", "")
+                        ).startswith("evidence_finding:"):
+                            raise RuntimeError(
+                                "scanner finding bypassed canonical EvidenceLedger promotion"
+                            )
                         txn.add_finding(f)
 
                     # Stage recon edges (graph relationships between findings)
@@ -1693,19 +1763,43 @@ class ScannerEngine:
             msg = f"[{tool}] internal tool timed out after {elapsed:.1f}s"
             logger.warning(msg)
             await queue.put(f"[{exec_id}] {msg}")
+            await self._route_tool_output(
+                exec_id=exec_id,
+                tool=tool,
+                target=target,
+                output=msg,
+                exit_code=124,
+                metadata={"timed_out": True, "internal": True},
+            )
             return []
         except Exception as exc:
             msg = f"[{tool}] internal tool error: {exc}"
             logger.error(msg, exc_info=True)
             self._last_tool_error = ToolError(tool=tool, exit_code=-1, stderr=str(exc)).details
             await queue.put(f"[{exec_id}] {msg}")
+            await self._route_tool_output(
+                exec_id=exec_id,
+                tool=tool,
+                target=target,
+                output=msg,
+                exit_code=-1,
+                metadata={"internal": True, "error": type(exc).__name__},
+            )
             return []
 
         elapsed = asyncio.get_running_loop().time() - start_time
         await queue.put(
             f"[{exec_id}] {tool} completed: {len(findings)} findings in {elapsed:.1f}s"
         )
-        return findings
+        return await self._route_tool_output(
+            exec_id=exec_id,
+            tool=tool,
+            target=target,
+            output=json.dumps(findings, sort_keys=True, default=str),
+            exit_code=0,
+            findings=findings,
+            metadata={"internal": True, "findings_count": len(findings)},
+        )
 
     async def _execute_tool(
         self,
@@ -1770,29 +1864,27 @@ class ScannerEngine:
         except FileNotFoundError:
             msg = f"[{tool}] NOT INSTALLED or not in PATH."
             self._last_tool_error = ToolError(tool=tool, exit_code=127, stderr=msg).details
-
-            if self._active_transaction and self._active_transaction.is_active:
-                self._active_transaction.add_evidence(
-                    {"tool": tool, "raw_output": msg, "metadata": {"target": target, "error": "not_found", "exec_id": exec_id}}
-                )
-            else:
-                ev_store = self.session.evidence if self.session else EvidenceStore.instance()
-                ev_store.add_evidence(tool, msg, {"target": target, "error": "not_found", "exec_id": exec_id})
-
+            await self._route_tool_output(
+                exec_id=exec_id,
+                tool=tool,
+                target=target,
+                output=msg,
+                exit_code=127,
+                metadata={"error": "not_found"},
+            )
             await queue.put(f"[{exec_id}] {msg}")
             return []
         except Exception as exc:
             msg = f"[{tool}] failed to start: {exc}"
             self._last_tool_error = ToolError(tool=tool, exit_code=-1, stderr=str(exc)).details
-
-            if self._active_transaction and self._active_transaction.is_active:
-                self._active_transaction.add_evidence(
-                    {"tool": tool, "raw_output": msg, "metadata": {"target": target, "error": str(exc), "exec_id": exec_id}}
-                )
-            else:
-                ev_store = self.session.evidence if self.session else EvidenceStore.instance()
-                ev_store.add_evidence(tool, msg, {"target": target, "error": str(exc), "exec_id": exec_id})
-
+            await self._route_tool_output(
+                exec_id=exec_id,
+                tool=tool,
+                target=target,
+                output=msg,
+                exit_code=-1,
+                metadata={"error": type(exc).__name__},
+            )
             await queue.put(f"[{exec_id}] {msg}")
             return []
 
@@ -1914,76 +2006,71 @@ class ScannerEngine:
             "canceled": bool(cancel_flag and cancel_flag.is_set()),
         }
 
-        # Stage evidence
         if self._active_transaction and self._active_transaction.is_active:
-            self._active_transaction.add_evidence({"tool": tool, "raw_output": output_text, "metadata": ev_meta})
             self._active_transaction.mark_tool_completed(tool)
-        else:
-            ev_store = self.session.evidence if self.session else EvidenceStore.instance()
-            ev_store.add_evidence(tool, output_text, ev_meta)
 
         try:
-            # Guard: don't classify output from failed tools — error messages
-            # get misclassified as findings by the LLM (e.g. "connection refused" → "Open Redirect")
             if not should_classify_output:
                 logger.info(f"[{exec_id}] Tool exited {exit_code}, skipping classification")
-                # Still record observation for audit trail, but no findings
-                try:
-                    router = TaskRouter.instance()
-                    await router.handle_tool_output(
-                        tool_name=tool, stdout=output_text, stderr="",
-                        rc=exit_code,
-                        metadata={
-                            "target": target,
-                            "exec_id": exec_id,
-                            "skipped_classification": True,
-                            "classification_policy": "strict_exit_code",
-                        },
-                    )
-                except Exception:
-                    pass
-                return []
+                return await self._route_tool_output(
+                    exec_id=exec_id,
+                    tool=tool,
+                    target=target,
+                    output=output_text,
+                    exit_code=exit_code,
+                    metadata={
+                        **ev_meta,
+                        "skipped_classification": True,
+                        "classification_policy": "strict_exit_code",
+                    },
+                )
 
-            findings = ScannerBridge.classify(tool, target, output_text)
+            try:
+                findings = ScannerBridge.classify(tool, target, output_text)
+            except Exception as exc:
+                err = f"[{tool}] classifier error: {exc}"
+                await queue.put(f"[{exec_id}] {err}")
+                await self._route_tool_output(
+                    exec_id=exec_id,
+                    tool=tool,
+                    target=target,
+                    output=output_text,
+                    exit_code=exit_code,
+                    metadata={
+                        **ev_meta,
+                        "classifier_error": type(exc).__name__,
+                    },
+                )
+                return []
 
             try:
                 self.resource_guard.check_findings(len(findings))
             except ResourceExhaustedError as e:
                 await queue.put(f"[{exec_id}] {e} - truncating results")
                 logger.warning(f"[{exec_id}] {e}")
+                await self._route_tool_output(
+                    exec_id=exec_id,
+                    tool=tool,
+                    target=target,
+                    output=output_text,
+                    exit_code=exit_code,
+                    metadata={**ev_meta, "findings_suppressed": "resource_limit"},
+                )
                 return []
 
-            # Always record observation in Epistemic Ledger for audit trail
-            # This ensures the Audit Feed shows all tool executions
-            try:
-                router = TaskRouter.instance()
-                await router.handle_tool_output(
-                    tool_name=tool,
-                    stdout=output_text,
-                    stderr="",
-                    rc=exit_code,
-                    metadata={
-                        "target": target,
-                        "findings_count": len(findings),
-                        "exec_id": exec_id,
-                        "classified_on_nonzero_exit": bool(exit_code not in (0, None)),
-                    },
-                )
-            except Exception as router_err:
-                logger.warning(f"[{exec_id}] TaskRouter processing error: {router_err}")
-
-            return findings
-        except Exception as exc:
-            err = f"[{tool}] classifier error: {exc}"
-            if self._active_transaction and self._active_transaction.is_active:
-                self._active_transaction.add_evidence(
-                    {"tool": f"{tool}_classifier_error", "raw_output": err, "metadata": {"target": target, "exec_id": exec_id}}
-                )
-            else:
-                ev_store = self.session.evidence if self.session else EvidenceStore.instance()
-                ev_store.add_evidence(f"{tool}_classifier_error", err, {"target": target, "exec_id": exec_id})
-            await queue.put(f"[{exec_id}] {err}")
-            return []
+            return await self._route_tool_output(
+                exec_id=exec_id,
+                tool=tool,
+                target=target,
+                output=output_text,
+                exit_code=exit_code,
+                findings=findings,
+                metadata={
+                    **ev_meta,
+                    "findings_count": len(findings),
+                    "classified_on_nonzero_exit": bool(exit_code not in (0, None)),
+                },
+            )
         finally:
             self._procs.pop(exec_id, None)
 

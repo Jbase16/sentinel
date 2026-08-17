@@ -13,6 +13,7 @@
 
 from typing import Dict, Any
 from core.base.task_router import TaskRouter
+from core.identity import ScannerEvidenceContext
 from core.toolkit.registry import TOOLS, get_tool_command, find_binary
 from core.toolkit.installer import install_tools, uninstall_tools
 
@@ -32,14 +33,21 @@ def tool_callback_factory(tool_name: str):
     """
     Create a callback function for a specific tool.
     """
-    def callback(stdout, stderr, rc, metadata):
+    async def callback(stdout, stderr, rc, metadata):
         """Function callback."""
-        TaskRouter.instance().handle_tool_output(
+        routed_metadata = dict(metadata or {})
+        evidence_context = routed_metadata.pop("evidence_context", None)
+        if not isinstance(evidence_context, ScannerEvidenceContext):
+            raise ValueError("tool callback requires a ScannerEvidenceContext")
+        return await TaskRouter.instance().handle_tool_output(
             tool_name=tool_name,
             stdout=stdout,
             stderr=stderr,
             rc=rc,
-            metadata=metadata
+            metadata=routed_metadata,
+            identity=evidence_context.identity,
+            operation_family=evidence_context.operation_family,
+            operation_instance=evidence_context.operation_instance,
         )
     return callback
 

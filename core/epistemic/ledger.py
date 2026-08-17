@@ -588,6 +588,53 @@ class EvidenceLedger:
             )
         )
 
+    def assess_proposal(self, proposal: FindingProposal) -> FindingProposal:
+        """Bind a proposal to canonical evidence without promoting its claim."""
+
+        if not proposal.citations:
+            raise ValueError("proposal requires canonical citations")
+        citations = sorted(
+            proposal.citations,
+            key=lambda item: json.dumps(asdict(item), sort_keys=True, default=str),
+        )
+        observations = [self._observations.get(item.observation_id) for item in citations]
+        if any(not isinstance(item, ObservationEnvelope) for item in observations):
+            raise ValueError("proposal citation is not a canonical observation")
+        sessions = {
+            item.session_id
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+        }
+        if len(sessions) != 1:
+            raise ValueError("proposal cannot cross session identities")
+        for observation in observations:
+            state = self.get_state(observation.id)
+            if state is not None and state.state in {
+                LifecycleState.INVALIDATED,
+                LifecycleState.REJECTED,
+            }:
+                raise ValueError("proposal cites invalid canonical evidence")
+
+        if proposal.source in {"ai", "neural_strategy"}:
+            confirmation = ConfirmationLevel.HYPOTHESIZED.value
+        elif proposal.source in {"scanner", "heuristic"}:
+            confirmation = ConfirmationLevel.PROBABLE.value
+        else:
+            confirmation = (
+                proposal.confirmation_level or ConfirmationLevel.PROBABLE.value
+            )
+        metadata = dict(proposal.metadata or {})
+        metadata["session_id"] = sessions.pop()
+        return FindingProposal(
+            title=proposal.title,
+            severity=proposal.severity,
+            description=proposal.description,
+            citations=citations,
+            source=proposal.source,
+            metadata=metadata,
+            confirmation_level=confirmation,
+        )
+
     def promote_canonical_finding(
         self,
         *,
@@ -656,7 +703,6 @@ class EvidenceLedger:
         except Exception:
             self._findings.pop(finding.id, None)
             raise
-        self._update_findings_store(finding)
         return finding
 
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:

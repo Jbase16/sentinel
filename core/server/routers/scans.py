@@ -889,6 +889,31 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         if req.oob:
             session.knowledge["oob"] = req.oob
 
+        from core.identity import scan_admission_binding
+
+        admission_id, admission_ref = scan_admission_binding(
+            session_id=session.id,
+            target=req.target,
+            request_material=req.model_dump(mode="json"),
+            policy_material={
+                "allow_methods": list(execution_policy.allow_methods),
+                "allow_payload_size": execution_policy.allow_payload_size,
+                "disallow_destructive_patterns": execution_policy.disallow_destructive_patterns,
+                "require_headers": dict(execution_policy.require_headers),
+                "max_rps_per_host": execution_policy.max_rps_per_host,
+                "allowed_tools": (
+                    sorted(execution_policy.allowed_tools)
+                    if execution_policy.allowed_tools is not None
+                    else None
+                ),
+                "banned_tools": (
+                    sorted(execution_policy.banned_tools)
+                    if execution_policy.banned_tools is not None
+                    else None
+                ),
+                "allow_authentication": execution_policy.allow_authentication,
+            },
+        )
         scope_context = ScopeContext(
             registry=registry,
             policy=execution_policy,
@@ -896,6 +921,8 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             strict_scope=scope_strict_effective,
             identity_headers=identity_headers,
             scan_id=session.id,
+            authorization_envelope_id=admission_id,
+            authorization_envelope_ref=admission_ref,
         )
 
         # Bind ScopeContext physically to the session

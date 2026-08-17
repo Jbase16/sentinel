@@ -18,3 +18,5 @@ class ScopeContext:
     strict_scope: bool = False
     identity_headers: Dict[str, str] = field(default_factory=dict)
     scan_id: Optional[str] = None
+    authorization_envelope_id: Optional[str] = None
+    authorization_envelope_ref: Optional[str] = None

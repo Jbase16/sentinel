@@ -7,16 +7,22 @@
 #
 # DATA FLOW:
 # Tool executes → Scanner captures output → TaskRouter.handle_tool_output()
-# → AIEngine.process_tool_output() → Findings extracted → UI events emitted
+# → canonical EvidenceLedger observation → AI/scanner proposals → UI projections
 #
 # KEY CONCEPTS FOR JUNIOR DEVELOPERS:
 # - Event Bus: A central hub that routes messages between components
 # - Signals: Observer pattern implementation (pub/sub system)
 # - Singleton: One global instance shared across the application
-# - Lazy Loading: Import dependencies only when needed (avoids circular imports)
+# - Canonical admission: identity and operation atoms are mandatory
 #
 
+import json
 import logging
+from typing import Any, Dict, List, Optional, Sequence
+
+from core.behavior.compiler import OperationFamily, OperationInstance
+from core.epistemic.ledger import Citation, EvidenceLedger, Finding, FindingProposal
+from core.identity import AssessmentIdentityContext
 from core.utils.observer import Observable, Signal
 
 # CRITICAL: We import AIEngine here (not at the top of the file)
@@ -35,10 +41,10 @@ class TaskRouter(Observable):
     1. Receive tool output from scanner engine
     2. Send output to AIEngine for semantic analysis
     3. Distribute findings/events to UI via signals
-    4. Maintain evidence store for all tool executions
+    4. Admit evidence and findings through the canonical EvidenceLedger
     
     Design Pattern: Singleton (one instance per application)
-    Thread Safety: Yes (AIEngine and stores handle their own locking)
+    Concurrency: scanner calls are serialized by the scan lifecycle
     """
 
     # Signal emitted for UI events (findings, logs, status updates)
@@ -56,7 +62,7 @@ class TaskRouter(Observable):
         
         Why singleton?
         - Only one event bus should exist (ensures all events go through one path)
-        - Avoids creating multiple AIEngine/EvidenceStore instances
+        - Avoids creating multiple AIEngine/EvidenceLedger instances
         - Makes it easy to access from anywhere: TaskRouter.instance()
         
         Returns:
@@ -71,7 +77,12 @@ class TaskRouter(Observable):
     # Initialization
     # ============================================================================
     
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        ai: Optional[Any] = None,
+        ledger: Optional[EvidenceLedger] = None,
+    ):
         """
         Initialize the TaskRouter.
         
@@ -83,22 +94,14 @@ class TaskRouter(Observable):
 
         # Get the global AIEngine singleton
         # The AI engine will analyze tool output and extract findings
-        self.ai = AIEngine.instance()
-
-        # Lazy-load EvidenceStore to avoid circular imports
-        # EvidenceStore might import modules that depend on TaskRouter
-        # By importing here (not at module level), we break the cycle
-        from core.data.evidence_store import EvidenceStore
-        from core.epistemic.ledger import EvidenceLedger
-        
-        self.evidence = EvidenceStore.instance()
-        self.ledger = EvidenceLedger()
+        self.ai = ai or AIEngine.instance()
+        self.ledger = ledger or EvidenceLedger()
 
         # Registry for UI callbacks (currently unused, kept for backward compatibility)
         # Modern code uses signals instead of direct callbacks
         self._ui_callbacks = {}
         
-        logger.info("[TaskRouter] Initialized - AI and Evidence stores connected")
+        logger.info("[TaskRouter] Initialized - AI connected to canonical EvidenceLedger")
 
     # ============================================================================
     # UI Signal Emission
@@ -153,187 +156,234 @@ class TaskRouter(Observable):
         stderr: str,
         rc: int,
         metadata: dict,
-    ):
-        """
-        Process the output from a security tool.
-        
-        This is called by the scanner engine after a tool finishes running.
-        It orchestrates the full analysis pipeline:
-        1. Send raw output to AIEngine for analysis
-        2. Store evidence in the database
-        3. Extract and store findings
-        4. Emit UI events for real-time updates
-        
-        Args:
-            tool_name: Name of the tool that was run (e.g., "nmap", "httpx")
-            stdout: Standard output from the tool (the actual results)
-            stderr: Standard error from the tool (warnings/errors)
-            rc: Return code (0 = success, non-zero = error)
-            metadata: Additional context (target, session_id, timestamp, etc.)
-        
-        Example:
-            await router.handle_tool_output(
-                tool_name="nmap",
-                stdout="PORT    STATE SERVICE\\n22/tcp  open  ssh\\n80/tcp  open  http",
-                stderr="",
-                rc=0,
-                metadata={"target": "192.168.1.1", "session_id": "abc123"}
+        *,
+        identity: AssessmentIdentityContext,
+        operation_family: OperationFamily,
+        operation_instance: OperationInstance,
+        scanner_findings: Optional[Sequence[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """Route one identity-bound tool output through the canonical ledger."""
+
+        metadata = dict(metadata or {})
+        supplied_session = metadata.get("session_id")
+        if supplied_session not in {None, identity.session_id}:
+            raise ValueError("tool output metadata session does not match identity")
+        metadata["session_id"] = identity.session_id
+        target = metadata.get("target")
+        if not isinstance(target, str):
+            raise ValueError("tool output requires an absolute target")
+
+        logger.debug(
+            "[TaskRouter] Processing output from %s (rc=%s, stdout=%d bytes)",
+            tool_name,
+            rc,
+            len(stdout),
+        )
+        observation = self.ledger.record_canonical_observation(
+            tool_name=tool_name,
+            tool_args=list(metadata.get("args", [])),
+            target=target,
+            raw_output=stdout.encode("utf-8", errors="replace"),
+            identity=identity,
+            operation_family=operation_family,
+            operation_instance=operation_instance,
+            exit_code=rc,
+        )
+
+        assessed_proposals: List[FindingProposal] = []
+        canonical_findings: List[Finding] = []
+        for raw_finding in scanner_findings or ():
+            proposal = self._scanner_proposal(raw_finding, observation.id, tool_name)
+            assessed = self.ledger.assess_proposal(proposal)
+            assessed_proposals.append(assessed)
+            canonical_findings.append(
+                self.ledger.promote_canonical_finding(
+                    title=assessed.title,
+                    severity=assessed.severity,
+                    citations=assessed.citations,
+                    description=assessed.description,
+                    confirmation_level=assessed.confirmation_level or "probable",
+                    metadata=assessed.metadata,
+                )
             )
-        
-        Error Handling:
-        - If AIEngine fails, we catch the exception and log it
-        - We still emit error events to the UI so the user knows what happened
-        - This ensures one tool failure doesn't crash the entire scan
-        """
-        
-        # Detailed logging for debugging tool execution issues
-        logger.debug(f"[TaskRouter] Processing output from {tool_name} (rc={rc}, stdout={len(stdout)} bytes)")
-        
-        # Error handling block.
-        try:
-            # STEP 0: Record immutable observation in Epistemic Ledger (The Truth Engine)
-            observation = self.ledger.record_observation(
-                tool_name=tool_name,
-                tool_args=metadata.get("args", []),
-                target=metadata.get("target", "unknown"),
-                raw_output=stdout.encode("utf-8", errors="replace"), # Store bytes
-                exit_code=rc
+
+        if rc != 0:
+            logger.info(
+                "[TaskRouter] Tool %s failed (rc=%s), skipping AI analysis",
+                tool_name,
+                rc,
             )
-            
-            # Guard: don't send failed tool output through AI — error messages
-            # get misclassified as vulnerability findings
-            if rc != 0:
-                logger.info(f"[TaskRouter] Tool {tool_name} failed (rc={rc}), skipping AI analysis")
-                result = {"summary": f"Tool {tool_name} failed with exit code {rc}", "proposals": [], "next_steps": []}
-                promoted_findings = []
-            else:
-                # STEP 1: Send output to AIEngine for semantic analysis
-                # AIEngine return PROPOSALS, not final findings.
+            result: Dict[str, Any] = {
+                "summary": f"Tool {tool_name} failed with exit code {rc}",
+                "proposals": [],
+                "next_steps": [],
+            }
+        else:
+            try:
                 result = await self.ai.process_tool_output(
                     tool_name=tool_name,
                     stdout=stdout,
                     stderr=stderr,
                     rc=rc,
                     metadata=metadata,
-                    observation_id=observation.id, # Cite the evidence
+                    observation_id=observation.id,
+                )
+            except Exception as exc:
+                logger.error(
+                    "[TaskRouter] AIEngine failed to process %s output: %s",
+                    tool_name,
+                    exc,
+                    exc_info=True,
+                )
+                result = {
+                    "summary": f"Analysis failed: {exc}",
+                    "proposals": [],
+                    "next_steps": [],
+                }
+                self.emit_ui_event(
+                    "analysis_error",
+                    {"tool": tool_name, "error": str(exc), "target": target},
                 )
 
-                proposals = result.get("proposals", [])
-                promoted_findings = []
+        for proposal in result.get("proposals", []):
+            if not isinstance(proposal, FindingProposal):
+                logger.warning("[TaskRouter] Ignoring untyped AI proposal")
+                continue
+            if not proposal.citations:
+                proposal = FindingProposal(
+                    title=proposal.title,
+                    severity=proposal.severity,
+                    description=proposal.description,
+                    citations=[Citation(observation_id=observation.id)],
+                    source=proposal.source,
+                    metadata=proposal.metadata,
+                    confirmation_level=proposal.confirmation_level,
+                )
+            assessed_proposals.append(self.ledger.assess_proposal(proposal))
 
-                # STEP 2: Epistemic Gatekeeping (The Inversion)
-                # Pass proposals to Ledger for validation and promotion
-                for proposal in proposals:
-                    finding = self.ledger.evaluate_and_promote(proposal)
-                    if finding:
-                        promoted_findings.append(finding)
-                    else:
-                        logger.info(f"[TaskRouter] Logic Refusal: Proposal '{proposal.title}' rejected by Ledger.")
-            
-        except Exception as e:
-            # AIEngine analysis failed (LLM offline, parsing error, etc.)
-            # Log the full error with stack trace for debugging
-            logger.error(
-                f"[TaskRouter] AIEngine failed to process {tool_name} output: {e}",
-                exc_info=True
-            )
-            
-            # Create a fallback/error state
-            result = {
-                "summary": f"Analysis failed: {str(e)}",
-                "proposals": [],
-                "next_steps": [],
-            }
-            promoted_findings = []
-            
-            # Emit error event to UI so the user knows something went wrong
-            try:
-                self.emit_ui_event("analysis_error", {
-                    "tool": tool_name,
-                    "error": str(e),
-                    "target": metadata.get("target") if metadata else None
-                })
-            except Exception:
-                pass
+        finding_views = [self._finding_view(item) for item in canonical_findings]
+        result = {
+            **result,
+            "observation_id": observation.id,
+            "evidence_id": observation.id,
+            "proposals": assessed_proposals,
+            "findings": finding_views,
+        }
+        self._emit_tool_result(
+            tool_name=tool_name,
+            rc=rc,
+            metadata=metadata,
+            result=result,
+            findings=canonical_findings,
+        )
+        logger.info(
+            "[TaskRouter] Processed %s: %d canonical findings, %d proposals, %d next steps",
+            tool_name,
+            len(canonical_findings),
+            len(assessed_proposals),
+            len(result.get("next_steps", [])),
+        )
+        return result
 
-        # STEP 3: Emit events to UI for real-time updates
-        
-        # Emit evidence update (raw tool output stored in database)
-        try:
-            self.emit_ui_event("evidence_update", {
+    def _emit_tool_result(
+        self,
+        *,
+        tool_name: str,
+        rc: int,
+        metadata: Dict[str, Any],
+        result: Dict[str, Any],
+        findings: Sequence[Finding],
+    ) -> None:
+        self.emit_ui_event(
+            "evidence_update",
+            {
                 "tool": tool_name,
                 "summary": result.get("summary", "No summary available"),
-                "evidence_id": result.get("evidence_id"),
+                "evidence_id": result["evidence_id"],
                 "return_code": rc,
                 "success": rc == 0,
-            })
-        except Exception as e:
-            logger.warning(f"[TaskRouter] Failed to emit evidence_update: {e}")
-
-        # Emit findings update (ONLY show PROMOTED findings)
-        try:
-            # We need to construct a serializable representation of findings for the UI
-            findings_payload = []
-            for f in promoted_findings:
-                findings_payload.append({
-                    "title": f.title,
-                    "severity": f.severity,
-                    "description": f.description,
-                    "citations": [c.observation_id for c in f.citations]
-                })
-
-            self.emit_ui_event("findings_update", {
-                "tool": tool_name,
-                "findings": findings_payload,
-                "next_steps": result.get("next_steps", []),
-                # Include metadata so UI can filter by target/session
-                "metadata": metadata,
-            })
-        except Exception as e:
-            logger.warning(f"[TaskRouter] Failed to emit findings_update: {e}")
-
-        # STEP 3: Emit live AI commentary (optional, for chat-like UI updates)
-        # This provides a natural language explanation of what was discovered
-        live_comment = result.get("live_comment")
-        # Conditional branch.
-        if live_comment:
-            try:
-                self.emit_ui_event("ai_live_comment", {
-                    "tool": tool_name,
-                    "target": metadata.get("target") if metadata else None,
-                    "comment": live_comment,
-                    # Include timestamp so UI can show when this happened
-                    "timestamp": metadata.get("timestamp") if metadata else None,
-                })
-            except Exception as e:
-                logger.warning(f"[TaskRouter] Failed to emit ai_live_comment: {e}")
-        
-        # Log successful completion
-        logger.info(
-            f"[TaskRouter] Processed {tool_name}: "
-            f"{len(result.get('findings', []))} findings, "
-            f"{len(result.get('next_steps', []))} next steps"
+            },
         )
+        self.emit_ui_event(
+            "findings_update",
+            {
+                "tool": tool_name,
+                "findings": [self._finding_view(item) for item in findings],
+                "next_steps": result.get("next_steps", []),
+                "metadata": metadata,
+            },
+        )
+        live_comment = result.get("live_comment")
+        if live_comment:
+            self.emit_ui_event(
+                "ai_live_comment",
+                {
+                    "tool": tool_name,
+                    "target": metadata.get("target"),
+                    "comment": live_comment,
+                    "timestamp": metadata.get("timestamp"),
+                },
+            )
+
+    @staticmethod
+    def _scanner_proposal(
+        raw_finding: Dict[str, Any], observation_id: str, tool_name: str
+    ) -> FindingProposal:
+        finding = json.loads(json.dumps(raw_finding, sort_keys=True, default=str))
+        title = str(finding.get("title") or finding.get("type") or "Scanner finding")
+        severity = str(finding.get("severity") or "INFO").upper()
+        description = str(
+            finding.get("description")
+            or finding.get("message")
+            or finding.get("value")
+            or finding.get("proof")
+            or "Deterministic scanner classification."
+        )
+        return FindingProposal(
+            title=title,
+            severity=severity,
+            description=description,
+            citations=[Citation(observation_id=observation_id)],
+            source="scanner",
+            metadata={
+                "tool": tool_name,
+                "type": finding.get("type", title),
+                "scanner_finding": finding,
+            },
+        )
+
+    @staticmethod
+    def _finding_view(finding: Finding) -> Dict[str, Any]:
+        view = dict(finding.metadata.get("scanner_finding") or {})
+        metadata = dict(view.get("metadata") or {})
+        metadata.update(
+            {
+                "canonical_finding_id": finding.id,
+                "canonical_commitment": finding.commitment,
+                "session_id": finding.session_id,
+            }
+        )
+        view.update(
+            {
+                "id": finding.id,
+                "title": finding.title,
+                "severity": finding.severity,
+                "description": finding.description,
+                "confirmation_level": finding.confirmation_level,
+                "citations": [item.observation_id for item in finding.citations],
+                "metadata": metadata,
+            }
+        )
+        return view
 
 
 # ============================================================================
 # Module-Level Documentation
 # ============================================================================
 """
-USAGE EXAMPLES:
+USAGE:
 
-1. Basic usage (from scanner engine):
-   
-   from core.base.task_router import TaskRouter
-   
-   router = TaskRouter.instance()
-   router.handle_tool_output(
-       tool_name="nmap",
-       stdout="...",
-       stderr="",
-       rc=0,
-       metadata={"target": "example.com"}
-   )
+1. ScannerEngine supplies a ScannerEvidenceContext to handle_tool_output.
 
 2. Subscribing to UI events (from API server):
    
@@ -353,8 +403,7 @@ USAGE EXAMPLES:
 
 THREAD SAFETY:
 - TaskRouter itself is thread-safe (uses Signal class which handles threading)
-- AIEngine and EvidenceStore have their own locking mechanisms
-- You can call handle_tool_output() from multiple threads safely
+- ScannerEngine serializes canonical evidence routing within each scan lifecycle
 
 ERROR HANDLING PHILOSOPHY:
 - Never crash the event bus (catch all exceptions)
@@ -364,6 +413,5 @@ ERROR HANDLING PHILOSOPHY:
 
 CIRCULAR IMPORT PREVENTION:
 - Import AIEngine at top of file (since it's used in __init__)
-- Import EvidenceStore in __init__ (lazy loading)
 - Import this module at bottom of other files (avoid top-level cycles)
 """

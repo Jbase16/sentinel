@@ -1094,22 +1094,17 @@ class AIEngine:
         """
         Primary handler for all tool outputs.
         """
+        if not observation_id:
+            raise ValueError("AI analysis requires a canonical observation_id")
         self.ensure_client()
 
-        # Step 1: store raw evidence
-        evidence_id = EvidenceStore.instance().add_evidence(
-            tool=tool_name,
-            raw_output=stdout,
-            metadata=metadata,
-            session_id=metadata.get("session_id")
-        )
-
-        # Step 2: generate summary
+        # Step 1: generate a derived interpretation of canonical evidence.
+        # TaskRouter/EvidenceLedger already own the raw bytes; AI must not write
+        # a second evidence record.
         summary = self._summarize_output(tool_name, stdout, stderr, rc)
 
-        # Step 3: extract findings (AI or Heuristic) -> NOW PROPOSALS
+        # Step 2: extract findings (AI or Heuristic) -> NOW PROPOSALS
         proposals = []
-        phases = []
         next_steps = []
         
         # Try AI first
@@ -1127,37 +1122,11 @@ class AIEngine:
         elif get_config().ai.fallback_enabled:
              proposals = self._extract_findings_heuristic(tool_name, stdout, stderr, rc)
 
-        # Step 4: map killchain phases (Do this later based on actual Promoted findings?)
-        # For now, we infer phases from proposals to keep UI responsive, but technically
-        # this should happen after promotion.
-        # phases = self._infer_killchain_phases(proposals) 
-
-        # Step 5: update global stores -> REMOVED (Ledger Authority Inversion)
-        # for f in findings:
-        #     findings_store.add_finding(f)
-
-        # Loop over items.
-        # for p in phases:
-        #     killchain_store.add_phase(p)
-
-        # Step 6: enrich the evidence entry -> Doing this briefly for legacy UI support
-        # EvidenceStore.instance().update_evidence(
-        #     evidence_id,
-        #     summary=summary,
-        #     findings=findings,
-        # )
-
-        # Step 7: generate short live commentary for UI
-        target = metadata.get("target") if metadata else None
-        
-        # We don't generate live comment here anymore, let TaskRouter handle it based on accepted findings
-        live_comment = None 
-
         return {
             "summary": summary,
             "proposals": proposals, 
             "next_steps": next_steps,
-            "evidence_id": evidence_id,
+            "evidence_id": observation_id,
         }
 
     async def _analyze_with_llm(
