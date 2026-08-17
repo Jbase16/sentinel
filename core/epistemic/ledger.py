@@ -11,17 +11,24 @@ It distinguishes between:
 
 import logging
 import json
+import re
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Optional, Any, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from enum import Enum
 
+from core.base.scope import canonical_origin
+from core.behavior.compiler import OperationFamily, OperationInstance
 from core.epistemic.cas import ContentAddressableStorage
+from core.identity import AssessmentIdentityContext
 from core.base.config import SentinelConfig
 from core.replay.merkle import MerkleEngine
+from core.behavior.normalize import stable_hash
 
 logger = logging.getLogger(__name__)
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class LifecycleState(str, Enum):
@@ -42,9 +49,15 @@ class ConfirmationLevel(str, Enum):
 @dataclass(frozen=True)
 class ToolContext:
     name: str
-    args: List[str]
+    args: Tuple[str, ...]
     version: Optional[str] = None
     exit_code: int = 0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("tool name is required")
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(self, "args", tuple(str(item) for item in self.args))
 
 
 @dataclass(frozen=True)
@@ -59,6 +72,93 @@ class Observation:
     tool: ToolContext
     target: str
     blob_hash: str  # Pointer to CAS content
+
+
+def _observation_envelope_material(
+    *,
+    tool: ToolContext,
+    target: str,
+    blob_hash: str,
+    identity: AssessmentIdentityContext,
+    operation_family: OperationFamily,
+    operation_instance: OperationInstance,
+) -> Dict[str, Any]:
+    return {
+        "schema": "evidence_observation_envelope_v1",
+        "tool": {
+            "name": tool.name,
+            "args": list(tool.args),
+            "version": tool.version,
+            "exit_code": tool.exit_code,
+        },
+        "target": target,
+        "blob_hash": blob_hash,
+        "session_id": identity.session_id,
+        "identity_digest": identity.digest,
+        "operation_family_id": operation_family.family_id,
+        "operation_instance_id": operation_instance.instance_id,
+        "operation_outcome": operation_instance.outcome.value,
+        "operation_source_ref": operation_instance.source_ref,
+    }
+
+
+@dataclass(frozen=True)
+class ObservationEnvelope(Observation):
+    """Canonical observation bound to one session, identity, and outcome."""
+
+    commitment: str
+    identity: AssessmentIdentityContext
+    operation_family: OperationFamily
+    operation_instance: OperationInstance
+
+    def __post_init__(self) -> None:
+        material = _observation_envelope_material(
+            tool=self.tool,
+            target=self.target,
+            blob_hash=self.blob_hash,
+            identity=self.identity,
+            operation_family=self.operation_family,
+            operation_instance=self.operation_instance,
+        )
+        expected_commitment = stable_hash("observation_envelope", material)
+        expected_id = f"obs-{expected_commitment.rsplit(':', 1)[-1]}"
+        target_origin = canonical_origin(self.target)
+        expected_world_ref = (
+            self.identity.world_id
+            if self.identity.world_id.startswith("world:")
+            else stable_hash("world", self.identity.world_id)
+        )
+        if (
+            self.id != expected_id
+            or self.commitment != expected_commitment
+            or self.identity.session_id == "global_scan"
+            or target_origin is None
+            or target_origin.as_url() != self.identity.target_origin
+            or self.operation_instance.family_id != self.operation_family.family_id
+            or self.operation_instance.source_ref not in self.operation_family.source_refs
+            or self.operation_instance.world_ref != expected_world_ref
+            or _SHA256.fullmatch(self.blob_hash) is None
+        ):
+            raise ValueError("canonical observation envelope is invalid")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp,
+            "tool": {
+                "name": self.tool.name,
+                "args": list(self.tool.args),
+                "version": self.tool.version,
+                "exit_code": self.tool.exit_code,
+            },
+            "target": self.target,
+            "blob_hash": self.blob_hash,
+            "commitment": self.commitment,
+            "session_id": self.identity.session_id,
+            "identity": self.identity.to_dict(),
+            "operation_family": self.operation_family.to_dict(),
+            "operation_instance": self.operation_instance.to_dict(),
+        }
 
 
 @dataclass
@@ -223,7 +323,7 @@ class EvidenceLedger:
         obs = Observation(
             id=obs_id,
             timestamp=timestamp_override or time.time(),
-            tool=ToolContext(name=tool_name, args=tool_args, exit_code=exit_code),
+            tool=ToolContext(name=tool_name, args=tuple(tool_args), exit_code=exit_code),
             target=target,
             blob_hash=blob_hash
         )
@@ -253,6 +353,88 @@ class EvidenceLedger:
             logger.debug(f"[EvidenceLedger] Idempotent observation seen: {obs_id}")
             
         return obs
+
+    def record_canonical_observation(
+        self,
+        *,
+        tool_name: str,
+        tool_args: List[str],
+        target: str,
+        raw_output: bytes,
+        identity: AssessmentIdentityContext,
+        operation_family: OperationFamily,
+        operation_instance: OperationInstance,
+        exit_code: int = 0,
+        tool_version: Optional[str] = None,
+        timestamp_override: Optional[float] = None,
+    ) -> ObservationEnvelope:
+        """Admit one exact Stage-1 identity/outcome atom into this ledger."""
+
+        blob_hash = self.cas.store(raw_output)
+        tool = ToolContext(
+            name=tool_name,
+            args=tuple(tool_args),
+            version=tool_version,
+            exit_code=exit_code,
+        )
+        material = _observation_envelope_material(
+            tool=tool,
+            target=target,
+            blob_hash=blob_hash,
+            identity=identity,
+            operation_family=operation_family,
+            operation_instance=operation_instance,
+        )
+        commitment = stable_hash("observation_envelope", material)
+        observation = ObservationEnvelope(
+            id=f"obs-{commitment.rsplit(':', 1)[-1]}",
+            timestamp=(timestamp_override if timestamp_override is not None else time.time()),
+            tool=tool,
+            target=target,
+            blob_hash=blob_hash,
+            commitment=commitment,
+            identity=identity,
+            operation_family=operation_family,
+            operation_instance=operation_instance,
+        )
+        existing = self._observations.get(observation.id)
+        if existing is not None:
+            if (
+                not isinstance(existing, ObservationEnvelope)
+                or existing.commitment != observation.commitment
+            ):
+                raise ValueError("observation commitment collision")
+            return existing
+
+        self._observations[observation.id] = observation
+        self._emit_event(
+            event_type=EventType.OBSERVED,
+            entity_id=observation.id,
+            payload=observation.to_dict(),
+            timestamp_override=timestamp_override,
+        )
+        logger.info(
+            "[EvidenceLedger] Recorded canonical observation %s "
+            "(session=%s family=%s instance=%s)",
+            observation.id,
+            identity.session_id,
+            operation_family.family_id,
+            operation_instance.instance_id,
+        )
+        return observation
+
+    def observations_for_family(self, family_id: str) -> Tuple[ObservationEnvelope, ...]:
+        return tuple(
+            sorted(
+                (
+                    item
+                    for item in self._observations.values()
+                    if isinstance(item, ObservationEnvelope)
+                    and item.operation_family.family_id == family_id
+                ),
+                key=lambda item: item.id,
+            )
+        )
 
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
         """
