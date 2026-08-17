@@ -931,8 +931,16 @@ class _OperationDraft:
     sources: set[str] = field(default_factory=set)
     requires: set[Capability] = field(default_factory=set)
     produces: set[Capability] = field(default_factory=set)
+    requires_source_ids: Dict[Capability, set[str]] = field(default_factory=dict)
+    produces_source_ids: Dict[Capability, set[str]] = field(default_factory=dict)
     epistemic_statuses: set[EpistemicStatus] = field(default_factory=set)
     observed_success: bool = False
+
+    def bind_default_sources(self) -> None:
+        for capability in self.requires:
+            self.requires_source_ids.setdefault(capability, set()).update(self.sources)
+        for capability in self.produces:
+            self.produces_source_ids.setdefault(capability, set()).update(self.sources)
 
     @property
     def key(self) -> Tuple[str, ...]:
@@ -1211,6 +1219,7 @@ class TargetSemanticCatalogBuilder:
             return source.source_id
 
         def add_draft(value: _OperationDraft) -> None:
+            value.bind_default_sources()
             existing = drafts.get(value.key)
             if existing is None:
                 drafts[value.key] = value
@@ -1223,6 +1232,14 @@ class TargetSemanticCatalogBuilder:
             existing.sources.update(value.sources)
             existing.requires.update(value.requires)
             existing.produces.update(value.produces)
+            for capability, source_ids in value.requires_source_ids.items():
+                existing.requires_source_ids.setdefault(capability, set()).update(
+                    source_ids
+                )
+            for capability, source_ids in value.produces_source_ids.items():
+                existing.produces_source_ids.setdefault(capability, set()).update(
+                    source_ids
+                )
             existing.epistemic_statuses.update(value.epistemic_statuses)
             existing.observed_success = existing.observed_success or value.observed_success
 
@@ -1290,7 +1307,7 @@ class TargetSemanticCatalogBuilder:
                     if protocol is SemanticProtocol.GRAPHQL
                     else SemanticSourceKind.REST_EXCHANGE
                 )
-                source_id = add_source(
+                exchange_source_id = add_source(
                     SemanticSource.build(
                         kind=source_kind,
                         epistemic_status=EpistemicStatus.OBSERVED,
@@ -1299,7 +1316,7 @@ class TargetSemanticCatalogBuilder:
                         tenant_ref=tenant_ref,
                     )
                 )
-                source_ids = {source_id}
+                source_ids = {exchange_source_id}
                 if any(item.kind is CapabilityKind.VALUE for item in contract.produces):
                     source_ids.add(
                         add_source(
@@ -1331,6 +1348,12 @@ class TargetSemanticCatalogBuilder:
                 observation_actions.setdefault(exchange.source_id, set()).add(
                     contract.operation_id
                 )
+                required_capabilities = {*contract.requires, *request_controls}
+                produced_capabilities = (
+                    {*contract.produces, *response_controls}
+                    if contract.observed_success
+                    else set()
+                )
                 add_draft(
                     _OperationDraft(
                         action_id=contract.operation_id,
@@ -1341,8 +1364,16 @@ class TargetSemanticCatalogBuilder:
                         world_ref=exchange.world_id,
                         tenant_ref=tenant_ref,
                         sources=source_ids,
-                        requires={*contract.requires, *request_controls},
-                        produces={*contract.produces, *response_controls},
+                        requires=required_capabilities,
+                        produces=produced_capabilities,
+                        requires_source_ids={
+                            capability: {exchange_source_id}
+                            for capability in required_capabilities
+                        },
+                        produces_source_ids={
+                            capability: set(source_ids)
+                            for capability in produced_capabilities
+                        },
                         epistemic_statuses={EpistemicStatus.OBSERVED},
                         observed_success=contract.observed_success,
                     )
@@ -1605,6 +1636,16 @@ class TargetSemanticCatalogBuilder:
         evidence_source_drops = 0
         for draft in sorted(drafts.values(), key=lambda item: item.key):
             draft.sources.intersection_update(retained_source_ids)
+            for capabilities, source_map in (
+                (draft.requires, draft.requires_source_ids),
+                (draft.produces, draft.produces_source_ids),
+            ):
+                for capability in tuple(capabilities):
+                    refs = source_map.setdefault(capability, set(draft.sources))
+                    refs.intersection_update(retained_source_ids)
+                    if not refs:
+                        capabilities.discard(capability)
+                        source_map.pop(capability, None)
             if not draft.sources:
                 evidence_source_drops += 1
                 continue
@@ -1621,9 +1662,9 @@ class TargetSemanticCatalogBuilder:
 
         slot_values: list[SemanticSlot] = []
         for draft in retained_drafts:
-            for direction, capabilities in (
-                ("requires", draft.requires),
-                ("produces", draft.produces),
+            for direction, capabilities, source_map in (
+                ("requires", draft.requires, draft.requires_source_ids),
+                ("produces", draft.produces, draft.produces_source_ids),
             ):
                 for capability in sorted(capabilities, key=lambda item: item.key):
                     slot_values.append(
@@ -1636,7 +1677,7 @@ class TargetSemanticCatalogBuilder:
                                 direction == "produces"
                                 and capability.kind is CapabilityKind.VALUE
                             ),
-                            source_ids=tuple(draft.sources),
+                            source_ids=tuple(source_map[capability]),
                         )
                     )
         slot_values.sort(key=lambda item: item.slot_id)

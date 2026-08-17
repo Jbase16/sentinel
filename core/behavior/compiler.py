@@ -37,6 +37,9 @@ _HIGH_VALUE_OPERATION = re.compile(
 )
 _GRAPHQL_OPERATION = re.compile(r"^[_A-Za-z][_0-9A-Za-z]{0,127}$")
 _SOURCE_REF = re.compile(r"^source_ref:[0-9a-f]{64}$")
+_ACTION_REF = re.compile(r"^action:[0-9a-f]{64}$")
+_STATE_REF = re.compile(r"^state:[0-9a-f]{64}$")
+_WORLD_REF = re.compile(r"^world:[0-9a-f]{64}$")
 _SAFE_PATH_TERMS = frozenset(
     {
         "admin",
@@ -141,6 +144,31 @@ class OperationSafety(str, Enum):
     EXTERNAL_EFFECT = "external_effect"
     DESTRUCTIVE = "destructive"
     UNKNOWN = "unknown"
+
+
+class OperationOutcome(str, Enum):
+    """Observed outcome of one exact operation instance."""
+
+    INFORMATIONAL = "informational"
+    SUCCESS = "success"
+    REDIRECT = "redirect"
+    CLIENT_ERROR = "client_error"
+    SERVER_ERROR = "server_error"
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_status(cls, status: int) -> "OperationOutcome":
+        if 100 <= status < 200:
+            return cls.INFORMATIONAL
+        if 200 <= status < 300:
+            return cls.SUCCESS
+        if 300 <= status < 400:
+            return cls.REDIRECT
+        if 400 <= status < 500:
+            return cls.CLIENT_ERROR
+        if 500 <= status < 600:
+            return cls.SERVER_ERROR
+        return cls.UNKNOWN
 
 
 def _semantic_name(value: str, *, field_name: str) -> str:
@@ -250,6 +278,149 @@ class OperationContract:
             "source_refs": list(self.source_refs),
             "requires_owned_state": self.requires_owned_state,
             "cleanup_operation_id": self.cleanup_operation_id,
+        }
+
+
+@dataclass(frozen=True)
+class OperationFamily:
+    """Reusable request shape; response claims remain on exact instances."""
+
+    family_id: str
+    action_id: str
+    label: str
+    method: str
+    requires: Tuple[Capability, ...]
+    safety: OperationSafety
+    source_refs: Tuple[str, ...]
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        action_id: str,
+        label: str,
+        method: str,
+        requires: Iterable[Capability],
+        safety: OperationSafety,
+        source_refs: Iterable[str],
+    ) -> "OperationFamily":
+        sources = tuple(sorted(set(source_refs)))
+        identity = {"action_id": action_id, "label": label}
+        return cls(
+            family_id=stable_hash("operation_family", identity),
+            action_id=action_id,
+            label=label,
+            method=method,
+            requires=_unique_capabilities(requires),
+            safety=safety,
+            source_refs=sources,
+        )
+
+    def __post_init__(self) -> None:
+        expected = stable_hash(
+            "operation_family",
+            {"action_id": self.action_id, "label": self.label},
+        )
+        if (
+            self.family_id != expected
+            or _ACTION_REF.fullmatch(self.action_id) is None
+            or not self.label
+            or len(self.label) > 256
+            or not self.method
+            or not isinstance(self.safety, OperationSafety)
+            or self.requires != _unique_capabilities(self.requires)
+            or self.source_refs != tuple(sorted(set(self.source_refs)))
+            or any(_SOURCE_REF.fullmatch(item) is None for item in self.source_refs)
+        ):
+            raise ValueError("operation family is invalid")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "family_id": self.family_id,
+            "action_id": self.action_id,
+            "label": self.label,
+            "method": self.method,
+            "requires": [item.to_dict() for item in self.requires],
+            "safety": self.safety.value,
+            "source_refs": list(self.source_refs),
+        }
+
+
+@dataclass(frozen=True)
+class OperationInstance:
+    """One exact source/outcome pair and only the outputs observed there."""
+
+    instance_id: str
+    family_id: str
+    source_ref: str
+    world_ref: str
+    state_ref: str
+    response_status: int
+    outcome: OperationOutcome
+    outputs: Tuple[Capability, ...]
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        family_id: str,
+        source_ref: str,
+        world_ref: str,
+        state_ref: str,
+        response_status: int,
+        outputs: Iterable[Capability],
+    ) -> "OperationInstance":
+        identity = {
+            "family_id": family_id,
+            "source_ref": source_ref,
+            "world_ref": world_ref,
+            "state_ref": state_ref,
+        }
+        return cls(
+            instance_id=stable_hash("operation_instance", identity),
+            family_id=family_id,
+            source_ref=source_ref,
+            world_ref=world_ref,
+            state_ref=state_ref,
+            response_status=response_status,
+            outcome=OperationOutcome.from_status(response_status),
+            outputs=_unique_capabilities(outputs),
+        )
+
+    def __post_init__(self) -> None:
+        expected = stable_hash(
+            "operation_instance",
+            {
+                "family_id": self.family_id,
+                "source_ref": self.source_ref,
+                "world_ref": self.world_ref,
+                "state_ref": self.state_ref,
+            },
+        )
+        if (
+            self.instance_id != expected
+            or not self.family_id.startswith("operation_family:")
+            or _SOURCE_REF.fullmatch(self.source_ref) is None
+            or _WORLD_REF.fullmatch(self.world_ref) is None
+            or _STATE_REF.fullmatch(self.state_ref) is None
+            or isinstance(self.response_status, bool)
+            or not isinstance(self.response_status, int)
+            or not 0 <= self.response_status < 600
+            or self.outcome is not OperationOutcome.from_status(self.response_status)
+            or self.outputs != _unique_capabilities(self.outputs)
+        ):
+            raise ValueError("operation instance is invalid")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "instance_id": self.instance_id,
+            "family_id": self.family_id,
+            "source_ref": self.source_ref,
+            "world_ref": self.world_ref,
+            "state_ref": self.state_ref,
+            "response_status": self.response_status,
+            "outcome": self.outcome.value,
+            "outputs": [item.to_dict() for item in self.outputs],
         }
 
 
@@ -720,18 +891,16 @@ def _redacted_rest_label(method: str, path_template: str) -> str:
     return f"{method} {path}"
 
 
-def operation_contracts_from_records(
+def operation_atoms_from_records(
     records: Sequence[Mapping[str, Any]],
     *,
     world_id: str = "captured",
     limits: Optional[OperationCatalogLimits] = None,
-) -> Tuple[OperationContract, ...]:
-    """Build redacted operation contracts from already-captured exchanges.
+) -> tuple[Tuple[OperationFamily, ...], Tuple[OperationInstance, ...]]:
+    """Build redacted families and exact source/outcome instances.
 
     The adapter intentionally infers only semantic field names and path slots.
-    Non-read operations remain ``UNKNOWN`` safety and therefore blocked by the
-    default compiler policy.  No raw identifier, token, URL value, or body is
-    retained in the returned catalog.
+    No raw identifier, token, URL value, or body is retained.
     """
 
     active_limits = limits or OperationCatalogLimits()
@@ -749,7 +918,8 @@ def operation_contracts_from_records(
             if total_body_chars > active_limits.max_total_body_chars:
                 raise ValueError("record catalog exceeds max_total_body_chars")
 
-    grouped: Dict[str, Dict[str, Any]] = {}
+    grouped: Dict[tuple[str, str], Dict[str, Any]] = {}
+    instances: list[OperationInstance] = []
     for index, record in enumerate(records):
         try:
             exchange = normalize_exchange(
@@ -771,54 +941,113 @@ def operation_contracts_from_records(
             for key in exchange.query_keys
             if _CAPABILITY_FIELD.search(key)
         )
-        produces = set(_shape_capabilities(exchange.response_shape))
-        if 200 <= exchange.response_status < 300:
-            produces.add(Capability(CapabilityKind.STATE, f"response.{exchange.state_id[-16:]}"))
+        outputs = set(_shape_capabilities(exchange.response_shape))
+        if OperationOutcome.from_status(exchange.response_status) is OperationOutcome.SUCCESS:
+            outputs.add(
+                Capability(CapabilityKind.STATE, f"response.{exchange.state_id[-16:]}")
+            )
+        if len(outputs) > active_limits.max_capabilities_per_operation:
+            raise ValueError("operation instance exceeds max_capabilities_per_operation")
         safety = (
             OperationSafety.READ_ONLY
             if exchange.method in {"GET", "HEAD", "OPTIONS"}
             else OperationSafety.UNKNOWN
         )
-        existing = grouped.get(exchange.action_id)
+        family_key = (exchange.action_id, label)
+        existing = grouped.get(family_key)
         if existing is None:
-            grouped[exchange.action_id] = {
+            grouped[family_key] = {
                 "label": label,
+                "method": exchange.method,
                 "requires": requires,
-                "produces": produces,
                 "safety": safety,
-                "observed_success": 200 <= exchange.response_status < 300,
                 "source_refs": {exchange.source_id},
             }
         else:
             existing["requires"].update(requires)
-            existing["produces"].update(produces)
-            existing["observed_success"] = bool(
-                existing["observed_success"] or 200 <= exchange.response_status < 300
-            )
             existing["source_refs"].add(exchange.source_id)
 
         if len(grouped) > active_limits.max_operations:
             raise ValueError("operation catalog exceeds max_operations")
 
+        family_id = stable_hash(
+            "operation_family",
+            {"action_id": exchange.action_id, "label": label},
+        )
+        instances.append(
+            OperationInstance.build(
+                family_id=family_id,
+                source_ref=exchange.source_id,
+                world_ref=exchange.world_id,
+                state_ref=exchange.state_id,
+                response_status=exchange.response_status,
+                outputs=outputs,
+            )
+        )
+
     for value in grouped.values():
-        if (
-            len(value["requires"]) > active_limits.max_capabilities_per_operation
-            or len(value["produces"]) > active_limits.max_capabilities_per_operation
-        ):
+        if len(value["requires"]) > active_limits.max_capabilities_per_operation:
             raise ValueError("operation exceeds max_capabilities_per_operation")
 
-    return tuple(
-        OperationContract(
-            operation_id=operation_id,
+    families = tuple(
+        OperationFamily.build(
+            action_id=action_id,
             label=value["label"],
+            method=value["method"],
             requires=tuple(value["requires"]),
-            produces=tuple(value["produces"]),
             safety=value["safety"],
-            observed_success=bool(value["observed_success"]),
             source_refs=tuple(value["source_refs"]),
         )
-        for operation_id, value in sorted(grouped.items())
+        for (action_id, _label), value in sorted(grouped.items())
     )
+    return families, tuple(sorted(instances, key=lambda item: item.instance_id))
+
+
+def operation_contracts_from_records(
+    records: Sequence[Mapping[str, Any]],
+    *,
+    world_id: str = "captured",
+    limits: Optional[OperationCatalogLimits] = None,
+) -> Tuple[OperationContract, ...]:
+    """Project exact atoms into the legacy passive planner contract.
+
+    A family may claim only outputs common to every successful instance. Error,
+    redirect, and unknown outputs remain on their exact instances and cannot be
+    promoted by a different instance's successful status.
+    """
+
+    families, instances = operation_atoms_from_records(
+        records,
+        world_id=world_id,
+        limits=limits,
+    )
+    by_family: Dict[str, list[OperationInstance]] = {}
+    for instance in instances:
+        by_family.setdefault(instance.family_id, []).append(instance)
+
+    contracts = []
+    for family in families:
+        family_instances = by_family.get(family.family_id, [])
+        successes = [
+            item for item in family_instances if item.outcome is OperationOutcome.SUCCESS
+        ]
+        common_outputs: set[Capability] = set(successes[0].outputs) if successes else set()
+        for instance in successes[1:]:
+            common_outputs.intersection_update(instance.outputs)
+        contracts.append(
+            OperationContract(
+                operation_id=family.action_id,
+                label=family.label,
+                requires=family.requires,
+                produces=tuple(common_outputs),
+                safety=family.safety,
+                observed_success=bool(successes),
+                source_refs=tuple(
+                    item.source_ref for item in (successes or family_instances)
+                ),
+            )
+        )
+    return tuple(contracts)
 
 
 def high_value_goals(operations: Sequence[OperationContract]) -> Tuple[BackwardGoal, ...]:
@@ -847,8 +1076,12 @@ __all__ = [
     "CompilerPolicy",
     "OperationContract",
     "OperationCatalogLimits",
+    "OperationFamily",
+    "OperationInstance",
+    "OperationOutcome",
     "OperationSafety",
     "high_value_goals",
     "operation_contracts_from_records",
+    "operation_atoms_from_records",
     "value_capability_for_field_path",
 ]
