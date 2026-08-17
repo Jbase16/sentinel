@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "canonical_ids": [
+    {"id": "C0", "kind": "gate", "description": "Capability reconciliation gate"},
+    {"id": "OCB-R0", "kind": "phase", "description": "One-click bounty baseline reconciliation"},
+    {"id": "OCB-R1", "kind": "phase", "description": "One-click payout goals and proof topology"},
+    {"id": "OCB-R2", "kind": "phase", "description": "One-click target semantic reconstruction"},
+    {"id": "OCB-R3", "kind": "phase", "description": "One-click constraint learning and replanning"},
+    {"id": "OCB-R4", "kind": "phase", "description": "One-click experiment, world, and oracle SDK"},
+    {"id": "OCB-R5", "kind": "phase", "description": "One-click payout proof families"},
+    {"id": "OCB-R6", "kind": "phase", "description": "One-click coverage-guided search"},
+    {"id": "OCB-R7", "kind": "phase", "description": "One-click submission candidate assembly"},
+    {"id": "OCB-R8", "kind": "phase", "description": "One-click operational completion"},
+    {"id": "OCB-R9", "kind": "phase", "description": "One-click payout acceptance"},
+    {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
+    {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
+    {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},
+    {"id": "DB-R3", "kind": "phase", "description": "Daybreak graph-bound execution"},
+    {"id": "DB-R4", "kind": "phase", "description": "Daybreak proof families"},
+    {"id": "DB-R5", "kind": "phase", "description": "Daybreak durability and native proof"},
+    {"id": "DB-R6", "kind": "phase", "description": "Daybreak candidate and delivery"},
+    {"id": "LAB-S01", "kind": "scenario", "description": "Visual signup recording"},
+    {"id": "LAB-S02", "kind": "scenario", "description": "Recipe replay for a second persona"},
+    {"id": "LAB-S03", "kind": "scenario", "description": "Email-verification challenge"},
+    {"id": "LAB-S04", "kind": "scenario", "description": "Authority denial before traffic"},
+    {"id": "LAB-S05", "kind": "scenario", "description": "Cross-user document access vulnerable twin"},
+    {"id": "LAB-S06", "kind": "scenario", "description": "Cross-user document access secure twin"},
+    {"id": "LAB-S07", "kind": "scenario", "description": "Already-visible difference"},
+    {"id": "LAB-S08", "kind": "scenario", "description": "Receipt persistence"},
+    {"id": "LAB-S09", "kind": "scenario", "description": "Lifecycle and omission"},
+    {"id": "LAB-S10", "kind": "scenario", "description": "General scanner calibration"},
+    {"id": "OCB-S11", "kind": "scenario", "description": "Proof topology selection"},
+    {"id": "OCB-S12", "kind": "scenario", "description": "High-value sink discovery"},
+    {"id": "OCB-S13", "kind": "scenario", "description": "Constraint learning and replanning"},
+    {"id": "OCB-S14", "kind": "scenario", "description": "Missing authority denial"},
+    {"id": "OCB-S15", "kind": "scenario", "description": "Controlled state manufacture"},
+    {"id": "OCB-S16", "kind": "scenario", "description": "Role and membership monotonicity"},
+    {"id": "OCB-S17", "kind": "scenario", "description": "Capability confinement and freshness"},
+    {"id": "OCB-S18", "kind": "scenario", "description": "Coverage ordering and stop certificate"},
+    {"id": "OCB-S19", "kind": "scenario", "description": "Submission candidate assembly"},
+    {"id": "OCB-S20", "kind": "scenario", "description": "Full ordinary-click run"},
+    {"id": "DB-S11", "kind": "scenario", "description": "Forbidden-origin containment"},
+    {"id": "DB-S12", "kind": "scenario", "description": "Redirect-origin containment"},
+    {"id": "DB-S13", "kind": "scenario", "description": "Unpredictable producer"},
+    {"id": "DB-S14", "kind": "scenario", "description": "Failure-driven replan"},
+    {"id": "DB-S15", "kind": "scenario", "description": "Persona continuity"},
+    {"id": "DB-S16", "kind": "scenario", "description": "Graph lifecycle omission"},
+    {"id": "DB-S17", "kind": "scenario", "description": "One-time capability"},
+    {"id": "DB-S18", "kind": "scenario", "description": "Crash-safe receipts"},
+    {"id": "DB-S19", "kind": "scenario", "description": "Concurrent account cap"},
+    {"id": "DB-S20", "kind": "scenario", "description": "Alternate channels"},
+    {"id": "DB-S21", "kind": "scenario", "description": "Native proof streak"},
+    {"id": "DB-S22", "kind": "scenario", "description": "Public-service refusal"},
+    {"id": "LAB-R0-S11", "kind": "implementation", "description": "Implemented R0 forbidden-origin lab proof"},
+    {"id": "LAB-R0-S12", "kind": "implementation", "description": "Implemented R0 redirect-origin lab proof"},
+    {"id": "LAB-R0-S22", "kind": "implementation", "description": "Implemented R0 public-service refusal lab proof"}
+  ],
+  "historical_sources": [
+    {
+      "path": "docs/architecture/ONE_CLICK_BOUNTY_RECONCILIATION_PLAN.md",
+      "aliases": {
+        "R0": "OCB-R0", "R1": "OCB-R1", "R2": "OCB-R2", "R3": "OCB-R3", "R4": "OCB-R4",
+        "R5": "OCB-R5", "R6": "OCB-R6", "R7": "OCB-R7", "R8": "OCB-R8", "R9": "OCB-R9",
+        "S01": "LAB-S01", "S02": "LAB-S02", "S03": "LAB-S03", "S04": "LAB-S04", "S05": "LAB-S05",
+        "S06": "LAB-S06", "S07": "LAB-S07", "S08": "LAB-S08", "S09": "LAB-S09", "S10": "LAB-S10",
+        "S11": "OCB-S11", "S12": "OCB-S12", "S13": "OCB-S13", "S14": "OCB-S14", "S15": "OCB-S15",
+        "S16": "OCB-S16", "S17": "OCB-S17", "S18": "OCB-S18", "S19": "OCB-S19", "S20": "OCB-S20"
+      }
+    },
+    {
+      "path": "docs/architecture/SENTINEL_VISUAL_ACCEPTANCE_LAB_PLAN.md",
+      "aliases": {
+        "S01": "LAB-S01", "S02": "LAB-S02", "S03": "LAB-S03", "S04": "LAB-S04", "S05": "LAB-S05",
+        "S06": "LAB-S06", "S07": "LAB-S07", "S08": "LAB-S08", "S09": "LAB-S09", "S10": "LAB-S10"
+      }
+    }
+  ]
+}
