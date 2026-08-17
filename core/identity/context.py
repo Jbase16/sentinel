@@ -6,9 +6,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
 import json
+import re
 from typing import Any
 
 from core.base.scope import canonical_origin
+
+
+_ENVELOPE_REF = re.compile(r"^authorization_envelope:[0-9a-f]{64}$")
 
 
 class CredentialFreshness(str, Enum):
@@ -33,6 +37,8 @@ class AssessmentIdentityContext:
     """One exact identity binding; display metadata never establishes identity."""
 
     session_id: str
+    authorization_envelope_id: str
+    authorization_envelope_ref: str
     target_origin: str
     target_reset_epoch: int
     world_id: str
@@ -49,6 +55,8 @@ class AssessmentIdentityContext:
     def __post_init__(self) -> None:
         for name in (
             "session_id",
+            "authorization_envelope_id",
+            "authorization_envelope_ref",
             "world_id",
             "persona_id",
             "target_actor_id",
@@ -58,6 +66,9 @@ class AssessmentIdentityContext:
             "representation_id",
         ):
             object.__setattr__(self, name, _required(getattr(self, name), name))
+
+        if _ENVELOPE_REF.fullmatch(self.authorization_envelope_ref) is None:
+            raise ValueError("authorization_envelope_ref must bind a signed envelope")
 
         origin = canonical_origin(self.target_origin)
         if origin is None:
@@ -77,6 +88,8 @@ class AssessmentIdentityContext:
         return {
             "schema": "assessment_identity_v1",
             "session_id": self.session_id,
+            "authorization_envelope_id": self.authorization_envelope_id,
+            "authorization_envelope_ref": self.authorization_envelope_ref,
             "target_origin": self.target_origin,
             "target_reset_epoch": self.target_reset_epoch,
             "world_id": self.world_id,

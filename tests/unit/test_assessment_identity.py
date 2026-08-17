@@ -10,6 +10,8 @@ from core.identity import AssessmentIdentityContext, CredentialFreshness
 def _identity(**changes: object) -> AssessmentIdentityContext:
     values = {
         "session_id": "session-7",
+        "authorization_envelope_id": "envelope-7",
+        "authorization_envelope_ref": f"authorization_envelope:{'7' * 64}",
         "target_origin": "https://Example.Test:443/account/42",
         "target_reset_epoch": 4,
         "world_id": "world-primary",
