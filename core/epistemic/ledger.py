@@ -9,18 +9,21 @@ It distinguishes between:
 4. WhyNot (Reasoning for discarded/suppressed findings)
 """
 
-import logging
+import hashlib
 import json
+import logging
 import re
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 from enum import Enum
 
 from core.base.scope import canonical_origin
 from core.behavior.compiler import OperationFamily, OperationInstance
 from core.epistemic.cas import ContentAddressableStorage
+from core.epistemic.events import EpistemicConflict, EpistemicEvent, EventType
+from core.epistemic.persistence import CanonicalEvidenceRepository
 from core.identity import AssessmentIdentityContext
 from core.base.config import SentinelConfig
 from core.replay.merkle import MerkleEngine
@@ -111,6 +114,10 @@ class ObservationEnvelope(Observation):
     operation_family: OperationFamily
     operation_instance: OperationInstance
 
+    @property
+    def session_id(self) -> str:
+        return self.identity.session_id
+
     def __post_init__(self) -> None:
         material = _observation_envelope_material(
             tool=self.tool,
@@ -160,6 +167,29 @@ class ObservationEnvelope(Observation):
             "operation_instance": self.operation_instance.to_dict(),
         }
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ObservationEnvelope":
+        tool = value["tool"]
+        observation = cls(
+            id=value["id"],
+            timestamp=value["timestamp"],
+            tool=ToolContext(
+                name=tool["name"],
+                args=tuple(tool["args"]),
+                version=tool.get("version"),
+                exit_code=tool["exit_code"],
+            ),
+            target=value["target"],
+            blob_hash=value["blob_hash"],
+            commitment=value["commitment"],
+            identity=AssessmentIdentityContext.from_dict(value["identity"]),
+            operation_family=OperationFamily.from_dict(value["operation_family"]),
+            operation_instance=OperationInstance.from_dict(value["operation_instance"]),
+        )
+        if value.get("session_id") != observation.session_id:
+            raise ValueError("canonical observation session mismatch")
+        return observation
+
 
 @dataclass
 class Citation:
@@ -186,6 +216,65 @@ class Finding:
     remediation: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     confirmation_level: str = "probable"  # Default preserves existing behavior
+    session_id: Optional[str] = None
+    commitment: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "severity": self.severity,
+            "citations": [asdict(item) for item in self.citations],
+            "description": self.description,
+            "remediation": self.remediation,
+            "metadata": self.metadata,
+            "confirmation_level": self.confirmation_level,
+            "session_id": self.session_id,
+            "commitment": self.commitment,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "Finding":
+        finding = cls(
+            id=value["id"],
+            title=value["title"],
+            severity=value["severity"],
+            citations=[Citation(**item) for item in value["citations"]],
+            description=value["description"],
+            remediation=value.get("remediation"),
+            metadata=dict(value.get("metadata") or {}),
+            confirmation_level=value["confirmation_level"],
+            session_id=value.get("session_id"),
+            commitment=value.get("commitment"),
+        )
+        if finding.commitment != _canonical_finding_commitment(finding):
+            raise ValueError("canonical finding commitment mismatch")
+        if finding.id != f"find-{finding.commitment.rsplit(':', 1)[-1]}":
+            raise ValueError("canonical finding id mismatch")
+        return finding
+
+
+def _canonical_finding_material(finding: Finding) -> Dict[str, Any]:
+    if not finding.session_id or finding.session_id == "global_scan":
+        raise ValueError("canonical finding requires an explicit session")
+    confirmation = ConfirmationLevel(finding.confirmation_level)
+    if confirmation is ConfirmationLevel.HYPOTHESIZED:
+        raise ValueError("hypothesized claims cannot be canonical findings")
+    return {
+        "schema": "evidence_finding_v1",
+        "session_id": finding.session_id,
+        "title": finding.title,
+        "severity": finding.severity,
+        "citations": [asdict(item) for item in finding.citations],
+        "description": finding.description,
+        "remediation": finding.remediation,
+        "metadata": finding.metadata,
+        "confirmation_level": finding.confirmation_level,
+    }
+
+
+def _canonical_finding_commitment(finding: Finding) -> str:
+    return stable_hash("evidence_finding", _canonical_finding_material(finding))
 
 
 @dataclass(frozen=True)
@@ -198,9 +287,6 @@ class StateRecord:
     reason: Optional[str] = None
     decider: str = "system"
     timestamp: float = field(default_factory=time.time)
-
-
-from core.epistemic.events import EpistemicConflict, EpistemicEvent, EventType, ConflictType
 
 
 @dataclass
@@ -247,6 +333,7 @@ class EvidenceLedger:
         from core.base.config import get_config
         self.config = config or get_config()
         self.cas = ContentAddressableStorage(self.config)
+        self._repository = CanonicalEvidenceRepository(self.config.storage.db_path)
         
         # 1. Immutable Stores (The "What")
         self._observations: Dict[str, Observation] = {}
@@ -268,16 +355,75 @@ class EvidenceLedger:
         self._listeners: List[Callable[[EpistemicEvent], None]] = []
 
         # 3. Derived Views (The "Now")
-
-        
-        # 3. Derived Views (The "Now")
         self._state_table: Dict[str, StateRecord] = {}
+        self._restore_canonical_state()
 
     def _generate_deterministic_id(self, prefix: str, content: Any) -> str:
         """Generate a deterministic ID based on content hash."""
         # Use first 12 chars of SHA256 (48 bits of entropy is enough for local collision resistance)
         # We rely on MerkleEngine for canonicalization.
         return f"{prefix}-{MerkleEngine.compute_hash(content)[:12]}"
+
+    def _restore_canonical_state(self) -> None:
+        entities, event_values = self._repository.load()
+        for stored in entities:
+            if stored["kind"] == "observation":
+                entity = ObservationEnvelope.from_dict(stored["data"])
+                blob = self.cas.load(entity.blob_hash)
+                if blob is None or hashlib.sha256(blob).hexdigest() != entity.blob_hash:
+                    raise ValueError("canonical observation CAS integrity check failed")
+                self._observations[entity.id] = entity
+            elif stored["kind"] == "finding":
+                entity = Finding.from_dict(stored["data"])
+                cited = [
+                    self._observations.get(item.observation_id)
+                    for item in entity.citations
+                ]
+                if any(
+                    not isinstance(item, ObservationEnvelope)
+                    or item.session_id != entity.session_id
+                    for item in cited
+                ):
+                    raise ValueError("canonical finding citation index mismatch")
+                self._findings[entity.id] = entity
+            else:
+                raise ValueError("unsupported persisted epistemic entity")
+            if (
+                stored["id"] != entity.id
+                or stored["session_id"] != entity.session_id
+                or stored["commitment"] != entity.commitment
+            ):
+                raise ValueError("canonical evidence index mismatch")
+
+        for value in event_values:
+            event = EpistemicEvent(
+                id=value["id"],
+                event_type=EventType(value["event_type"]),
+                entity_id=value["entity_id"],
+                payload=dict(value["payload"]),
+                timestamp=value["timestamp"],
+                run_id=value.get("run_id"),
+            )
+            expected_id = self._generate_deterministic_id(
+                "evt",
+                {
+                    "type": event.event_type,
+                    "entity": event.entity_id,
+                    "payload": event.payload,
+                    "time": event.timestamp,
+                },
+            )
+            entity = self._observations.get(event.entity_id) or self._findings.get(
+                event.entity_id
+            )
+            if (
+                event.id != expected_id
+                or entity is None
+                or event.payload.get("session_id") != entity.session_id
+            ):
+                raise ValueError("canonical epistemic event is invalid")
+            self._event_log.append(event)
+            self._apply_event(event)
 
     # ------------------------------------------------------------------
     # Reactivity
@@ -407,12 +553,18 @@ class EvidenceLedger:
             return existing
 
         self._observations[observation.id] = observation
-        self._emit_event(
-            event_type=EventType.OBSERVED,
-            entity_id=observation.id,
-            payload=observation.to_dict(),
-            timestamp_override=timestamp_override,
-        )
+        try:
+            self._emit_event(
+                event_type=EventType.OBSERVED,
+                entity_id=observation.id,
+                payload=observation.to_dict(),
+                timestamp_override=timestamp_override,
+                canonical_session_id=identity.session_id,
+                durable_entity=("observation", observation.to_dict()),
+            )
+        except Exception:
+            self._observations.pop(observation.id, None)
+            raise
         logger.info(
             "[EvidenceLedger] Recorded canonical observation %s "
             "(session=%s family=%s instance=%s)",
@@ -435,6 +587,77 @@ class EvidenceLedger:
                 key=lambda item: item.id,
             )
         )
+
+    def promote_canonical_finding(
+        self,
+        *,
+        title: str,
+        severity: str,
+        citations: List[Citation],
+        description: str,
+        confirmation_level: str,
+        remediation: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        timestamp_override: Optional[float] = None,
+    ) -> Finding:
+        """Promote a non-hypothetical claim grounded only in session evidence."""
+
+        if not citations:
+            raise ValueError("canonical finding requires citations")
+        normalized_citations = sorted(
+            citations,
+            key=lambda item: json.dumps(asdict(item), sort_keys=True, default=str),
+        )
+        observations = [
+            self._observations.get(item.observation_id)
+            for item in normalized_citations
+        ]
+        if any(not isinstance(item, ObservationEnvelope) for item in observations):
+            raise ValueError(
+                "canonical finding citations must resolve to canonical observations"
+            )
+        sessions = {
+            item.session_id
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+        }
+        if len(sessions) != 1:
+            raise ValueError("canonical finding cannot cross session identities")
+        session_id = sessions.pop()
+        finding = Finding(
+            id="",
+            title=title,
+            severity=severity,
+            citations=normalized_citations,
+            description=description,
+            remediation=remediation,
+            metadata=dict(metadata or {}),
+            confirmation_level=confirmation_level,
+            session_id=session_id,
+        )
+        finding.commitment = _canonical_finding_commitment(finding)
+        finding.id = f"find-{finding.commitment.rsplit(':', 1)[-1]}"
+        existing = self._findings.get(finding.id)
+        if existing is not None:
+            if existing.commitment != finding.commitment:
+                raise ValueError("canonical finding commitment collision")
+            return existing
+
+        self._findings[finding.id] = finding
+        try:
+            self._emit_event(
+                event_type=EventType.PROMOTED,
+                entity_id=finding.id,
+                payload=finding.to_dict(),
+                timestamp_override=timestamp_override,
+                canonical_session_id=session_id,
+                durable_entity=("finding", finding.to_dict()),
+            )
+        except Exception:
+            self._findings.pop(finding.id, None)
+            raise
+        self._update_findings_store(finding)
+        return finding
 
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
         """
@@ -563,7 +786,7 @@ class EvidenceLedger:
             logger.warning(f"[EvidenceLedger] Suppressing unknown entity {related_id}")
             
         # Emit SUPPRESSED event
-        event = self._emit_event(
+        self._emit_event(
             event_type=EventType.SUPPRESSED,
             entity_id=related_id,
             payload={
@@ -585,11 +808,16 @@ class EvidenceLedger:
             logger.error(f"[EvidenceLedger] Cannot invalidate unknown finding {finding_id}")
             return
             
+        finding = self._findings[finding_id]
+        payload = {"reason": reason}
+        if finding.session_id is not None:
+            payload["session_id"] = finding.session_id
         self._emit_event(
             event_type=EventType.INVALIDATED,
             entity_id=finding_id,
-            payload={"reason": reason},
-            timestamp_override=timestamp_override
+            payload=payload,
+            timestamp_override=timestamp_override,
+            canonical_session_id=finding.session_id,
         )
         logger.info(f"[EvidenceLedger] Invalidated Finding {finding_id}: {reason}")
 
@@ -630,8 +858,15 @@ class EvidenceLedger:
     # Event Sourcing Core
     # ------------------------------------------------------------------
 
-    def _emit_event(self, event_type: EventType, entity_id: str, payload: Dict[str, Any], 
-                   timestamp_override: Optional[float] = None) -> EpistemicEvent:
+    def _emit_event(
+        self,
+        event_type: EventType,
+        entity_id: str,
+        payload: Dict[str, Any],
+        timestamp_override: Optional[float] = None,
+        canonical_session_id: Optional[str] = None,
+        durable_entity: Optional[Tuple[str, Mapping[str, Any]]] = None,
+    ) -> EpistemicEvent:
         """
         Create, Log, and Apply an event.
         """
@@ -656,6 +891,35 @@ class EvidenceLedger:
             timestamp=timestamp,
             run_id=GlobalSequenceAuthority.instance().run_id
         )
+
+        event_value = {
+            "id": event.id,
+            "event_type": event.event_type.value,
+            "entity_id": event.entity_id,
+            "payload": event.payload,
+            "timestamp": event.timestamp,
+            "run_id": event.run_id,
+        }
+        if canonical_session_id is not None:
+            if payload.get("session_id") != canonical_session_id:
+                raise ValueError("canonical event session mismatch")
+            if durable_entity is None:
+                self._repository.append_event(
+                    session_id=canonical_session_id,
+                    event=event_value,
+                )
+            else:
+                kind, entity_value = durable_entity
+                self._repository.append_entity_event(
+                    session_id=canonical_session_id,
+                    kind=kind,
+                    entity_id=entity_id,
+                    commitment=entity_value["commitment"],
+                    entity=entity_value,
+                    event=event_value,
+                )
+        elif durable_entity is not None:
+            raise ValueError("durable entity requires a canonical session")
         
         self._event_log.append(event)
         
@@ -682,18 +946,38 @@ class EvidenceLedger:
         The Reducer. Updates derived state based on event.
         """
         if event.event_type == EventType.OBSERVED:
-            self._set_state(event.entity_id, LifecycleState.OBSERVED, reason="Observed")
+            self._set_state(
+                event.entity_id,
+                LifecycleState.OBSERVED,
+                reason="Observed",
+                timestamp=event.timestamp,
+            )
             
         elif event.event_type == EventType.PROMOTED:
-            self._set_state(event.entity_id, LifecycleState.PROMOTED, reason="Promoted")
+            self._set_state(
+                event.entity_id,
+                LifecycleState.PROMOTED,
+                reason="Promoted",
+                timestamp=event.timestamp,
+            )
             
         elif event.event_type == EventType.SUPPRESSED:
             reason = f"{event.payload.get('reason_code')}: {event.payload.get('notes')}"
-            self._set_state(event.entity_id, LifecycleState.SUPPRESSED, reason=reason)
+            self._set_state(
+                event.entity_id,
+                LifecycleState.SUPPRESSED,
+                reason=reason,
+                timestamp=event.timestamp,
+            )
             
         elif event.event_type == EventType.INVALIDATED:
             reason = event.payload.get("reason", "Invalidated")
-            self._set_state(event.entity_id, LifecycleState.INVALIDATED, reason=reason)
+            self._set_state(
+                event.entity_id,
+                LifecycleState.INVALIDATED,
+                reason=reason,
+                timestamp=event.timestamp,
+            )
             
             # If finding is invalidated, maybe remove from findings_store view?
             # Or update its status there? 
@@ -701,13 +985,19 @@ class EvidenceLedger:
             # the UI handles it if we had a proper sync mechanism. 
             pass
 
-    def _set_state(self, entity_id: str, state: LifecycleState, reason: Optional[str] = None) -> StateRecord:
+    def _set_state(
+        self,
+        entity_id: str,
+        state: LifecycleState,
+        reason: Optional[str] = None,
+        timestamp: Optional[float] = None,
+    ) -> StateRecord:
         """Internal helper to update state table view."""
         record = StateRecord(
             entity_id=entity_id,
             state=state,
             reason=reason,
-            timestamp=time.time()
+            timestamp=timestamp if timestamp is not None else time.time(),
         )
         self._state_table[entity_id] = record
         return record
@@ -759,6 +1049,9 @@ class EvidenceLedger:
 
     def get_observation(self, obs_id: str) -> Optional[Observation]:
         return self._observations.get(obs_id)
+
+    def get_finding(self, finding_id: str) -> Optional[Finding]:
+        return self._findings.get(finding_id)
         
     def get_blob(self, obs_id: str) -> Optional[bytes]:
         return self.get_observation(obs_id) and self.cas.load(self.get_observation(obs_id).blob_hash)

@@ -196,6 +196,13 @@ class Capability:
     def to_dict(self) -> Dict[str, str]:
         return {"kind": self.kind.value, "name": self.name, "key": self.key}
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "Capability":
+        capability = cls(kind=CapabilityKind(value["kind"]), name=value["name"])
+        if value.get("key") != capability.key:
+            raise ValueError("capability key mismatch")
+        return capability
+
 
 def _unique_capabilities(values: Iterable[Capability]) -> Tuple[Capability, ...]:
     return tuple(sorted(set(values), key=lambda item: item.key))
@@ -345,6 +352,18 @@ class OperationFamily:
             "source_refs": list(self.source_refs),
         }
 
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "OperationFamily":
+        return cls(
+            family_id=value["family_id"],
+            action_id=value["action_id"],
+            label=value["label"],
+            method=value["method"],
+            requires=tuple(Capability.from_dict(item) for item in value["requires"]),
+            safety=OperationSafety(value["safety"]),
+            source_refs=tuple(value["source_refs"]),
+        )
+
 
 @dataclass(frozen=True)
 class OperationInstance:
@@ -422,6 +441,19 @@ class OperationInstance:
             "outcome": self.outcome.value,
             "outputs": [item.to_dict() for item in self.outputs],
         }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "OperationInstance":
+        return cls(
+            instance_id=value["instance_id"],
+            family_id=value["family_id"],
+            source_ref=value["source_ref"],
+            world_ref=value["world_ref"],
+            state_ref=value["state_ref"],
+            response_status=value["response_status"],
+            outcome=OperationOutcome(value["outcome"]),
+            outputs=tuple(Capability.from_dict(item) for item in value["outputs"]),
+        )
 
 
 @dataclass(frozen=True)

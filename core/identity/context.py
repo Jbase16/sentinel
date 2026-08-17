@@ -7,7 +7,7 @@ from enum import Enum
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Mapping
 
 from core.base.scope import canonical_origin
 
@@ -129,3 +129,30 @@ class AssessmentIdentityContext:
             "display_name": self.display_name,
             "digest": self.digest,
         }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "AssessmentIdentityContext":
+        """Restore a persisted identity while re-running every invariant."""
+
+        if value.get("schema") != "assessment_identity_v1":
+            raise ValueError("unsupported assessment identity schema")
+        identity = cls(
+            session_id=value["session_id"],
+            authorization_envelope_id=value["authorization_envelope_id"],
+            authorization_envelope_ref=value["authorization_envelope_ref"],
+            target_origin=value["target_origin"],
+            target_reset_epoch=value["target_reset_epoch"],
+            world_id=value["world_id"],
+            persona_id=value["persona_id"],
+            target_actor_id=value["target_actor_id"],
+            tenant_id=value["tenant_id"],
+            credential_source_ref=value["credential_source_ref"],
+            credential_epoch=value["credential_epoch"],
+            credential_freshness=CredentialFreshness(value["credential_freshness"]),
+            resource_id=value["resource_id"],
+            representation_id=value["representation_id"],
+            display_name=value.get("display_name", ""),
+        )
+        if value.get("digest") != identity.digest:
+            raise ValueError("assessment identity digest mismatch")
+        return identity
