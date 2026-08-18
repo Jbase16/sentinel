@@ -21,6 +21,7 @@ from .models import (
 from .propagator import PressurePropagator
 from .counterfactual import CounterfactualEngine
 from .min_fix_set import MinimalFixSetEngine
+from .projection import PressureGraphProjection, project_pressure_graph
 from .manager import PressureGraphManager
 
 __all__ = [
@@ -31,5 +32,7 @@ __all__ = [
     'PressurePropagator',
     'CounterfactualEngine',
     'MinimalFixSetEngine',
+    'PressureGraphProjection',
+    'project_pressure_graph',
     'PressureGraphManager',
 ]

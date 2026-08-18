@@ -14,6 +14,7 @@ from core.behavior.receipts import (
 )
 from core.cortex.canonical_graph import build_causal_graph_snapshot
 from core.cortex.triage_adversary import BOUNTY, route_findings
+from core.data.pressure_graph.projection import project_pressure_graph
 from core.epistemic.ledger import (
     ActiveProofCitation,
     Citation,
@@ -204,6 +205,7 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
 
         before = ledger.session_read_model(SESSION_ID)
         before_graph = build_causal_graph_snapshot(before)
+        before_pressure = project_pressure_graph(before_graph)
         tampered_graph_view = before_graph.graph_dto
         tampered_graph_view["nodes"].clear()
         assert before_graph.graph_dto["count"]["nodes"] == 1
@@ -226,6 +228,7 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
         restored = EvidenceLedger(config, receipt_store=receipt_store)
         after = restored.session_read_model(SESSION_ID)
         after_graph = build_causal_graph_snapshot(after)
+        after_pressure = project_pressure_graph(after_graph)
         after_findings = after.finding_views()
         after_chat = build_scan_briefing(
             after_findings,
@@ -243,6 +246,8 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
     assert restored.get_state(finding.id).state is LifecycleState.INVALIDATED
     assert before.revision != after.revision
     assert before_graph.graph_hash != after_graph.graph_hash
+    assert before_pressure.graph_hash != after_pressure.graph_hash
+    assert before_pressure.projection_hash != after_pressure.projection_hash
     assert before_graph.graph_dto["count"]["nodes"] == 1
     assert after_graph.graph_dto["count"]["nodes"] == 0
     assert before_chat != after_chat

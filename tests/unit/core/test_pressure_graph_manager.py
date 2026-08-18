@@ -37,58 +37,33 @@ class _EventBus:
         return self.subscription
 
 
-def test_on_issues_changed_uses_injected_store(monkeypatch):
-    issue = {
-        "id": "issue-1",
-        "type": "vulnerability",
-        "severity": "HIGH",
-        "target": "https://example.test",
-        "description": "example",
-    }
+def test_peer_issue_store_cannot_mutate_canonical_projection():
     mgr = PressureGraphManager(
         session_id="s1",
-        issues_store=_StubStore([issue]),
+        issues_store=_RaisingStore(),
         killchain_store=None,
         findings_store=None,
     )
 
-    import core.data.pressure_graph.manager as pgm
-
-    monkeypatch.setattr(pgm, "issues_store", _RaisingStore())
-
     mgr._on_issues_changed()
 
-    assert "s1_issue-1" in mgr.nodes
+    assert mgr.nodes == {}
 
 
-def test_on_killchain_changed_uses_injected_store(monkeypatch):
-    edge = {
-        "id": "edge-1",
-        "source": "source-node",
-        "target": "target-node",
-        "edge_type": "CAUSES",
-        "severity": "HIGH",
-        "tool": "nuclei",
-    }
+def test_peer_killchain_store_cannot_mutate_canonical_projection():
     mgr = PressureGraphManager(
         session_id="s1",
         issues_store=None,
-        killchain_store=_StubStore([edge]),
+        killchain_store=_RaisingStore(),
         findings_store=None,
     )
 
-    import core.data.pressure_graph.manager as pgm
-
-    monkeypatch.setattr(pgm, "killchain_store", _RaisingStore())
-
     mgr._on_killchain_changed()
 
-    assert "edge-1" in mgr.edges
-    assert mgr.edges["edge-1"].source_id == "source-node"
-    assert mgr.edges["edge-1"].target_id == "target-node"
+    assert mgr.edges == {}
 
 
-def test_close_disconnects_store_and_event_subscriptions(monkeypatch):
+def test_manager_does_not_subscribe_to_peer_graph_sources(monkeypatch):
     issues = _SignalStore([], "issues_changed")
     killchain = _SignalStore([], "edges_changed")
     findings = _SignalStore([], "findings_changed")
@@ -104,9 +79,9 @@ def test_close_disconnects_store_and_event_subscriptions(monkeypatch):
         findings_store=findings,
     )
 
-    assert len(issues.issues_changed._observers) == 1
-    assert len(killchain.edges_changed._observers) == 1
-    assert len(findings.findings_changed._observers) == 1
+    assert issues.issues_changed._observers == []
+    assert killchain.edges_changed._observers == []
+    assert findings.findings_changed._observers == []
 
     manager.close()
     manager.close()
@@ -114,4 +89,4 @@ def test_close_disconnects_store_and_event_subscriptions(monkeypatch):
     assert issues.issues_changed._observers == []
     assert killchain.edges_changed._observers == []
     assert findings.findings_changed._observers == []
-    assert event_bus.subscription.unsubscribed is True
+    assert event_bus.subscription.unsubscribed is False

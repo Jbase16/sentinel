@@ -20,6 +20,10 @@ class EdgeType(Enum):
     REACHES = "reaches"
     REQUIRES = "requires"
     AMPLIFIES = "amplifies"
+    EXPOSES = "exposes"
+    VULNERABLE_TO = "vulnerable_to"
+    USES_TECH = "uses_tech"
+    HAS_PORT = "has_port"
 
 
 class PressureSource(Enum):
@@ -27,6 +31,7 @@ class PressureSource(Enum):
     ENGINE = "engine"         # Calculated by our Propagator
     INTERPOLATED = "interpolated" # Smooth transition state (frontend only usually, but allowed here)
     DECAYING = "decaying"     # Post-remediation cooling
+    CANONICAL = "canonical_causal_graph"
 
 
 class RemediationState(Enum):

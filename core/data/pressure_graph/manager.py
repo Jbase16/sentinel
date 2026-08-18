@@ -4,16 +4,13 @@ Integration manager for pressure graph with Sentinel stores.
 Bridges issues_store and killchain_store to pressure graph.
 """
 
-from typing import Dict, Set, Optional
+from typing import TYPE_CHECKING, Dict, Set, Optional
 
 from core.utils.observer import Observable, Signal
 from core.data.db import Database
 from core.utils.async_helpers import create_safe_task
 import asyncio
 import logging
-
-
-logger = logging.getLogger(__name__)
 
 from .models import (
     PressureNode,
@@ -27,6 +24,7 @@ from .propagator import PressurePropagator
 from .counterfactual import CounterfactualEngine
 from .min_fix_set import MinimalFixSetEngine
 from .explanation import CausalExplainer
+from .projection import PressureGraphProjection, project_pressure_graph
 from core.cortex.events import get_event_bus, GraphEventType, GraphEvent
 # ... imports continue ...
 
@@ -40,6 +38,11 @@ except ImportError:
     issues_store = None
     killchain_store = None
 
+if TYPE_CHECKING:
+    from core.cortex.canonical_graph import CausalGraphSnapshot
+
+logger = logging.getLogger(__name__)
+
 class PressureGraphManager(Observable):
     """
     Main manager for pressure graph integration.
@@ -50,7 +53,14 @@ class PressureGraphManager(Observable):
     
     graph_updated = Signal()
     
-    def __init__(self, session_id: str, issues_store=None, killchain_store=None, findings_store=None):
+    def __init__(
+        self,
+        session_id: str,
+        issues_store=None,
+        killchain_store=None,
+        findings_store=None,
+        canonical_snapshot: Optional["CausalGraphSnapshot"] = None,
+    ):
         """
         Initialize pressure graph manager.
         
@@ -69,6 +79,8 @@ class PressureGraphManager(Observable):
         self._findings_store = findings_store
         self._closed = False
         self._event_subscription = None
+        self._canonical_only = True
+        self._projection: Optional[PressureGraphProjection] = None
         
         # Graph data
         self.nodes: Dict[str, PressureNode] = {}
@@ -83,78 +95,65 @@ class PressureGraphManager(Observable):
         # State
         self.crown_jewel_ids: Set[str] = set()
         self.baseline_pressures: Dict[str, float] = {}
-        
-        # Connect to store signals
-        self._connect_stores()
-        
-        # Initialize engines on first data
+        self.entry_node_ids: Set[str] = set()
         self._engines_initialized = False
 
-        # Attempt to load persistent state if loop exists
-        try:
-            asyncio.get_running_loop()
-            create_safe_task(self._load_state(), name="graph_load_state")
-        except RuntimeError:
-            pass
+        if canonical_snapshot is not None:
+            self._apply_canonical_snapshot(canonical_snapshot)
+        else:
+            try:
+                asyncio.get_running_loop()
+                create_safe_task(self._load_state(), name="graph_load_state")
+            except RuntimeError:
+                pass
     
     async def _load_state(self):
-        """Load graph state from DB."""
+        """Load one fresh canonical snapshot and replace the projection."""
         if self._closed or not self.session_id:
             return
-            
-        nodes_data, edges_data = await self.db.load_graph_snapshot(self.session_id)
-        if not nodes_data and not edges_data:
-            await self._hydrate_from_stores()
-            self._ensure_crown_jewels()
-            return
-            
-        # Reconstruct nodes
-        for n in nodes_data:
-            node = PressureNode(
-                id=n["id"],
-                type=n["type"],
-                revision=n["data"].get("revision", 1),
-                severity=n["data"].get("severity", 1.0),
-                exposure=n["data"].get("exposure", 0.5),
-                exploitability=n["data"].get("exploitability", 0.5),
-                privilege_gain=n["data"].get("privilege_gain", 0.3),
-                asset_value=n["data"].get("asset_value", 5.0),
-                tool_reliability=n["data"].get("tool_reliability", 1.0),
-                evidence_quality=n["data"].get("evidence_quality", 0.8),
-                corroboration_count=n["data"].get("corroboration_count", 0),
-                pressure_source=PressureSource(n["data"].get("pressure_source", "engine")),
-                remediation_state=RemediationState(n["data"].get("remediation_state", "none")),
-                mass=n["data"].get("mass", 1.0),
-                charge=n["data"].get("charge", 0.0),
-                temperature=n["data"].get("temperature", 0.0),
-                structural=n["data"].get("structural", False)
-            )
-            self.nodes[node.id] = node
-            
-        # Reconstruct edges
-        for e in edges_data:
-            edge = PressureEdge(
-                id=e["id"],
-                source_id=e["source"],
-                target_id=e["target"],
-                type=EdgeType(e["type"]),
-                transfer_factor=e.get("weight", 0.8),
-                confidence=e["data"].get("confidence", 0.8),
-                evidence_sources=e["data"].get("evidence_sources", []),
-                created_at=e["data"].get("created_at", 0.0)
-            )
-            self.edges[edge.id] = edge
-            
-        if self.nodes or self.edges:
-            self._initialize_engines()
-            self.graph_updated.emit()
-            logger.info(f"[GraphManager] Loaded {len(self.nodes)} nodes, {len(self.edges)} edges from DB.")
 
-        await self._hydrate_from_stores()
-        self._ensure_crown_jewels()
+        from core.cortex.canonical_graph import load_causal_graph_snapshot
+
+        snapshot = await load_causal_graph_snapshot(self.session_id)
+        self._apply_canonical_snapshot(snapshot)
+
+    async def refresh_from_canonical(self) -> None:
+        await self._load_state()
+
+    def _apply_canonical_snapshot(self, snapshot: "CausalGraphSnapshot") -> None:
+        projection = project_pressure_graph(snapshot)
+        self._projection = projection
+        self.nodes = {item.id: item for item in projection.nodes}
+        self.edges = {item.id: item for item in projection.edges}
+        dto = projection.to_dict()
+        self.entry_node_ids = {
+            item for item in dto.get("entry_nodes", []) if item in self.nodes
+        }
+        self.crown_jewel_ids = {
+            item for item in dto.get("critical_assets", []) if item in self.nodes
+        }
+        self.baseline_pressures = {}
+        self.propagator = None
+        self.counterfactual = None
+        self.min_fix_set = None
+        self.explainer = None
+        self._engines_initialized = False
+        self._initialize_engines()
+        if self.propagator:
+            self.baseline_pressures = self.propagator.propagate(
+                self.crown_jewel_ids
+            )
+            if self.counterfactual:
+                self.counterfactual.set_baseline(
+                    self.crown_jewel_ids,
+                    self.baseline_pressures,
+                )
+        self.graph_updated.emit()
 
     async def _hydrate_from_stores(self) -> None:
         """Pull current data from stores if signals were missed."""
+        if self._canonical_only:
+            return
         store = self._issues_store if self._issues_store else issues_store
         if not store:
             return
@@ -176,120 +175,32 @@ class PressureGraphManager(Observable):
             self.graph_updated.emit()
 
     async def save_snapshot(self):
-        """Persist current graph state to DB."""
-        if self._closed or not self.session_id:
-            return
-
-        nodes_data = [
-            {
-                "id": n.id,
-                "type": n.type,
-                "label": f"{n.type}:{n.id}",
-                "data": {
-                    "severity": n.severity,
-                    "exposure": n.exposure,
-                    "exploitability": n.exploitability,
-                    "privilege_gain": n.privilege_gain,
-                    "asset_value": n.asset_value,
-                    "tool_reliability": n.tool_reliability,
-                    "evidence_quality": n.evidence_quality,
-                    "corroboration_count": n.corroboration_count,
-                    "pressure_source": n.pressure_source.value,
-                    "remediation_state": n.remediation_state.value,
-                    "revision": n.revision,
-                    "mass": n.mass,
-                    "charge": n.charge,
-                    "temperature": n.temperature,
-                    "structural": n.structural
-                }
-            }
-            for n in self.nodes.values()
-        ]
-        
-        edges_data = [
-            {
-                "id": e.id,
-                "source": e.source_id,
-                "target": e.target_id,
-                "type": e.type.value,
-                "weight": e.transfer_factor,
-                "data": {
-                    "confidence": e.confidence,
-                    "evidence_sources": e.evidence_sources,
-                    "created_at": e.created_at
-                }
-            }
-            for e in self.edges.values()
-        ]
-        
-        try:
-            await self.db.save_graph_snapshot(self.session_id, nodes_data, edges_data)
-        except ValueError as e:
-            if "no active connection" in str(e):
-                logger.debug("[GraphManager] Skipping snapshot save - DB connection closed.")
-                return
-            raise
-        except Exception as e:
-            logger.warning(f"[GraphManager] Snapshot save failed: {e}")
-            # Don't re-raise to avoid crashing background tasks
-            return
+        """No-op: canonical graph persistence is owned by EvidenceLedger readers."""
+        return
 
 
     def to_dict(self) -> dict:
         """Return graph state as DTO-compatible dict."""
+        if self._projection is not None:
+            return self._projection.to_dict()
         return {
             "session_id": self.session_id,
-            "nodes": [
-                {
-                    "id": n.id,
-                    "type": n.type,
-                    "label": f"{n.type}:{n.id}",
-                    "data": {
-                        "severity": n.severity,
-                        "exposure": n.exposure,
-                        "exploitability": n.exploitability,
-                        "privilege_gain": n.privilege_gain,
-                        "asset_value": n.asset_value,
-                        "tool_reliability": n.tool_reliability,
-                        "evidence_quality": n.evidence_quality,
-                        "corroboration_count": n.corroboration_count,
-                        "pressure_source": n.pressure_source.value,
-                        "remediation_state": n.remediation_state.value,
-                        "revision": n.revision,
-                        "mass": n.mass,
-                        "charge": n.charge,
-                        "temperature": n.temperature,
-                        "structural": n.structural,
-                        "description": n.description
-                    }
-                }
-                for n in self.nodes.values()
-            ],
-            "edges": [
-                {
-                    "id": e.id,
-                    "source": e.source_id,
-                    "target": e.target_id,
-                    "type": e.type.value,
-                    "weight": e.transfer_factor,
-                    "data": {
-                        "confidence": e.confidence,
-                        "evidence_sources": e.evidence_sources,
-                        "created_at": e.created_at
-                    }
-                }
-                for e in self.edges.values()
-            ],
-            "count": {
-                "nodes": len(self.nodes),
-                "edges": len(self.edges)
-            }
+            "evidence_revision": None,
+            "graph_hash": None,
+            "source_graph_hash": None,
+            "projection_hash": None,
+            "projection_owner": "canonical_causal_graph",
+            "nodes": [],
+            "edges": [],
+            "count": {"nodes": 0, "edges": 0},
         }
 
 
     
     def _connect_stores(self):
         """Connect to Sentinel store change signals."""
+        if self._canonical_only:
+            return
         # Issues Store
         store = self._issues_store if self._issues_store else issues_store
         if store and hasattr(store, 'issues_changed'):
@@ -375,6 +286,8 @@ class PressureGraphManager(Observable):
         Handle new issues from issues_store.
         Converts issues to pressure nodes.
         """
+        if self._canonical_only:
+            return
         store = self._issues_store if self._issues_store else issues_store
         if not store:
             return
@@ -407,6 +320,8 @@ class PressureGraphManager(Observable):
         Handle new killchain edges from killchain_store.
         Converts killchain edges to pressure edges.
         """
+        if self._canonical_only:
+            return
         store = self._killchain_store if self._killchain_store else killchain_store
         if not store:
             return
@@ -437,6 +352,8 @@ class PressureGraphManager(Observable):
         Handle new findings from findings_store.
         Converts findings to pressure nodes (treating them as potential issues).
         """
+        if self._canonical_only:
+            return
         store = self._findings_store
         if not store:
             return
@@ -465,6 +382,8 @@ class PressureGraphManager(Observable):
         """
         Manually ingest a list of findings (e.g. from HTTP hydrator).
         """
+        if self._canonical_only:
+            raise RuntimeError("PressureGraph canonical projection is read-only")
         for finding in findings:
             node = self._issue_to_pressure_node(finding)
             self.nodes[node.id] = node
@@ -486,6 +405,8 @@ class PressureGraphManager(Observable):
         - TOOL_COMPLETED (Error) -> Friction Node
         - SCAN_FAILED -> Catastrophic Friction
         """
+        if self._canonical_only:
+            return
         payload = event.payload
         if payload.get("session_id") != self.session_id:
             return
@@ -515,7 +436,6 @@ class PressureGraphManager(Observable):
         - Connected via High Tension edge to Target
         """
         # Node ID unique to this failure instance
-        import time
         import time
         node_id = f"{self.session_id}_friction_{tool}_{int(time.time()*1000)}"
         
@@ -761,6 +681,8 @@ class PressureGraphManager(Observable):
         
         These are the sinks in the pressure graph.
         """
+        if self._canonical_only:
+            raise RuntimeError("PressureGraph critical assets are canonical")
         self.crown_jewel_ids = crown_jewel_ids
         self.recompute_pressure()
 
@@ -774,6 +696,8 @@ class PressureGraphManager(Observable):
 
     def _ensure_crown_jewels(self) -> None:
         """Populate crown jewels automatically when none are set."""
+        if self._canonical_only:
+            return
         if self.crown_jewel_ids:
             return
         detected = self._auto_detect_crown_jewels()
@@ -849,6 +773,10 @@ class PressureGraphManager(Observable):
         chokepoints = self.find_chokepoints()
         
         return {
+            "graph_hash": self._projection.graph_hash if self._projection else None,
+            "projection_hash": (
+                self._projection.projection_hash if self._projection else None
+            ),
             "pressure_metrics": {
                 "total_system_pressure": total_system_pressure,
                 "total_crown_jewel_pressure": total_crown_jewel_pressure,
@@ -993,6 +921,8 @@ class PressureGraphManager(Observable):
         """
         Find entry points (nodes with no inbound edges).
         """
+        if self._canonical_only:
+            return sorted(self.entry_node_ids)
         all_node_ids = set(self.nodes.keys())
         nodes_with_inbound = set()
         
@@ -1006,6 +936,8 @@ class PressureGraphManager(Observable):
         """
         Directly increase pressure on a node (e.g., from Fuzzing Feedback).
         """
+        if self._canonical_only:
+            raise RuntimeError("PressureGraph canonical projection is read-only")
         if node_id not in self.nodes:
             logger.info(f"PressureGraph: Auto-creating missing node {node_id} from feedback.")
             # Heuristic: If it starts with service:, it's a Component.

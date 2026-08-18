@@ -633,7 +633,6 @@ class CausalGraphBuilder:
         """
         Add decision nodes and edges to the graph.
         """
-        import json
         for d in decisions:
             label = f"[{d.get('type','DECISION')}] {d.get('chosen','Unknown')}"
             node_data = {
@@ -1223,7 +1222,7 @@ class CausalGraphBuilder:
         # Calculate betweenness centrality (measures choke-point importance)
         try:
             centrality = nx.betweenness_centrality(self.graph)
-        except:
+        except Exception:
             centrality = {node: 0.0 for node in self.graph.nodes()}
 
         pressure_points = []
@@ -1235,7 +1234,7 @@ class CausalGraphBuilder:
             # Downstream: all findings reachable from this node
             try:
                 downstream = list(nx.descendants(self.graph, node))
-            except:
+            except Exception:
                 downstream = []
 
             # Attack paths blocked: count of simple paths from this node to leaves
@@ -1285,7 +1284,7 @@ class CausalGraphBuilder:
         try:
             descendants = nx.descendants(self.graph, finding_id)
             return len(descendants)
-        except:
+        except Exception:
             return 0
 
     def get_attack_chains(
@@ -1684,7 +1683,10 @@ class CausalGraphBuilder:
 
             edge_data = {
                 "confidence": float(confidence),
-                "created_at": data.get("enabled_at", time.time()),
+                # Snapshot rendering must be deterministic for one canonical
+                # evidence revision. Missing source time is represented as 0,
+                # never wall-clock render time.
+                "created_at": data.get("enabled_at", 0.0),
                 "relationship_raw": relationship_raw,
                 "render_type": canonical_type,
             }
@@ -1845,7 +1847,6 @@ class CausalGraphBuilder:
             DOT format string
         """
         from io import StringIO
-        import networkx as nx
 
         output = StringIO()
         output.write("digraph CausalAttackGraph {\n")
