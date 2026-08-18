@@ -329,6 +329,115 @@ def _canonical_finding_commitment(finding: Finding) -> str:
 
 
 @dataclass(frozen=True)
+class CanonicalSessionReadModel:
+    """One immutable, session-scoped projection of current ledger truth."""
+
+    session_id: str
+    revision: str
+    observations: Tuple[ObservationEnvelope, ...]
+    findings: Tuple[Finding, ...]
+
+    def finding_views(self) -> List[Dict[str, Any]]:
+        observation_index = {item.id: item for item in self.observations}
+        views: List[Dict[str, Any]] = []
+        for finding in self.findings:
+            cited = [
+                observation_index.get(item.observation_id)
+                for item in finding.citations
+            ]
+            first_observation = next(
+                (item for item in cited if isinstance(item, ObservationEnvelope)),
+                None,
+            )
+            metadata = json.loads(
+                json.dumps(finding.metadata, sort_keys=True, default=str)
+            )
+            finding_type = str(
+                metadata.get("type") or metadata.get("finding_class") or finding.title
+            )
+            views.append(
+                {
+                    "id": finding.id,
+                    "finding_id": finding.id,
+                    "title": finding.title,
+                    "type": finding_type,
+                    "severity": finding.severity,
+                    "description": finding.description,
+                    "message": finding.description,
+                    "value": finding.description,
+                    "remediation": finding.remediation,
+                    "target": (
+                        first_observation.target if first_observation is not None else ""
+                    ),
+                    "asset": (
+                        first_observation.target if first_observation is not None else ""
+                    ),
+                    "tool": (
+                        first_observation.tool.name
+                        if first_observation is not None
+                        else ""
+                    ),
+                    "confirmation_level": finding.confirmation_level,
+                    "session_id": finding.session_id,
+                    "commitment": finding.commitment,
+                    "citations": [asdict(item) for item in finding.citations],
+                    "active_proof": [asdict(item) for item in finding.active_proof],
+                    "metadata": metadata,
+                }
+            )
+        return views
+
+    def evidence_views(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "id": observation.id,
+                "evidence_id": observation.id,
+                "type": "canonical_observation",
+                "session_id": observation.session_id,
+                "target": observation.target,
+                "tool": observation.tool.name,
+                "tool_args": list(observation.tool.args),
+                "exit_code": observation.tool.exit_code,
+                "blob_hash": observation.blob_hash,
+                "commitment": observation.commitment,
+                "identity_digest": observation.identity.digest,
+                "operation_family_id": observation.operation_family.family_id,
+                "operation_instance_id": observation.operation_instance.instance_id,
+                "operation_outcome": observation.operation_instance.outcome.value,
+            }
+            for observation in self.observations
+        ]
+
+    def filter_cited_issues(
+        self, issues: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Keep specialist issue enrichment only when it cites active findings."""
+
+        active_ids = {item.id for item in self.findings}
+        output: List[Dict[str, Any]] = []
+        for issue in issues:
+            supporting = issue.get("supporting_findings")
+            if not isinstance(supporting, list):
+                continue
+            refs: set[str] = set()
+            for item in supporting:
+                if not isinstance(item, Mapping):
+                    continue
+                for key in ("id", "finding_id", "canonical_finding_id"):
+                    value = item.get(key)
+                    if isinstance(value, str):
+                        refs.add(value)
+                metadata = item.get("metadata")
+                if isinstance(metadata, Mapping):
+                    value = metadata.get("canonical_finding_id")
+                    if isinstance(value, str):
+                        refs.add(value)
+            if refs & active_ids:
+                output.append(dict(issue))
+        return output
+
+
+@dataclass(frozen=True)
 class StateRecord:
     """
     Mutable state wrapper for any epistemic entity (Observation or Finding).
@@ -1020,6 +1129,26 @@ class EvidenceLedger:
         )
         logger.info(f"[EvidenceLedger] Invalidated Finding {finding_id}: {reason}")
 
+    def invalidate_observation(
+        self,
+        observation_id: str,
+        reason: str,
+        timestamp_override: Optional[float] = None,
+    ) -> StateRecord:
+        """Invalidate one canonical atom; dependent finding views cascade closed."""
+
+        observation = self._observations.get(observation_id)
+        if not isinstance(observation, ObservationEnvelope):
+            raise ValueError("cannot invalidate an unknown canonical observation")
+        self._emit_event(
+            event_type=EventType.INVALIDATED,
+            entity_id=observation_id,
+            payload={"reason": reason, "session_id": observation.session_id},
+            timestamp_override=timestamp_override,
+            canonical_session_id=observation.session_id,
+        )
+        return self.get_state(observation_id)
+
     def register_conflict(self, source_a_id: str, source_b_id: str, 
                          description: str, conflict_type: str = "direct_contradiction",
                          timestamp_override: Optional[float] = None):
@@ -1177,12 +1306,19 @@ class EvidenceLedger:
                 reason=reason,
                 timestamp=event.timestamp,
             )
-            
-            # If finding is invalidated, maybe remove from findings_store view?
-            # Or update its status there? 
-            # Current findings_store doesn't support 'update status' well, but we can assume
-            # the UI handles it if we had a proper sync mechanism. 
-            pass
+            observation = self._observations.get(event.entity_id)
+            if isinstance(observation, ObservationEnvelope):
+                for finding in self._findings.values():
+                    if any(
+                        citation.observation_id == observation.id
+                        for citation in finding.citations
+                    ):
+                        self._set_state(
+                            finding.id,
+                            LifecycleState.INVALIDATED,
+                            reason=f"Cited observation invalidated: {reason}",
+                            timestamp=event.timestamp,
+                        )
 
     def _set_state(
         self,
@@ -1251,6 +1387,74 @@ class EvidenceLedger:
 
     def get_finding(self, finding_id: str) -> Optional[Finding]:
         return self._findings.get(finding_id)
+
+    def session_read_model(self, session_id: str) -> CanonicalSessionReadModel:
+        """Derive the only reader-facing view for one explicit session."""
+
+        if not isinstance(session_id, str) or not session_id or session_id == "global_scan":
+            raise ValueError("canonical read model requires an explicit session")
+        session_observations = tuple(
+            sorted(
+                (
+                    item
+                    for item in self._observations.values()
+                    if isinstance(item, ObservationEnvelope)
+                    and item.session_id == session_id
+                ),
+                key=lambda item: item.id,
+            )
+        )
+        active_observations = tuple(
+            item
+            for item in session_observations
+            if self.get_state(item.id) is not None
+            and self.get_state(item.id).state is LifecycleState.OBSERVED
+        )
+        active_observation_ids = {item.id for item in active_observations}
+        session_findings = tuple(
+            sorted(
+                (
+                    item
+                    for item in self._findings.values()
+                    if item.session_id == session_id
+                ),
+                key=lambda item: item.id,
+            )
+        )
+        active_findings = tuple(
+            Finding.from_dict(item.to_dict())
+            for item in session_findings
+            if self.get_state(item.id) is not None
+            and self.get_state(item.id).state is LifecycleState.PROMOTED
+            and all(
+                citation.observation_id in active_observation_ids
+                for citation in item.citations
+            )
+        )
+        state_material = []
+        for entity in (*session_observations, *session_findings):
+            state = self.get_state(entity.id)
+            state_material.append(
+                {
+                    "id": entity.id,
+                    "commitment": entity.commitment,
+                    "state": state.state.value if state is not None else "missing",
+                    "reason": state.reason if state is not None else None,
+                }
+            )
+        revision = stable_hash(
+            "canonical_session_read_model",
+            {
+                "session_id": session_id,
+                "entities": sorted(state_material, key=lambda item: item["id"]),
+            },
+        )
+        return CanonicalSessionReadModel(
+            session_id=session_id,
+            revision=revision,
+            observations=active_observations,
+            findings=active_findings,
+        )
         
     def get_blob(self, obs_id: str) -> Optional[bytes]:
         return self.get_observation(obs_id) and self.cas.load(self.get_observation(obs_id).blob_hash)
@@ -1272,3 +1476,17 @@ class EvidenceLedger:
             "confirmation_level": finding.confirmation_level,
         }
         findings_store.add_finding(finding_dict, persist=False)
+
+
+def load_canonical_session_read_model(
+    session_id: str,
+    *,
+    config: Optional[SentinelConfig] = None,
+    receipt_store: Optional[BehavioralReceiptStore] = None,
+) -> CanonicalSessionReadModel:
+    """Load a fresh DB/CAS-backed view so readers cannot retain stale truth."""
+
+    return EvidenceLedger(
+        config,
+        receipt_store=receipt_store,
+    ).session_read_model(session_id)

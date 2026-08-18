@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -15,12 +16,14 @@ from core.cortex.graph_analyzer import GraphAnalyzer
 from core.cortex.insight_engine import InsightEngine
 
 from core.data.findings_store import get_finding_store
+from core.epistemic.ledger import load_canonical_session_read_model
 from core.reporting.report_composer import ReportComposer
 from core.reporting.poc_generator import PoCGenerator, PoCSafetyError
-from core.cortex.causal_graph import get_graph_dto_for_session
+from core.cortex.canonical_graph import load_causal_graph_snapshot
 from core.server.routers.auth import verify_token
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/cortex", tags=["cortex"])
 
 
@@ -103,7 +106,8 @@ async def get_current_graph():
         return Response(status_code=204)
 
     try:
-        return await get_graph_dto_for_session(session_id)
+        snapshot = await load_causal_graph_snapshot(str(session_id))
+        return snapshot.graph_dto
     except Exception as e:
         logger.warning(f"[Graph] Failed to build graph for session {session_id}: {e}")
         # Return empty graph instead of error to prevent UI crashes
@@ -221,13 +225,12 @@ async def generate_report(
         requested_target=req.target,
     )
 
-    # Pull only this session's findings/evidence. There is intentionally no
-    # latest-session or global-store fallback on this sensitive read path.
-    findings = await db.get_findings(req.session_id)
-    evidence = await db.get_evidence(req.session_id)
+    # Pull only the active canonical revision for this explicit session.  DB
+    # finding/evidence tables are legacy projections, not reporting authority.
+    read_model = load_canonical_session_read_model(req.session_id)
     composer = ReportComposer(
-        finding_store=_ListStore(findings),
-        evidence_ledger=_ListStore(evidence),
+        finding_store=_ListStore(read_model.finding_views()),
+        evidence_ledger=_ListStore(read_model.evidence_views()),
         graph_analyzer=graph_analyzer,
     )
 
@@ -269,10 +272,11 @@ async def get_poc(
         requested_target=target,
     )
 
+    read_model = load_canonical_session_read_model(session_id)
     finding = next(
         (
             item
-            for item in await db.get_findings(session_id)
+            for item in read_model.finding_views()
             if str(item.get("id")) == str(finding_id)
         ),
         None,

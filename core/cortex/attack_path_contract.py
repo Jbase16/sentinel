@@ -103,6 +103,7 @@ def build_attack_path_contract(
     session_id: str,
     graph_dto: Dict[str, Any],
     max_chains: int = 25,
+    evidence_revision: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Build the canonical, deterministic attack-path contract.
@@ -110,8 +111,12 @@ def build_attack_path_contract(
     chains = extract_attack_chains(graph_dto, max_chains=max_chains)
     chain_count = len(chains)
 
+    sealed_evidence_revision = str(
+        evidence_revision or graph_dto.get("evidence_revision") or ""
+    )
     hash_input = {
         "session_id": str(session_id or ""),
+        "evidence_revision": sealed_evidence_revision,
         "chains": chains,
     }
     graph_hash = hashlib.sha256(
@@ -120,6 +125,7 @@ def build_attack_path_contract(
 
     return {
         "session_id": str(session_id or ""),
+        "evidence_revision": sealed_evidence_revision,
         "graph_hash": graph_hash,
         "chain_count": chain_count,
         "has_attack_paths": chain_count > 0,

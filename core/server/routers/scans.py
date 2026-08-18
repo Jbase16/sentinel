@@ -2178,8 +2178,9 @@ async def get_session_findings(session_id: str):
     Retrieve all findings for a specific session.
     Fallback endpoint when WebSocket connection is lost.
     """
-    db = Database.instance()
-    findings = await db.get_findings(session_id)
+    from core.epistemic.ledger import load_canonical_session_read_model
+
+    findings = load_canonical_session_read_model(session_id).finding_views()
     return {"session_id": session_id, "findings": findings, "count": len(findings)}
 
 @router.get("/sessions/{session_id}/evidence", dependencies=[Depends(verify_token)])
@@ -2187,8 +2188,9 @@ async def get_session_evidence(session_id: str):
     """
     Retrieve all evidence for a specific session.
     """
-    db = Database.instance()
-    evidence = await db.get_evidence(session_id)
+    from core.epistemic.ledger import load_canonical_session_read_model
+
+    evidence = load_canonical_session_read_model(session_id).evidence_views()
     return {"session_id": session_id, "evidence": evidence, "count": len(evidence)}
 
 @router.get("/sessions/{session_id}/issues", dependencies=[Depends(verify_token)])
@@ -2197,7 +2199,10 @@ async def get_session_issues(session_id: str):
     Retrieve all issues for a specific session.
     """
     db = Database.instance()
-    issues = await db.get_issues(session_id)
+    from core.epistemic.ledger import load_canonical_session_read_model
+
+    read_model = load_canonical_session_read_model(session_id)
+    issues = read_model.filter_cited_issues(await db.get_issues(session_id))
     return {"session_id": session_id, "issues": issues, "count": len(issues)}
 
 def _lift_sentinel_provenance(surfaced: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -2235,9 +2240,12 @@ async def get_session_bounty_report(
     from core.data.db import Database
 
     db = Database.instance()
-    findings = await db.get_findings(session_id)
-    issues = await db.get_issues(session_id)
-    evidence = await db.get_evidence(session_id)
+    from core.epistemic.ledger import load_canonical_session_read_model
+
+    read_model = load_canonical_session_read_model(session_id)
+    findings = read_model.finding_views()
+    issues = read_model.filter_cited_issues(await db.get_issues(session_id))
+    evidence = read_model.evidence_views()
 
     # Merge issues and findings; prefer issues (higher confidence)
     all_findings = list(issues) + [
@@ -2434,10 +2442,20 @@ async def get_scan_results():
 
     # Fetch from database
     logger.info(f"[Results] Fetching results for session_id={session_id}")
-    findings = await db.get_findings(session_id)
-    issues = await db.get_issues(session_id)
-    evidence = await db.get_evidence(session_id)
-    logger.info(f"[Results] Retrieved {len(findings)} findings, {len(issues)} issues, {len(evidence)} evidence")
+    from core.epistemic.ledger import load_canonical_session_read_model
+
+    read_model = load_canonical_session_read_model(session_id)
+    findings = read_model.finding_views()
+    issues = read_model.filter_cited_issues(await db.get_issues(session_id))
+    evidence = read_model.evidence_views()
+    logger.info(
+        "[Results] Retrieved canonical revision %s: %d findings, %d issues, "
+        "%d evidence",
+        read_model.revision,
+        len(findings),
+        len(issues),
+        len(evidence),
+    )
     
     # Fetch logs from session record
     session_data = await db.get_session(session_id)
@@ -2450,19 +2468,12 @@ async def get_scan_results():
             logs = []
 
     # Build response matching Swift SentinelResults structure
-    from core.cortex.causal_graph import get_graph_dto_for_session
-    graph_dto = await get_graph_dto_for_session(
-        session_id=session_id,
-        findings=findings,
-        issues=issues,
-    )
-    graph_attack_paths = _extract_graph_attack_paths_from_graph_dto(graph_dto)
-    from core.cortex.attack_path_contract import build_attack_path_contract
+    from core.cortex.canonical_graph import build_causal_graph_snapshot
 
-    attack_path_contract = build_attack_path_contract(
-        session_id=str(session_id),
-        graph_dto=graph_dto,
-    )
+    graph_snapshot = build_causal_graph_snapshot(read_model, issues=issues)
+    graph_dto = graph_snapshot.graph_dto
+    graph_attack_paths = _extract_graph_attack_paths_from_graph_dto(graph_dto)
+    attack_path_contract = graph_snapshot.attack_path_contract
 
     # Multi-proposer chain ensemble (docs/CHAIN_ARBITER.md): cortex (observed)
     # + omega/NEXUS (hypothesized goal-synthesis), merged + ranked into one

@@ -37,11 +37,9 @@ import logging
 import httpx
 import time
 import threading
-from typing import Dict, List, Optional, Generator, AsyncGenerator, Callable, Any
+from typing import Dict, List, Optional, AsyncGenerator, Callable, Any
 
 from core.data.findings_store import findings_store
-from core.data.issues_store import issues_store
-from core.data.killchain_store import killchain_store
 from core.data.evidence_store import EvidenceStore
 from core.base.config import get_config
 
@@ -588,8 +586,8 @@ class AIEngine:
         """
         Resolve findings/issues context with explicit session pinning when provided.
         """
-        findings = findings_store.get_all()
-        issues = issues_store.get_all()
+        findings: List[Dict[str, Any]] = []
+        issues: List[Dict[str, Any]] = []
         context_session_id: Optional[str] = None
         context_killchain_edges: List[Dict[str, Any]] = []
 
@@ -600,45 +598,33 @@ class AIEngine:
             active_session_id = (state.scan_state or {}).get("session_id")
             preferred_session_id = str(requested_session_id or active_session_id or "").strip()
 
-            # 1) In-memory session (authoritative during active scan).
-            if preferred_session_id:
-                pinned_session = await state.get_session(preferred_session_id)
-                if pinned_session is not None:
-                    session_findings = pinned_session.findings.get_all()
-                    session_issues = pinned_session.issues.get_all()
-                    if session_findings:
-                        findings = session_findings
-                    if session_issues:
-                        issues = session_issues
-                    context_killchain_edges = pinned_session.killchain.get_all()
-                    context_session_id = preferred_session_id
-                    return findings, issues, context_session_id, context_killchain_edges
-
-            # 2) Persisted DB snapshot for explicit session pinning.
+            # EvidenceLedger is authoritative during and after a scan.  In-memory
+            # and legacy DB stores are projections and cannot re-admit invalid data.
             from core.data.db import Database
+            from core.epistemic.ledger import load_canonical_session_read_model
 
             db = Database.instance()
             await db.init()
             if preferred_session_id:
-                findings = await db.get_findings(preferred_session_id)
-                issues = await db.get_issues(preferred_session_id)
-                _, persisted_edges = await db.load_graph_snapshot(preferred_session_id)
-                context_killchain_edges = persisted_edges or []
+                read_model = load_canonical_session_read_model(preferred_session_id)
+                findings = read_model.finding_views()
+                issues = read_model.filter_cited_issues(
+                    await db.get_issues(preferred_session_id)
+                )
                 context_session_id = preferred_session_id
                 return findings, issues, context_session_id, context_killchain_edges
 
-            # 3) Legacy fallback when no active/requested session and global stores are empty.
-            if not findings and not issues:
-                session_rows = await db.fetch_all(
-                    "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1"
+            session_rows = await db.fetch_all(
+                "SELECT id FROM sessions ORDER BY start_time DESC LIMIT 1"
+            )
+            if session_rows:
+                latest_session_id = str(session_rows[0][0])
+                read_model = load_canonical_session_read_model(latest_session_id)
+                findings = read_model.finding_views()
+                issues = read_model.filter_cited_issues(
+                    await db.get_issues(latest_session_id)
                 )
-                if session_rows:
-                    latest_session_id = str(session_rows[0][0])
-                    findings = await db.get_findings(latest_session_id)
-                    issues = await db.get_issues(latest_session_id)
-                    _, persisted_edges = await db.load_graph_snapshot(latest_session_id)
-                    context_killchain_edges = persisted_edges or []
-                    context_session_id = latest_session_id
+                context_session_id = latest_session_id
         except Exception as exc:
             logger.debug("[AIEngine] Failed loading session-scoped chat context: %s", exc)
 
@@ -654,22 +640,19 @@ class AIEngine:
         """
         Build canonical graph-derived attack-path contract for narration guardrails.
         """
-        from core.cortex.attack_path_contract import build_attack_path_contract
-
         canonical_session_id = str(session_id or "unknown")
-        graph_dto: Dict[str, Any] = {}
         if session_id:
             try:
-                from core.cortex.causal_graph import get_graph_dto_for_session
+                from core.cortex.canonical_graph import load_causal_graph_snapshot
 
-                graph_dto = await get_graph_dto_for_session(
-                    session_id=session_id,
-                    findings=findings,
-                    issues=issues,
-                )
+                snapshot = await load_causal_graph_snapshot(session_id)
+                return snapshot.attack_path_contract, snapshot.graph_dto
             except Exception as exc:
                 logger.debug("[AIEngine] Could not build graph DTO for chat: %s", exc)
 
+        from core.cortex.attack_path_contract import build_attack_path_contract
+
+        graph_dto: Dict[str, Any] = {}
         contract = build_attack_path_contract(
             session_id=canonical_session_id,
             graph_dto=graph_dto,

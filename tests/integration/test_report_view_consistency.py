@@ -209,26 +209,29 @@ class TestConsumerConsistency:
 # ═════════════════════════ Tier 2: endpoint session-scoping ════════
 
 class _FakeDB:
-    """Fake Database for the report endpoint — proves it reads the SESSION's
-    findings (not a global store) and resolves session ids correctly."""
+    """Fake Database for report-session target authorization."""
     def __init__(self, sessions: Dict[str, List[Dict[str, Any]]]):
         self._sessions = sessions
-        self.get_findings_calls: List[str] = []
+        self.canonical_read_calls: List[str] = []
 
     async def fetch_all(self, query, params=()):
         # _resolve_session_id's "latest session" query.
         sids = list(self._sessions.keys())
         return [[sids[-1]]] if sids else []
 
-    async def get_findings(self, session_id=None):
-        self.get_findings_calls.append(session_id)
-        return list(self._sessions.get(session_id, []))
-
-    async def get_evidence(self, session_id=None):
-        return []
-
     async def get_session(self, session_id):
         return {"target": _TARGET}
+
+
+class _FakeCanonicalReadModel:
+    def __init__(self, findings: List[Dict[str, Any]]) -> None:
+        self._findings = findings
+
+    def finding_views(self) -> List[Dict[str, Any]]:
+        return list(self._findings)
+
+    def evidence_views(self) -> List[Dict[str, Any]]:
+        return []
 
 
 class TestEndpointSessionScoping:
@@ -236,6 +239,16 @@ class TestEndpointSessionScoping:
         import core.data.db as db_mod
         from core.server.routers import cortex
         monkeypatch.setattr(db_mod.Database, "instance", staticmethod(lambda: fake_db))
+        def load_read_model(requested_session_id):
+            fake_db.canonical_read_calls.append(requested_session_id)
+            return _FakeCanonicalReadModel(
+                fake_db._sessions.get(requested_session_id, [])
+            )
+        monkeypatch.setattr(
+            cortex,
+            "load_canonical_session_read_model",
+            load_read_model,
+        )
         req = cortex.ReportGenerateRequest(
             target=_TARGET, format="markdown", session_id=session_id,
         )
@@ -244,8 +257,8 @@ class TestEndpointSessionScoping:
     async def test_explicit_session_id_is_used(self, monkeypatch):
         fake = _FakeDB({"sess-A": seeded_findings(), "sess-B": []})
         resp = await self._call(fake, monkeypatch, "sess-A")
-        # Endpoint pulled findings for the requested session, not the global store.
-        assert "sess-A" in fake.get_findings_calls
+        # Endpoint pulled the canonical revision for the requested session.
+        assert fake.canonical_read_calls == ["sess-A"]
         assert f"**{len(seeded_findings())} finding(s)**" in resp.content
 
     async def test_missing_session_id_is_rejected(self):

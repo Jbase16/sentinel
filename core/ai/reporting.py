@@ -86,25 +86,15 @@ class ReportComposer:
         if not session_id:
             return build_attack_path_contract(session_id="unknown", graph_dto={}), {}
 
-        findings = context.get("findings", [])
-        issues = context.get("issues", [])
-        if not isinstance(findings, list):
-            findings = []
-        if not isinstance(issues, list):
-            issues = []
-
-        graph_dto: Dict[str, Any] = {}
         try:
-            from core.cortex.causal_graph import get_graph_dto_for_session
+            from core.cortex.canonical_graph import load_causal_graph_snapshot
 
-            graph_dto = await get_graph_dto_for_session(
-                session_id=session_id,
-                findings=findings,
-                issues=issues,
-            )
+            snapshot = await load_causal_graph_snapshot(session_id)
+            return snapshot.attack_path_contract, snapshot.graph_dto
         except Exception as exc:
             logger.debug("[ReportComposer] Failed to build graph DTO for attack narrative: %s", exc)
 
+        graph_dto: Dict[str, Any] = {}
         contract = build_attack_path_contract(
             session_id=session_id,
             graph_dto=graph_dto,

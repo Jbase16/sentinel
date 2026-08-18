@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 
-from fastapi import APIRouter, Depends, Body, Response
+from fastapi import APIRouter, Depends, Body
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -13,10 +13,34 @@ from core.ai.reporting import ReportComposer
 from core.server.state import get_state
 from core.errors import SentinelError, ErrorCode
 from core.data.db import Database
+from core.epistemic.ledger import load_canonical_session_read_model
+from core.cortex.canonical_graph import build_causal_graph_snapshot
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+async def _canonical_report_context(session_id: str) -> Dict[str, Any]:
+    """Build AI-report inputs from the same revision as every other reader."""
+
+    db = Database.instance()
+    await db.init()
+    read_model = load_canonical_session_read_model(session_id)
+    issues = read_model.filter_cited_issues(await db.get_issues(session_id))
+    graph = build_causal_graph_snapshot(read_model, issues=issues)
+    return {
+        "session_id": session_id,
+        "evidence_revision": read_model.revision,
+        "findings": read_model.finding_views(),
+        "issues": issues,
+        "risk": {},
+        "killchain": graph.graph_dto.get("edges", []),
+        "causal_graph_snapshot": graph.graph_dto,
+        "attack_path_contract": graph.attack_path_contract,
+        "reasoning": {},
+        "decisions": [],
+    }
 
 class ChatTurn(BaseModel):
     role: str = Field(..., max_length=16)
@@ -153,27 +177,12 @@ async def generate_report(
     """
     state = get_state()
     session = await state.get_session(session_id)
-    context_override: Dict[str, Any] | None = None
-
     if not session:
         db = Database.instance()
         await db.init()
-        findings = await db.get_findings(session_id)
-        issues = await db.get_issues(session_id)
-        _, db_edges = await db.load_graph_snapshot(session_id)
-
-        if not findings and not issues:
+        if await db.get_session(session_id) is None:
             raise SentinelError(ErrorCode.SESSION_NOT_FOUND, f"Session {session_id} not found")
-
-        context_override = {
-            "session_id": session_id,
-            "findings": findings,
-            "issues": issues,
-            "risk": {},
-            "killchain": db_edges,
-            "reasoning": {},
-            "decisions": [],
-        }
+    context_override = await _canonical_report_context(session_id)
 
     composer = ReportComposer(session)
     report_content = await composer.generate_async(
@@ -200,24 +209,12 @@ async def generate_section(
     """
     state = get_state()
     session = await state.get_session(session_id)
-
-    if not session and not context:
+    if not session:
         db = Database.instance()
         await db.init()
-        findings = await db.get_findings(session_id)
-        issues = await db.get_issues(session_id)
-        _, db_edges = await db.load_graph_snapshot(session_id)
-
-        if findings or issues:
-            context = {
-                "session_id": session_id,
-                "findings": findings,
-                "issues": issues,
-                "risk": {},
-                "killchain": db_edges,
-                "reasoning": {},
-                "decisions": [],
-            }
+        if await db.get_session(session_id) is None:
+            raise SentinelError(ErrorCode.SESSION_NOT_FOUND, f"Session {session_id} not found")
+    context = await _canonical_report_context(session_id)
 
     # ReportComposer tolerates session=None — it falls back to global stores if context_override is missing.
     composer = ReportComposer(session)
