@@ -3,51 +3,33 @@
 # This module is part of the wraith package in SentinelForge.
 # The Hand of God - Automated attack verification.
 #
-# CAL INTEGRATION:
-# - on_hypothesis: Asserts a Claim ("target is exploitable via vuln_class")
-# - _execute_verification: Adds Evidence to validate or dispute the claim
-#
 
 """
 core/wraith/automator.py
 The Hand of God.
 Listens for AI Hypotheses and automatically executes verification strikes.
-Now integrated with CAL for claim-based reasoning.
 """
 
 import logging
 import asyncio
-from typing import Dict, Optional
+from typing import Dict
 from core.base.session import ScanSession
-from core.cal.types import Evidence, Provenance, Claim
 
 logger = logging.getLogger(__name__)
 
 class WraithAutomator:
     """
     Observer that reacts to new 'hypothesis' findings.
-    
-    CAL INTEGRATION:
-    Every hypothesis becomes a Claim in the global ReasoningSession.
-    Verification results become Evidence that supports or disputes the Claim.
     """
     
     def __init__(self, session: ScanSession):
         """Function __init__."""
         self.session = session
-        
-        # [CAL INTEGRATION]
-        from core.cortex.reasoning import get_reasoning_engine
-        self.reasoning_engine = get_reasoning_engine()
-        
-        logger.info("[Wraith] CAL integration enabled - attacks will emit Claims")
 
-    async def on_hypothesis(self, finding: Dict) -> Optional[Claim]:
+    async def on_hypothesis(self, finding: Dict) -> None:
         """
         Called when a new Hypothesis Finding is added.
-        Asserts a CAL Claim and schedules verification.
-        
-        Returns the created Claim for tracking.
+        Schedules bounded verification; finding promotion remains downstream.
         """
         ftype = finding.get("type", "")
         if not ftype.startswith("hypothesis::"):
@@ -58,38 +40,11 @@ class WraithAutomator:
         payloads = metadata.get("payloads", [])
         
         self.session.log(f"[Wraith] Analyzed Hypothesis: {ftype}. preparing verification...")
-        
-        # ═══════════════════════════════════════════════════════════════════
-        # CAL INTEGRATION: Assert a Claim for this hypothesis
-        # ═══════════════════════════════════════════════════════════════════
-        vuln_class = ftype.split("::")[-1] if "::" in ftype else "unknown"
-        
-        claim = self.reasoning_engine.assert_claim(
-            statement=f"{target} is exploitable via {vuln_class}",
-            source="Wraith",
-            evidence_content={
-                "hypothesis_type": ftype,
-                "target": target,
-                "payloads": payloads,
-                "status": "pending_verification"
-            },
-            confidence=0.3,  # Low confidence until verified
-            metadata={
-                "vuln_class": vuln_class,
-                "target": target,
-                "payloads": payloads
-            }
-        )
-        
-        self.session.log(f"[CAL] Wraith asserted Claim {claim.id}: {claim.statement}")
-        
         # Schedule verification
-        asyncio.create_task(self._execute_verification(target, payloads, ftype, claim.id))
-        logger.info(f"[Wraith] Launched verification task for Claim {claim.id}")
-        
-        return claim
+        asyncio.create_task(self._execute_verification(target, payloads, ftype))
+        logger.info("[Wraith] Launched verification task for %s", ftype)
 
-    async def _execute_verification(self, target: str, payloads: list, ftype: str, claim_id: str):
+    async def _execute_verification(self, target: str, payloads: list, ftype: str):
         """Execute real HTTP-based attack verification against the target.
 
         Flow:
@@ -98,7 +53,7 @@ class WraithAutomator:
            (which auto-detects WAF blocks and mutates payloads).
         3. Evaluate the response with oracle heuristics (status-code diff,
            reflection detection, timing anomalies).
-        4. Emit CAL Evidence supporting or disputing the Claim.
+        4. Emit a verified finding only when response signals support it.
         """
         import httpx
         from core.wraith.evasion import WraithEngine
@@ -203,38 +158,8 @@ class WraithAutomator:
                     logger.debug("[Wraith] Payload delivery failed for %s: %s", target_url, exc)
                     continue
 
-        # ═══════════════════════════════════════════════════════════════════
-        # CAL INTEGRATION: Add Evidence based on verification result
-        # ═══════════════════════════════════════════════════════════════════
-        verification_evidence = Evidence(
-            content={
-                "target": target,
-                "payload_used": used_payload,
-                "success": success,
-                "vuln_class": vuln_class,
-                "status": "verified" if success else "failed",
-                "response_signals": response_signals,
-            },
-            description=(
-                f"Wraith verification: {'SUCCESS — payload reflected/executed' if success else 'FAILED — no exploitation indicators'}"
-            ),
-            provenance=Provenance(
-                source="Wraith:verification",
-                method="automated_http_attack",
-                run_id=self.session.session_id
-            ),
-            confidence=0.9 if success else 0.8
-        )
-
-        self.reasoning_engine.add_evidence(
-            claim_id=claim_id,
-            evidence=verification_evidence,
-            supporting=success,
-        )
-
         if success:
             self.session.log(f"[Wraith] TARGET HIT! {ftype} verified with payload: {used_payload}")
-            self.session.log(f"[CAL] Claim {claim_id} strengthened by verification Evidence")
 
             self.session.findings.add_finding({
                 "tool": "wraith_automator",
@@ -246,10 +171,7 @@ class WraithAutomator:
                     "payload": used_payload,
                     "verified": True,
                     "response_signals": response_signals,
-                    "cal_claim_id": claim_id,
-                    "cal_evidence_id": verification_evidence.id,
                 }
             })
         else:
             self.session.log(f"[Wraith] Hypothesis {ftype} failed verification — no exploitation indicators")
-            self.session.log(f"[CAL] Claim {claim_id} disputed by verification Evidence")

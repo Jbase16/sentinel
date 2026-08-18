@@ -92,10 +92,10 @@ async def test_end_to_end_insight_flow():
         
         # Verify Event Emission
         mock_bus.emit.assert_called()
-        call_args = mock_bus.emit.call_args[1]
-        assert call_args["event_type"] == EventType.NEXUS_INSIGHT_FORMED
-        assert isinstance(call_args["payload"], dict)
-        assert call_args["payload"]["action_type"] == InsightActionType.HIGH_VALUE_TARGET.value
+        event = mock_bus.emit.call_args.args[0]
+        assert event.type == EventType.NEXUS_INSIGHT_FORMED
+        assert isinstance(event.payload, dict)
+        assert event.payload["action_type"] == InsightActionType.HIGH_VALUE_TARGET.value
         
     finally:
         process_task.cancel()
@@ -284,15 +284,15 @@ async def test_event_emission_verification():
         
         # Check that NEXUS_INSIGHT_FORMED events were emitted
         insight_events = [
-            call for call in mock_bus.emit.call_args_list
-            if call[1].get("event_type") == EventType.NEXUS_INSIGHT_FORMED
+            call.args[0] for call in mock_bus.emit.call_args_list
+            if call.args and call.args[0].type == EventType.NEXUS_INSIGHT_FORMED
         ]
         
         assert len(insight_events) >= 2, f"Expected at least 2 NEXUS_INSIGHT_FORMED events, got {len(insight_events)}"
         
         # Verify event payloads contain required fields
-        for event_call in insight_events:
-            payload = event_call[1].get("payload", {})
+        for event in insight_events:
+            payload = event.payload
             assert "insight_id" in payload, "Event payload should contain insight_id"
             assert "action_type" in payload, "Event payload should contain action_type"
             assert "confidence" in payload, "Event payload should contain confidence"

@@ -48,7 +48,7 @@ from enum import Enum
 from urllib.parse import urlparse
 import uuid
 
-# Constitution class replaced by CAL policies loaded into ArbitrationEngine
+# Tool-selection laws are typed and rechecked by canonical proposal admission.
 from core.scheduler.registry import (
     ToolRegistry,
     PHASE_1_PASSIVE,
@@ -81,6 +81,11 @@ from core.scheduler.decisions import (
 )
 from core.cortex.arbitration import ArbitrationEngine
 from core.cortex.policy import ScopePolicy, RiskPolicy, Verdict
+from core.cortex.tool_execution_admission import (
+    CanonicalToolSelectionPolicy,
+    ToolPolicyInputError,
+    ToolPolicySnapshot,
+)
 
 # --- Integration: Capability Tiers + Feedback Loop + WAF Bypass ---
 from core.cortex.capability_tiers import (
@@ -416,40 +421,7 @@ class Strategos:
         self.arbitrator = ArbitrationEngine()
         self.arbitrator.register_policy(ScopePolicy())
         self.arbitrator.register_policy(RiskPolicy())
-
-        cal_policies = self.arbitrator.load_cal_file("assets/laws/constitution.cal")
-        if cal_policies:
-            logger.info(f"[Strategos] Loaded {len(cal_policies)} CAL laws from constitution")
-        else:
-            logger.warning("[Strategos] No CAL laws loaded - constitution.cal missing or empty")
-
-    async def load_policies_from_db(self) -> int:
-        """
-        Load enabled CAL policies from database into ArbitrationEngine.
-        Must be called after Database.init().
-        """
-        try:
-            from core.data.db import Database
-
-            db = Database.instance()
-            db_policies = await db.list_policies()
-            enabled_policies = [p for p in db_policies if p.get("enabled", True)]
-
-            loaded_count = 0
-            for policy in enabled_policies:
-                try:
-                    policies = self.arbitrator.load_cal_policy(policy["cal_source"])
-                    loaded_count += len(policies)
-                    logger.info(f"[Strategos] Loaded DB policy '{policy['name']}' with {len(policies)} laws")
-                except Exception as e:
-                    logger.error(f"[Strategos] Failed to load policy '{policy['name']}': {e}")
-
-            if loaded_count > 0:
-                logger.info(f"[Strategos] Loaded {loaded_count} policies from database")
-            return loaded_count
-        except Exception as e:
-            logger.error(f"[Strategos] Failed to load policies from database: {e}")
-            return 0
+        self.tool_selection_policy = CanonicalToolSelectionPolicy()
 
     def request_stop(self, *, grace_seconds: float = DEFAULT_CANCEL_GRACE_SECONDS) -> None:
         """
@@ -1869,6 +1841,23 @@ class Strategos:
                 reason="Candidate Qualification",
                 context=sim_ctx,
             )
+            policy_context = {
+                **sim_ctx,
+                "knowledge": {
+                    **self.context.knowledge,
+                    "tags": self.context.knowledge.get("tags", set()),
+                },
+            }
+            typed_policy_decision = self.tool_selection_policy.evaluate(
+                policy_context,
+                policy_tool_def,
+            )
+            if not typed_policy_decision.allowed:
+                rejected_count += 1
+                reasons.setdefault(
+                    f"Typed Policy: {typed_policy_decision.reason}", []
+                ).append(t)
+                continue
             judgment = self.arbitrator.review(simulated_decision, sim_ctx)
 
             if judgment.verdict == Verdict.VETO:
@@ -1914,6 +1903,32 @@ class Strategos:
                 )
 
         return selected_tools
+
+    def tool_policy_snapshot(self, tool: str) -> ToolPolicySnapshot:
+        """Seal the current Strategos facts for canonical proposal admission."""
+
+        if self.context is None:
+            raise ToolPolicyInputError("Strategos policy context is unavailable")
+        if tool not in ToolRegistry.METADATA:
+            raise ToolPolicyInputError("Strategos tool metadata is unavailable")
+
+        tool_def = ToolRegistry.get(tool)
+        policy_tool_def = {
+            **tool_def,
+            "gates": tool_def.get("gates", []),
+            "resource_cost": 1,
+        }
+        reserved_current_tool = 1 if tool in self.context.running_tools else 0
+        policy_context = {
+            "phase_index": self.context.phase_index,
+            "knowledge": {
+                **self.context.knowledge,
+                "tags": self.context.knowledge.get("tags", set()),
+            },
+            "active_tools": max(0, self.context.active_tools - reserved_current_tool),
+            "max_concurrent": self.context.max_concurrent,
+        }
+        return ToolPolicySnapshot.from_inputs(policy_context, policy_tool_def)
 
     def _has_wraith_verify_candidates(self) -> bool:
         """

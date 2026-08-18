@@ -16,7 +16,7 @@ Layers:
     resolver      — dispatch identifier → correct extractor
     verifier      — login-attempt verification of extracted creds
     registrar     — auto-signup when policy authorizes (opt-in)
-    compilers/    — ProgramScope → CAL scope, personas.json, policy gates
+    compilers/    — ProgramScope → typed scope rules, personas.json, policy gates
     token_store   — keychain-first secure storage for platform API tokens
 
 See docs/PHASE_2_DESIGN.md for full architecture.

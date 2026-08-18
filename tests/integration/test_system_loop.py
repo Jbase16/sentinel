@@ -1,7 +1,7 @@
 """
 Integration Test: The Golden Run (System Loop).
 Verifies the full pipeline:
-Ghost (Traffic) -> MIMIC (Structure) -> Strategy (Analysis) -> CAL (Reasoning)
+Ghost (Traffic) -> MIMIC (Structure), with Strategy deferred offline
 """
 import pytest
 import asyncio
@@ -16,8 +16,9 @@ sys.modules['mitmproxy.tools'] = MagicMock()
 sys.modules['mitmproxy.tools.dump'] = MagicMock()
 
 from core.ghost.proxy import GhostAddon
+from core.base.context import ScopeContext
+from core.base.scope import AssetType, ScopeDecision, ScopeRegistry, ScopeRule
 from core.base.session import ScanSession
-from core.cal.types import ValidationStatus
 
 @pytest.fixture
 def mock_ai():
@@ -37,6 +38,10 @@ def mock_session():
     s.ghost = MagicMock()
     s.ghost._task = MagicMock() # Ensure truthy for task check
     s.log = MagicMock()
+    s.knowledge = {}
+    registry = ScopeRegistry()
+    registry.add_rule(ScopeRule(AssetType.DOMAIN, "target.com", ScopeDecision.ALLOW))
+    s.scope_context = ScopeContext(registry=registry)
     return s
 
 class MockFlow:
@@ -56,42 +61,16 @@ async def test_system_loop_integration(mock_session, mock_ai):
     1. User browses to http://target.com/login?user=admin
     2. Ghost intercepts.
     3. MIMIC learns /login.
-    4. Strategy asserts 'SQLi Suspected'.
-    5. CAL holds the claim.
+    4. Live interception does not invoke Strategy or grant proposal authority.
     """
     
     # 1. Setup
     addon = GhostAddon(mock_session)
     
-    # Spy on StrategyEngine.propose_attacks to ensure it's called
-    # But wait, Ghost calls it via asyncio.create_task.
-    # We need to capture that task.
-    # We can mock the strategy object on the addon.
-    
-    # Real StrategyEngine, but with mocked AI?
-    # StrategyEngine needs a real Session to work fully?
-    # Let's rely on the wiring check.
-    
-    # Override `propose_attacks` to just assert a claim directly (simulating AI success)
-    # This avoids setting up the full AI response structure
+    # Attach a strategy mock to prove live interception never calls it.
     async def fake_propose(flow_data):
-        # MOCKING the AI's "Brain" here
-        # AI decides this looks like SQLi
-        from core.cal.types import Evidence, Provenance
-        from core.cal.engine import ReasoningSession
-        
-        # In the real code, StrategyEngine creates a generic ReasoningSession(id=session.id)
-        # We need to access that session to verify claims.
-        # Since ReasoningSession is created *inside* propose_attacks in the current impl (ephemeral),
-        # validation is hard unless we expose it or use a persistent registry.
-        
-        # FOR TEST: We will inspect the side-effects.
-        # StrategyEngine emits events?
-        # Let's modify the Addon to expose the CAL session or have Strategy use a shared one?
-        # Current impl of StrategyEngine: `cal_session = ReasoningSession(...)` local variable.
-        # This is hard to test.
-        # FIX: The StrategyEngine should likely check a Global/Session-scoped Registry.
-        # But for now, let's just verifying MIMIC (which we know works) and that `propose_attacks` was called.
+        # The wiring contract only needs to prove that Ghost hands the captured
+        # flow to Strategy; epistemic promotion is covered by canonical-ledger tests.
         pass
 
     mock_strategy = MagicMock()
@@ -109,20 +88,9 @@ async def test_system_loop_integration(mock_session, mock_ai):
     assert ep.path_template == "/login"
     assert ep.observation_count >= 2 # 1 from ingest in test, 1 from request
     
-    # 4. Verify Strategy Trigger
-    # Ghost creates a task. We need to wait for it?
-    # Since we mocked propose_attacks as AsyncMock, we can just check called.
-    # Attempt to yield to event loop to let create_task run
+    # 4. Strategy analysis is intentionally offline; the live proxy must not
+    # schedule an AI task for each parameterized request.
     await asyncio.sleep(0.1)
-    
-    mock_strategy.propose_attacks.assert_called_once()
-    args = mock_strategy.propose_attacks.call_args[0][0]
-    assert args["url"] == "http://target.com/login?user=admin"
-    assert args["method"] == "GET"
-    
-    # 5. Verify CAL Integration (Implicit)
-    # Since we verified MIMIC and Strategy Trigger, and validated CAL logic in unit tests,
-    # the loop is theoretically sound.
-    # A true E2E would require observing the EventBus or DB.
+    mock_strategy.propose_attacks.assert_not_called()
     
     print("✅ System Loop Configured Correctly")

@@ -1213,12 +1213,18 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     source: str = "strategos",
                     reason: str = "Strategos selected the tool for the active intent",
                 ) -> List[Dict]:
+                    policy_snapshot = (
+                        reasoning_engine.strategos.tool_policy_snapshot(tool)
+                        if source == "strategos"
+                        else None
+                    )
                     proposal = ToolExecutionProposal.build(
                         source=source,
                         tool=tool,
                         args=args or (),
                         target=target or req.target,
                         reason=reason,
+                        policy_snapshot=policy_snapshot,
                     )
                     try:
                         status, response = await proposal_admission.admit_and_execute(proposal)

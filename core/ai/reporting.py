@@ -235,7 +235,7 @@ class ReportComposer:
             "- ONLY cite findings, numbers, and details from the provided scan data.\n"
             "- NEVER invent, estimate, or inflate vulnerability counts.\n"
             "- If data is limited, say so honestly — do not pad with generic content.\n"
-            "- Do NOT mention internal tool names (Strategos, CAL, Cortex, Ledger, "
+            "- Do NOT mention internal tool names (Strategos, Cortex, Ledger, "
             "ScanOrchestrator, VulnRule) — these are implementation details.\n"
             "- Distinguish between CONFIRMED, PROBABLE, and HYPOTHESIZED findings."
         )
@@ -479,7 +479,7 @@ class ReportComposer:
             "STRICT RULES:\n"
             "- ONLY reference findings and issues listed below. Do NOT invent findings.\n"
             "- Use EXACT counts from the data. Do NOT hallucinate numbers.\n"
-            "- Do NOT mention internal system names (Strategos, CAL, Cortex, Ledger).\n"
+            "- Do NOT mention internal system names (Strategos, Cortex, Ledger).\n"
             "- Write for a CISO audience: business impact, not tool names.\n\n"
             f"SCAN DATA — {len(issues)} enriched issues, {len(findings)} raw findings:\n"
             f"{issues_block}\n"

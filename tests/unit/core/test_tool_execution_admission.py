@@ -7,6 +7,7 @@ from core.cortex.tool_execution_admission import (
     CanonicalToolExecutionAdmission,
     ToolExecutionProposal,
     ToolProposalAdmissionDenied,
+    ToolPolicySnapshot,
 )
 
 
@@ -87,3 +88,68 @@ def test_ai_and_strategos_share_the_canonical_router_adapter():
     assert 'source="ai_action_dispatcher"' in source
     assert 'source: str = "strategos"' in source
     assert source.count("admit_and_execute(proposal)") == 1
+
+
+def test_strategos_proposals_require_a_passing_typed_policy_snapshot():
+    local_target = "http://127.0.0.1:39871"
+
+    async def mock_transport(method, url, body=None, **_kwargs):
+        raise AssertionError("claim admission must not touch transport")
+
+    admission = CanonicalToolExecutionAdmission(
+        executor=PolicyExecutor(
+            mock_transport,
+            ExecutionPolicy("lab", scope_filter=lambda url: url == local_target),
+        ),
+        allowed_tools={"nmap"},
+        safe_tools=set(),
+    )
+
+    missing_snapshot = ToolExecutionProposal.build(
+        source="strategos",
+        tool="nmap",
+        args=(),
+        target=local_target,
+        reason="typed policy admission fixture",
+    )
+    with pytest.raises(ToolProposalAdmissionDenied, match="malformed scheduling policy snapshot"):
+        admission.claim(missing_snapshot)
+
+    blocked_snapshot = ToolPolicySnapshot.from_inputs(
+        {
+            "phase_index": 0,
+            "knowledge": {"tags": []},
+            "active_tools": 0,
+            "max_concurrent": 3,
+        },
+        {"phase": 3, "gates": [], "resource_cost": 1},
+    )
+    blocked = ToolExecutionProposal.build(
+        source="strategos",
+        tool="nmap",
+        args=(),
+        target=local_target,
+        reason="typed policy admission fixture",
+        policy_snapshot=blocked_snapshot,
+    )
+    with pytest.raises(ToolProposalAdmissionDenied, match="PassiveBeforeActive"):
+        admission.claim(blocked)
+
+    passing_snapshot = ToolPolicySnapshot.from_inputs(
+        {
+            "phase_index": 3,
+            "knowledge": {"tags": []},
+            "active_tools": 0,
+            "max_concurrent": 3,
+        },
+        {"phase": 3, "gates": [], "resource_cost": 1},
+    )
+    passing = ToolExecutionProposal.build(
+        source="strategos",
+        tool="nmap",
+        args=(),
+        target=local_target,
+        reason="typed policy admission fixture",
+        policy_snapshot=passing_snapshot,
+    )
+    assert admission.claim(passing).max_requests == 1

@@ -216,6 +216,7 @@ class ToolExecutionProposal:
     target: str
     reason: str
     proposal_ref: str
+    policy_snapshot: Optional[ToolPolicySnapshot] = None
 
     @classmethod
     def build(
@@ -226,6 +227,7 @@ class ToolExecutionProposal:
         args: Iterable[str],
         target: str,
         reason: str,
+        policy_snapshot: Optional[ToolPolicySnapshot] = None,
     ) -> "ToolExecutionProposal":
         normalized_source = str(source or "").strip().lower()
         normalized_tool = str(tool or "").strip().lower()
@@ -248,6 +250,10 @@ class ToolExecutionProposal:
             for value in normalized_args
         ):
             raise ValueError("tool proposal arguments are invalid")
+        if policy_snapshot is not None and not isinstance(
+            policy_snapshot, ToolPolicySnapshot
+        ):
+            raise ValueError("tool proposal policy snapshot is invalid")
 
         material = {
             "source": normalized_source,
@@ -256,6 +262,8 @@ class ToolExecutionProposal:
             "target": normalized_target,
             "reason": normalized_reason,
         }
+        if policy_snapshot is not None:
+            material["policy_snapshot"] = dict(policy_snapshot.to_material())
         digest = body_hash(material)
         if digest is None:
             raise ValueError("tool proposal commitment is unavailable")
@@ -266,6 +274,7 @@ class ToolExecutionProposal:
             target=normalized_target,
             reason=normalized_reason,
             proposal_ref=f"tool_execution_proposal:{digest.removeprefix('sha256:')}",
+            policy_snapshot=policy_snapshot,
         )
 
     def transport_payload(self) -> Mapping[str, Any]:
@@ -304,6 +313,12 @@ class CanonicalToolExecutionAdmission:
             raise TypeError("proposal must be a ToolExecutionProposal")
         if proposal.tool not in self.allowed_tools:
             raise ToolProposalAdmissionDenied("tool_not_allowed_for_scan")
+        if proposal.source == "strategos":
+            selection = CanonicalToolSelectionPolicy().evaluate_snapshot(
+                proposal.policy_snapshot
+            )
+            if not selection.allowed:
+                raise ToolProposalAdmissionDenied(selection.reason)
 
         action_class = (
             SAFE_READ if proposal.tool in self.safe_tools else AUTHZ_PROBE
@@ -352,6 +367,12 @@ class CanonicalToolExecutionAdmission:
 
 __all__ = [
     "CanonicalToolExecutionAdmission",
+    "CanonicalToolSelectionPolicy",
+    "EvidenceGatesPolicy",
+    "PassiveBeforeActivePolicy",
+    "ResourceAwarenessPolicy",
     "ToolExecutionProposal",
+    "ToolPolicyInputError",
+    "ToolPolicySnapshot",
     "ToolProposalAdmissionDenied",
 ]

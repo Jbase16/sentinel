@@ -40,8 +40,6 @@ from dataclasses import dataclass
 
 from core.ai.ai_engine import AIEngine
 from core.base.session import ScanSession
-from core.cal.types import Claim, Evidence, Provenance
-from core.cal.engine import ReasoningSession
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +98,6 @@ class StrategyEngine:
         self.session = session
         self.shadow_spec = shadow_spec
         self.ai = AIEngine.instance()
-        
-        # CAL Integration: Create a reasoning session for this strategy instance
-        self.reasoning_session = ReasoningSession(
-            session_id=session.session_id,
-            topic=f"Strategy Analysis for {session.target}"
-        )
 
     async def analyze_traffic(self, flow_data: Dict) -> List[AttackVector]:
         """
@@ -239,34 +231,6 @@ class StrategyEngine:
             )
             results.append(vec)
             self.session.log(f"[Neural Strategy] Proposed {vec.vuln_class} on {vec.parameter}")
-            
-            # ═══════════════════════════════════════════════════════════════
-            # CAL INTEGRATION: Assert AI's hypothesis as a Claim
-            # ═══════════════════════════════════════════════════════════════
-            # The AI is making an assertion: "This parameter is vulnerable to X"
-            # We create Evidence from the AI's reasoning and assert the Claim
-            ai_evidence = Evidence(
-                content={"ai_reasoning": vec.hypothesis, "payloads": vec.suggested_payloads},
-                description=f"AI-generated attack hypothesis for {vec.parameter}",
-                provenance=Provenance(
-                    source="StrategyEngine:AI",
-                    method="neural_reasoning",
-                    run_id=self.session.session_id
-                ),
-                confidence=0.5  # AI suspicion, not confirmed
-            )
-            
-            claim = self.reasoning_session.assert_claim(
-                statement=f"{vec.parameter} is vulnerable to {vec.vuln_class}",
-                evidence=ai_evidence,
-                metadata={
-                    "url": flow_data.get("url"),
-                    "parameter": vec.parameter,
-                    "vuln_class": vec.vuln_class
-                }
-            )
-            
-            logger.debug(f"[CAL] Asserted Claim {claim.id}: {vec.vuln_class} on {vec.parameter}")
 
         return results
 
@@ -368,7 +332,7 @@ class StrategyEngine:
 
     async def propose_attacks(self, flow_data: Dict):
         """
-        High-level entry: Analyze traffic → Create findings → Trigger Wraith → ASSERT CLAIMS.
+        High-level entry: Analyze traffic → Create findings → Trigger Wraith.
 
         This is the main entry point called by the Ghost proxy when it
         intercepts interesting traffic.
@@ -376,48 +340,8 @@ class StrategyEngine:
         vectors = await self.analyze_traffic(flow_data)
         logger.debug(f"[Strategy] propose_attacks generated {len(vectors)} vectors")
 
-        # [CAL INTEGRATION]
-        # We need a ReasoningSession to debate these hypotheses.
-        # For now, we'll create a session per target host, or retrieve one if we attach it to ScanSession.
-        # Ideally, ScanSession should hold the ReasoningSession.
-        # Fallback: Create ephemeral session for now to verify the flow is working.
-        from core.cal.engine import ReasoningSession
-        from core.cal.types import Evidence, Provenance
-        
-        # In a real impl, this session would be persistent
-        cal_session = ReasoningSession(
-            session_id=self.session.id, 
-            topic=flow_data.get("host", "unknown")
-        )
-
         for vec in vectors:
-            # 1. Create Evidence for the Traffic
-            traffic_evidence = Evidence(
-                content={
-                    "url": flow_data.get("url"),
-                    "method": flow_data.get("method"),
-                    "params": flow_data.get("params")
-                },
-                description=f"Intercepted Request to {flow_data.get('url')}",
-                provenance=Provenance(source="GhostProxy", method="intercept"),
-                confidence=1.0 # Traffic definitely happened
-            )
-
-            # 2. Assert the Claim (Neural Hypothesis)
-            cal_session.assert_claim(
-                statement=f"{vec.vuln_class} suspected on parameter '{vec.parameter}'",
-                evidence=traffic_evidence,
-                metadata={
-                    "type": f"hypothesis::{vec.vuln_class.lower()}",
-                    "vuln_class": vec.vuln_class,
-                    "parameter": vec.parameter,
-                    "target": flow_data.get("host"),
-                    "payloads": vec.suggested_payloads,
-                    "source": vec.source
-                }
-            )
-
-            # 3. Legacy Finding (Keep for UI compatibility)
+            # Legacy finding remains the downstream hypothesis proposal.
             self.session.findings.add_finding({
                 "tool": "neural_strategy",
                 "type": f"hypothesis::{vec.vuln_class.lower()}",
@@ -432,7 +356,7 @@ class StrategyEngine:
                 }
             })
 
-            # 4. Trigger Wraith (The Hand)
+            # Trigger Wraith (The Hand)
             asyncio.create_task(self.session.wraith.on_hypothesis({
                 "type": f"hypothesis::{vec.vuln_class.lower()}",
                 "target": flow_data.get("host", "unknown"),

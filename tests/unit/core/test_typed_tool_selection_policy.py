@@ -4,10 +4,7 @@ from typing import Any
 
 import pytest
 
-from core.cortex.arbitration import ArbitrationEngine
-from core.cortex.policy import Verdict
 from core.cortex.tool_execution_admission import CanonicalToolSelectionPolicy
-from core.scheduler.decisions import DecisionPoint, DecisionType
 
 
 def _context(**overrides: Any) -> dict[str, Any]:
@@ -31,33 +28,8 @@ def _tool(**overrides: Any) -> dict[str, Any]:
     return value
 
 
-@pytest.fixture()
-def legacy_cal() -> ArbitrationEngine:
-    engine = ArbitrationEngine()
-    policies = engine.load_cal_file("assets/laws/constitution.cal")
-    assert [policy.name for policy in policies] == [
-        "CAL:PassiveBeforeActive",
-        "CAL:EvidenceGates",
-        "CAL:ResourceAwareness",
-    ]
-    return engine
-
-
-def _legacy_allows(engine: ArbitrationEngine, context: Any, tool: Any) -> tuple[bool, str]:
-    if isinstance(context, dict):
-        review_context: Any = {**context, "tool": tool}
-    else:
-        review_context = context
-    decision = DecisionPoint.create(
-        DecisionType.TOOL_SELECTION,
-        chosen="fixture-tool",
-        reason="CAL equivalence fixture",
-        context=review_context,
-    )
-    judgment = engine.review(decision, review_context)
-    return judgment.verdict != Verdict.VETO, judgment.reason
-
-
+# Recorded by the live legacy-vs-typed equivalence proof in DB-R1-WO18
+# (commit 5e6e422). The legacy runtime is intentionally absent after WO19.
 @pytest.mark.parametrize(
     ("context", "tool", "expected_allowed", "expected_policy"),
     [
@@ -105,22 +77,17 @@ def _legacy_allows(engine: ArbitrationEngine, context: Any, tool: Any) -> tuple[
         ),
     ],
 )
-def test_typed_policy_matches_cal_laws(
-    legacy_cal: ArbitrationEngine,
+def test_typed_policy_preserves_recorded_cal_outcomes(
     context: Any,
     tool: Any,
     expected_allowed: bool,
     expected_policy: str | None,
 ) -> None:
-    old_allowed, old_reason = _legacy_allows(legacy_cal, context, tool)
-    typed = CanonicalToolSelectionPolicy().evaluate(context, tool)
+    decision = CanonicalToolSelectionPolicy().evaluate(context, tool)
 
-    assert old_allowed is expected_allowed
-    assert typed.allowed is expected_allowed
-    assert old_allowed is typed.allowed
+    assert decision.allowed is expected_allowed
     if expected_policy is not None:
-        assert expected_policy in old_reason
-        assert expected_policy in typed.reason
+        assert expected_policy in decision.reason
 
 
 @pytest.mark.parametrize(
@@ -158,14 +125,11 @@ def test_typed_policy_matches_cal_laws(
         ),
     ],
 )
-def test_cal_and_typed_policy_fail_closed_on_malformed_input(
-    legacy_cal: ArbitrationEngine,
+def test_typed_policy_fails_closed_on_recorded_malformed_inputs(
     context: Any,
     tool: Any,
 ) -> None:
-    old_allowed, _ = _legacy_allows(legacy_cal, context, tool)
-    typed = CanonicalToolSelectionPolicy().evaluate(context, tool)
+    decision = CanonicalToolSelectionPolicy().evaluate(context, tool)
 
-    assert old_allowed is False
-    assert typed.allowed is False
-    assert old_allowed is typed.allowed
+    assert decision.allowed is False
+    assert decision.reason.startswith("TypedToolPolicyInput:")

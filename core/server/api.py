@@ -77,7 +77,6 @@ async def lifespan(app: FastAPI):
         "build_id": build_id,
         "module_path": __file__,
         "db_ready": False,
-        "policy_watcher_ready": False,
         "nexus_ready": False,
         "cronus_ready": False,
     }
@@ -131,51 +130,6 @@ async def lifespan(app: FastAPI):
     # ANCHOR: Enforce strict contract validation
     # This prevents invalid events from circulating in the system.
     set_strict_contract_mode(True)
-
-    # Load CAL policies from database
-    try:
-        from core.cortex.reasoning import reasoning_engine
-        policy_count = await reasoning_engine.strategos.load_policies_from_db()
-        if policy_count > 0:
-            logger.info(f"[Startup] Loaded {policy_count} CAL policies from database")
-    except Exception as e:
-        logger.error(f"[Startup] Failed to load policies from database: {e}")
-
-    # Start policy file watcher
-    try:
-        from core.cortex.policy_watcher import get_policy_watcher
-        from core.cortex.reasoning import reasoning_engine
-
-        watcher = get_policy_watcher()
-
-        async def reload_policies_on_change():
-            try:
-                arbitrator = reasoning_engine.strategos.arbitrator
-                active_policies = arbitrator.list_policies()
-                for policy_name in active_policies:
-                    if policy_name.startswith("CAL:"):
-                        arbitrator.unregister_policy(policy_name)
-
-                policies = arbitrator.load_cal_file("assets/laws/constitution.cal")
-                logger.info(
-                    f"[PolicyWatcher] Reloaded {len(policies)} policies from constitution.cal"
-                )
-
-                db_count = await reasoning_engine.strategos.load_policies_from_db()
-                logger.info(
-                    f"[PolicyWatcher] Reloaded {db_count} policies from database"
-                )
-
-            except Exception as e:
-                logger.error(f"[PolicyWatcher] Reload callback failed: {e}")
-
-        watcher.set_reload_callback(reload_policies_on_change)
-        await watcher.start()
-        logger.info("[Startup] Policy file watcher started")
-        app.state.boot_status["policy_watcher_ready"] = True
-
-    except Exception as e:
-        logger.error(f"[Startup] Failed to start policy watcher: {e}")
 
     # Session cleanup loop
     async def session_cleanup_loop():
@@ -236,14 +190,6 @@ async def lifespan(app: FastAPI):
             await state.session_cleanup_task
         except asyncio.CancelledError:
             pass
-
-    try:
-        from core.cortex.policy_watcher import get_policy_watcher
-        watcher = get_policy_watcher()
-        await watcher.stop()
-        logger.info("[Shutdown] Policy file watcher stopped")
-    except Exception as e:
-        logger.error(f"[Shutdown] Failed to stop policy watcher: {e}")
 
     # Shutdown Managers
     async def _shutdown_component(name: str, component: Any) -> None:

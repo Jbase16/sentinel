@@ -256,7 +256,7 @@ class ProgramScope:
            Persona.verified in place.
         4. (Optional) Registrar creates new personas via signup endpoint.
         5. Compilers consume ProgramScope and emit Sentinel's existing
-           config files (CAL scope DSL, personas.json, restrictions).
+           config files (typed scope rules, personas.json, restrictions).
     """
 
     # Bumped any time the field layout changes. Loaders use this to

@@ -121,10 +121,10 @@ class GhostAddon:
         # CAPTURE FIRST — record the step BEFORE any analysis.
         # ═══════════════════════════════════════════════════════════════
         # Recording is the core job of a passive proxy and must never be
-        # sacrificed to a downstream analysis failure (a CAL event-contract
+        # sacrificed to a downstream analysis failure (an event-contract
         # violation, a strategy/shadow-spec error, etc.). So it runs in its
-        # own isolated try, AHEAD of shadow-spec / session-bridge / CAL /
-        # strategy. Previously these ran first, and a single contract
+        # own isolated try, AHEAD of shadow-spec / session-bridge / strategy.
+        # Previously these ran first, and a single contract
         # violation aborted the whole hook — recording nothing.
         try:
             from core.ghost.flow import FlowMapper, MAX_BODY_BYTES

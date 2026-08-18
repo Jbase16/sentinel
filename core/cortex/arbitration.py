@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import logging
 from typing import List, Dict, Any
-from pathlib import Path
 
 from core.scheduler.decisions import DecisionPoint
-from core.cortex.policy import Policy, Judgment, Verdict, CALCompiledPolicy
+from core.cortex.policy import Policy, Judgment, Verdict
 
 logger = logging.getLogger(__name__)
 
@@ -34,65 +33,10 @@ class ArbitrationEngine:
         Register a single Policy instance.
 
         Args:
-            policy: A Policy object (Python or CAL-compiled)
+            policy: A typed Policy object
         """
         self._policies.append(policy)
         logger.debug(f"[Arbitration] Registered policy: {policy.name}")
-
-    def load_cal_policy(self, cal_source: str) -> List[Policy]:
-        """
-        Parse CAL source string and register all laws as policies.
-
-        Args:
-            cal_source: CAL DSL string containing one or more Law definitions
-
-        Returns:
-            List of registered CALCompiledPolicy instances
-
-        Example:
-            >>> cal = '''
-            ... Law BlockProduction {
-            ...     When: context.target == "prod.example.com"
-            ...     Then: DENY "Production scans require approval"
-            ... }
-            ... '''
-            >>> engine.load_cal_policy(cal)
-        """
-        from core.cal.parser import CALParser
-
-        parser = CALParser()
-        laws = parser.parse_string(cal_source)
-
-        policies = []
-        for law in laws:
-            policy = CALCompiledPolicy(law)
-            self.register_policy(policy)
-            policies.append(policy)
-            logger.info(f"[Arbitration] Loaded CAL policy: {policy.name}")
-
-        return policies
-
-    def load_cal_file(self, file_path: str) -> List[Policy]:
-        """
-        Load CAL policies from a file.
-
-        Args:
-            file_path: Path to .cal file (absolute or relative to cwd)
-
-        Returns:
-            List of registered CALCompiledPolicy instances
-
-        Example:
-            >>> engine.load_cal_file("assets/laws/constitution.cal")
-        """
-        path = Path(file_path)
-        if not path.exists():
-            logger.warning(f"[Arbitration] CAL file not found: {file_path}")
-            return []
-
-        cal_source = path.read_text()
-        logger.info(f"[Arbitration] Loading CAL policies from {file_path}")
-        return self.load_cal_policy(cal_source)
 
     def unregister_policy(self, policy_name: str) -> bool:
         """
