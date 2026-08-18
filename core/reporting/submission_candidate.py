@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from core.behavior.normalize import stable_hash
-from core.behavior.receipts import COMPLETED, re_full_sha256
+from core.behavior.receipts import COMPLETED, ReceiptStoreError, re_full_sha256
 from core.epistemic.ledger import CanonicalSessionReadModel
 from core.verify.workbench import (
     CandidateWorkbenchStore,
@@ -272,6 +272,53 @@ def build_submission_candidate(
     )
 
 
+def resolve_submission_candidate(
+    read_model: CanonicalSessionReadModel,
+    *,
+    finding_id: Optional[str] = None,
+    workbench_store: Optional[CandidateWorkbenchStore] = None,
+) -> SubmissionCandidate:
+    """Resolve one explicit candidate, or the sole valid session candidate."""
+
+    store = workbench_store or CandidateWorkbenchStore()
+    if finding_id:
+        try:
+            workbench_id = store.workbench_id_for(
+                read_model,
+                finding_id=finding_id,
+            )
+            return build_submission_candidate(
+                read_model,
+                workbench_id=workbench_id,
+                workbench_store=store,
+            )
+        except ReceiptStoreError as exc:
+            raise ValueError(
+                "SubmissionCandidate receipt state is unavailable"
+            ) from exc
+
+    candidates = []
+    for finding in sorted(read_model.findings, key=lambda item: item.id):
+        try:
+            workbench_id = store.workbench_id_for(
+                read_model,
+                finding_id=finding.id,
+            )
+            candidates.append(build_submission_candidate(
+                read_model,
+                workbench_id=workbench_id,
+                workbench_store=store,
+            ))
+        except (ValueError, ReceiptStoreError):
+            continue
+    if len(candidates) != 1:
+        raise ValueError(
+            "Report generation requires one explicit finding_id or exactly one "
+            "valid SubmissionCandidate"
+        )
+    return candidates[0]
+
+
 @dataclass(frozen=True)
 class RenderedCandidateStep:
     index: int
@@ -463,6 +510,33 @@ def candidate_report_payload(
     }
 
 
+def candidate_section_content(
+    candidate: SubmissionCandidate,
+    *,
+    section: str,
+) -> str:
+    """Render a named report section without accepting caller or model claims."""
+
+    rendered = render_submission_candidate(candidate)
+    if section == "executive_summary":
+        return f"## Executive Summary\n\n{candidate.summary}"
+    if section == "attack_narrative":
+        steps = "\n\n".join(rendered.steps_to_reproduce)
+        return f"## Evidence-Bound Reproduction\n\n{steps}"
+    if section == "technical_findings":
+        return rendered.markdown
+    if section == "risk_assessment":
+        return (
+            "## Risk Assessment\n\n"
+            f"Severity: **{candidate.severity}**  \n"
+            f"Confirmation: **{candidate.confirmation_level}**"
+        )
+    if section == "remediation_roadmap":
+        remediation = candidate.remediation or "No canonical remediation is recorded."
+        return f"## Remediation Roadmap\n\n{remediation}"
+    raise ValueError("Unsupported candidate report section")
+
+
 __all__ = [
     "CandidateProofBinding",
     "CandidateStep",
@@ -470,6 +544,8 @@ __all__ = [
     "SubmissionCandidate",
     "SubmissionCandidateRender",
     "build_submission_candidate",
+    "candidate_section_content",
     "candidate_report_payload",
     "render_submission_candidate",
+    "resolve_submission_candidate",
 ]

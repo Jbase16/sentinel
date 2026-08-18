@@ -1150,11 +1150,15 @@ struct PendingAction: Identifiable, Decodable {
 
 struct ReportGenerateResponse: Decodable {
     let report_id: String
-    let created_at: String
+    let created_at: String?
+    let candidate_digest: String
+    let render_digest: String
+    let canonical_revision: String
     let target: String
     let scope: String?
     let format: String
     let content: String
+    let claims: JSONDict
 }
 
 struct PoCResponse: Decodable {
@@ -1170,7 +1174,12 @@ struct PoCResponse: Decodable {
 extension HelixAppState {
     // MARK: - Reporting & Proof of Concept (Phase 12)
 
-    func generateReport(target: String, scope: String? = nil, format: String = "markdown") async {
+    func generateReport(
+        target: String,
+        scope: String? = nil,
+        format: String = "markdown",
+        findingId: String? = nil
+    ) async {
         guard let sessionID = currentChatSessionID() else {
             await MainActor.run {
                 self.activeReportMeta = nil
@@ -1186,7 +1195,8 @@ extension HelixAppState {
                 format: format,
                 includeAttackPaths: true,
                 maxPaths: 5,
-                sessionId: sessionID
+                sessionId: sessionID,
+                findingId: findingId
             )
             await MainActor.run {
                 self.activeReportMeta = decoded

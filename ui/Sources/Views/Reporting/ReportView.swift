@@ -4,6 +4,7 @@ struct ReportView: View {
     @EnvironmentObject var appState: HelixAppState
 
     @State private var selectedTab: Int = 0
+    @State private var selectedFindingId: String?
     var body: some View {
         VStack(spacing: 0) {
             // Header / Controls
@@ -25,10 +26,24 @@ struct ReportView: View {
                         Text(scanTarget)
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundColor(.secondary)
+                        if let findings = appState.apiResults?.findings, !findings.isEmpty {
+                            Picker("Candidate", selection: $selectedFindingId) {
+                                Text("Auto (one candidate)").tag(String?.none)
+                                ForEach(findings) { finding in
+                                    Text(finding.title ?? finding.type)
+                                        .tag(finding.id as String?)
+                                }
+                            }
+                            .frame(maxWidth: 260)
+                        }
                         Button("Generate Report") {
                             Task {
                                 await appState.generateReport(
-                                    target: scanTarget, scope: nil, format: "markdown")
+                                    target: scanTarget,
+                                    scope: nil,
+                                    format: "markdown",
+                                    findingId: selectedFindingId
+                                )
                             }
                         }
                         .keyboardShortcut(.return, modifiers: [.command])
@@ -62,7 +77,7 @@ struct ReportView: View {
                 ScrollView {
                     Text(
                         appState.activeReportMarkdown.isEmpty
-                            ? "Generates a comprehensive Markdown report including findings and attack paths."
+                            ? "Renders a deterministic Markdown report from one receipt-bound SubmissionCandidate."
                             : appState.activeReportMarkdown
                     )
                     .font(.system(.body, design: .monospaced))

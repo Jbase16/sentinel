@@ -20,7 +20,7 @@ exactly the failure that reached production this session.
 """
 from __future__ import annotations
 
-import json
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import pytest
@@ -121,7 +121,7 @@ class TestConsumerConsistency:
         md = _make_report(findings).content
         # Each severity's count from the seed must appear in the table.
         for sev, count in breakdown.items():
-            row = [l for l in md.splitlines() if sev in l and "|" in l]
+            row = [line for line in md.splitlines() if sev in line and "|" in line]
             assert row, f"severity {sev} missing from report table"
             assert str(count) in row[0], (
                 f"{sev} count {count} not in report row: {row[0]!r}"
@@ -237,6 +237,7 @@ class _FakeCanonicalReadModel:
 class TestEndpointSessionScoping:
     async def _call(self, fake_db, monkeypatch, session_id):
         import core.data.db as db_mod
+        from core.reporting import submission_candidate as candidate_module
         from core.server.routers import cortex
         monkeypatch.setattr(db_mod.Database, "instance", staticmethod(lambda: fake_db))
         def load_read_model(requested_session_id):
@@ -249,8 +250,45 @@ class TestEndpointSessionScoping:
             "load_canonical_session_read_model",
             load_read_model,
         )
+        selected = fake_db._sessions[session_id][0]
+        claims = {
+            "title": selected["type"],
+            "severity": selected["severity"],
+            "summary": selected["message"],
+            "remediation": None,
+            "confirmation_level": "probable",
+            "target_url": selected["target"],
+        }
+        candidate = SimpleNamespace(
+            candidate_digest="submission_candidate:" + "a" * 64,
+            canonical_revision="canonical_session_read_model:" + "b" * 64,
+            finding_id=selected["id"],
+            target_url=selected["target"],
+        )
+        rendered = SimpleNamespace(
+            render_digest="submission_candidate_render:" + "c" * 64,
+            markdown=f"# {claims['title']}\n\n{claims['summary']}\n",
+        )
+        monkeypatch.setattr(
+            candidate_module,
+            "resolve_submission_candidate",
+            lambda read_model, finding_id=None: candidate,
+        )
+        monkeypatch.setattr(
+            candidate_module,
+            "render_submission_candidate",
+            lambda value: rendered,
+        )
+        monkeypatch.setattr(
+            candidate_module,
+            "candidate_report_payload",
+            lambda value, rendered=None: {"claims": claims},
+        )
         req = cortex.ReportGenerateRequest(
-            target=_TARGET, format="markdown", session_id=session_id,
+            target=_TARGET,
+            format="markdown",
+            session_id=session_id,
+            finding_id=selected["id"],
         )
         return await cortex.generate_report(req, graph_analyzer=_NoPathAnalyzer())
 
@@ -259,7 +297,8 @@ class TestEndpointSessionScoping:
         resp = await self._call(fake, monkeypatch, "sess-A")
         # Endpoint pulled the canonical revision for the requested session.
         assert fake.canonical_read_calls == ["sess-A"]
-        assert f"**{len(seeded_findings())} finding(s)**" in resp.content
+        assert resp.claims["title"] == "Missing Security Header"
+        assert "content-security-policy absent" in resp.content
 
     async def test_missing_session_id_is_rejected(self):
         # Sensitive artifact reads must never guess which session owns them.

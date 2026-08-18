@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
@@ -149,15 +149,27 @@ class ReportGenerateRequest(BaseModel):
     # latest session makes a caller-selected target ambiguous and can expose
     # findings/evidence from a different scan.
     session_id: str = Field(..., min_length=1)
+    finding_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        description=(
+            "Exact canonical finding. May be omitted only when the session has "
+            "exactly one valid SubmissionCandidate."
+        ),
+    )
 
 
 class ReportGenerateResponse(BaseModel):
     report_id: str
-    created_at: str
+    created_at: Optional[str]
+    candidate_digest: str
+    render_digest: str
+    canonical_revision: str
     target: str
     scope: Optional[str]
     format: str
     content: str
+    claims: Dict[str, Any]
 
 
 class PoCResponse(BaseModel):
@@ -216,39 +228,57 @@ async def generate_report(
     req: ReportGenerateRequest,
     graph_analyzer: GraphAnalyzer = Depends(get_graph_analyzer),
 ) -> ReportGenerateResponse:
+    import json
+
     from core.data.db import Database
+    from core.reporting.submission_candidate import (
+        candidate_report_payload,
+        render_submission_candidate,
+        resolve_submission_candidate,
+    )
 
     db = Database.instance()
     session_data = await db.get_session(req.session_id)
-    target = _require_session_target(
+    _require_session_target(
         session_data=session_data,
         requested_target=req.target,
     )
+    if req.scope:
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate reports do not accept caller-provided scope prose",
+        )
+    report_format = req.format.lower()
+    if report_format not in {"markdown", "json"}:
+        raise HTTPException(status_code=400, detail="Unsupported report format")
 
-    # Pull only the active canonical revision for this explicit session.  DB
-    # finding/evidence tables are legacy projections, not reporting authority.
     read_model = load_canonical_session_read_model(req.session_id)
-    composer = ReportComposer(
-        finding_store=_ListStore(read_model.finding_views()),
-        evidence_ledger=_ListStore(read_model.evidence_views()),
-        graph_analyzer=graph_analyzer,
-    )
-
-    artifact = composer.generate(
-        target=target,
-        scope=req.scope,
-        report_format=req.format,
-        include_attack_paths=req.include_attack_paths,
-        max_paths=req.max_paths,
+    try:
+        candidate = resolve_submission_candidate(
+            read_model,
+            finding_id=req.finding_id,
+        )
+        rendered = render_submission_candidate(candidate)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    payload = candidate_report_payload(candidate, rendered=rendered)
+    content = (
+        json.dumps(payload, sort_keys=True, indent=2)
+        if report_format == "json"
+        else rendered.markdown
     )
 
     return ReportGenerateResponse(
-        report_id=artifact.report_id,
-        created_at=artifact.created_at,
-        target=artifact.target,
-        scope=artifact.scope,
-        format=artifact.format,
-        content=artifact.content,
+        report_id=candidate.candidate_digest,
+        created_at=None,
+        candidate_digest=candidate.candidate_digest,
+        render_digest=rendered.render_digest,
+        canonical_revision=candidate.canonical_revision,
+        target=candidate.target_url,
+        scope=None,
+        format=report_format,
+        content=content,
+        claims=payload["claims"],
     )
 
 

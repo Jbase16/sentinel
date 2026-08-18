@@ -20,6 +20,7 @@ struct ReportComposerView: View {
     @State private var generationProgress: String = ""
     @State private var elapsedTime: Int = 0
     @State private var timer: Timer?
+    @State private var selectedFindingId: String?
 
     let sections = [
         ("Executive Summary", "executive_summary"),
@@ -40,6 +41,17 @@ struct ReportComposerView: View {
                     Text("Report Outline")
                         .font(.headline)
                         .padding()
+
+                    if let findings = appState.apiResults?.findings, !findings.isEmpty {
+                        Picker("Candidate", selection: $selectedFindingId) {
+                            Text("Auto (one candidate)").tag(String?.none)
+                            ForEach(findings) { finding in
+                                Text(finding.title ?? finding.type)
+                                    .tag(finding.id as String?)
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
 
                     List(sections, id: \.1) { (title, key) in
                         HStack {
@@ -176,7 +188,7 @@ struct ReportComposerView: View {
                             EmptyStateView(
                                 icon: "doc.text",
                                 title: "No Content Yet",
-                                message: "Click 'Generate' to create this section using AI",
+                                message: "Click 'Generate' to render this section from the active SubmissionCandidate",
                                 isLoading: false
                             )
                         }
@@ -234,6 +246,7 @@ struct ReportComposerView: View {
             do {
                 let content = try await appState.apiClient.generateReportSection(
                     sessionID: validSessionID,
+                    findingID: selectedFindingId,
                     section: key
                 )
 

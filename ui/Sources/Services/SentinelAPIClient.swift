@@ -619,7 +619,8 @@ public struct SentinelAPIClient: Sendable {
         format: String,
         includeAttackPaths: Bool,
         maxPaths: Int,
-        sessionId: String
+        sessionId: String,
+        findingId: String? = nil
     ) async throws -> ReportGenerateResponse {
         guard let url = URL(string: "/v1/cortex/reporting/generate", relativeTo: baseURL) else {
             throw APIError.badStatus
@@ -639,6 +640,9 @@ public struct SentinelAPIClient: Sendable {
         // The backend rejects unbound reports: the explicit session selects
         // the only findings/evidence set this request may read.
         body["session_id"] = sessionId
+        if let findingId {
+            body["finding_id"] = findingId
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await session.data(for: request)
@@ -754,7 +758,11 @@ public struct SentinelAPIClient: Sendable {
     }
 
     /// Generate a specific report section using the AI
-    public func generateReportSection(sessionID: String, section: String) async throws -> String {
+    public func generateReportSection(
+        sessionID: String,
+        findingID: String? = nil,
+        section: String
+    ) async throws -> String {
         guard let url = URL(string: "/v1/ai/generate-section", relativeTo: baseURL) else {
             throw URLError(.badURL)
         }
@@ -762,10 +770,13 @@ public struct SentinelAPIClient: Sendable {
         var request = authenticatedRequest(url: url, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
-        let payload: [String: Any] = [
+        var payload: [String: Any] = [
             "session_id": sessionID,
             "section": section,
         ]
+        if let findingID {
+            payload["finding_id"] = findingID
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload)
 

@@ -8,9 +8,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.server.routers.auth import verify_token, check_ai_rate_limit
+from core.base.action_dispatcher import ActionDispatcher
 from core.ai.ai_engine import AIEngine
-from core.ai.reporting import ReportComposer
-from core.server.state import get_state
 from core.errors import SentinelError, ErrorCode
 from core.data.db import Database
 from core.epistemic.ledger import load_canonical_session_read_model
@@ -169,79 +168,124 @@ async def verify_vulnerability(req: VerifyRequest):
 @router.post("/generate-report", dependencies=[Depends(verify_token)])
 async def generate_report(
     session_id: str = Body(..., embed=True),
+    finding_id: str | None = Body(None, embed=True),
     report_type: str = Body("executive", embed=True),
     format: str = Body("markdown", embed=True)
 ):
-    """
-    Generate a security report for a specific scan session.
-    """
-    state = get_state()
-    session = await state.get_session(session_id)
-    if not session:
-        db = Database.instance()
-        await db.init()
-        if await db.get_session(session_id) is None:
-            raise SentinelError(ErrorCode.SESSION_NOT_FOUND, f"Session {session_id} not found")
-    context_override = await _canonical_report_context(session_id)
+    """Render the AI report route from one immutable SubmissionCandidate."""
+    import json
 
-    composer = ReportComposer(session)
-    report_content = await composer.generate_async(
-        report_type=report_type,
-        format=format,
-        context_override=context_override,
+    candidate, rendered, payload = await _candidate_report_state(
+        session_id,
+        finding_id=finding_id,
     )
-    
+    report_format = format.lower()
+    if report_format not in {"markdown", "json"}:
+        raise SentinelError(
+            ErrorCode.SESSION_INVALID_STATE,
+            "Unsupported candidate report format",
+        )
+    if report_type not in {"full", "executive", "technical"}:
+        raise SentinelError(
+            ErrorCode.SESSION_INVALID_STATE,
+            "Unsupported candidate report type",
+        )
+    report_content = (
+        json.dumps(payload, sort_keys=True, indent=2)
+        if report_format == "json"
+        else rendered.markdown
+    )
     return {
         "session_id": session_id,
+        "finding_id": candidate.finding_id,
+        "candidate_digest": candidate.candidate_digest,
+        "render_digest": rendered.render_digest,
+        "canonical_revision": candidate.canonical_revision,
         "type": report_type,
-        "format": format,
-        "content": report_content
+        "format": report_format,
+        "claims": payload["claims"],
+        "content": report_content,
     }
+
+
+async def _candidate_report_state(
+    session_id: str,
+    *,
+    finding_id: str | None,
+):
+    from core.reporting.submission_candidate import (
+        candidate_report_payload,
+        render_submission_candidate,
+        resolve_submission_candidate,
+    )
+
+    db = Database.instance()
+    await db.init()
+    if await db.get_session(session_id) is None:
+        raise SentinelError(
+            ErrorCode.SESSION_NOT_FOUND,
+            f"Session {session_id} not found",
+        )
+    read_model = load_canonical_session_read_model(session_id)
+    try:
+        candidate = resolve_submission_candidate(
+            read_model,
+            finding_id=finding_id,
+        )
+        rendered = render_submission_candidate(candidate)
+    except ValueError as exc:
+        raise SentinelError(
+            ErrorCode.SESSION_INVALID_STATE,
+            str(exc),
+        ) from exc
+    return (
+        candidate,
+        rendered,
+        candidate_report_payload(candidate, rendered=rendered),
+    )
 
 @router.post("/generate-section", dependencies=[Depends(verify_token)])
 async def generate_section(
     session_id: str = Body(..., embed=True),
+    finding_id: str | None = Body(None, embed=True),
     section: str = Body(..., embed=True),
-    context: Dict[str, Any] = Body(None, embed=True)
+    context: Dict[str, Any] | None = Body(None, embed=True)
 ):
-    """
-    Generate a specific section of a security report.
-    """
-    state = get_state()
-    session = await state.get_session(session_id)
-    if not session:
-        db = Database.instance()
-        await db.init()
-        if await db.get_session(session_id) is None:
-            raise SentinelError(ErrorCode.SESSION_NOT_FOUND, f"Session {session_id} not found")
-    context = await _canonical_report_context(session_id)
-
-    # ReportComposer tolerates session=None — it falls back to global stores if context_override is missing.
-    composer = ReportComposer(session)
-
-    if section not in composer.SECTIONS:
-        raise SentinelError(ErrorCode.SESSION_INVALID_STATE, f"Invalid section name: {section}")
-
-    try:
-        content = await composer.generate_section(section, context_override=context)
-    except Exception as exc:
-        logger.error("[AI] Report section '%s' generation failed: %s", section, exc, exc_info=True)
+    """Render a named candidate section; caller/model claims are not accepted."""
+    if context:
         raise SentinelError(
-            ErrorCode.AI_INVALID_RESPONSE,
-            f"Failed to generate section '{section}': {exc}",
+            ErrorCode.SESSION_INVALID_STATE,
+            "Candidate report sections do not accept caller-provided claims",
         )
+    candidate, rendered, payload = await _candidate_report_state(
+        session_id,
+        finding_id=finding_id,
+    )
+    try:
+        from core.reporting.submission_candidate import candidate_section_content
+
+        content = candidate_section_content(candidate, section=section)
+    except ValueError as exc:
+        raise SentinelError(
+            ErrorCode.SESSION_INVALID_STATE,
+            str(exc),
+        ) from exc
 
     return {
         "session_id": session_id,
+        "finding_id": candidate.finding_id,
+        "candidate_digest": candidate.candidate_digest,
+        "render_digest": rendered.render_digest,
+        "canonical_revision": candidate.canonical_revision,
         "section": section,
-        "content": content
+        "claims": payload["claims"],
+        "content": content,
     }
 
 
 # ---------------------------------------------------------
 # Action Dispatcher: approval queue endpoints
 # ---------------------------------------------------------
-from core.base.action_dispatcher import ActionDispatcher
 
 
 @router.get("/actions/pending", dependencies=[Depends(verify_token)])
