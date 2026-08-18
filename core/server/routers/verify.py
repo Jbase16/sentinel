@@ -522,7 +522,9 @@ class PromoteRequest(BaseModel):
 
 
 class PromoteResponse(BaseModel):
-    """Rendered repro ready to drop into BountyReport.steps_to_reproduce."""
+    """Deterministic draft rendered from the canonical SubmissionCandidate."""
+    candidate_digest: str
+    render_digest: str
     finding_id: Optional[str]
     target_url: str
     entry_count: int
@@ -533,6 +535,64 @@ class PromoteResponse(BaseModel):
     placeholder_legend: Dict[str, str]
     # Structured per-entry view for UI consumers.
     entries: List[Dict[str, Any]]
+    submission_markdown: str
+
+
+def _render_candidate_response(sess, read_model) -> PromoteResponse:
+    from core.reporting.submission_candidate import (
+        build_submission_candidate,
+        render_submission_candidate,
+    )
+
+    workbench = sess.candidate_workbench
+    store = sess.candidate_workbench_store
+    if workbench is None or store is None:
+        raise ValueError("Verify session has no Candidate Workbench")
+    candidate = build_submission_candidate(
+        read_model,
+        workbench_id=workbench.workbench_id,
+        workbench_store=store,
+    )
+    rendered = render_submission_candidate(candidate)
+    return PromoteResponse(
+        candidate_digest=candidate.candidate_digest,
+        render_digest=rendered.render_digest,
+        finding_id=candidate.finding_id,
+        target_url=candidate.target_url,
+        entry_count=len(rendered.steps),
+        steps_to_reproduce=list(rendered.steps_to_reproduce),
+        placeholder_legend=dict(rendered.placeholder_legend),
+        entries=[item.to_dict() for item in rendered.steps],
+        submission_markdown=rendered.markdown,
+    )
+
+
+@router.get("/sessions/{session_id}/candidate", response_model=PromoteResponse)
+async def get_submission_candidate(
+    session_id: str,
+    _: bool = Depends(verify_sensitive_token),
+) -> PromoteResponse:
+    """Render the persisted draft without replaying any target traffic."""
+
+    from core.epistemic.ledger import load_canonical_session_read_model
+    from core.verify.console import get_session
+
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"session {session_id!r} not found",
+        )
+    if not sess.canonical_session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Legacy/global Verify sessions have no SubmissionCandidate.",
+        )
+    read_model = load_canonical_session_read_model(sess.canonical_session_id)
+    try:
+        return _render_candidate_response(sess, read_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/promote", response_model=PromoteResponse)
@@ -541,20 +601,12 @@ async def promote_to_repro(
     req: PromoteRequest,
     _: bool = Depends(verify_sensitive_token),
 ) -> PromoteResponse:
-    """Render selected exchanges as BountyReport-ready repro steps.
-
-    The output's `steps_to_reproduce` field is the EXACT shape
-    BountyReport consumes. The UI / CLI can either:
-      * Push directly into a BountyReport draft.
-      * Copy to clipboard.
-      * Show for operator review before pushing.
+    """Replace the active selection set and render its deterministic draft.
 
     Selection persistence always replaces raw auth values with placeholders.
-    The secret-bearing exploratory transcript remains memory-only.
+    The secret-bearing exploratory transcript remains memory-only, and this
+    endpoint has no platform submission capability.
     """
-    import json
-    import shlex
-
     from core.epistemic.ledger import load_canonical_session_read_model
     from core.verify.console import get_session
 
@@ -618,71 +670,12 @@ async def promote_to_repro(
                 for index in indices
             ),
             read_model=read_model,
+            replace_existing=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     sess.candidate_workbench = workbench
-
-    by_index = {item.exchange_index: item for item in workbench.selections}
-    rendered_steps: List[str] = []
-    entry_values: List[Dict[str, Any]] = []
-    legend: Dict[str, str] = {
-        "$VALUE": "a target-specific value supplied by the triager",
-        "$REDACTED": "a sensitive request header value",
-    }
-    for ordinal, index in enumerate(indices, start=1):
-        selection = by_index[index]
-        lines = [f"curl -X {selection.method}"]
-        for name, value in selection.sanitized_headers:
-            lines.append(f"  -H {shlex.quote(f'{name}: {value}')}")
-            for placeholder in ("$TOKEN", "$CSRF_TOKEN", "$API_KEY", "$SESSION_ID"):
-                if placeholder in value:
-                    legend[placeholder] = "an operator-supplied credential placeholder"
-        if selection.request_shape.get("kind") != "none":
-            lines.append(
-                "  --data "
-                + shlex.quote(json.dumps(selection.request_shape, sort_keys=True))
-            )
-        lines.append(f"  {shlex.quote(selection.sanitized_url)}")
-        curl = " \\\n".join(lines)
-        response_excerpt = json.dumps(
-            {
-                "status": selection.response_status,
-                "shape": selection.response_shape,
-                "body_sha256": selection.response_body_sha256,
-                "observation_id": selection.observation_id,
-                "receipt_id": selection.receipt_id,
-            },
-            sort_keys=True,
-            indent=2,
-        )
-        prose = (
-            f"Send the receipt-bound `{selection.method}` request to "
-            f"`{selection.sanitized_url}`."
-        )
-        markdown = (
-            f"{prose}\n\n```bash\n{curl}\n```\n\n"
-            f"**Committed response evidence:**\n```json\n{response_excerpt}\n```"
-        )
-        rendered_steps.append(markdown)
-        entry_values.append({
-            "index": ordinal,
-            "method": selection.method,
-            "url": selection.sanitized_url,
-            "prose": prose,
-            "curl": curl,
-            "response_status": selection.response_status,
-            "response_excerpt": response_excerpt,
-            "markdown": markdown,
-            "observation_id": selection.observation_id,
-            "receipt_id": selection.receipt_id,
-            "selection_commitment": selection.selection_commitment,
-        })
-    return PromoteResponse(
-        finding_id=sess.finding_id,
-        target_url=workbench.target_url,
-        entry_count=len(entry_values),
-        steps_to_reproduce=rendered_steps,
-        placeholder_legend=legend,
-        entries=entry_values,
-    )
+    try:
+        return _render_candidate_response(sess, read_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

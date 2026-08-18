@@ -224,6 +224,22 @@ class CandidateWorkbenchStore:
             raise ValueError("Verify workbench id is invalid")
         return self.root / f"{digest}.json"
 
+    def workbench_id_for(
+        self,
+        read_model: CanonicalSessionReadModel,
+        *,
+        finding_id: str,
+    ) -> str:
+        finding = self._finding(read_model, finding_id)
+        return stable_hash(
+            "verify_workbench",
+            {
+                "session_id": read_model.session_id,
+                "finding_id": finding.id,
+                "finding_commitment": finding.commitment,
+            },
+        )
+
     @staticmethod
     def _finding(read_model: CanonicalSessionReadModel, finding_id: str) -> Finding:
         if read_model.session_id == "global_scan":
@@ -265,13 +281,9 @@ class CandidateWorkbenchStore:
             or parts.password is not None
         ):
             raise ValueError("Verify workbench target is not a credential-free HTTP(S) URL")
-        workbench_id = stable_hash(
-            "verify_workbench",
-            {
-                "session_id": read_model.session_id,
-                "finding_id": finding.id,
-                "finding_commitment": finding.commitment,
-            },
+        workbench_id = self.workbench_id_for(
+            read_model,
+            finding_id=finding.id,
         )
         path = self._path(workbench_id)
         if path.exists():
@@ -316,6 +328,7 @@ class CandidateWorkbenchStore:
         *,
         exchanges: Sequence[Tuple[int, FlowStep, str, str]],
         read_model: CanonicalSessionReadModel,
+        replace_existing: bool = False,
     ) -> CandidateWorkbench:
         finding = self._finding(read_model, workbench.finding_id)
         if (
@@ -327,7 +340,7 @@ class CandidateWorkbenchStore:
             raise ValueError("Verify selection batch is empty")
 
         cited = {item.observation_id for item in finding.citations}
-        selections = {
+        selections = {} if replace_existing else {
             item.exchange_index: item for item in workbench.selections
         }
         batch_indices = set()
@@ -445,11 +458,26 @@ class CandidateWorkbenchStore:
                 "finding_commitment": finding.commitment,
             },
         )
+        canonical_target = self._target(read_model, finding)
+        target_parts = urlsplit(canonical_target)
+        target_exchange = normalize_exchange(
+            {"url": canonical_target},
+            source_id="finding-target",
+        )
+        expected_target_url = _sanitized_url_value(
+            canonical_target,
+            path_template=target_exchange.path_template,
+        )
+        expected_target_origin = (
+            f"{target_parts.scheme}://{target_parts.netloc}"
+        )
         if (
             workbench.workbench_id != workbench_id
             or workbench.workbench_id != expected
             or workbench.canonical_session_id != read_model.session_id
             or workbench.finding_commitment != finding.commitment
+            or workbench.target_url != expected_target_url
+            or workbench.target_origin != expected_target_origin
         ):
             raise ValueError("Verify workbench canonical binding is invalid")
         cited = {item.observation_id for item in finding.citations}

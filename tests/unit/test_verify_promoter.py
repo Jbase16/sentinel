@@ -90,16 +90,47 @@ def _candidate_session(monkeypatch):
         target_url="https://h.example/",
         target_origin="https://h.example",
     )
+    proof = SimpleNamespace(
+        observation_id=observation_id,
+        receipt_id=receipt_id,
+        provenance_root="6" * 64,
+    )
+    finding = SimpleNamespace(
+        id=workbench.finding_id,
+        commitment=workbench.finding_commitment,
+        title="Cross-account read",
+        severity="HIGH",
+        description="A peer can read another account's record.",
+        remediation="Enforce ownership.",
+        confirmation_level="confirmed",
+        citations=[SimpleNamespace(observation_id=observation_id)],
+        active_proof=[proof],
+    )
+    read_model = SimpleNamespace(
+        session_id=workbench.canonical_session_id,
+        revision="canonical_session_read_model:" + "7" * 64,
+        observations=(SimpleNamespace(id=observation_id),),
+        findings=(finding,),
+    )
 
     class SelectingStore:
+        def __init__(self):
+            self.current = workbench
+            self.receipt_store = SimpleNamespace(
+                load=lambda fingerprint: SimpleNamespace(state="completed")
+            )
+
         def select_exchanges(
             self,
             current,
             *,
             exchanges,
             read_model,
+            replace_existing=False,
         ):
-            selections = {item.exchange_index: item for item in current.selections}
+            selections = {} if replace_existing else {
+                item.exchange_index: item for item in current.selections
+            }
             for exchange_index, step, observation_id, receipt_id in exchanges:
                 selections[exchange_index] = ReproEvidenceSelection.build(
                     exchange_index=exchange_index,
@@ -108,10 +139,15 @@ def _candidate_session(monkeypatch):
                     receipt_id=receipt_id,
                     provenance_root="6" * 64,
                 )
-            return replace(
+            self.current = replace(
                 current,
                 selections=tuple(selections[index] for index in sorted(selections)),
             )
+            return self.current
+
+        def load(self, workbench_id, *, read_model):
+            assert workbench_id == self.current.workbench_id
+            return self.current
 
     session = create_session_from_workbench(
         workbench,
@@ -122,7 +158,7 @@ def _candidate_session(monkeypatch):
     monkeypatch.setattr(
         ledger_module,
         "load_canonical_session_read_model",
-        lambda session_id: SimpleNamespace(session_id=session_id),
+        lambda session_id: read_model,
     )
     return session, observation_id, receipt_id
 
@@ -393,7 +429,10 @@ class TestPromoteEndpoint:
 
     def test_full_promotion_shape(self, monkeypatch):
         from core.server.routers.verify import (
-            EvidenceBindingRequest, PromoteRequest, promote_to_repro,
+            EvidenceBindingRequest,
+            PromoteRequest,
+            get_submission_candidate,
+            promote_to_repro,
         )
 
         sess, observation_id, receipt_id = _candidate_session(monkeypatch)
@@ -425,6 +464,12 @@ class TestPromoteEndpoint:
         assert "$TOKEN" in flat
         # Legend includes $TOKEN.
         assert "$TOKEN" in result.placeholder_legend
+        assert result.candidate_digest.startswith("submission_candidate:")
+        assert result.render_digest.startswith("submission_candidate_render:")
+        reopened = _run(get_submission_candidate(sess.session_id, _=True))
+        assert reopened.candidate_digest == result.candidate_digest
+        assert reopened.render_digest == result.render_digest
+        assert reopened.submission_markdown == result.submission_markdown
 
     def test_subset_selection_via_indices(self, monkeypatch):
         from core.server.routers.verify import (

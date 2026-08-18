@@ -2291,143 +2291,84 @@ async def get_session_bounty_report(
     format: str = "markdown",
     platform: str = "hackerone",
 ):
-    """
-    Generate a HackerOne-ready bug bounty report for a specific session.
+    """Render only receipt-bound SubmissionCandidates for one session."""
 
-    Query params:
-      min_severity: Minimum severity to include (CRITICAL/HIGH/MEDIUM/LOW/INFO). Default: LOW
-      format:       "markdown" (default) or "json"
-      platform:     "hackerone" (default), "bugcrowd", "intigriti"
-
-    Returns a complete Markdown document (or JSON array) with per-finding reports,
-    CVSS 3.1 vectors, steps to reproduce, and impact statements.
-    """
-    from core.reporting.bounty_report import build_reports, render_summary_report
+    from core.behavior.receipts import ReceiptStoreError
     from core.data.db import Database
-
-    db = Database.instance()
     from core.epistemic.ledger import load_canonical_session_read_model
+    from core.reporting.submission_candidate import (
+        build_submission_candidate,
+        candidate_report_payload,
+        render_submission_candidate,
+    )
+    from core.verify.workbench import CandidateWorkbenchStore
 
+    severity_order = {
+        "INFO": 0,
+        "LOW": 1,
+        "MEDIUM": 2,
+        "HIGH": 3,
+        "CRITICAL": 4,
+    }
+    minimum = min_severity.upper()
+    if minimum not in severity_order:
+        raise HTTPException(status_code=400, detail="Unsupported minimum severity")
+    db = Database.instance()
     read_model = load_canonical_session_read_model(session_id)
-    findings = read_model.finding_views()
-    issues = read_model.filter_cited_issues(await db.get_issues(session_id))
-    evidence = read_model.evidence_views()
-
-    # Merge issues and findings; prefer issues (higher confidence)
-    all_findings = list(issues) + [
-        f for f in findings
-        if not any(
-            (iss.get("type") == f.get("type") and iss.get("asset") == f.get("asset"))
-            for iss in issues
-        )
-    ]
-
-    if not all_findings:
-        return {"session_id": session_id, "reports": [], "markdown": "No findings to report.", "count": 0}
-
     session_data = await db.get_session(session_id)
     target = (session_data or {}).get("target", session_id)
+    store = CandidateWorkbenchStore()
+    report_dicts: List[Dict[str, Any]] = []
+    held: List[Dict[str, str]] = []
+    filtered = 0
+    for finding in sorted(read_model.findings, key=lambda item: item.id):
+        try:
+            workbench_id = store.workbench_id_for(
+                read_model,
+                finding_id=finding.id,
+            )
+            candidate = build_submission_candidate(
+                read_model,
+                workbench_id=workbench_id,
+                workbench_store=store,
+            )
+        except (ValueError, ReceiptStoreError) as exc:
+            held.append({"finding_id": finding.id, "reason": str(exc)})
+            continue
+        if severity_order.get(candidate.severity.upper(), -1) < severity_order[minimum]:
+            filtered += 1
+            continue
+        rendered = render_submission_candidate(candidate)
+        report_dicts.append(
+            candidate_report_payload(candidate, rendered=rendered)
+        )
 
-    # ── Adversarial triage gate ──────────────────────────────────────────
-    # The submission queue is SURFACE only. HOLD (needs strengthening) and
-    # SUPPRESS (valid-but-unpayable) are reported SEPARATELY so neither pollutes
-    # the submission candidates. A bounty report targets a program the researcher
-    # has chosen, so scope/rules are treated as loaded; the substantive axes
-    # (impact, safety, dedup, artifact, invariant) do the filtering. Findings are
-    # judged on deep copies — the raw findings stay in the DB for diagnostics.
-    from core.cortex.triage_adversary import route_findings, BOUNTY, SURFACE, HOLD, SUPPRESS
-    _loaded = object()
-    _buckets = route_findings(all_findings, route=BOUNTY, scope=_loaded, program_rules=_loaded)
-    surfaced = _buckets[SURFACE]
-
-    def _triage_digest(f: Dict[str, Any]) -> Dict[str, Any]:
-        t = (f.get("metadata") or {}).get("adversarial_triage") or {}
-        return {"type": f.get("type"), "target": f.get("target"),
-                "top_rejection_risks": t.get("top_rejection_risks"),
-                "predicted_rejections": t.get("predicted_rejections"),
-                "evidence_needed": t.get("evidence_needed"),
-                "next_action": t.get("next_action")}
-
+    if report_dicts:
+        markdown = "\n\n---\n\n".join(
+            item["markdown"].rstrip() for item in report_dicts
+        ) + "\n"
+    else:
+        markdown = (
+            "# Submission candidates: none\n\n"
+            "No canonical finding currently has a persisted, receipt-bound "
+            "Candidate Workbench selection.\n"
+        )
     triage_summary = {
-        "route": BOUNTY,
-        "surface": len(surfaced), "hold": len(_buckets[HOLD]), "suppress": len(_buckets[SUPPRESS]),
-        "held_for_review": [_triage_digest(f) for f in _buckets[HOLD]],
-        "suppressed": [_triage_digest(f) for f in _buckets[SUPPRESS]],
+        "route": "submission_candidate",
+        "surface": len(report_dicts),
+        "hold": len(held),
+        "filtered_by_severity": filtered,
+        "held_for_review": held,
     }
-
-    reports = build_reports(
-        surfaced,
-        scan_id=session_id,
-        evidence_items=evidence,
-        min_severity=min_severity.upper(),
-        platform=platform,
-    )
-
-    # Cross-scan duplicate annotations
-    from core.data.dedup_store import DedupStore
-    dedup_store = DedupStore.instance()
-    try:
-        await dedup_store.init()
-        dedup_map: Dict[str, Any] = {}
-        for finding in surfaced:
-            fp = dedup_store.fingerprint(finding)
-            result = await dedup_store.check_finding(finding)
-            dedup_map[fp] = result
-    except Exception as _dedup_err:
-        logger.warning("[BountyReport] Dedup check failed (non-fatal): %s", _dedup_err)
-        dedup_map = {}
-
-    # Annotate each report dict with duplicate info
-    report_dicts = []
-    for rep in reports:
-        d = rep.to_dict()
-        # Find the corresponding finding to get its fingerprint
-        for finding in surfaced:
-            ftype = finding.get("type") or finding.get("title") or ""
-            fasset = finding.get("asset") or finding.get("target") or ""
-            if ftype.lower() in rep.title.lower() or fasset in rep.asset:
-                fp = dedup_store.fingerprint(finding)
-                dr = dedup_map.get(fp)
-                if dr:
-                    d["duplicate_info"] = {
-                        "is_duplicate": dr.is_duplicate,
-                        "first_seen_at": dr.first_seen_at,
-                        "first_session": dr.first_session,
-                        "seen_count": dr.seen_count,
-                        "annotation": dr.annotation(),
-                    }
-                break
-        report_dicts.append(d)
-
-    # Sentinel's OWN conduct provenance — the Merkle root over the PolicyExecutor
-    # seam, lifted from the surfaced findings (the sink is scan-scoped, but the root
-    # travels with the DB-backed finding). Distinct from any target-observed ledger.
-    sentinel_provenance = _lift_sentinel_provenance(surfaced)
-
-    if format.lower() == "json":
-        return {
-            "session_id": session_id,
-            "target": target,
-            "count": len(reports),
-            "reports": report_dicts,
-            "triage": triage_summary,
-            "sentinel_provenance": sentinel_provenance,
-        }
-
-    # Default: Markdown summary document (SURFACE candidates only).
-    md = render_summary_report(reports, target=target, scan_id=session_id,
-                               sentinel_provenance=sentinel_provenance)
-    if not reports:
-        md = (f"# Submission candidates: none\n\n"
-              f"The adversarial triage gate surfaced 0 of {len(all_findings)} findings as "
-              f"submission-ready ({triage_summary['hold']} held for strengthening, "
-              f"{triage_summary['suppress']} suppressed). See `triage` for the predicted "
-              f"reviewer objections and the safe evidence that would change the decision.")
     return {
         "session_id": session_id,
+        "canonical_revision": read_model.revision,
         "target": target,
-        "count": len(reports),
-        "markdown": md,
+        "count": len(report_dicts),
+        "format": format.lower(),
+        "platform": platform,
+        "candidate_digests": [item["candidate_digest"] for item in report_dicts],
+        "markdown": markdown,
         "reports": report_dicts,
         "triage": triage_summary,
     }

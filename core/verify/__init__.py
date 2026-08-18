@@ -6,13 +6,13 @@ reproduction (workflow steps 4-5). This is where bounty reports get
 REJECTED ("could not reproduce") and where hunters get BANNED
 (out-of-scope testing during verification).
 
-Design (single artifact, three uses simultaneously):
-  1. Live engine interface — operator drives real requests at the
-     target while standing on the policy_enforcer.
+Design (one finding-scoped workflow, three uses simultaneously):
+  1. Live engine interface — operator drives explicitly scoped requests
+     through the Verify egress broker.
   2. Audit trail — every exchange is structured (FlowStep-shaped),
      not text-soup from a shell.
-  3. Report repro section — exchanges promote one-click into
-     BountyReport.steps_to_reproduce as curl + prose.
+  3. Candidate evidence — selected exchanges persist only as sanitized,
+     receipt-bound inputs to a deterministic SubmissionCandidate draft.
 
 Architecture is intentionally a *finding-scoped* specialization of
 Phase 4's Ghost flow capture rather than a parallel system. Reuses:

@@ -200,24 +200,30 @@ public struct VerifyPromoteEntry: Codable, Identifiable, Equatable {
 }
 
 public struct VerifyPromoteResult: Codable, Identifiable {
+    public let candidateDigest: String
+    public let renderDigest: String
     public let findingId: String?
     public let targetUrl: String
     public let entryCount: Int
     public let stepsToReproduce: [String]
     public let placeholderLegend: [String: String]
     public let entries: [VerifyPromoteEntry]
+    public let submissionMarkdown: String
 
     // Identifiable conformance for `.sheet(item:)`. Computed (not stored) so it
     // stays out of CodingKeys and doesn't affect decoding of the API response.
     public var id: String { findingId ?? targetUrl }
 
     enum CodingKeys: String, CodingKey {
+        case candidateDigest = "candidate_digest"
+        case renderDigest = "render_digest"
         case findingId = "finding_id"
         case targetUrl = "target_url"
         case entryCount = "entry_count"
         case stepsToReproduce = "steps_to_reproduce"
         case placeholderLegend = "placeholder_legend"
         case entries
+        case submissionMarkdown = "submission_markdown"
     }
 }
 
@@ -369,6 +375,14 @@ public final class VerifyAPIClient {
     }
 
     // MARK: promote
+
+    public func getCandidate(sessionId: String) async throws -> VerifyPromoteResult {
+        let req = authed(
+            path: "/v1/verify/sessions/\(sessionId)/candidate",
+            method: "GET"
+        )
+        return try await send(req, as: VerifyPromoteResult.self)
+    }
 
     public func promote(
         sessionId: String,

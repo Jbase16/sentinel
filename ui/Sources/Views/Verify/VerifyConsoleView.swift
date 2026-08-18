@@ -10,9 +10,9 @@
 //            an inline banner with a one-click "Add to scope" CTA.
 //    * Right — transcript of captured exchanges. Each row has a
 //            checkbox so the operator can select which exchanges
-//            promote to repro. The Promote button at the bottom
-//            renders the selected subset as bounty-report-ready
-//            markdown.
+//            retain as receipt-bound candidate evidence. The Promote
+//            button replaces the active selection set and renders the
+//            deterministic SubmissionCandidate draft.
 //
 //  The Verify Console deliberately doesn't try to replace the
 //  long-running-tool TerminalView — they coexist. Verify Console is
