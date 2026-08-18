@@ -159,9 +159,24 @@ class CALCompiledPolicy(Policy):
         - If all pass and action is ALLOW → APPROVE
         - If conditions fail → APPROVE (law doesn't apply)
         """
-        # Extract tool definition from decision context
-        # Strategos stores tool info in decision.context['tool'] or passes via evaluate context
-        tool_def = decision.context.get("tool") or context.get("tool") or {}
+        decision_context = getattr(decision, "context", None)
+        if not isinstance(decision_context, dict) or not isinstance(context, dict):
+            return Judgment(
+                verdict=Verdict.VETO,
+                policy_name=self.name,
+                reason="Malformed CAL policy input",
+            )
+
+        if "tool" in decision_context:
+            tool_def = decision_context["tool"]
+        else:
+            tool_def = context.get("tool")
+        if not self._inputs_are_well_formed(context, tool_def):
+            return Judgment(
+                verdict=Verdict.VETO,
+                policy_name=self.name,
+                reason="Malformed CAL policy input",
+            )
 
         # Build evaluation context (matches CAL parser expectations)
         # Wrap in _ContextWrapper to support dot notation (context.phase_index)
@@ -231,6 +246,32 @@ class CALCompiledPolicy(Policy):
             policy_name=self.name,
             reason=f"Law {self._law.name} has no action"
         )
+
+    @staticmethod
+    def _inputs_are_well_formed(context: Dict[str, Any], tool: Any) -> bool:
+        """Reject ambiguous CAL inputs before the legacy evaluator can default them."""
+
+        if not isinstance(tool, dict):
+            return False
+        knowledge = context.get("knowledge")
+        if not isinstance(knowledge, dict):
+            return False
+        collections = (list, tuple, set, frozenset)
+        tags = knowledge.get("tags")
+        gates = tool.get("gates")
+        if not isinstance(tags, collections) or not isinstance(gates, collections):
+            return False
+        if any(type(value) is not str or not value for value in (*tags, *gates)):
+            return False
+
+        integer_fields = (
+            (context.get("phase_index"), 0),
+            (context.get("active_tools"), 0),
+            (context.get("max_concurrent"), 1),
+            (tool.get("phase"), 0),
+            (tool.get("resource_cost"), 0),
+        )
+        return all(type(value) is int and value >= minimum for value, minimum in integer_fields)
 
     def _format_reason(self, template: str, context: Any, tool: Dict) -> str:
         """

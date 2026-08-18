@@ -1805,6 +1805,13 @@ class Strategos:
         for t in candidates:
             tool_def = ToolRegistry.get(t, mode=mode)
             tool_def["name"] = t
+            policy_tool_def = {
+                **tool_def,
+                "gates": tool_def.get("gates", []),
+                # One scheduled tool consumes one concurrency slot. Registry
+                # ``cost`` is a scoring weight, not a concurrency unit.
+                "resource_cost": 1,
+            }
 
             # Internal tools may require operator-provided configuration (personas, OOB provider)
             # or prior discoveries (verification targets). Enforce these preconditions here so we
@@ -1846,8 +1853,8 @@ class Strategos:
                 continue
 
             sim_ctx = {
-                **tool_def,
-                "tool": tool_def,
+                **policy_tool_def,
+                "tool": policy_tool_def,
                 "target": self.context.target,
                 "mode": mode.value,
                 "phase_index": self.context.phase_index,

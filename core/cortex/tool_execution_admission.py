@@ -9,10 +9,11 @@ transport is therefore unreachable without a live, single-use executor claim.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Optional, Tuple
+from typing import Any, FrozenSet, Iterable, Mapping, Optional, Tuple
 
 from core.cortex.execution_policy import (
     CandidateAction,
+    Decision,
     PolicyExecutor,
     ProposalExecutionClaim,
 )
@@ -21,6 +22,184 @@ from core.safety.provenance import body_hash
 
 
 _PROPOSAL_SOURCES = frozenset({"ai_action_dispatcher", "strategos"})
+_TOOL_SELECTION_ACTION_CLASS = "TOOL_SELECTION"
+
+
+class ToolPolicyInputError(ValueError):
+    """A scheduler policy input cannot be represented without ambiguity."""
+
+
+def _policy_int(value: Any, *, field: str, minimum: int) -> int:
+    if type(value) is not int or value < minimum:
+        raise ToolPolicyInputError(f"{field} must be an integer >= {minimum}")
+    return value
+
+
+def _policy_tags(value: Any, *, field: str) -> FrozenSet[str]:
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        raise ToolPolicyInputError(f"{field} must be a collection of strings")
+    if any(type(item) is not str or not item for item in value):
+        raise ToolPolicyInputError(f"{field} must contain only non-empty strings")
+    return frozenset(value)
+
+
+@dataclass(frozen=True)
+class ToolPolicySnapshot:
+    """Immutable scheduling facts consumed by the three constitution policies."""
+
+    phase_index: int
+    knowledge_tags: FrozenSet[str]
+    active_tools: int
+    max_concurrent: int
+    tool_phase: int
+    prerequisite_gates: FrozenSet[str]
+    resource_cost: int
+
+    def __post_init__(self) -> None:
+        _policy_int(self.phase_index, field="phase_index", minimum=0)
+        _policy_int(self.active_tools, field="active_tools", minimum=0)
+        _policy_int(self.max_concurrent, field="max_concurrent", minimum=1)
+        _policy_int(self.tool_phase, field="tool_phase", minimum=0)
+        _policy_int(self.resource_cost, field="resource_cost", minimum=0)
+        if not isinstance(self.knowledge_tags, frozenset):
+            raise ToolPolicyInputError("knowledge_tags must be a frozenset")
+        if not isinstance(self.prerequisite_gates, frozenset):
+            raise ToolPolicyInputError("prerequisite_gates must be a frozenset")
+        _policy_tags(self.knowledge_tags, field="knowledge_tags")
+        _policy_tags(self.prerequisite_gates, field="prerequisite_gates")
+
+    @classmethod
+    def from_inputs(
+        cls,
+        context: Any,
+        tool: Any,
+    ) -> "ToolPolicySnapshot":
+        if not isinstance(context, Mapping):
+            raise ToolPolicyInputError("context must be a mapping")
+        if not isinstance(tool, Mapping):
+            raise ToolPolicyInputError("tool must be a mapping")
+
+        knowledge = context.get("knowledge")
+        if not isinstance(knowledge, Mapping):
+            raise ToolPolicyInputError("context.knowledge must be a mapping")
+
+        return cls(
+            phase_index=_policy_int(
+                context.get("phase_index"), field="context.phase_index", minimum=0
+            ),
+            knowledge_tags=_policy_tags(
+                knowledge.get("tags"), field="context.knowledge.tags"
+            ),
+            active_tools=_policy_int(
+                context.get("active_tools"), field="context.active_tools", minimum=0
+            ),
+            max_concurrent=_policy_int(
+                context.get("max_concurrent"), field="context.max_concurrent", minimum=1
+            ),
+            tool_phase=_policy_int(
+                tool.get("phase"), field="tool.phase", minimum=0
+            ),
+            prerequisite_gates=_policy_tags(
+                tool.get("gates"), field="tool.gates"
+            ),
+            resource_cost=_policy_int(
+                tool.get("resource_cost"), field="tool.resource_cost", minimum=0
+            ),
+        )
+
+    def to_material(self) -> Mapping[str, Any]:
+        """Return deterministic proposal material without granting authority."""
+
+        return {
+            "phase_index": self.phase_index,
+            "knowledge_tags": sorted(self.knowledge_tags),
+            "active_tools": self.active_tools,
+            "max_concurrent": self.max_concurrent,
+            "tool_phase": self.tool_phase,
+            "prerequisite_gates": sorted(self.prerequisite_gates),
+            "resource_cost": self.resource_cost,
+        }
+
+
+class PassiveBeforeActivePolicy:
+    name = "PassiveBeforeActive"
+
+    @staticmethod
+    def violation(snapshot: ToolPolicySnapshot) -> Optional[str]:
+        if snapshot.phase_index < 2 and snapshot.tool_phase >= 2:
+            return (
+                "Passive Mode Violation: "
+                f"Phase {snapshot.phase_index} cannot run Phase {snapshot.tool_phase} tool"
+            )
+        return None
+
+
+class EvidenceGatesPolicy:
+    name = "EvidenceGates"
+
+    @staticmethod
+    def violation(snapshot: ToolPolicySnapshot) -> Optional[str]:
+        if not snapshot.prerequisite_gates.issubset(snapshot.knowledge_tags):
+            missing = sorted(snapshot.prerequisite_gates - snapshot.knowledge_tags)
+            return f"Missing Prerequisite: {missing}"
+        return None
+
+
+class ResourceAwarenessPolicy:
+    name = "ResourceAwareness"
+
+    @staticmethod
+    def violation(snapshot: ToolPolicySnapshot) -> Optional[str]:
+        projected = snapshot.active_tools + snapshot.resource_cost
+        if projected > snapshot.max_concurrent:
+            return (
+                "System load too high "
+                f"({snapshot.active_tools} + {snapshot.resource_cost} "
+                f"> {snapshot.max_concurrent})"
+            )
+        return None
+
+
+class CanonicalToolSelectionPolicy:
+    """Typed, fail-closed pre-admission policy for Strategos proposals.
+
+    This policy can reject a proposal, but cannot authorize transport.  A proposal
+    that passes still needs a live, single-use claim from ``PolicyExecutor``.
+    """
+
+    _policies = (
+        PassiveBeforeActivePolicy(),
+        EvidenceGatesPolicy(),
+        ResourceAwarenessPolicy(),
+    )
+
+    def evaluate(self, context: Any, tool: Any) -> Decision:
+        try:
+            snapshot = ToolPolicySnapshot.from_inputs(context, tool)
+        except (ToolPolicyInputError, TypeError, ValueError):
+            return Decision(
+                False,
+                "TypedToolPolicyInput: malformed scheduling policy input",
+                _TOOL_SELECTION_ACTION_CLASS,
+            )
+        return self.evaluate_snapshot(snapshot)
+
+    def evaluate_snapshot(self, snapshot: Any) -> Decision:
+        if not isinstance(snapshot, ToolPolicySnapshot):
+            return Decision(
+                False,
+                "TypedToolPolicyInput: malformed scheduling policy snapshot",
+                _TOOL_SELECTION_ACTION_CLASS,
+            )
+        for policy in self._policies:
+            violation = policy.violation(snapshot)
+            if violation is not None:
+                return Decision(
+                    False,
+                    f"{policy.name}: {violation}",
+                    _TOOL_SELECTION_ACTION_CLASS,
+                )
+        return Decision(True, "All typed tool policies passed", _TOOL_SELECTION_ACTION_CLASS)
 
 
 class ToolProposalAdmissionDenied(RuntimeError):
