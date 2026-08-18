@@ -2,12 +2,13 @@
 #
 # PURPOSE:
 # The AI can suggest running security tools autonomously (like "run nmap on this target").
-# This module ensures dangerous operations require human approval before execution.
+# This module manages proposal approval; PolicyExecutor alone grants execution authority.
 #
 # SECURITY MODEL:
-# - Safe tools (passive reconnaissance): Auto-approve
-# - Restricted tools (active scanning, system modification): Require human approval
+# - Safe proposals (passive reconnaissance): Auto-release to canonical admission
+# - Restricted proposals (active scanning): Require human approval first
 # - Unknown tools: Block completely
+# - Every released proposal still requires a single-use PolicyExecutor claim
 #
 # WHY THIS MATTERS:
 # Prevents the AI from:
@@ -33,10 +34,10 @@ logger = logging.getLogger(__name__)
 
 class ActionDispatcher(Observable):
     """
-    Safety layer for autonomous AI actions.
+    Approval queue for autonomous AI action proposals.
     
-    Acts as a gatekeeper between the AI's suggestions and actual tool execution.
-    Maintains a queue of actions awaiting human approval.
+    Maintains proposals awaiting human approval.  Its signals never grant
+    execution authority; subscribers must obtain a claim from PolicyExecutor.
     
     Design Pattern: Singleton (one global approval queue)
     Observable: Emits signals when actions need approval or get approved
@@ -103,7 +104,7 @@ class ActionDispatcher(Observable):
             target: What we're scanning (for logging/context)
             
         Returns:
-            "AUTO_APPROVED" - Safe tool, already executed
+            "AUTO_APPROVED" - Safe proposal released to canonical admission
             "PENDING" - Restricted tool, waiting for approval
             "DROPPED" - Duplicate or unknown tool, rejected
         """
@@ -147,7 +148,7 @@ class ActionDispatcher(Observable):
 
         # Decision 1: Is this a safe tool? (passive reconnaissance)
         if tool in config.scan.safe_tools:
-            # Auto-approve and immediately emit for execution
+            # Auto-approve and emit to the canonical execution-admission adapter.
             self.action_approved.emit(full_action)
             return "AUTO_APPROVED"
 
@@ -165,10 +166,10 @@ class ActionDispatcher(Observable):
 
     def approve_action(self, action_id: str):
         """
-        Human approved a pending action - execute it.
+        Human approved a pending proposal - release it for canonical admission.
         
-        Removes action from pending queue and emits approval signal.
-        Scan orchestrator will receive the signal and actually run the tool.
+        Removes the proposal from the pending queue and emits an approval signal.
+        The scan orchestrator must still obtain and consume a PolicyExecutor claim.
         
         Args:
             action_id: UUID of the action to approve

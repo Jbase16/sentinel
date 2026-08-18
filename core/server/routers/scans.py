@@ -1016,16 +1016,11 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             )
 
         async def _dispatch_approved_action(action: Dict) -> None:
-            """Execute an AI-approved tool within the active scan session.
-
-            Re-resolves session and event_bus from global state each time
-            so we never operate on a stale/dead session object.
-            """
+            """Submit an AI-approved proposal to the scan's canonical admission."""
             tool_name = action.get("tool", "")
             args = action.get("args", [])
             target_url = action.get("target") or _bound_target
 
-            # Re-resolve session from the live state manager
             current_state = get_state()
             live_session = None
             for _sid, _sess in current_state.session_manager.items():
@@ -1037,43 +1032,26 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                _bound_session_id, action.get("id"))
                 return
 
-            # Freshen event_bus from the module-level getter
-            _event_bus = get_event_bus()
+            dispatch_tool = (current_state.scan_state or {}).get("_dispatch_tool")
+            if not callable(dispatch_tool):
+                live_session.log(
+                    "[ActionDispatcher] Approved proposal has no active canonical executor"
+                )
+                return
 
-            live_session.log(f"[ActionDispatcher] Executing approved tool: {tool_name} {' '.join(args)}")
-
-            engine = ScannerEngine(session=live_session)
-            findings: List[Dict] = []
-            exit_code = 0
-            tool_error: Optional[Dict[str, Any]] = None
             try:
-                _event_bus.emit_tool_invoked(tool=tool_name, target=target_url, args=args, scan_id=live_session.id)
-                if current_state.cancel_requested.is_set():
-                    return
-
-                async for log_line in engine.scan(
-                    target_url, selected_tools=[tool_name], cancel_flag=current_state.cancel_requested,
-                ):
-                    live_session.log(log_line)
-
-                findings = engine.get_last_results() or []
-                tool_error = engine.consume_last_tool_error()
-                exit_code = 130 if current_state.cancel_requested.is_set() else 0
-                if tool_error and "exit_code" in tool_error:
-                    exit_code = int(tool_error["exit_code"])
+                await dispatch_tool(
+                    tool_name,
+                    args=args,
+                    target=target_url,
+                    source="ai_action_dispatcher",
+                    reason=action.get("reason") or "operator-approved AI proposal",
+                )
             except asyncio.CancelledError:
-                pass
+                raise
             except Exception as exc:
                 live_session.log(f"[ActionDispatcher] Tool failed ({tool_name}): {exc}")
                 logger.error("[ActionBridge] Approved action failed: %s", exc, exc_info=True)
-            finally:
-                _event_bus.emit_tool_completed(
-                    tool=tool_name,
-                    exit_code=exit_code,
-                    findings_count=len(findings),
-                    scan_id=live_session.id,
-                    error=tool_error,
-                )
 
         async def _runner() -> None:
             start_time = time.time()
@@ -1099,7 +1077,35 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         session.id,
                     )
 
-                async def dispatch_tool(tool: str) -> List[Dict]:
+                from core.base.config import get_config
+                from core.cortex.execution_policy import (
+                    DENIED_STATUS,
+                    ExecutionPolicy as CanonicalExecutionPolicy,
+                    PolicyExecutor,
+                )
+                from core.cortex.tool_execution_admission import (
+                    CanonicalToolExecutionAdmission,
+                    ToolExecutionProposal,
+                    ToolProposalAdmissionDenied,
+                )
+                from core.net.egress import scope_context_authorizer
+                from core.safety.proof_mode import ProofMode
+
+                async def _execute_tool_transport(
+                    method: str,
+                    target_url: str,
+                    body: Optional[Dict[str, Any]] = None,
+                    **_kwargs: Any,
+                ) -> tuple[int, List[Dict]]:
+                    if method != "EXECUTE" or not isinstance(body, dict):
+                        raise ToolError(
+                            "unknown",
+                            126,
+                            "Canonical tool transport received an invalid action",
+                        )
+                    tool = str(body.get("tool") or "").strip().lower()
+                    args = body.get("args") or []
+                    source = str(body.get("source") or "unknown")
                     findings = []
                     exit_code = 0
                     tool_error: Optional[Dict[str, Any]] = None
@@ -1107,19 +1113,28 @@ async def begin_scan_logic(req: ScanRequest) -> str:
 
                     if tool not in allowed_tools:
                         session.log(f"⚠️ [Security] Tool '{tool}' blocked")
-                        tool_outcomes["attempted"] += 1
-                        tool_outcomes["failed"] += 1
                         raise ToolError(tool, 126, "Tool is not allowed for this scan")
 
                     tool_outcomes["attempted"] += 1
                     engine = ScannerEngine(session=session)
                     try:
-                        event_bus.emit_tool_invoked(tool=tool, target=req.target, args=[], scan_id=session.id)
+                        session.log(
+                            f"[CanonicalExecution] {source} executing {tool} "
+                            f"against {target_url}"
+                        )
+                        event_bus.emit_tool_invoked(
+                            tool=tool,
+                            target=target_url,
+                            args=args,
+                            scan_id=session.id,
+                        )
                         if state.cancel_requested.is_set():
-                            return []
+                            return 200, []
 
                         async for log_line in engine.scan(
-                            req.target, selected_tools=[tool], cancel_flag=state.cancel_requested
+                            target_url,
+                            selected_tools=[tool],
+                            cancel_flag=state.cancel_requested,
                         ):
                             session.log(log_line)
 
@@ -1137,7 +1152,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                                 str(tool_error.get("stderr", "Tool execution failed")),
                             )
                         tool_outcomes["succeeded"] += 1
-                        return findings
+                        return 200, findings
                     except asyncio.CancelledError:
                         # Local task cancellation (e.g., from Strategos tool timeout)
                         # should NOT poison the global scan state.
@@ -1176,6 +1191,57 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                             scan_id=session.id,
                             error=tool_error,
                         )
+
+                proposal_executor = PolicyExecutor(
+                    _execute_tool_transport,
+                    CanonicalExecutionPolicy(
+                        ProofMode.for_scan_mode(req.mode),
+                        scope_filter=scope_context_authorizer(scope_context),
+                    ),
+                )
+                proposal_admission = CanonicalToolExecutionAdmission(
+                    executor=proposal_executor,
+                    allowed_tools=allowed_tools,
+                    safe_tools=get_config().scan.safe_tools,
+                )
+
+                async def dispatch_tool(
+                    tool: str,
+                    *,
+                    args: Optional[List[str]] = None,
+                    target: Optional[str] = None,
+                    source: str = "strategos",
+                    reason: str = "Strategos selected the tool for the active intent",
+                ) -> List[Dict]:
+                    proposal = ToolExecutionProposal.build(
+                        source=source,
+                        tool=tool,
+                        args=args or (),
+                        target=target or req.target,
+                        reason=reason,
+                    )
+                    try:
+                        status, response = await proposal_admission.admit_and_execute(proposal)
+                    except ToolProposalAdmissionDenied as exc:
+                        tool_outcomes["attempted"] += 1
+                        tool_outcomes["failed"] += 1
+                        raise ToolError(tool, 126, str(exc)) from exc
+                    if status == DENIED_STATUS:
+                        tool_outcomes["attempted"] += 1
+                        tool_outcomes["failed"] += 1
+                        reason = (
+                            response.get("_policy_denied", "canonical execution denied")
+                            if isinstance(response, dict)
+                            else "canonical execution denied"
+                        )
+                        raise ToolError(tool, 126, str(reason))
+                    if not isinstance(response, list):
+                        raise ToolError(
+                            tool,
+                            1,
+                            "Canonical tool transport returned an invalid result",
+                        )
+                    return response
 
                 if not passive_only:
                     # Store dispatch_tool on state for external callers

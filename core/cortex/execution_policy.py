@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
@@ -77,6 +78,20 @@ class Decision:
 
 class LocatorRuntimeAuthorityDenied(RuntimeError):
     """A single-use admitted locator action no longer matches its authority."""
+
+
+@dataclass(frozen=True)
+class ProposalExecutionClaim:
+    """Opaque, single-use authority for one exact proposed action.
+
+    Proposal producers may retain this value, but only the ``PolicyExecutor``
+    instance that issued it can consume it.  The executor's private registry is
+    authoritative; constructing or copying a look-alike value grants nothing.
+    """
+
+    claim_id: str
+    action_ref: str
+    max_requests: int = 1
 
 
 def _candidate_runtime_fingerprint(action: CandidateAction) -> str:
@@ -437,6 +452,110 @@ class PolicyExecutor:
         self.policy = policy
         self.provenance = provenance          # optional conduct trail (Merkle chain)
         self.skipped: List[Dict[str, Any]] = []
+        self._proposal_claims: Dict[str, str] = {}
+        self._proposal_claim_lock = threading.Lock()
+
+    def claim_proposal_action(
+        self,
+        action: CandidateAction,
+    ) -> Optional[ProposalExecutionClaim]:
+        """Admit and bind one proposal without touching the transport.
+
+        A claim is intentionally single-use and executor-local.  Policy is
+        evaluated again at execution time so a claim cannot preserve stale
+        scope or budget authority.
+        """
+
+        if not isinstance(action, CandidateAction):
+            return None
+        decision = self.policy.evaluate_action(action)
+        if not decision.allowed:
+            self.skipped.append({
+                "method": action.method,
+                "url": action.url,
+                "class": decision.action_class,
+                "reason": decision.reason,
+            })
+            self._emit_provenance(
+                action,
+                decision,
+                allowed=False,
+                status=None,
+                resp=None,
+            )
+            return None
+
+        action_ref = _candidate_runtime_fingerprint(action)
+        claim = ProposalExecutionClaim(
+            claim_id=str(uuid.uuid4()),
+            action_ref=action_ref,
+        )
+        with self._proposal_claim_lock:
+            self._proposal_claims[claim.claim_id] = action_ref
+        return claim
+
+    async def send_claimed_action(
+        self,
+        action: CandidateAction,
+        claim: Optional[ProposalExecutionClaim],
+        **kw: Any,
+    ) -> Tuple[int, Any]:
+        """Consume one exact proposal claim, then use ordinary policy send.
+
+        Missing, forged, replayed, or action-mismatched claims fail before the
+        raw transport.  A mismatch burns the claim so it cannot be used as an
+        oracle and then replayed with the originally admitted action.
+        """
+
+        action_ref = (
+            _candidate_runtime_fingerprint(action)
+            if isinstance(action, CandidateAction)
+            else None
+        )
+        registered_ref: Optional[str] = None
+        if isinstance(claim, ProposalExecutionClaim):
+            with self._proposal_claim_lock:
+                registered_ref = self._proposal_claims.pop(claim.claim_id, None)
+
+        claim_valid = (
+            isinstance(action, CandidateAction)
+            and isinstance(claim, ProposalExecutionClaim)
+            and claim.max_requests == 1
+            and registered_ref is not None
+            and registered_ref == claim.action_ref == action_ref
+        )
+        if not claim_valid:
+            try:
+                action_class = classify(
+                    action.method,
+                    action.url,
+                    action.body,
+                    hint=action.hint,
+                )
+            except Exception:
+                action_class = "UNKNOWN"
+            decision = Decision(
+                False,
+                "proposal_execution_claim_unavailable",
+                action_class,
+            )
+            if isinstance(action, CandidateAction):
+                self.skipped.append({
+                    "method": action.method,
+                    "url": action.url,
+                    "class": decision.action_class,
+                    "reason": decision.reason,
+                })
+                self._emit_provenance(
+                    action,
+                    decision,
+                    allowed=False,
+                    status=None,
+                    resp=None,
+                )
+            return DENIED_STATUS, {"_policy_denied": decision.reason}
+
+        return await self.send_action(action, **kw)
 
     async def send_action(self, action: CandidateAction, **kw: Any) -> Tuple[int, Any]:
         decision = self.policy.evaluate_action(action)

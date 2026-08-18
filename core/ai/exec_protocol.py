@@ -20,7 +20,9 @@ This module is the choke point for all of those. The dispatch path is:
         -> parse_exec_line()           # strict, fail-closed
         -> ExecCommand pydantic model  # schema-locked
         -> ActionDispatcher.request_action()
-        -> safe_tools auto-approve / restricted_tools human-approve / drop
+        -> safe_tools auto-release / restricted_tools human-approve / drop
+        -> PolicyExecutor single-use claim
+        -> bounded tool transport
 
 If parsing fails for any reason — bad JSON, wrong shape, oversized, dangerous
 args, unknown tool — we return None and the line is rendered as plain text.
@@ -145,7 +147,8 @@ def parse_exec_line(
 
     The caller is responsible for routing the returned command through
     ``ActionDispatcher.request_action()``. This function only validates the
-    *shape* of the directive; it does not consult the safe/restricted lists.
+    *shape* of the directive; it does not consult the safe/restricted lists or
+    grant the later PolicyExecutor claim.
 
     Args:
         line: A single line from the streamed model output.
