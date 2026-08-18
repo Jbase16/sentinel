@@ -142,10 +142,18 @@ def _omission_records():
 
 
 def _omission_shadow():
+    context, _calls = _context(
+        workflows=(
+            CONTROLLED_SEQUENCE_WORKFLOW,
+            FRESH_OMISSION_WORKFLOW,
+            FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        )
+    )
     return BehavioralShadowOrchestrator().run(
         _omission_records(),
         target_origin=ORIGIN,
         world_id="alice",
+        experiment_context=context,
     )
 
 
@@ -228,7 +236,7 @@ def _confirmation_admission(shadow, tmp_path, *, enabled=True):
     )
 
 
-def _context():
+def _context(*, workflows=None, peer: bool = False):
     calls = []
 
     async def forbidden_transport(method, url, body=None, **kwargs):
@@ -242,7 +250,9 @@ def _context():
         authorized_origins=[ORIGIN],
         authorization_basis="authorized resolver test",
         disclosure_attestation=True,
-        allowed_workflows=[CONTROLLED_WORKFLOW, CONTROLLED_SEQUENCE_WORKFLOW],
+        allowed_workflows=list(
+            workflows or (CONTROLLED_WORKFLOW, CONTROLLED_SEQUENCE_WORKFLOW)
+        ),
         created_at=1_780_000_000.0,
         expires_at=1_900_000_000.0,
     )
@@ -270,13 +280,14 @@ def _context():
             authorization=envelope,
             actor_persona_id="alice",
             executor=executor,
+            peer_persona_id="bob" if peer else None,
         ),
         calls,
     )
 
 
 def _shadow(*, peer=True):
-    context, calls = _context()
+    context, calls = _context(peer=peer)
     result = BehavioralShadowOrchestrator().run(
         _source_records(),
         target_origin=ORIGIN,
@@ -288,9 +299,9 @@ def _shadow(*, peer=True):
     return result, calls
 
 
-def test_plan_defers_preparatory_setup_and_selects_next_outcome_bearing_obligation():
+def test_plan_selects_the_payout_goal_bound_outcome_bearing_obligation():
     shadow, calls = _shadow()
-    assert shadow.ranked_frontier[0].resolution_kind == "owned_experiment"
+    assert shadow.ranked_frontier[0].resolution_kind == "authorization_proposal"
 
     resolver = SingleStepObligationResolver(ClosedLoopResolverConfig(enabled=False))
     first = resolver.plan(shadow)
@@ -298,12 +309,12 @@ def test_plan_defers_preparatory_setup_and_selects_next_outcome_bearing_obligati
 
     assert first.to_dict() == second.to_dict()
     assert first.selected is not None
-    assert first.selected.frontier_index == 1
-    assert first.selected.obligation_id == shadow.ranked_frontier[1].obligation_id
-    assert first.selected.proposal_id == shadow.ranked_frontier[1].resolution_ref
-    assert first.diagnostics.actionable_items == 2
+    assert first.selected.frontier_index == 0
+    assert first.selected.obligation_id == shadow.ranked_frontier[0].obligation_id
+    assert first.selected.proposal_id == shadow.ranked_frontier[0].resolution_ref
+    assert first.diagnostics.actionable_items == 1
     assert first.diagnostics.outcome_bearing_items == 1
-    assert first.diagnostics.deferred_preparatory_items == 1
+    assert first.diagnostics.deferred_preparatory_items == 0
     assert calls == []
     encoded = json.dumps(first.to_dict(), sort_keys=True)
     for raw in (ORIGIN, NOTE_ID, SOURCE_DOCUMENT_ID, PEER_DOCUMENT_ID, "alice", "bob"):
@@ -320,7 +331,8 @@ def test_enabled_resolver_with_only_preparatory_work_sends_no_traffic():
 
     assert result.status == "no_executable_candidate"
     assert result.plan.selected is None
-    assert result.plan.diagnostics.deferred_preparatory_items == 1
+    assert result.plan.diagnostics.deferred_preparatory_items == 0
+    assert result.plan.diagnostics.unavailable_items == 1
     assert result.execution is None
     assert calls == []
 
@@ -486,8 +498,8 @@ def test_unbound_frontier_reference_fails_closed():
         SingleStepObligationResolver().plan(shadow)
 
 
-def test_rank_bound_cannot_be_misreported_as_no_outcome_bearing_candidate():
-    context, calls = _context()
+def test_rank_bound_retains_the_canonical_outcome_bearing_selection():
+    context, calls = _context(peer=True)
     shadow = BehavioralShadowOrchestrator(
         config=ShadowOrchestratorConfig(max_ranked_obligations=1)
     ).run(
@@ -499,10 +511,11 @@ def test_rank_bound_cannot_be_misreported_as_no_outcome_bearing_candidate():
         experiment_context=context,
     )
     assert shadow.ranked_dropped > 0
-    assert shadow.ranked_frontier[0].resolution_kind == "owned_experiment"
+    assert shadow.ranked_frontier[0].resolution_kind == "authorization_proposal"
 
-    with pytest.raises(ClosedLoopResolverDenied, match="blocked_by_rank_bound"):
-        SingleStepObligationResolver().plan(shadow)
+    plan = SingleStepObligationResolver().plan(shadow)
+    assert plan.selected is not None
+    assert plan.selected.frontier_index == 0
 
     assert calls == []
 

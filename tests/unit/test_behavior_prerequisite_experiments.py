@@ -430,8 +430,13 @@ def test_ordinary_shadow_run_carries_passive_specs_without_new_resolution_author
     assert first.to_dict() == second.to_dict()
     assert first.prerequisite_experiments.executable is False
     assert first.prerequisite_experiments.finding_authority is False
-    assert first.selected is not None
-    assert first.selected.resolution_kind == "omission_experiment"
+    assert first.payout_goal_plan.selected is None
+    assert first.selected is None
+    ranked = next(
+        item for item in first.ranked_frontier if item.kind == "state_machine_legality"
+    )
+    assert ranked.resolution_kind == "unavailable"
+    assert "payout_goal_unselected" in ranked.signals
 
 
 def test_analysis_module_has_no_transport_or_execution_surface():

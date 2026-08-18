@@ -43,6 +43,7 @@ from .omission import (
 from .obligations import OPEN, SecurityObligationGraph, SecurityObligationGraphBuilder
 from .payout_goals import (
     GoalPlanningContext,
+    PayoutGoalCandidate,
     PayoutGoalPlan,
     PayoutGoalTopologyPlanner,
 )
@@ -343,6 +344,13 @@ class BehavioralShadowRun:
             or self.payout_goal_plan.target_ref != self.graph.target_ref
             or self.payout_goal_plan.graph_digest != self.graph.graph_digest
             or self.payout_goal_plan.executable
+            or (
+                any(item.actionable for item in self.ranked_frontier)
+                and BehavioralShadowOrchestrator._selected_payout_candidate(
+                    self.payout_goal_plan
+                )
+                is None
+            )
             or self.prerequisite_experiments.state_machine_result_id
             != self.state_machine.result_id
             or self.prerequisite_experiments.lifecycle_capture_digest
@@ -596,18 +604,29 @@ class BehavioralShadowOrchestrator:
     def _resolution_maps(
         *,
         records: Sequence[Mapping[str, Any]],
+        payout_goal_plan: PayoutGoalPlan,
         proposals: Optional[ProposalBatch],
         experiment_stage: OwnedExperimentShadowStage,
         omissions: OmissionCompilationResult,
     ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+        selected = BehavioralShadowOrchestrator._selected_payout_candidate(
+            payout_goal_plan
+        )
+        if selected is None:
+            return {}, {}, {}
+        terminal_operation_id = selected.goal.terminal_operation_id
+        selected_evidence = set(selected.goal.evidence_refs)
+
         proposal_by_subject: Dict[str, str] = {}
-        if proposals is not None:
+        if proposals is not None and selected.backend == "object_authorization":
             for proposal in proposals.proposals:
                 # The established controlled authorization executor currently
                 # admits only proven reads. Mutation proposals remain on the
                 # obligation frontier but cannot be advertised as resolvable.
                 if (
                     proposal.risk_class != CROSS_OBJECT_READ
+                    or proposal.action_id != terminal_operation_id
+                    or proposal.proposal_id not in selected_evidence
                     or not BehavioralShadowOrchestrator._proposal_read_semantics_proven(
                         proposal,
                         records,
@@ -624,6 +643,8 @@ class BehavioralShadowOrchestrator:
         inventory = experiment_stage.inventory
         if inventory is not None:
             for experiment in inventory.experiments:
+                if experiment.terminal_operation_id != terminal_operation_id:
+                    continue
                 subject_ref = stable_hash(
                     "security_subject",
                     {
@@ -632,11 +653,37 @@ class BehavioralShadowOrchestrator:
                     },
                 )
                 experiment_by_subject[subject_ref] = experiment.experiment_id
-        omission_by_subject = {
-            experiment.subject_ref: experiment.experiment_id
-            for experiment in omissions.experiments
-        }
+        omission_by_subject = (
+            {
+                experiment.subject_ref: experiment.experiment_id
+                for experiment in omissions.experiments
+                if experiment.terminal_operation_id == terminal_operation_id
+                and experiment.experiment_id in selected_evidence
+            }
+            if selected.backend == "prerequisite_omission"
+            else {}
+        )
         return proposal_by_subject, experiment_by_subject, omission_by_subject
+
+    @staticmethod
+    def _selected_payout_candidate(
+        plan: PayoutGoalPlan,
+    ) -> Optional[PayoutGoalCandidate]:
+        selected = plan.selected
+        context = plan.context
+        if (
+            plan.status != "ready"
+            or selected is None
+            or selected.status != "admissible"
+            or selected.blockers
+            or context.selected_world_ref is None
+            or context.authorization_ref is None
+            or not context.authorization_approved
+            or not context.origin_authorized
+            or selected.backend not in context.available_backends
+        ):
+            return None
+        return selected
 
     def _rank_frontier(
         self,
@@ -645,6 +692,7 @@ class BehavioralShadowOrchestrator:
         graph: SecurityObligationGraph,
         closure: SecurityClosureCertificate,
         dispositions: Sequence[ObligationDisposition],
+        payout_goal_plan: PayoutGoalPlan,
         proposals: Optional[ProposalBatch],
         experiment_stage: OwnedExperimentShadowStage,
         omissions: OmissionCompilationResult,
@@ -655,6 +703,7 @@ class BehavioralShadowOrchestrator:
             omission_by_subject,
         ) = self._resolution_maps(
             records=records,
+            payout_goal_plan=payout_goal_plan,
             proposals=proposals,
             experiment_stage=experiment_stage,
             omissions=omissions,
@@ -665,6 +714,7 @@ class BehavioralShadowOrchestrator:
             for item in graph.obligations
         }
         unresolved = set(closure.unresolved_ids)
+        selected_payout = self._selected_payout_candidate(payout_goal_plan)
         ranked = []
         for obligation in graph.obligations:
             if obligation.obligation_id not in unresolved or obligation.status != OPEN:
@@ -686,6 +736,12 @@ class BehavioralShadowOrchestrator:
                 resolution_ref = omission_by_subject[obligation.subject_ref]
 
             signals = {"unresolved_frontier"}
+            if selected_payout is None:
+                signals.add("payout_goal_unselected")
+            elif resolution_kind == "unavailable":
+                signals.add("payout_goal_mismatch")
+            else:
+                signals.add("payout_goal_selected")
             if prerequisites_ready:
                 signals.add("prerequisites_upheld")
             else:
@@ -721,6 +777,7 @@ class BehavioralShadowOrchestrator:
                 + self._RISK_SCORE[obligation.risk_class]
                 + (200 if actionable else 0)
                 + (60 if resolution_kind == "owned_experiment" else 0)
+                + (selected_payout.score if actionable and selected_payout else 0)
                 + min(32, len(obligation.evidence_refs) * 4)
             )
             ranked.append(
@@ -897,10 +954,35 @@ class BehavioralShadowOrchestrator:
             interactions=interactions,
             lifecycle=lifecycle,
         )
+        if isinstance(dispositions, (str, bytes)):
+            raise TypeError("dispositions must contain ObligationDisposition values")
+        disposition_values = tuple(islice(dispositions, len(graph.obligations) + 1))
+        if len(disposition_values) > len(graph.obligations):
+            raise ValueError("dispositions exceed graph obligation count")
+        closure = self.closure_evaluator.evaluate(
+            graph,
+            dispositions=disposition_values,
+            previous_graph=previous_graph,
+            derivation_round=derivation_round,
+        )
+        unresolved_ids = set(closure.unresolved_ids)
+        frontier_evidence_refs = tuple(
+            sorted(
+                {
+                    evidence_ref
+                    for obligation in graph.obligations
+                    if obligation.obligation_id in unresolved_ids
+                    for evidence_ref in obligation.evidence_refs
+                }
+            )
+        )
         available_backends = []
-        if proposals is not None and any(
-            item.risk_class == CROSS_OBJECT_READ for item in proposals.proposals
-        ):
+        # The generalized locator-bound authorization adapter can validate
+        # paired captures that the narrower legacy proposal compiler cannot
+        # represent (for example form and GraphQL locator shapes).  Declaring
+        # the backend available grants no authority; exact pair compilation and
+        # PolicyExecutor admission remain mandatory downstream.
+        if secondary_records:
             available_backends.append("object_authorization")
         if omissions.experiments:
             available_backends.append("prerequisite_omission")
@@ -915,34 +997,28 @@ class BehavioralShadowOrchestrator:
             target_ref=graph.target_ref,
             target_origin=target_origin,
             authorization=authorization,
+            selected_world_id=world_id,
             owned_world_ids=owned_world_ids,
             lifecycle_available=bool(state_machine.candidates),
             available_backends=available_backends,
         )
         payout_goal_plan = self.payout_goal_planner.plan(
-            semantic_catalog.planner_operations(),
+            semantic_catalog.planner_operations(
+                world_ref=stable_hash("world", world_id),
+            ),
             graph=graph,
             context=payout_context,
+            frontier_evidence_refs=frontier_evidence_refs,
             proposals=proposals,
             state_machine=state_machine,
             omissions=omissions,
-        )
-        if isinstance(dispositions, (str, bytes)):
-            raise TypeError("dispositions must contain ObligationDisposition values")
-        disposition_values = tuple(islice(dispositions, len(graph.obligations) + 1))
-        if len(disposition_values) > len(graph.obligations):
-            raise ValueError("dispositions exceed graph obligation count")
-        closure = self.closure_evaluator.evaluate(
-            graph,
-            dispositions=disposition_values,
-            previous_graph=previous_graph,
-            derivation_round=derivation_round,
         )
         ranked, ranked_dropped = self._rank_frontier(
             records=primary_records,
             graph=graph,
             closure=closure,
             dispositions=disposition_values,
+            payout_goal_plan=payout_goal_plan,
             proposals=proposals,
             experiment_stage=experiment_stage,
             omissions=omissions,

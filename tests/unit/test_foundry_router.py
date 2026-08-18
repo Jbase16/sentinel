@@ -423,6 +423,7 @@ class TestBehavioralAuthorizationEndpoint:
                     ),
                     "variables": {"BizEncId": resource_id},
                 }]),
+                "response_status": 200,
                 "response_body": json.dumps({"owner": private_marker}),
             }
 
@@ -1564,7 +1565,7 @@ class TestBehavioralAuthorizationEndpoint:
             receipt for receipt in receipts if receipt["state"] == "aborted"
         )["abort_reason"] == "continuation_result_invalid"
 
-    def test_frontier_defers_preparatory_setup_and_dispatches_exact_auth_obligation(
+    def test_frontier_dispatches_the_payout_goal_bound_auth_obligation(
         self, monkeypatch
     ):
         from core.behavior.active import CONTROLLED_WORKFLOW
@@ -1626,11 +1627,10 @@ class TestBehavioralAuthorizationEndpoint:
 
         assert result["status"] == "completed"
         assert result["execution"]["legacy_verdict"] == "BOLA_CONFIRMED"
-        assert result["plan"]["selected"]["frontier_index"] == 1
-        assert result["plan"]["diagnostics"]["deferred_preparatory_items"] == 1
-        assert result["plan"]["selected_obligation_id"] != (
-            result["behavioral_shadow"].get("selected") or {}
-        ).get("obligation_id")
+        assert result["plan"]["selected"]["frontier_index"] == 0
+        assert result["plan"]["diagnostics"]["deferred_preparatory_items"] == 0
+        assert result["plan"]["selected_obligation_id"]
+        assert result["behavioral_shadow"].get("selected") is None
         assert len(calls) == 3
 
     def test_fresh_owned_frontier_creates_proves_and_cleans_both_personas(

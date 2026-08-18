@@ -204,11 +204,11 @@ def test_orchestrator_builds_and_ranks_one_unified_frontier_without_traffic():
     assert result.closure.open_count == 5
     assert len(result.ranked_frontier) == 5
     assert result.selected is not None
-    assert result.selected.kind == "ownership_boundary"
-    assert result.selected.resolution_kind == "owned_experiment"
+    assert result.selected.kind == "authorization_counterexample"
+    assert result.selected.resolution_kind == "authorization_proposal"
     assert [item.actionable for item in result.ranked_frontier] == [
         True,
-        True,
+        False,
         False,
         False,
         False,

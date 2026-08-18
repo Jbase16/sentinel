@@ -55,6 +55,7 @@ def _authorization(*, workflows=()):
 
 def _context(
     *,
+    selected_world="alice-secret-world",
     owned_worlds=(),
     role_worlds=(),
     backends=(),
@@ -70,6 +71,7 @@ def _context(
         target_ref=graph.target_ref,
         target_origin=target_origin,
         authorization=_authorization(workflows=workflows) if authorization else None,
+        selected_world_id=selected_world,
         owned_world_ids=owned_worlds,
         role_world_ids=role_worlds,
         fresh_anonymous_available=fresh_anonymous,
@@ -111,6 +113,11 @@ def _blocker_codes(candidate):
     return {item.code for item in candidate.blockers}
 
 
+def test_planning_context_rejects_an_invalid_selected_world():
+    with pytest.raises(ValueError, match="selected_world_id"):
+        _context(selected_world="")
+
+
 def test_unconfirmed_semantic_operation_cannot_become_an_admissible_goal():
     operation = OperationContract(
         operation_id=stable_hash("action", "published-export"),
@@ -144,6 +151,7 @@ def test_planner_preserves_all_initial_payout_sink_classes():
         _operation("authority", "ReadRolePermission"),
         _operation("recovery", "ResetPasswordRecovery"),
         _operation("file", "ReadPrivateFile"),
+        _operation("private-data", "ReadPrivateObject"),
         _operation("message", "ReadPrivateMessage"),
         _operation("bulk", "RunBulkOperation"),
         _operation("export", "DownloadExportBackup"),

@@ -14,7 +14,13 @@ from core.behavior.omission import (
     MinimizedOmissionCompiler,
 )
 from core.behavior.orchestrator import BehavioralShadowOrchestrator
+from core.behavior.omission_boundary import FRESH_OMISSION_WORKFLOW
+from core.behavior.omission_confirmation import (
+    FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+)
+from core.behavior.runtime import CONTROLLED_SEQUENCE_WORKFLOW
 from core.behavior.state_machine import StateMachineLegalityMiner
+from tests.unit.test_behavior_resolver import _context as _planning_context
 
 ORIGIN = "https://api.example.test"
 WORKFLOW_ID = "workflow_7fa9f13a2b4c5d6e"
@@ -203,10 +209,18 @@ def test_truncated_baseline_cannot_define_the_comparison_oracle():
 
 
 def test_orchestrator_attaches_compiled_omission_as_confirmation_eligible():
+    planning_context, calls = _planning_context(
+        workflows=(
+            CONTROLLED_SEQUENCE_WORKFLOW,
+            FRESH_OMISSION_WORKFLOW,
+            FRESH_OMISSION_CONFIRMATION_WORKFLOW,
+        )
+    )
     result = BehavioralShadowOrchestrator().run(
         _records(),
         target_origin=ORIGIN,
         world_id="alice",
+        experiment_context=planning_context,
     )
 
     assert result.omissions.status == "ready"
@@ -220,6 +234,7 @@ def test_orchestrator_attaches_compiled_omission_as_confirmation_eligible():
     assert "omission_proof_compiled" in ranked.signals
     assert "omission_confirmation_eligible" in ranked.signals
     assert result.selected == ranked
+    assert calls == []
     experiment = result.omissions.experiments[0]
     obligation = next(
         item

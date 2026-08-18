@@ -34,6 +34,7 @@ from tests.unit.test_behavior_interaction_adaptive import _adaptive_context
 from tests.unit.test_behavior_interaction_second_transition import (
     SECOND_URL,
 )
+from tests.unit.test_behavior_orchestrator import _context as _planning_context
 
 ORIGIN = "https://api.example.test"
 SOURCE_ID = "doc_source_7fa9f13a2b4c"
@@ -42,10 +43,13 @@ PEER_ID = "doc_peer_4a5b6c7d8e9f0"
 
 def _shadow_pair():
     orchestrator = BehavioralShadowOrchestrator()
+    planning_context, planning_calls, _executor = _planning_context(peer=True)
     initial = orchestrator.run(
         (),
         target_origin=ORIGIN,
         world_id="alice",
+        peer_world_id="bob",
+        experiment_context=planning_context,
     )
     source = (
         {
@@ -71,9 +75,11 @@ def _shadow_pair():
         world_id="alice",
         peer_records=peer,
         peer_world_id="bob",
+        experiment_context=planning_context,
     )
     assert not any(item.actionable for item in initial.ranked_frontier)
     assert any(item.actionable for item in final.ranked_frontier)
+    assert planning_calls == []
     return initial, final, source, peer
 
 

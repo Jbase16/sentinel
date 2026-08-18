@@ -14,7 +14,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from core.foundry.authorization import AuthorizationContext, AuthorizationEnvelope
 
-from .compiler import OperationContract, operation_contracts_from_records
+from .compiler import OperationContract, OperationSafety, operation_contracts_from_records
 from .normalize import stable_hash
 from .obligations import SecurityObligationGraph
 from .omission import OmissionCompilationResult
@@ -44,6 +44,7 @@ class PayoutSink(str, Enum):
     AUTHORITY = "authority"
     IDENTITY_RECOVERY = "identity_recovery"
     FILE_ACCESS = "file_access"
+    PRIVATE_DATA = "private_data"
     PRIVATE_COMMUNICATION = "private_communication"
     ADMIN_BULK = "admin_bulk"
     ACCOUNT_OWNERSHIP = "account_ownership"
@@ -76,6 +77,7 @@ _SINK_WEIGHT = {
     PayoutSink.IDENTITY_RECOVERY: 90,
     PayoutSink.EXPORT_DOWNLOAD: 88,
     PayoutSink.PRIVATE_COMMUNICATION: 86,
+    PayoutSink.PRIVATE_DATA: 85,
     PayoutSink.FILE_ACCESS: 84,
     PayoutSink.MEMBERSHIP: 82,
     PayoutSink.ADMIN_BULK: 80,
@@ -308,6 +310,7 @@ class GoalBlocker:
 def _context_payload(
     *,
     target_ref: str,
+    selected_world_ref: Optional[str],
     authorization_ref: Optional[str],
     authorization_approved: bool,
     origin_authorized: bool,
@@ -322,6 +325,7 @@ def _context_payload(
 ) -> Dict[str, Any]:
     return {
         "target_ref": target_ref,
+        "selected_world_ref": selected_world_ref,
         "authorization_ref": authorization_ref,
         "authorization_approved": authorization_approved,
         "origin_authorized": origin_authorized,
@@ -340,6 +344,7 @@ def _context_payload(
 class GoalPlanningContext:
     context_ref: str
     target_ref: str
+    selected_world_ref: Optional[str]
     authorization_ref: Optional[str]
     authorization_approved: bool
     origin_authorized: bool
@@ -361,6 +366,7 @@ class GoalPlanningContext:
         target_ref: str,
         target_origin: str,
         authorization: Optional[AuthorizationEnvelope],
+        selected_world_id: Optional[str] = None,
         owned_world_ids: Sequence[str] = (),
         role_world_ids: Sequence[str] = (),
         fresh_anonymous_available: bool = False,
@@ -368,6 +374,13 @@ class GoalPlanningContext:
         callback_receiver_available: bool = False,
         available_backends: Sequence[str] = (),
     ) -> "GoalPlanningContext":
+        if selected_world_id is not None and (
+            not isinstance(selected_world_id, str)
+            or not selected_world_id.strip()
+            or selected_world_id != selected_world_id.strip()
+            or len(selected_world_id) > 512
+        ):
+            raise ValueError("selected_world_id must be a non-empty bounded string")
         if authorization is None:
             authorization_ref = None
             authorization_approved = False
@@ -391,12 +404,18 @@ class GoalPlanningContext:
         owned_refs = tuple(
             sorted({stable_hash("world", value) for value in owned_world_ids})
         )
+        selected_world_ref = (
+            stable_hash("world", selected_world_id)
+            if selected_world_id is not None
+            else None
+        )
         role_refs = tuple(
             sorted({stable_hash("world", value) for value in role_world_ids})
         )
         backends = tuple(sorted(set(available_backends)))
         payload = _context_payload(
             target_ref=target_ref,
+            selected_world_ref=selected_world_ref,
             authorization_ref=authorization_ref,
             authorization_approved=authorization_approved,
             origin_authorized=origin_authorized,
@@ -412,6 +431,7 @@ class GoalPlanningContext:
         return cls(
             context_ref=stable_hash("payout_goal_context", payload),
             target_ref=target_ref,
+            selected_world_ref=selected_world_ref,
             authorization_ref=authorization_ref,
             authorization_approved=authorization_approved,
             origin_authorized=origin_authorized,
@@ -428,6 +448,7 @@ class GoalPlanningContext:
     def __post_init__(self) -> None:
         payload = _context_payload(
             target_ref=self.target_ref,
+            selected_world_ref=self.selected_world_ref,
             authorization_ref=self.authorization_ref,
             authorization_approved=self.authorization_approved,
             origin_authorized=self.origin_authorized,
@@ -445,6 +466,10 @@ class GoalPlanningContext:
             or self.mode != PAYOUT_GOAL_PLANNER_MODE
             or self.executable
             or not _hash_ref(self.target_ref, "security_obligation_target")
+            or (
+                self.selected_world_ref is not None
+                and not _hash_ref(self.selected_world_ref, "world")
+            )
             or (
                 self.authorization_ref is not None
                 and not _hash_ref(
@@ -471,6 +496,7 @@ class GoalPlanningContext:
         return {
             "context_ref": self.context_ref,
             "target_ref": self.target_ref,
+            "selected_world_ref": self.selected_world_ref,
             "authorization_ref": self.authorization_ref,
             "authorization_approved": self.authorization_approved,
             "origin_authorized": self.origin_authorized,
@@ -742,6 +768,8 @@ def _sink_for_label(label: str) -> Optional[PayoutSink]:
         return PayoutSink.CREDENTIAL_CAPABILITY
     if tokens & {"message", "messages", "inbox", "chat", "conversation"}:
         return PayoutSink.PRIVATE_COMMUNICATION
+    if "private" in tokens and tokens & {"data", "object", "record", "resource"}:
+        return PayoutSink.PRIVATE_DATA
     if tokens & {"export", "download", "backup"}:
         return PayoutSink.EXPORT_DOWNLOAD
     if tokens & {"file", "files", "document", "documents", "attachment", "attachments"}:
@@ -846,6 +874,8 @@ def _candidate_blockers(
     operation_observed: bool,
 ) -> Tuple[GoalBlocker, ...]:
     blockers = []
+    if context.selected_world_ref is None:
+        blockers.append(GoalBlocker.build("selected_world_unavailable"))
     if not operation_observed:
         blockers.append(GoalBlocker.build("operation_unconfirmed"))
     if context.authorization_ref is None:
@@ -894,6 +924,7 @@ class PayoutGoalTopologyPlanner:
         *,
         graph: SecurityObligationGraph,
         context: GoalPlanningContext,
+        frontier_evidence_refs: Optional[Sequence[str]] = None,
         proposals: Optional[ProposalBatch] = None,
         state_machine: Optional[StateMachineLegalityResult] = None,
         omissions: Optional[OmissionCompilationResult] = None,
@@ -905,6 +936,7 @@ class PayoutGoalTopologyPlanner:
                 (),
                 graph=graph,
                 context=context,
+                frontier_evidence_refs=frontier_evidence_refs,
                 proposals=proposals,
                 state_machine=state_machine,
                 omissions=omissions,
@@ -914,6 +946,7 @@ class PayoutGoalTopologyPlanner:
             operations,
             graph=graph,
             context=context,
+            frontier_evidence_refs=frontier_evidence_refs,
             proposals=proposals,
             state_machine=state_machine,
             omissions=omissions,
@@ -925,6 +958,7 @@ class PayoutGoalTopologyPlanner:
         *,
         graph: SecurityObligationGraph,
         context: GoalPlanningContext,
+        frontier_evidence_refs: Optional[Sequence[str]] = None,
         proposals: Optional[ProposalBatch] = None,
         state_machine: Optional[StateMachineLegalityResult] = None,
         omissions: Optional[OmissionCompilationResult] = None,
@@ -932,6 +966,15 @@ class PayoutGoalTopologyPlanner:
     ) -> PayoutGoalPlan:
         if graph.target_ref != context.target_ref:
             raise ValueError("payout goal context target does not match obligation graph")
+        frontier_refs = (
+            None
+            if frontier_evidence_refs is None
+            else frozenset(frontier_evidence_refs)
+        )
+        if frontier_refs is not None and any(
+            not _hash_ref(item) for item in frontier_refs
+        ):
+            raise ValueError("frontier evidence references are invalid")
         operation_count = len(operations)
         if len(operations) > self.limits.max_operations:
             input_blockers = (*input_blockers, GoalBlocker.build("operation_limit_exceeded"))
@@ -963,6 +1006,11 @@ class PayoutGoalTopologyPlanner:
         dropped_evidence_refs = 0
         for operation in sorted(operations, key=lambda item: item.operation_id):
             sink = _sink_for_label(operation.label)
+            if sink is None and operation.operation_id in authorization_by_action:
+                # A typed cross-object-read proposal establishes a private-data
+                # boundary even when the route noun itself (for example
+                # ``notes``) does not identify a narrower payout sink.
+                sink = PayoutSink.PRIVATE_DATA
             if sink is None or not operation.source_refs:
                 continue
             high_value_operations += 1
@@ -1021,10 +1069,20 @@ class PayoutGoalTopologyPlanner:
                     backend=backend,
                     operation_observed=operation.observed_success,
                 )
+                if (
+                    frontier_refs is not None
+                    and relation_evidence
+                    and not frontier_refs.intersection(relation_evidence)
+                ):
+                    blockers = (
+                        *blockers,
+                        GoalBlocker.build("goal_not_on_open_frontier"),
+                    )
                 score = max(
                     0,
                     goal.impact_weight
                     + (8 if operation.observed_success else 0)
+                    + (8 if operation.safety is OperationSafety.READ_ONLY else 0)
                     + relation_score
                     + (6 if backend in context.available_backends else 0)
                     - operation.cost,

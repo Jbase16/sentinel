@@ -23,6 +23,7 @@ from core.behavior.obligations import UPHELD
 from core.behavior.orchestrator import BehavioralShadowOrchestrator
 from core.behavior.resolver import ClosedLoopResolverConfig, SingleStepObligationResolver
 from core.foundry.authorization import AuthorizationEnvelope
+from tests.unit.test_behavior_orchestrator import _context as _planning_context
 
 ORIGIN = "https://api.example.test"
 
@@ -51,12 +52,14 @@ def _records():
 def _shadow_pair():
     source, peer = _records()
     orchestrator = BehavioralShadowOrchestrator()
+    planning_context, planning_calls, _executor = _planning_context(peer=True)
     before = orchestrator.run(
         source,
         target_origin=ORIGIN,
         world_id="alice",
         peer_records=peer,
         peer_world_id="bob",
+        experiment_context=planning_context,
     )
     selected = before.ranked_frontier[0]
     disposition = ObligationDisposition.create(
@@ -71,6 +74,7 @@ def _shadow_pair():
         world_id="alice",
         peer_records=peer,
         peer_world_id="bob",
+        experiment_context=planning_context,
         dispositions=(disposition,),
         previous_graph=before.graph,
         derivation_round=2,
@@ -93,6 +97,7 @@ def _shadow_pair():
         requests_sent=3,
         cleanup_uncertain=False,
     )
+    assert planning_calls == []
     return before, after, round_summary
 
 
@@ -125,7 +130,7 @@ def test_config_requires_both_flags_and_separate_workflow(monkeypatch):
     config.authorize(_envelope((CONTINUATION_WORKFLOW,)), target_origin=ORIGIN)
 
 
-def test_receipt_backed_frontier_progress_admits_one_next_plan():
+def test_receipt_progress_selects_the_next_distinct_payout_goal():
     before, after, round_summary = _shadow_pair()
     controller = BoundedContinuationController(
         BoundedContinuationConfig(enabled=True)
@@ -143,6 +148,7 @@ def test_receipt_backed_frontier_progress_admits_one_next_plan():
 
     assert progress.continue_execution is True
     assert admission.continue_execution is True
+    assert admission.reason == "continue"
     assert next_plan.selected is not None
     assert next_plan.selected.obligation_id != round_summary.obligation_id
 

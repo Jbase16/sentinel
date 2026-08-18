@@ -876,8 +876,15 @@ class TargetSemanticCatalog:
         ):
             raise ValueError("target semantic catalog contract is invalid")
 
-    def planner_operations(self) -> Tuple[OperationContract, ...]:
-        """Project semantic operations into the existing passive planner contract."""
+    def planner_operations(
+        self,
+        *,
+        world_ref: Optional[str] = None,
+    ) -> Tuple[OperationContract, ...]:
+        """Project operations, optionally restricted to one exact source world."""
+
+        if world_ref is not None and not _hash_ref(world_ref, "world"):
+            raise ValueError("planner operation world_ref is invalid")
 
         slots = {item.slot_id: item for item in self.slots}
         return tuple(
@@ -897,6 +904,7 @@ class TargetSemanticCatalog:
                 ),
             )
             for operation in self.operations
+            if world_ref is None or operation.world_ref == world_ref
         )
 
     def to_dict(self) -> Dict[str, Any]:

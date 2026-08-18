@@ -17,11 +17,16 @@ from core.behavior.orchestrator import (
     BehavioralShadowOrchestrator,
     OwnedExperimentShadowContext,
 )
+from core.behavior.normalize import stable_hash
 from core.behavior.ownership_locators import (
     GeneralizedOwnershipLocatorCompiler,
     OwnershipLocatorKind,
 )
 from core.behavior.receipts import BehavioralReceiptStore, redacted_outcome
+from core.behavior.payout_goals import (
+    GoalPlanningContext,
+    PayoutGoalTopologyPlanner,
+)
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.vault import PersonaVault
 from core.safety.ownership_locator import (
@@ -303,6 +308,103 @@ async def test_one_click_does_not_dispatch_without_a_payout_ranked_operation(
 
 
 @pytest.mark.asyncio
+async def test_one_click_rejects_same_action_from_the_unselected_peer_world(
+    tmp_path,
+    monkeypatch,
+):
+    context = _context(tmp_path, monkeypatch)
+    shadow = context["shadow"]
+    selected = shadow.payout_goal_plan.selected
+    assert selected is not None
+
+    actor_world_ref = stable_hash("world", context["target"].actor_id)
+    owner_world_ref = stable_hash("world", context["target"].owner_id)
+    selected_sources = tuple(
+        item
+        for item in selected.goal.evidence_refs
+        if item.startswith("source_ref:")
+    )
+    operations = shadow.semantic_catalog.planner_operations()
+    selected_worlds = {
+        semantic.world_ref
+        for semantic, operation in zip(shadow.semantic_catalog.operations, operations)
+        if operation.operation_id == selected.goal.terminal_operation_id
+        and operation.source_refs == selected_sources
+    }
+    assert selected_worlds == {actor_world_ref}
+
+    peer_operations = tuple(
+        operation
+        for semantic, operation in zip(shadow.semantic_catalog.operations, operations)
+        if semantic.world_ref == owner_world_ref
+        and operation.operation_id == selected.goal.terminal_operation_id
+    )
+    assert peer_operations
+    run = await context["dispatcher"].run(
+        actor_records=context["actor_records"],
+        owner_records=context["owner_records"],
+        payout_goal_plan=shadow.payout_goal_plan,
+        operations=peer_operations,
+    )
+
+    assert run.status == "no_eligible_candidate"
+    assert run.dispatched is False
+    assert context["target"].calls == []
+    assert context["budget"].snapshot()["total_requests"] == 0
+
+
+@pytest.mark.asyncio
+async def test_one_click_sends_zero_requests_without_selected_backend_or_authority(
+    tmp_path,
+    monkeypatch,
+):
+    context = _context(tmp_path, monkeypatch)
+    shadow = context["shadow"]
+    actor_id = context["target"].actor_id
+    owner_id = context["target"].owner_id
+    actor_world_ref = stable_hash("world", actor_id)
+    planner_operations = shadow.semantic_catalog.planner_operations(
+        world_ref=actor_world_ref
+    )
+
+    for authorization, backends in (
+        (context["dispatcher"].authorization, ()),
+        (None, ("object_authorization",)),
+    ):
+        planning_context = GoalPlanningContext.build(
+            target_ref=shadow.graph.target_ref,
+            target_origin=context["dispatcher"].target_origin,
+            authorization=authorization,
+            selected_world_id=actor_id,
+            owned_world_ids=(actor_id, owner_id),
+            lifecycle_available=bool(shadow.state_machine.candidates),
+            available_backends=backends,
+        )
+        blocked_plan = PayoutGoalTopologyPlanner().plan(
+            planner_operations,
+            graph=shadow.graph,
+            context=planning_context,
+            proposals=shadow.proposals,
+            state_machine=shadow.state_machine,
+            omissions=shadow.omissions,
+        )
+        assert blocked_plan.selected is None
+
+        run = await context["dispatcher"].run(
+            actor_records=context["actor_records"],
+            owner_records=context["owner_records"],
+            payout_goal_plan=blocked_plan,
+            operations=shadow.semantic_catalog.planner_operations(),
+        )
+        assert run.status == "no_eligible_candidate"
+        assert run.dispatched is False
+
+    assert context["target"].calls == []
+    assert context["budget"].snapshot()["total_requests"] == 0
+    assert context["registry"]._owned == {}
+
+
+@pytest.mark.asyncio
 async def test_one_click_prefers_the_higher_value_export_operation(
     tmp_path,
     monkeypatch,
@@ -325,7 +427,7 @@ async def test_one_click_prefers_the_higher_value_export_operation(
 
     assert run.status == "completed"
     assert run.candidate_pairs == 1
-    assert run.dropped_for_bound == 1
+    assert run.dropped_for_bound == 0
     assert all("/api/documents/export?" in call[2] for call in context["target"].calls)
 
 

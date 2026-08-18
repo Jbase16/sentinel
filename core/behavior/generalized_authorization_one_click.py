@@ -7,7 +7,7 @@ R4 claim, and returns evidence only.  It never promotes a finding.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from core.cortex.execution_policy import PolicyExecutor
@@ -354,46 +354,49 @@ class GeneralizedAuthorizationOneClickDispatcher:
     @staticmethod
     def _operation_map(
         operations: Sequence[OperationContract],
+        selected: PayoutGoalCandidate,
     ) -> Dict[str, OperationContract]:
-        values: Dict[str, OperationContract] = {}
+        selected_sources = tuple(
+            item
+            for item in selected.goal.evidence_refs
+            if item.startswith("source_ref:")
+        )
+        matches = []
         for operation in operations:
             if not isinstance(operation, OperationContract):
                 raise TypeError("operations must contain OperationContract values")
-            existing = values.get(operation.operation_id)
-            if existing is None:
-                values[operation.operation_id] = operation
-                continue
-            existing_contract = existing.to_dict()
-            operation_contract = operation.to_dict()
-            existing_contract.pop("source_refs", None)
-            operation_contract.pop("source_refs", None)
-            if existing_contract != operation_contract:
-                raise GeneralizedAuthorizationOneClickDenied(
-                    "generalized_authorization_operation_is_ambiguous"
-                )
-            values[operation.operation_id] = replace(
-                existing,
-                source_refs=tuple(
-                    sorted(set(existing.source_refs) | set(operation.source_refs))
-                ),
+            if (
+                operation.operation_id == selected.goal.terminal_operation_id
+                and operation.source_refs == selected_sources
+            ):
+                matches.append(operation)
+        if not matches:
+            return {}
+        if len(matches) != 1:
+            raise GeneralizedAuthorizationOneClickDenied(
+                "generalized_authorization_operation_is_ambiguous"
             )
-        return values
+        operation = matches[0]
+        return {operation.operation_id: operation}
 
     @staticmethod
     def _payout_map(plan: PayoutGoalPlan) -> Dict[str, PayoutGoalCandidate]:
-        values: Dict[str, PayoutGoalCandidate] = {}
-        for candidate in plan.candidates:
-            operation_id = candidate.goal.terminal_operation_id
-            blocker_codes = {item.code for item in candidate.blockers}
-            generalized_backend_satisfies_blockers = blocker_codes == {
-                "proof_backend_unavailable"
-            }
-            if (
-                candidate.status == "admissible"
-                or generalized_backend_satisfies_blockers
-            ) and operation_id not in values:
-                values[operation_id] = candidate
-        return values
+        selected = plan.selected
+        context = plan.context
+        if (
+            plan.status != "ready"
+            or selected is None
+            or selected.status != "admissible"
+            or selected.blockers
+            or selected.backend != "object_authorization"
+            or selected.backend not in context.available_backends
+            or context.selected_world_ref is None
+            or context.authorization_ref is None
+            or not context.authorization_approved
+            or not context.origin_authorized
+        ):
+            return {}
+        return {selected.goal.terminal_operation_id: selected}
 
     @staticmethod
     def _observation_index(index: GeneralizedOwnershipIndex, source_ref: str) -> int:
@@ -416,6 +419,20 @@ class GeneralizedAuthorizationOneClickDispatcher:
     ) -> Tuple[Tuple[_PairCandidate, ...], int, int]:
         actor_id = self.backend.source_persona.persona_id
         owner_id = self.backend.peer_persona.persona_id
+        expected_authorization_ref = stable_hash(
+            "payout_goal_authorization",
+            {
+                "envelope_id": self.authorization.envelope_id,
+                "attestation_signature": self.authorization.attestation_signature,
+            },
+        )
+        if (
+            payout_goal_plan.context.selected_world_ref
+            != stable_hash("world", actor_id)
+            or payout_goal_plan.context.authorization_ref
+            != expected_authorization_ref
+        ):
+            return (), 0, 0
         actor_index = self.locator_compiler.compile(
             actor_records,
             world_id=actor_id,
@@ -424,8 +441,11 @@ class GeneralizedAuthorizationOneClickDispatcher:
             owner_records,
             world_id=owner_id,
         )
-        operation_map = self._operation_map(operations)
         payout_map = self._payout_map(payout_goal_plan)
+        if not payout_map:
+            return (), 0, 0
+        selected = next(iter(payout_map.values()))
+        operation_map = self._operation_map(operations, selected)
         owner_by_shape = {}
         for owner_evidence in owner_index.evidence:
             for owner_use in owner_evidence.uses:
