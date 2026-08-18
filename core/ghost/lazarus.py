@@ -18,7 +18,6 @@ The Lazarus Engine: Real-time Neural De-obfuscation.
 Uses mitmproxy's async addon pattern to prevent blocking HTTP responses
 while AI processes JavaScript.
 """
-import asyncio
 import logging
 import hashlib
 from mitmproxy import http
@@ -117,12 +116,10 @@ class LazarusEngine:
         string repr of an un-awaited coroutine). That corrupted every in-bounds
         script: pages rendered and scrolled but all click handlers were dead.
         We now read the response read-only, mine route strings with static
-        regexes over the FULL original code, and emit findings off to the side.
+        regexes over the FULL original code, and retain route proposals off to the side.
         De-obfuscation for human analysis, if ever wanted, must happen on a
         copy in a dedicated viewer — never on the live flow.
         """
-        from core.cortex.events import get_event_bus, GraphEvent, GraphEventType
-
         try:
             original_code = flow.response.text
             if not original_code:
@@ -143,24 +140,7 @@ class LazarusEngine:
             if not routes:
                 return
 
-            event_bus = get_event_bus()
             for route in routes:
-                event_bus.emit(GraphEvent(
-                    type=GraphEventType.FINDING_CREATED,
-                    payload={
-                        "finding_id": hashlib.sha256(
-                            f"{url}:{route['method']}:{route['path']}".encode()
-                        ).hexdigest()[:32],
-                        "tool": "lazarus",
-                        # INFO, not MEDIUM: an API route referenced in a JS
-                        # bundle is an observation, not a vulnerability. The
-                        # old MEDIUM severity flooded the findings store and
-                        # polluted AI summaries.
-                        "severity": "INFO",
-                        "title": f"API route referenced in JS: {route['method']} {route['path']}",
-                        "target": url,
-                    }
-                ))
                 logger.debug(f"[Lazarus] route (passive): {route['method']} {route['path']}")
 
             shadow_client = self._generate_shadow_client(routes, url)
@@ -315,4 +295,3 @@ class LazarusEngine:
 
 # Mitmproxy addon initialization
 addons = [LazarusEngine.instance()]
-

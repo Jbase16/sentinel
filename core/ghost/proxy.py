@@ -26,7 +26,6 @@ from typing import Optional
 from mitmproxy import options, http
 from mitmproxy.tools.dump import DumpMaster
 from core.base.session import ScanSession
-from core.ai.strategy import StrategyEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +39,8 @@ DEFAULT_GHOST_PORT = int(os.getenv("SENTINEL_GHOST_PORT", "8787"))
 class GhostAddon:
     """
     mitmproxy addon that bridges traffic to the ScanSession.
-    Now equipped with Neural Strategy Engine, MIMIC Shadow Spec, AND CAL Integration.
-    
-    CAL INTEGRATION:
-    Every intercepted request/response is emitted as Evidence to the central
-    ReasoningSession, enabling cross-component reasoning.
+    Captured exchanges are finalized for canonical EvidenceLedger admission.
+    Specialist route and credential extraction remain proposal-only inputs.
     """
     def __init__(self, session: ScanSession):
         """Function __init__."""
@@ -58,13 +54,6 @@ class GhostAddon:
         # The Shadow Spec (Dynamic OpenAPI Store)
         from core.sentient.mimic.shadow_spec import ShadowSpec
         self.shadow_spec = ShadowSpec()
-        
-        self.strategy = StrategyEngine(session, shadow_spec=self.shadow_spec)
-        
-        # [CAL INTEGRATION]
-        # Get the global ReasoningEngine for system-wide claims
-        from core.cortex.reasoning import get_reasoning_engine
-        self.reasoning_engine = get_reasoning_engine()
         
         # [SESSION BRIDGE]
         # Intercept auth headers and cookies for Wraith tools
@@ -85,19 +74,18 @@ class GhostAddon:
                 self._bb_header, self._bb_value,
             )
 
-        logger.info("[Ghost] CAL integration enabled - traffic will emit Evidence")
+        logger.info("[Ghost] canonical capture adapter enabled")
 
     def request(self, flow: http.HTTPFlow):
         """
         Intercept requests to identify new endpoints/params.
-        Emits CAL Evidence for every request.
+        Finalized named flows are admitted to the canonical EvidenceLedger.
         Phase 4-G2: also feeds the FlowMapper for any active recordings.
         """
         # ── Read the essentials up front (cheap; must not fail) ──────────
         try:
             url = flow.request.pretty_url
             method = flow.request.method
-            host = flow.request.host
         except Exception as e:
             logger.error(f"[Ghost] request: unreadable flow, skipping: {e}")
             return
@@ -184,42 +172,13 @@ class GhostAddon:
             # [SESSION BRIDGE] capture outbound auth tokens/cookies
             self.session_bridge.observe_request(flow)
 
-            # CAL: emit Evidence for this request (traffic is fact)
             query = flow.request.query
-            from core.cal.types import Evidence, Provenance
-            traffic_evidence = Evidence(
-                content={
-                    "method": method,
-                    "url": url,
-                    "host": host,
-                    "params": list(query.keys()) if query else [],
-                    "has_auth": "authorization" in [h.lower() for h in flow.request.headers.keys()],
-                    "content_type": flow.request.headers.get("content-type", ""),
-                },
-                description=f"HTTP Request: {method} {url}",
-                provenance=Provenance(
-                    source="Ghost:request",
-                    method="traffic_interception",
-                    run_id=self.session.session_id,
-                ),
-                confidence=1.0,
-            )
-            self.reasoning_engine.reasoning_session.evidence[traffic_evidence.id] = traffic_evidence
-
-            # Attack-surface heuristics for parameterized endpoints
             if query:
-                self.session.findings.add_finding({
-                    "tool": "ghost_proxy",
-                    "type": "endpoint_discovery",
-                    "severity": "INFO",
-                    "target": host,
-                    "metadata": {
-                        "url": url,
-                        "params": list(query.keys()),
-                        "method": method,
-                        "cal_evidence_id": traffic_evidence.id,
-                    }
-                })
+                logger.debug(
+                    "[Ghost] parameterized route observed for canonical capture: %s %s",
+                    method,
+                    url,
+                )
                 # NOTE: We deliberately do NOT spawn per-request LLM strategy
                 # analysis here. Doing so (asyncio.create_task(strategy.
                 # propose_attacks)) ran an AI call *inside mitmproxy's event
@@ -247,13 +206,10 @@ class GhostAddon:
             # Simple header check for now
             server = flow.response.headers.get("Server", "")
             if server:
-                self.session.findings.add_finding({
-                    "tool": "ghost_proxy",
-                    "type": "tech_fingerprint",
-                    "severity": "INFO",
-                    "target": flow.request.host,
-                    "metadata": {"server_header": server}
-                })
+                logger.debug(
+                    "[Ghost] server header observed for canonical capture: %s",
+                    flow.request.host,
+                )
 
             # [SESSION BRIDGE]
             # Capture inbound Set-Cookie authentication
@@ -313,21 +269,13 @@ class GhostAddon:
 
         Side effects:
             - Modifies flow.response.text with de-obfuscated code
-            - Adds findings to session on errors
+            - Logs processing failures without promoting findings
             - Updates Lazarus cache
         """
         try:
             await self.lazarus.response(flow)
         except Exception as e:
             logger.error(f"[Ghost] Lazarus processing failed: {e}")
-            # Add finding about the failure
-            self.session.findings.add_finding({
-                "tool": "ghost_proxy",
-                "type": "lazarus_error",
-                "severity": "LOW",
-                "target": flow.request.host,
-                "metadata": {"error": str(e), "url": flow.request.pretty_url}
-            })
 
 class GhostInterceptor:
     """

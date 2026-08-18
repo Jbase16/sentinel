@@ -32,14 +32,12 @@ can only point one browser at one proxy at a time anyway.
 
 The Ghost session is its OWN ScanSession (separate from scheduler-driven
 scan sessions), because Ghost is operator-driven and persists across
-multiple captures. Findings emitted by the addon land in this dedicated
-session.
+multiple captures. Captures are adapted into the canonical EvidenceLedger;
+the private session cannot promote findings.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -157,6 +155,24 @@ def _get_or_create_ghost_session():
     return _GHOST_SESSION
 
 
+def _authorization_for_flow(flow):
+    """Resolve one unambiguous signed envelope for every origin in a flow."""
+
+    from core.foundry.authorization import list_envelopes
+
+    candidates = [
+        envelope
+        for envelope in list_envelopes()
+        if envelope.signature_is_valid()
+        and all(envelope.authorizes_origin(step.url) for step in flow.steps)
+    ]
+    if len(candidates) != 1:
+        raise ValueError(
+            "Ghost canonical evidence requires exactly one matching authorization envelope"
+        )
+    return candidates[0]
+
+
 @router.post("/scope", response_model=GhostScopeResponse)
 async def set_ghost_scope(
     req: GhostScopeRequest,
@@ -208,7 +224,7 @@ async def start_ghost(
     Spawns the real mitmproxy DumpMaster with the GhostAddon installed.
     The addon:
       * Enforces scope (drops out-of-scope requests with 403)
-      * Emits CAL Evidence for every observed request
+      * Finalizes named flows for canonical EvidenceLedger admission
       * Feeds the MIMIC shadow_spec (auto-discovered API surface)
       * Captures auth tokens via SessionBridge
       * Async-de-obfuscates JS via Lazarus
@@ -329,7 +345,9 @@ async def get_ghost_status(
     sess = _GHOST_SESSION
     if sess is not None:
         try:
-            findings_so_far = len(sess.findings.get_all())
+            ledger = getattr(sess, "canonical_evidence_ledger", None)
+            if ledger is not None:
+                findings_so_far = len(ledger.session_read_model(sess.id).findings)
         except Exception:
             findings_so_far = 0
 
@@ -437,6 +455,37 @@ async def stop_ghost_recording(
     persist_path = fm.persist(flow_id)
     persist_note = f" Persisted to {persist_path}." if persist_path else ""
 
+    canonical_note = ""
+    if flow is not None and flow.steps and _GHOST_SESSION is not None:
+        try:
+            from core.epistemic.ledger import EvidenceLedger
+            from core.ghost.canonical_evidence import GhostCanonicalEvidenceAdapter
+
+            ledger = getattr(_GHOST_SESSION, "canonical_evidence_ledger", None)
+            if ledger is None:
+                ledger = EvidenceLedger()
+                _GHOST_SESSION.canonical_evidence_ledger = ledger
+            result = GhostCanonicalEvidenceAdapter(ledger).record_flow(
+                flow,
+                session_id=_GHOST_SESSION.id,
+                envelope=_authorization_for_flow(flow),
+            )
+            canonical_refs = _GHOST_SESSION.knowledge.setdefault(
+                "ghost_canonical_observation_ids",
+                {},
+            )
+            canonical_refs[flow_id] = list(result.observation_ids)
+            canonical_note = (
+                f" Canonical evidence: {len(result.observation_ids)} observation(s)."
+            )
+        except Exception as exc:
+            logger.warning(
+                "[Ghost] canonical flow admission deferred for %s: %s",
+                flow_id,
+                exc,
+            )
+            canonical_note = " Canonical evidence pending an exact authorization binding."
+
     logger.info(
         f"[Ghost] stopped recording flow {flow_name!r} "
         f"(id={flow_id}, steps={step_count}){persist_note}"
@@ -448,7 +497,7 @@ async def stop_ghost_recording(
         step_count=step_count,
         message=(
             f"Recording stopped. {step_count} step(s) captured."
-            f"{persist_note}"
+            f"{persist_note}{canonical_note}"
         ),
     )
 
