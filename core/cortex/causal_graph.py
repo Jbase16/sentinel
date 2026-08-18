@@ -1689,6 +1689,14 @@ class CausalGraphBuilder:
                 "created_at": data.get("enabled_at", 0.0),
                 "relationship_raw": relationship_raw,
                 "render_type": canonical_type,
+                # Only canonical finding IDs are evidence anchors. Structural
+                # topology nodes remain visible as endpoints but are never
+                # mislabeled as ledger-backed evidence.
+                "evidence_sources": [
+                    str(node_id)
+                    for node_id in (u, v)
+                    if node_id in self.findings_map
+                ],
             }
             if data.get("enablement_edge"):
                 edge_data.update({

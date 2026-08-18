@@ -379,15 +379,6 @@ public class HelixAppState: ObservableObject {
                 }
                 .store(in: &cancellables)
 
-            eventClient.graphEventPublisher
-                .receive(on: RunLoop.main)
-                .sink { [weak self] event in
-                    guard let self else { return }
-                    guard !self.isReplaying else { return }
-
-                    self.cortexStream.processEvent(event)
-                }
-                .store(in: &cancellables)
         }
 
         // Connect unified event stream (provides sequence IDs)
@@ -983,87 +974,39 @@ public class HelixAppState: ObservableObject {
 
     // MARK: - Semantic Analysis (Phase 11)
 
+    private func canonicalGraphData(from snapshot: PressureGraphDTO) -> GraphDataDTO {
+        let nodes = snapshot.nodes.map { node in
+            NodeDTO(
+                id: node.id,
+                type: node.type,
+                attributes: [
+                    "severity": String(node.data.severity),
+                    "confirmation_level": node.data.confirmationLevel ?? "",
+                ]
+            )
+        }
+        let edges = snapshot.edges.map { edge in
+            EdgeDTO(
+                id: edge.id,
+                source: edge.source,
+                target: edge.target,
+                type: edge.data?.renderType ?? edge.type,
+                weight: edge.weight
+            )
+        }
+        return GraphDataDTO(nodes: nodes, edges: edges)
+    }
+
     func fetchAnalysis() {
         Task {
-            // Snapshot current graph state
-            let nodes = cortexStream.nodes.filter { $0.type.lowercased() != "decision" }
-            let nodeIds = Set(nodes.map { $0.id })
-            let edges = cortexStream.edges.filter { edge in
-                nodeIds.contains(edge.source) && nodeIds.contains(edge.target)
+            guard let snapshot = self.latestPressureGraph else {
+                self.refreshGraph()
+                return
             }
 
-            // Map to DTOs
-            let nodeDTOs = nodes.map { node in
-                NodeDTO(
-                    id: node.id,
-                    type: node.type,
-                    attributes: [
-                        "severity": node.severity ?? "",
-                        "pressure": String(node.pressure ?? 0),
-                    ]
-                )
-            }
-
-            let edgeDTOs = edges.map { edge in
-                EdgeDTO(
-                    source: edge.source,
-                    target: edge.target,
-                    type: edge.type ?? "unknown",
-                    weight: 1.0
-                )
-            }
-
-            let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
-
-            // Prefer authoritative entry/critical sets from backend graph DTO when available.
-            let backendEntryNodes = (self.latestPressureGraph?.entryNodes ?? [])
-                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            let backendCriticalNodes = (self.latestPressureGraph?.criticalAssets ?? [])
-                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
-            // Fallback: infer entry nodes from topology if backend values are unavailable.
-            var inboundCounts: [String: Int] = [:]
-            for node in nodes {
-                inboundCounts[node.id] = 0
-            }
-            for edge in edges {
-                inboundCounts[edge.target, default: 0] += 1
-            }
-
-            var entryNodes = backendEntryNodes
-            if entryNodes.isEmpty {
-                entryNodes =
-                    nodes
-                    .filter { inboundCounts[$0.id, default: 0] == 0 }
-                    .map { $0.id }
-            }
-
-            if entryNodes.isEmpty {
-                let entryTypeHints = ["entry", "target", "exposure", "port", "service", "asset"]
-                entryNodes = nodes.filter { node in
-                    let lowered = node.type.lowercased()
-                    return entryTypeHints.contains { lowered.contains($0) }
-                }.map { $0.id }
-            }
-
-            if entryNodes.isEmpty,
-                let highestPressure = nodes.max(by: { ($0.pressure ?? 0) < ($1.pressure ?? 0) })
-            {
-                entryNodes = [highestPressure.id]
-            }
-
-            // Critical assets fallback = high-pressure sinks; if none, use highest-pressure nodes.
-            var criticalNodes = backendCriticalNodes
-            if criticalNodes.isEmpty {
-                criticalNodes = nodes.filter { ($0.pressure ?? 0) >= 0.7 }.map { $0.id }
-            }
-            if criticalNodes.isEmpty {
-                criticalNodes =
-                    nodes
-                    .sorted { ($0.pressure ?? 0) > ($1.pressure ?? 0) }
-                    .prefix(5)
-                    .map { $0.id }
-            }
+            let graphDTO = self.canonicalGraphData(from: snapshot)
+            let entryNodes = snapshot.entryNodes ?? []
+            let criticalNodes = snapshot.criticalAssets ?? []
 
             do {
                 let analysis = try await cortexClient.fetchTopology(
@@ -1085,44 +1028,21 @@ public class HelixAppState: ObservableObject {
     }
 
     func fetchInsights(for nodeID: String) {
-        guard let analysis = graphAnalysis else {
-            print("[Analysis] Skipping insight fetch - No underlying topology analysis available.")
+        guard let snapshot = latestPressureGraph,
+            snapshot.nodes.contains(where: { $0.id == nodeID })
+        else {
+            print("[Analysis] Skipping insight fetch - Node is absent from the canonical snapshot.")
             return
         }
 
         Task {
-            // Snapshot current graph state (Similar to above, could refactor into helper)
-            let nodes = cortexStream.nodes.filter { $0.type.lowercased() != "decision" }
-            let nodeIds = Set(nodes.map { $0.id })
-            let edges = cortexStream.edges.filter { edge in
-                nodeIds.contains(edge.source) && nodeIds.contains(edge.target)
-            }
-
-            let nodeDTOs = nodes.map { node in
-                NodeDTO(
-                    id: node.id,
-                    type: node.type,
-                    attributes: [
-                        "severity": node.severity ?? "",
-                        "pressure": String(node.pressure ?? 0),
-                    ]
-                )
-            }
-            let edgeDTOs = edges.map { edge in
-                EdgeDTO(
-                    source: edge.source, target: edge.target, type: edge.type ?? "unknown",
-                    weight: 1.0)
-            }
-            let graphDTO = GraphDataDTO(nodes: nodeDTOs, edges: edgeDTOs)
-
-            // Use the authoritative hash from the topology analysis
-            let hash = analysis.graph_hash
+            let graphDTO = self.canonicalGraphData(from: snapshot)
 
             do {
                 // TODO: Selection context should drive insight type (e.g. critical_path vs cluster_summary)
                 let response = try await cortexClient.fetchInsights(
                     graph: graphDTO,
-                    hash: hash,
+                    hash: snapshot.graphHash,
                     nodes: [nodeID],
                     type: "cluster_summary"  // Default type
                 )
@@ -1352,6 +1272,7 @@ public struct NodeDTO: Codable {
 }
 
 public struct EdgeDTO: Codable {
+    public let id: String
     public let source: String
     public let target: String
     public let type: String

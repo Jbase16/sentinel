@@ -19,7 +19,6 @@
 //  Wraps the Metal Renderer for SwiftUI.
 //
 
-import Combine
 import Foundation
 import MetalKit
 import SwiftUI
@@ -33,7 +32,6 @@ struct GraphLabel: Identifiable, Equatable {
 }
 
 struct NeuralGraphView: NSViewRepresentable {
-    let eventClient: EventStreamClient
     let nodes: [CortexStream.NodeModel]
     let edges: [CortexStream.EdgeModel]
     let analysis: TopologyResponse?  // Phase 11
@@ -69,7 +67,7 @@ struct NeuralGraphView: NSViewRepresentable {
             target: context.coordinator, action: #selector(Coordinator.handleClick(_:)))
         mtkView.addGestureRecognizer(click)
 
-        context.coordinator.bindEventStream(view: mtkView)
+        context.coordinator.attach(view: mtkView)
         context.coordinator.updateNodes(nodes)
         context.coordinator.updateEdges(edges)
 
@@ -96,12 +94,15 @@ struct NeuralGraphView: NSViewRepresentable {
     class Coordinator: NSObject, MTKViewDelegate {
         var parent: NeuralGraphView
         var renderer: GraphRenderer?
-        private var graphCancellable: AnyCancellable?
         private weak var mtkView: MTKView?
 
         init(_ parent: NeuralGraphView) {
             self.parent = parent
             super.init()
+        }
+
+        func attach(view: MTKView) {
+            mtkView = view
         }
 
         func updateCriticalPaths(_ paths: [[String]]) {
@@ -190,28 +191,6 @@ struct NeuralGraphView: NSViewRepresentable {
             }
         }
 
-        @MainActor
-        func bindEventStream(view: MTKView) {
-            self.mtkView = view
-            guard graphCancellable == nil else { return }
-
-            graphCancellable = parent.eventClient.eventPublisher
-                .receive(on: RunLoop.main)
-                .sink { [weak self] event in
-                    guard let self, let renderer = self.renderer else { return }
-                    renderer.handleGraphEvent(
-                        GraphRenderer.Event(typeString: event.type, payload: event.payload)
-                    )
-                    self.mtkView?.setNeedsDisplay(self.mtkView?.bounds ?? .zero)
-
-                    // Update overlay on event
-                    if let id = self.parent.selectedNodeId, let point = renderer.projectNode(id: id)
-                    {
-                        self.parent.selectedNodePoint = point
-                    }
-                }
-        }
-
         // ... rest of delegate
         func updateInput(drag: CGSize, zoom: CGFloat) {
             let sens: Float = 0.01
@@ -269,7 +248,6 @@ struct InteractiveGraphContainer: View {
     var body: some View {
         ZStack {
             NeuralGraphView(
-                eventClient: appState.eventClient,
                 nodes: appState.cortexStream.nodes,
                 edges: appState.cortexStream.edges,
                 analysis: appState.graphAnalysis,
@@ -418,6 +396,13 @@ private struct FixImpactPanel: View {
         return chains.filter { $0.nodeIds.contains(nodeId) }.count
     }
 
+    private var selectedEdges: [PressureEdgeDTO] {
+        guard let nodeId = selectedNodeId else { return [] }
+        return (graph?.edges ?? [])
+            .filter { $0.source == nodeId || $0.target == nodeId }
+            .sorted { $0.id < $1.id }
+    }
+
     private func severityColor(_ severity: String?) -> Color {
         let value = (severity ?? "").uppercased()
         switch value {
@@ -438,6 +423,7 @@ private struct FixImpactPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             headerView
             selectedNodeDetailsView
+            selectedEdgeEvidenceView
             Divider().background(Color.white.opacity(0.25))
             pressurePointsListView
         }
@@ -450,6 +436,48 @@ private struct FixImpactPanel: View {
                 .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 4)
+    }
+
+    @ViewBuilder
+    private var selectedEdgeEvidenceView: some View {
+        if !selectedEdges.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("EDGE EVIDENCE")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan)
+
+                ForEach(selectedEdges.prefix(6)) { edge in
+                    Button {
+                        selectedNodeId = edge.source == selectedNodeId ? edge.target : edge.source
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(edge.source) → \(edge.target)")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Text(edge.data?.relationshipRaw ?? edge.type)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.7))
+                            ForEach(edge.data?.evidenceSources ?? [], id: \.self) { reference in
+                                Text("EVIDENCE: \(reference)")
+                                    .font(.system(size: 8, design: .monospaced))
+                                    .foregroundColor(.green)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(5)
+                        .background(Color.white.opacity(0.04))
+                        .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Open the opposite node while retaining this server-authored edge evidence")
+                }
+            }
+            .padding(8)
+            .background(Color.black.opacity(0.35))
+            .cornerRadius(6)
+        }
     }
 
     private var headerView: some View {

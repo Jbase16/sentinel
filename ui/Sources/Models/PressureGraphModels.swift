@@ -9,6 +9,8 @@ import Foundation
 
 public struct PressureGraphDTO: Decodable, Sendable {
     public let sessionId: String
+    public let evidenceRevision: String
+    public let graphHash: String
     public let nodes: [PressureNodeDTO]
     public let edges: [PressureEdgeDTO]
     public let count: GraphCountDTO
@@ -21,6 +23,8 @@ public struct PressureGraphDTO: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
+        case evidenceRevision = "evidence_revision"
+        case graphHash = "graph_hash"
         case nodes, edges, count
         case entryNodes = "entry_nodes"
         case criticalAssets = "critical_assets"
@@ -216,6 +220,7 @@ public struct PressureEdgeDataDTO: Decodable, Sendable {
     public let renderType: String?
     public let enablementClass: String?
     public let effortReplaced: Double?
+    public let evidenceSources: [String]?
 
     enum CodingKeys: String, CodingKey {
         case confidence
@@ -224,5 +229,6 @@ public struct PressureEdgeDataDTO: Decodable, Sendable {
         case renderType = "render_type"
         case enablementClass = "enablement_class"
         case effortReplaced = "effort_replaced"
+        case evidenceSources = "evidence_sources"
     }
 }

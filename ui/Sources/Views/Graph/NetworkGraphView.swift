@@ -88,6 +88,13 @@ struct NetworkGraphView: View {
                     Text("NODES: \(appState.cortexStream.nodes.count)")
                         .font(.custom("Courier New", size: 12))
                         .foregroundColor(.white)
+
+                    if let snapshot = appState.latestPressureGraph {
+                        Text("SNAPSHOT: \(snapshot.graphHash.prefix(12))")
+                            .font(.custom("Courier New", size: 11))
+                            .foregroundColor(.cyan)
+                            .help("Evidence revision: \(snapshot.evidenceRevision)")
+                    }
                 }
                 .padding()
                 

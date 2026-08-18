@@ -1,6 +1,5 @@
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict
 import json
-import time
 import logging
 from core.ai.ai_engine import AIEngine
 from core.cortex.models import InsightRequest, InsightResponse, InsightClaim
@@ -15,10 +14,15 @@ class InsightEngine:
     def __init__(self):
         self.ai = AIEngine()
         
-    async def generate_insights(self, request: InsightRequest, graph_context: Dict[str, Any]) -> InsightResponse:
+    async def generate_insights(self, request: InsightRequest) -> InsightResponse:
         """
         Generates insights for specific nodes based on graph context.
         """
+        # The request model owns the exact context supplied by the caller. Keeping
+        # a second positional context allowed the validated request and the model
+        # evidence anchors to diverge.
+        graph_context = request.graph_data
+
         # 1. Prepare Prompt
         # We need to serialize the relevant slice of the graph for the LLM.
         # Including whole graph is too big. Just include target nodes + neighbors.
@@ -95,10 +99,14 @@ class InsightEngine:
         return f"Analyze these nodes for '{request.insight_type}':\n" + "\n".join(details)
 
     def _validate_ref(self, ref: str, graph_context: Dict[str, Any]) -> bool:
-        # Check if ref exists in graph_context nodes/edges
-        # Optimizable with set lookup
-        # For now, linear scan is fine for small context
-        # TODO: Build an index once per request
-        for n in graph_context.get("nodes", []):
-            if n["id"] == ref: return True
-        return False
+        node_ids = {
+            str(node.get("id"))
+            for node in graph_context.get("nodes", [])
+            if isinstance(node, dict) and node.get("id")
+        }
+        edge_ids = {
+            str(edge.get("id"))
+            for edge in graph_context.get("edges", [])
+            if isinstance(edge, dict) and edge.get("id")
+        }
+        return ref in node_ids or ref in edge_ids

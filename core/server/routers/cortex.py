@@ -110,13 +110,10 @@ async def get_current_graph():
         return snapshot.graph_dto
     except Exception as e:
         logger.warning(f"[Graph] Failed to build graph for session {session_id}: {e}")
-        # Return empty graph instead of error to prevent UI crashes
-        return {
-            "session_id": session_id,
-            "nodes": [],
-            "edges": [],
-            "count": {"nodes": 0, "edges": 0}
-        }
+        raise HTTPException(
+            status_code=503,
+            detail="canonical graph snapshot unavailable",
+        ) from e
 
 
 # ---------------------------------------------------------------------------
