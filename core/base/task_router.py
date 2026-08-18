@@ -196,16 +196,9 @@ class TaskRouter(Observable):
             proposal = self._scanner_proposal(raw_finding, observation.id, tool_name)
             assessed = self.ledger.assess_proposal(proposal)
             assessed_proposals.append(assessed)
-            canonical_findings.append(
-                self.ledger.promote_canonical_finding(
-                    title=assessed.title,
-                    severity=assessed.severity,
-                    citations=assessed.citations,
-                    description=assessed.description,
-                    confirmation_level=assessed.confirmation_level or "probable",
-                    metadata=assessed.metadata,
-                )
-            )
+            # Scanner classification is passive evidence.  It remains an assessed
+            # proposal until a completed R0 receipt and conduct provenance bind an
+            # active proof; TaskRouter must not manufacture that authority.
 
         if rc != 0:
             logger.info(

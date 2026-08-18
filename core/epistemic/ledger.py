@@ -21,6 +21,11 @@ from enum import Enum
 
 from core.base.scope import canonical_origin
 from core.behavior.compiler import OperationFamily, OperationInstance
+from core.behavior.receipts import (
+    COMPLETED,
+    BehavioralReceiptStore,
+    ReceiptStoreError,
+)
 from core.epistemic.cas import ContentAddressableStorage
 from core.epistemic.events import EpistemicConflict, EpistemicEvent, EventType
 from core.epistemic.persistence import CanonicalEvidenceRepository
@@ -32,6 +37,8 @@ from core.behavior.normalize import stable_hash
 logger = logging.getLogger(__name__)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_BEHAVIORAL_RECEIPT_ID = re.compile(r"^behavioral-[0-9a-f]{64}$")
+_PROVENANCE_ROOT = re.compile(r"^(?:provenance:)?[0-9a-f]{64}$")
 
 
 class LifecycleState(str, Enum):
@@ -202,6 +209,41 @@ class Citation:
     snippet: Optional[str] = None  # Short quote for verification
 
 
+@dataclass(frozen=True)
+class ActiveProofCitation:
+    """Binding from one active evidence atom to completed R0 conduct proof."""
+
+    observation_id: str
+    receipt_id: str
+    provenance_root: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.observation_id, str) or not self.observation_id.startswith(
+            "obs-"
+        ):
+            raise ValueError("active proof observation citation is invalid")
+        if (
+            not isinstance(self.receipt_id, str)
+            or _BEHAVIORAL_RECEIPT_ID.fullmatch(self.receipt_id) is None
+        ):
+            raise ValueError("active proof receipt citation is invalid")
+        if (
+            not isinstance(self.provenance_root, str)
+            or _PROVENANCE_ROOT.fullmatch(self.provenance_root) is None
+        ):
+            raise ValueError("active proof provenance citation is invalid")
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ActiveProofCitation":
+        if set(value) != {"observation_id", "receipt_id", "provenance_root"}:
+            raise ValueError("active proof citation fields are invalid")
+        return cls(
+            observation_id=value["observation_id"],
+            receipt_id=value["receipt_id"],
+            provenance_root=value["provenance_root"],
+        )
+
+
 @dataclass
 class Finding:
     """
@@ -218,6 +260,7 @@ class Finding:
     confirmation_level: str = "probable"  # Default preserves existing behavior
     session_id: Optional[str] = None
     commitment: Optional[str] = None
+    active_proof: List[ActiveProofCitation] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -231,6 +274,7 @@ class Finding:
             "confirmation_level": self.confirmation_level,
             "session_id": self.session_id,
             "commitment": self.commitment,
+            "active_proof": [asdict(item) for item in self.active_proof],
         }
 
     @classmethod
@@ -246,6 +290,10 @@ class Finding:
             confirmation_level=value["confirmation_level"],
             session_id=value.get("session_id"),
             commitment=value.get("commitment"),
+            active_proof=[
+                ActiveProofCitation.from_dict(item)
+                for item in value.get("active_proof", [])
+            ],
         )
         if finding.commitment != _canonical_finding_commitment(finding):
             raise ValueError("canonical finding commitment mismatch")
@@ -260,8 +308,10 @@ def _canonical_finding_material(finding: Finding) -> Dict[str, Any]:
     confirmation = ConfirmationLevel(finding.confirmation_level)
     if confirmation is ConfirmationLevel.HYPOTHESIZED:
         raise ValueError("hypothesized claims cannot be canonical findings")
+    if not finding.active_proof:
+        raise ValueError("active canonical finding requires proof provenance")
     return {
-        "schema": "evidence_finding_v1",
+        "schema": "evidence_finding_v2",
         "session_id": finding.session_id,
         "title": finding.title,
         "severity": finding.severity,
@@ -270,6 +320,7 @@ def _canonical_finding_material(finding: Finding) -> Dict[str, Any]:
         "remediation": finding.remediation,
         "metadata": finding.metadata,
         "confirmation_level": finding.confirmation_level,
+        "active_proof": [asdict(item) for item in finding.active_proof],
     }
 
 
@@ -327,13 +378,19 @@ class EvidenceLedger:
     3. Derived View (StateTable, Findings)
     """
 
-    def __init__(self, config: Optional[SentinelConfig] = None):
+    def __init__(
+        self,
+        config: Optional[SentinelConfig] = None,
+        *,
+        receipt_store: Optional[BehavioralReceiptStore] = None,
+    ):
         # Use the global singleton when no config is injected.
         # See core/epistemic/cas.py for the historical-bug rationale.
         from core.base.config import get_config
         self.config = config or get_config()
         self.cas = ContentAddressableStorage(self.config)
         self._repository = CanonicalEvidenceRepository(self.config.storage.db_path)
+        self._receipt_store = receipt_store or BehavioralReceiptStore()
         
         # 1. Immutable Stores (The "What")
         self._observations: Dict[str, Observation] = {}
@@ -385,6 +442,11 @@ class EvidenceLedger:
                     for item in cited
                 ):
                     raise ValueError("canonical finding citation index mismatch")
+                self._validate_active_proof(
+                    evidence_citations=entity.citations,
+                    observations=cited,
+                    active_proof=entity.active_proof,
+                )
                 self._findings[entity.id] = entity
             else:
                 raise ValueError("unsupported persisted epistemic entity")
@@ -645,6 +707,7 @@ class EvidenceLedger:
         confirmation_level: str,
         remediation: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        active_proof: Optional[List[ActiveProofCitation]] = None,
         timestamp_override: Optional[float] = None,
     ) -> Finding:
         """Promote a non-hypothetical claim grounded only in session evidence."""
@@ -671,6 +734,15 @@ class EvidenceLedger:
         if len(sessions) != 1:
             raise ValueError("canonical finding cannot cross session identities")
         session_id = sessions.pop()
+        normalized_active_proof = sorted(
+            active_proof or [],
+            key=lambda item: json.dumps(asdict(item), sort_keys=True),
+        )
+        self._validate_active_proof(
+            evidence_citations=normalized_citations,
+            observations=observations,
+            active_proof=normalized_active_proof,
+        )
         finding = Finding(
             id="",
             title=title,
@@ -681,6 +753,7 @@ class EvidenceLedger:
             metadata=dict(metadata or {}),
             confirmation_level=confirmation_level,
             session_id=session_id,
+            active_proof=normalized_active_proof,
         )
         finding.commitment = _canonical_finding_commitment(finding)
         finding.id = f"find-{finding.commitment.rsplit(':', 1)[-1]}"
@@ -704,6 +777,86 @@ class EvidenceLedger:
             self._findings.pop(finding.id, None)
             raise
         return finding
+
+    @staticmethod
+    def _contains_provenance_root(value: Any, expected: str) -> bool:
+        if value == expected:
+            return True
+        if isinstance(value, Mapping):
+            return any(
+                EvidenceLedger._contains_provenance_root(item, expected)
+                for item in value.values()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(
+                EvidenceLedger._contains_provenance_root(item, expected)
+                for item in value
+            )
+        return False
+
+    def _validate_active_proof(
+        self,
+        *,
+        evidence_citations: List[Citation],
+        observations: List[Optional[Observation]],
+        active_proof: List[ActiveProofCitation],
+    ) -> None:
+        if not active_proof:
+            raise ValueError(
+                "active canonical finding requires a completed behavioral receipt "
+                "and safety provenance"
+            )
+        cited_ids = {item.observation_id for item in evidence_citations}
+        observation_index = {
+            item.id: item
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+        }
+        if len(active_proof) != len(set(active_proof)):
+            raise ValueError("active proof citations must be unique")
+
+        for proof in active_proof:
+            observation = observation_index.get(proof.observation_id)
+            if proof.observation_id not in cited_ids or observation is None:
+                raise ValueError("active proof must bind a cited canonical observation")
+            fingerprint = proof.receipt_id.removeprefix("behavioral-")
+            try:
+                receipt = self._receipt_store.load(fingerprint)
+            except (OSError, ReceiptStoreError) as exc:
+                raise ValueError("active proof receipt could not be verified") from exc
+            if receipt is None or receipt.state != COMPLETED or receipt.outcome is None:
+                raise ValueError("active proof receipt is not completed")
+
+            identity = observation.identity
+            expected_target = stable_hash(
+                "behavioral_receipt_target", identity.target_origin
+            )
+            expected_envelope = stable_hash(
+                "behavioral_receipt_envelope", identity.authorization_envelope_id
+            )
+            expected_persona = stable_hash(
+                "behavioral_receipt_persona", identity.persona_id
+            )
+            if (
+                receipt.context.target_ref != expected_target
+                or receipt.context.envelope_ref != expected_envelope
+                or expected_persona
+                not in {
+                    receipt.context.source_persona_ref,
+                    receipt.context.peer_persona_ref,
+                }
+            ):
+                raise ValueError("active proof receipt identity does not match evidence")
+            if not self._contains_provenance_root(
+                receipt.outcome, proof.provenance_root
+            ):
+                raise ValueError(
+                    "active proof provenance is not committed by the completed receipt"
+                )
+            if receipt.outcome.get("finding_confirmed") is False:
+                raise ValueError("completed receipt does not support an active finding")
+            if receipt.outcome.get("oracle_verdict") in {"refuted", "inconclusive"}:
+                raise ValueError("completed receipt does not support an active finding")
 
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
         """

@@ -505,7 +505,7 @@ def _redacted_execution(value: Any) -> Optional[Dict[str, Any]]:
     verdict = value.get("legacy_verdict")
     if status not in _VALID_EXECUTION_STATUSES or verdict not in _VALID_LEGACY_VERDICTS:
         raise ReceiptStoreError("behavioral receipt execution summary is invalid")
-    return {
+    output = {
         "status": status,
         "legacy_verdict": verdict,
         "finding_confirmed": bool(value.get("finding_confirmed")),
@@ -519,6 +519,16 @@ def _redacted_execution(value: Any) -> Optional[Dict[str, Any]]:
             value.get("policy_denials"), field_name="policy_denials"
         ),
     }
+    provenance_root = value.get("provenance_root")
+    if provenance_root is not None:
+        if not isinstance(provenance_root, str) or not re_full_sha256(
+            provenance_root
+        ):
+            raise ReceiptStoreError(
+                "behavioral receipt execution provenance root is invalid"
+            )
+        output["provenance_root"] = provenance_root
+    return output
 
 
 def _count_section(value: Any, keys: tuple[str, ...], *, section: str) -> Dict[str, int]:

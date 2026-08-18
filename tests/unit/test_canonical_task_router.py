@@ -109,7 +109,7 @@ async def test_ai_interprets_existing_observation_without_writing_evidence() -> 
 
 
 @pytest.mark.asyncio
-async def test_scanner_output_has_one_canonical_path_and_ai_is_not_promoted(
+async def test_scanner_output_stays_passive_and_ai_is_not_promoted(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -206,17 +206,13 @@ async def test_scanner_output_has_one_canonical_path_and_ai_is_not_promoted(
 
     assert len(routed_results) == 1
     assert fake_ai.calls == 1
-    assert len(findings) == 1
-    assert findings[0]["id"].startswith("find-")
+    assert findings == []
     assert len(ledger._observations) == 1
     assert all(
         isinstance(item, ObservationEnvelope) for item in ledger._observations.values()
     )
-    assert len(ledger._findings) == 1
-    assert [item.event_type for item in ledger._event_log] == [
-        EventType.OBSERVED,
-        EventType.PROMOTED,
-    ]
+    assert ledger._findings == {}
+    assert [item.event_type for item in ledger._event_log] == [EventType.OBSERVED]
     assert {item.payload["session_id"] for item in ledger._event_log} == {
         "session-wo07"
     }
