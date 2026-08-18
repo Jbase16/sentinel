@@ -19,8 +19,8 @@ Coverage:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
 
+import httpx
 import pytest
 
 from core.verify.console import (
@@ -239,18 +239,20 @@ class TestSessionRegistry:
 
 
 class TestCreateSessionEndpoint:
-    def test_xor_validation_rejects_both(self, monkeypatch):
+    def test_target_fallback_is_rejected_even_with_canonical_ids(self):
         from core.server.routers.verify import (
             CreateSessionRequest, create_session,
         )
         from fastapi import HTTPException
         req = CreateSessionRequest(
-            finding_id="f-1", target_url="https://h.example/"
+            canonical_session_id="session-1",
+            finding_id="f-1",
+            target_url="https://h.example/",
         )
         with pytest.raises(HTTPException) as ei:
             _run(create_session(req, _=True))
         assert ei.value.status_code == 400
-        assert "EITHER" in ei.value.detail
+        assert "target-only/global" in ei.value.detail
 
     def test_xor_validation_rejects_neither(self):
         from core.server.routers.verify import (
@@ -262,43 +264,73 @@ class TestCreateSessionEndpoint:
             _run(create_session(req, _=True))
         assert ei.value.status_code == 400
 
-    def test_target_mode_returns_session_id_and_scope(self):
+    def test_target_mode_is_not_a_workbench(self):
         from core.server.routers.verify import (
             CreateSessionRequest, create_session,
         )
-        resp = _run(create_session(
-            CreateSessionRequest(target_url="https://h.example/"),
-            _=True,
-        ))
-        assert resp.session_id is not None
-        assert resp.finding_id is None
-        assert resp.target_url == "https://h.example/"
-        assert resp.allowed_origins == ["https://h.example"]
-        assert resp.has_persona_auth is False
+        from fastapi import HTTPException
 
-    def test_finding_mode_dispatches_to_factory(self, monkeypatch):
-        """When finding_id is provided, the handler must call
-        create_session_from_finding (with the global FindingsStore)."""
+        with pytest.raises(HTTPException) as ei:
+            _run(create_session(
+                CreateSessionRequest(target_url="https://h.example/"),
+                _=True,
+            ))
+        assert ei.value.status_code == 400
+
+    def test_exact_canonical_finding_opens_workbench(self, monkeypatch):
         from core.server.routers import verify as vrouter
-        # Inject a fake store via the real createsession_from_finding
-        # path. The handler calls get_finding_store() internally; we
-        # monkeypatch that.
-        from core.data import findings_store as fs_mod
+        from core.epistemic import ledger as ledger_module
+        from core.verify import workbench as workbench_module
+        from core.verify.workbench import CandidateWorkbench
+        from types import SimpleNamespace
 
-        fake_store = _FakeFindingStore({
-            "f-7": {
-                "id": "f-7",
-                "target": "https://h.example/api/x",
-                "type": "X",
-                "metadata": {"persona": "admin"},
-            },
-        })
-        monkeypatch.setattr(fs_mod, "get_finding_store", lambda: fake_store)
+        observation = SimpleNamespace(id="obs-1", target="https://h.example/api/x")
+        finding = SimpleNamespace(
+            id="f-7",
+            citations=[SimpleNamespace(observation_id=observation.id)],
+            to_dict=lambda: {"id": "f-7", "active_proof": []},
+        )
+        read_model = SimpleNamespace(
+            session_id="canonical-7",
+            findings=(finding,),
+            observations=(observation,),
+        )
+        workbench = CandidateWorkbench(
+            workbench_id="verify_workbench:" + "7" * 64,
+            canonical_session_id="canonical-7",
+            finding_id="f-7",
+            finding_commitment="evidence_finding:" + "8" * 64,
+            target_url="https://h.example/api/x",
+            target_origin="https://h.example",
+        )
+
+        class FakeStore:
+            def open(self, model, *, finding_id):
+                assert model is read_model
+                assert finding_id == "f-7"
+                return workbench
+
+        store = FakeStore()
+        monkeypatch.setattr(
+            ledger_module,
+            "load_canonical_session_read_model",
+            lambda session_id: read_model,
+        )
+        monkeypatch.setattr(
+            workbench_module,
+            "CandidateWorkbenchStore",
+            lambda: store,
+        )
 
         resp = _run(vrouter.create_session(
-            vrouter.CreateSessionRequest(finding_id="f-7"),
+            vrouter.CreateSessionRequest(
+                canonical_session_id="canonical-7",
+                finding_id="f-7",
+            ),
             _=True,
         ))
+        assert resp.canonical_session_id == "canonical-7"
+        assert resp.workbench_id == workbench.workbench_id
         assert resp.finding_id == "f-7"
         assert resp.target_url == "https://h.example/api/x"
         assert resp.allowed_origins == ["https://h.example"]
@@ -477,7 +509,6 @@ class TestExchangeEndpoint:
         monkeypatch.setattr(httpx, "AsyncClient", _MockedAsyncClient)
 
     def test_in_scope_request_captures_step(self, monkeypatch):
-        import httpx
         from core.server.routers.verify import (
             ExchangeRequest, send_exchange,
         )
@@ -535,7 +566,6 @@ class TestExchangeEndpoint:
         handler, an out-of-scope request must be rejected without ever
         invoking that handler. We use a handler that asserts False to
         make sure no network call sneaks through."""
-        import httpx
         from core.server.routers.verify import (
             ExchangeRequest, send_exchange,
         )

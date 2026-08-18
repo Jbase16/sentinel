@@ -21,13 +21,15 @@ the rendered curl + markdown.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from core.ghost.flow import FlowStep
 from core.verify.console import (
     _reset_for_tests,
+    create_session_from_workbench,
     create_session_from_target,
     create_session_from_finding,
 )
@@ -35,11 +37,10 @@ from core.verify.promoter import (
     ReproEntry,
     promote_transcript_to_repro,
     render_curl,
-    render_repro_as_strings,
     sanitize_headers,
-    _excerpt_response_body,
     _sanitize_cookie_value,
 )
+from core.verify.workbench import CandidateWorkbench, ReproEvidenceSelection
 
 
 def _run(coro):
@@ -74,6 +75,56 @@ def _mk_step(
         content_type=(resp_headers or {}).get("content-type"),
     )
     return step
+
+
+def _candidate_session(monkeypatch):
+    from core.epistemic import ledger as ledger_module
+
+    observation_id = "obs-" + "1" * 64
+    receipt_id = "behavioral-" + "2" * 64
+    workbench = CandidateWorkbench(
+        workbench_id="verify_workbench:" + "3" * 64,
+        canonical_session_id="candidate-session",
+        finding_id="find-" + "4" * 64,
+        finding_commitment="evidence_finding:" + "5" * 64,
+        target_url="https://h.example/",
+        target_origin="https://h.example",
+    )
+
+    class SelectingStore:
+        def select_exchanges(
+            self,
+            current,
+            *,
+            exchanges,
+            read_model,
+        ):
+            selections = {item.exchange_index: item for item in current.selections}
+            for exchange_index, step, observation_id, receipt_id in exchanges:
+                selections[exchange_index] = ReproEvidenceSelection.build(
+                    exchange_index=exchange_index,
+                    step=step,
+                    observation_id=observation_id,
+                    receipt_id=receipt_id,
+                    provenance_root="6" * 64,
+                )
+            return replace(
+                current,
+                selections=tuple(selections[index] for index in sorted(selections)),
+            )
+
+    session = create_session_from_workbench(
+        workbench,
+        target_url="https://h.example/",
+        original_finding={"id": workbench.finding_id},
+    )
+    session.candidate_workbench_store = SelectingStore()
+    monkeypatch.setattr(
+        ledger_module,
+        "load_canonical_session_read_model",
+        lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    return session, observation_id, receipt_id
 
 
 # ─────────────────────────── sanitization ───────────────────────────
@@ -340,12 +391,12 @@ class TestPromoteEndpoint:
             ))
         assert ei.value.status_code == 404
 
-    def test_full_promotion_shape(self):
+    def test_full_promotion_shape(self, monkeypatch):
         from core.server.routers.verify import (
-            PromoteRequest, promote_to_repro,
+            EvidenceBindingRequest, PromoteRequest, promote_to_repro,
         )
 
-        sess = create_session_from_target("https://h.example/")
+        sess, observation_id, receipt_id = _candidate_session(monkeypatch)
         sess.append_exchange(_mk_step(
             method="GET", url="https://h.example/users/1",
             headers={"Authorization": "Bearer REAL-TOKEN-XYZ"},
@@ -353,10 +404,16 @@ class TestPromoteEndpoint:
         ))
 
         result = _run(promote_to_repro(
-            sess.session_id, PromoteRequest(), _=True,
+            sess.session_id,
+            PromoteRequest(evidence_bindings=[EvidenceBindingRequest(
+                exchange_index=0,
+                observation_id=observation_id,
+                receipt_id=receipt_id,
+            )]),
+            _=True,
         ))
         # Top-level shape.
-        assert result.finding_id is None
+        assert result.finding_id == sess.finding_id
         assert result.target_url == "https://h.example/"
         assert result.entry_count == 1
         # Both representations populated.
@@ -369,12 +426,12 @@ class TestPromoteEndpoint:
         # Legend includes $TOKEN.
         assert "$TOKEN" in result.placeholder_legend
 
-    def test_subset_selection_via_indices(self):
+    def test_subset_selection_via_indices(self, monkeypatch):
         from core.server.routers.verify import (
-            PromoteRequest, promote_to_repro,
+            EvidenceBindingRequest, PromoteRequest, promote_to_repro,
         )
 
-        sess = create_session_from_target("https://h.example/")
+        sess, observation_id, receipt_id = _candidate_session(monkeypatch)
         for i in range(4):
             sess.append_exchange(_mk_step(
                 url=f"https://h.example/step{i}",
@@ -384,7 +441,17 @@ class TestPromoteEndpoint:
         # Pick exchanges 1 and 3.
         result = _run(promote_to_repro(
             sess.session_id,
-            PromoteRequest(exchange_indices=[1, 3]),
+            PromoteRequest(
+                exchange_indices=[1, 3],
+                evidence_bindings=[
+                    EvidenceBindingRequest(
+                        exchange_index=index,
+                        observation_id=observation_id,
+                        receipt_id=receipt_id,
+                    )
+                    for index in (1, 3)
+                ],
+            ),
             _=True,
         ))
         assert result.entry_count == 2
@@ -392,22 +459,21 @@ class TestPromoteEndpoint:
         urls = [e["url"] for e in result.entries]
         assert urls == ["https://h.example/step1", "https://h.example/step3"]
 
-    def test_unsanitized_path_includes_real_token(self):
-        """sanitize=False is for local debug — verify it actually
-        returns the real value (operators may need this for their own
-        repro debugging before promoting to a report)."""
+    def test_unsanitized_candidate_persistence_is_rejected(self):
         from core.server.routers.verify import (
             PromoteRequest, promote_to_repro,
         )
+        from fastapi import HTTPException
 
         sess = create_session_from_target("https://h.example/")
         sess.append_exchange(_mk_step(
             headers={"Authorization": "Bearer LOCAL-DEBUG-TOKEN"},
         ))
-        result = _run(promote_to_repro(
-            sess.session_id,
-            PromoteRequest(sanitize=False),
-            _=True,
-        ))
-        # Real value DOES appear when sanitize=False.
-        assert "LOCAL-DEBUG-TOKEN" in result.steps_to_reproduce[0]
+        with pytest.raises(HTTPException) as exc:
+            _run(promote_to_repro(
+                sess.session_id,
+                PromoteRequest(sanitize=False),
+                _=True,
+            ))
+        assert exc.value.status_code == 400
+        assert "requires sanitization" in exc.value.detail

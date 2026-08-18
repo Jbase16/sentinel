@@ -42,10 +42,13 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
-from core.base.scope import canonical_origin
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
+from core.base.scope import canonical_origin
 from core.ghost.flow import FlowStep
+
+if TYPE_CHECKING:
+    from core.verify.workbench import CandidateWorkbench, CandidateWorkbenchStore
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,16 @@ class VerificationSession:
     finding_id: Optional[str]
     target_url: str
     target_origin: str
+    canonical_session_id: Optional[str] = None
+    workbench_id: Optional[str] = None
+    candidate_workbench: Optional["CandidateWorkbench"] = field(
+        default=None,
+        repr=False,
+    )
+    candidate_workbench_store: Optional["CandidateWorkbenchStore"] = field(
+        default=None,
+        repr=False,
+    )
     # Origin-level allowlist. Always contains target_origin as the
     # minimum-viable scope; operators can extend it via add_origin_to_scope().
     allowed_origins: Set[str] = field(default_factory=set)
@@ -130,9 +143,28 @@ class VerificationSession:
     # ─────────────── serialization ───────────────
 
     def to_dict(self) -> Dict[str, Any]:
+        proof_bindings = []
+        if self.original_finding:
+            for item in self.original_finding.get("active_proof", []):
+                if not isinstance(item, dict):
+                    continue
+                binding = {
+                    key: item.get(key)
+                    for key in ("observation_id", "receipt_id", "provenance_root")
+                }
+                if all(isinstance(value, str) and value for value in binding.values()):
+                    proof_bindings.append(binding)
         return {
             "session_id": self.session_id,
             "finding_id": self.finding_id,
+            "canonical_session_id": self.canonical_session_id,
+            "workbench_id": self.workbench_id,
+            "candidate_evidence": (
+                [item.to_dict() for item in self.candidate_workbench.selections]
+                if self.candidate_workbench is not None
+                else []
+            ),
+            "available_proof_bindings": proof_bindings,
             "target_url": self.target_url,
             "target_origin": self.target_origin,
             "allowed_origins": sorted(self.allowed_origins),
@@ -287,4 +319,38 @@ def create_session_from_target(
         f"[verify] created ad-hoc session {session.session_id[:8]} for "
         f"target {target_url!r} (scope: {origin}){f' — {note}' if note else ''}"
     )
+    return session
+
+
+def create_session_from_workbench(
+    workbench,
+    *,
+    target_url: str,
+    original_finding: Dict[str, Any],
+) -> VerificationSession:
+    """Create the live, secret-bearing shell for one durable workbench.
+
+    Only the sanitized workbench persists. Persona credentials and the raw
+    exploratory transcript remain memory-only.
+    """
+
+    from core.verify.workbench import CandidateWorkbench
+
+    if not isinstance(workbench, CandidateWorkbench):
+        raise TypeError("workbench must be a CandidateWorkbench")
+    origin = _origin_of(target_url)
+    if origin is None or origin != workbench.target_origin:
+        raise ValueError("workbench target binding is invalid")
+    session = VerificationSession(
+        session_id=workbench.workbench_id,
+        finding_id=workbench.finding_id,
+        target_url=target_url,
+        target_origin=origin,
+        canonical_session_id=workbench.canonical_session_id,
+        workbench_id=workbench.workbench_id,
+        candidate_workbench=workbench,
+        allowed_origins={origin},
+        original_finding=dict(original_finding),
+    )
+    _register(session)
     return session

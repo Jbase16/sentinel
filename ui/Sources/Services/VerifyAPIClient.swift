@@ -14,6 +14,8 @@ import Foundation
 
 public struct VerifySessionSummary: Codable, Identifiable, Equatable {
     public let sessionId: String
+    public let canonicalSessionId: String?
+    public let workbenchId: String?
     public let findingId: String?
     public let targetUrl: String
     public let allowedOrigins: [String]
@@ -27,6 +29,8 @@ public struct VerifySessionSummary: Codable, Identifiable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
+        case canonicalSessionId = "canonical_session_id"
+        case workbenchId = "workbench_id"
         case findingId = "finding_id"
         case targetUrl = "target_url"
         case allowedOrigins = "allowed_origins"
@@ -86,6 +90,8 @@ public struct VerifyExchange: Codable, Identifiable, Equatable {
 
 public struct VerifySession: Codable {
     public let sessionId: String
+    public let canonicalSessionId: String?
+    public let workbenchId: String?
     public let findingId: String?
     public let targetUrl: String
     public let targetOrigin: String
@@ -95,11 +101,14 @@ public struct VerifySession: Codable {
     public let originalFindingSummary: VerifyFindingSummary?
     public let transcriptLength: Int
     public let transcript: [VerifyExchange]
+    public let availableProofBindings: [VerifyProofBinding]
     public let createdAt: Double
     public let lastActivityAt: Double
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
+        case canonicalSessionId = "canonical_session_id"
+        case workbenchId = "workbench_id"
         case findingId = "finding_id"
         case targetUrl = "target_url"
         case targetOrigin = "target_origin"
@@ -109,6 +118,7 @@ public struct VerifySession: Codable {
         case originalFindingSummary = "original_finding_summary"
         case transcriptLength = "transcript_length"
         case transcript
+        case availableProofBindings = "available_proof_bindings"
         case createdAt = "created_at"
         case lastActivityAt = "last_activity_at"
     }
@@ -116,6 +126,8 @@ public struct VerifySession: Codable {
 
 public struct VerifyCreateResult: Codable {
     public let sessionId: String
+    public let canonicalSessionId: String
+    public let workbenchId: String
     public let findingId: String?
     public let targetUrl: String
     public let allowedOrigins: [String]
@@ -123,10 +135,24 @@ public struct VerifyCreateResult: Codable {
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
+        case canonicalSessionId = "canonical_session_id"
+        case workbenchId = "workbench_id"
         case findingId = "finding_id"
         case targetUrl = "target_url"
         case allowedOrigins = "allowed_origins"
         case hasPersonaAuth = "has_persona_auth"
+    }
+}
+
+public struct VerifyProofBinding: Codable, Equatable {
+    public let observationId: String
+    public let receiptId: String
+    public let provenanceRoot: String
+
+    enum CodingKeys: String, CodingKey {
+        case observationId = "observation_id"
+        case receiptId = "receipt_id"
+        case provenanceRoot = "provenance_root"
     }
 }
 
@@ -295,10 +321,11 @@ public final class VerifyAPIClient {
 
     // MARK: lifecycle
 
-    public func createSession(findingId: String? = nil, targetUrl: String? = nil, note: String? = nil) async throws -> VerifyCreateResult {
-        var body: [String: Any] = [:]
-        if let f = findingId { body["finding_id"] = f }
-        if let t = targetUrl { body["target_url"] = t }
+    public func createSession(canonicalSessionId: String, findingId: String, note: String? = nil) async throws -> VerifyCreateResult {
+        var body: [String: Any] = [
+            "canonical_session_id": canonicalSessionId,
+            "finding_id": findingId,
+        ]
         if let n = note { body["note"] = n }
         return try await postJSON(path: "/v1/verify/sessions", body: body, as: VerifyCreateResult.self)
     }
@@ -346,9 +373,18 @@ public final class VerifyAPIClient {
     public func promote(
         sessionId: String,
         exchangeIndices: [Int]? = nil,
-        sanitize: Bool = true
+        evidenceBindings: [(exchangeIndex: Int, binding: VerifyProofBinding)]
     ) async throws -> VerifyPromoteResult {
-        var body: [String: Any] = ["sanitize": sanitize]
+        var body: [String: Any] = [
+            "sanitize": true,
+            "evidence_bindings": evidenceBindings.map { item -> [String: Any] in
+                [
+                    "exchange_index": item.exchangeIndex,
+                    "observation_id": item.binding.observationId,
+                    "receipt_id": item.binding.receiptId,
+                ]
+            },
+        ]
         if let xs = exchangeIndices { body["exchange_indices"] = xs }
         return try await postJSON(
             path: "/v1/verify/sessions/\(sessionId)/promote",

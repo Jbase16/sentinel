@@ -80,7 +80,7 @@ public struct VerifyConsoleView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white.opacity(0.65))
                 } else if vm.session != nil {
-                    Text("ad-hoc verification (no finding bound)")
+                    Text("legacy session (not a Candidate Workbench)")
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white.opacity(0.5))
                 }
@@ -88,9 +88,9 @@ public struct VerifyConsoleView: View {
             Spacer()
 
             Picker("Session", selection: $vm.selectedSessionId) {
-                Text("New session…").tag(String?.none)
+                Text("Open Candidate Workbench…").tag(String?.none)
                 ForEach(vm.sessions) { s in
-                    Text("\(s.findingId ?? "ad-hoc") · \(s.targetUrl)")
+                    Text("\(s.findingId ?? "legacy") · \(s.targetUrl)")
                         .tag(s.sessionId as String?)
                 }
             }
@@ -101,7 +101,7 @@ public struct VerifyConsoleView: View {
                 Image(systemName: "plus.circle.fill")
             }
             .buttonStyle(.plain)
-            .help("Create a new VerificationSession")
+            .help("Open a canonical session/finding Candidate Workbench")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -353,18 +353,21 @@ final class VerifyConsoleViewModel: ObservableObject {
     // MARK: actions
 
     func openNewSessionSheet() async {
-        // Minimal create — target_url manual input via a popover would
-        // be nicer; for now, fall back to a clipboard pull as the
-        // ad-hoc entrypoint (matches operator habit).
+        // The clipboard accepts two identifiers separated by whitespace:
+        // canonical_session_id then finding_id. Target-only sessions are
+        // intentionally unavailable.
         let pasteboard = NSPasteboard.general
         let raw = pasteboard.string(forType: .string) ?? ""
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.hasPrefix("http") else {
-            errorMessage = "To create a session, copy a target URL to the clipboard first (or use a finding-bound session)."
+        let identifiers = raw.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard identifiers.count == 2 else {
+            errorMessage = "Copy the canonical session ID and finding ID (separated by whitespace) to open a Candidate Workbench."
             return
         }
         do {
-            let r = try await client.createSession(targetUrl: trimmed)
+            let r = try await client.createSession(
+                canonicalSessionId: identifiers[0],
+                findingId: identifiers[1]
+            )
             selectedSessionId = r.sessionId
             await refresh()
             errorMessage = nil
@@ -436,12 +439,22 @@ final class VerifyConsoleViewModel: ObservableObject {
     }
 
     func promoteSelected() async {
-        guard let id = selectedSessionId, !selectedExchangeIndices.isEmpty else { return }
+        guard
+            let id = selectedSessionId,
+            let session,
+            !selectedExchangeIndices.isEmpty
+        else { return }
+        guard session.availableProofBindings.count == 1,
+              let binding = session.availableProofBindings.first else {
+            errorMessage = "Promotion requires exactly one unambiguous active proof binding for this finding."
+            return
+        }
+        let indices = Array(selectedExchangeIndices).sorted()
         do {
             let result = try await client.promote(
                 sessionId: id,
-                exchangeIndices: Array(selectedExchangeIndices).sorted(),
-                sanitize: true
+                exchangeIndices: indices,
+                evidenceBindings: indices.map { ($0, binding) }
             )
             promoteResult = result
         } catch {

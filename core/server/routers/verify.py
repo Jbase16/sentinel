@@ -1,17 +1,12 @@
 """
 core/server/routers/verify.py — Verify Console HTTP surface (VC1).
 
-Phase 5-VC1 endpoints (this commit):
-  POST /v1/verify/sessions             create from finding_id OR target
+Stage 4 Candidate Workbench endpoints:
+  POST /v1/verify/sessions             open exact session/finding workbench
   GET  /v1/verify/sessions             list
   GET  /v1/verify/sessions/{id}        full state
   POST /v1/verify/sessions/{id}/scope  add an origin to the allowlist
   POST /v1/verify/sessions/{id}/persona  bind/swap persona auth
-
-Phase 5-VC2 (next): the request console — POST a structured HTTP
-exchange through the scope gate and capture the response.
-Phase 5-VC3 (after): repro promoter — exchange-ids → BountyReport
-steps_to_reproduce.
 
 All endpoints gated by the sensitive token (operator-only).
 """
@@ -34,10 +29,11 @@ router = APIRouter(tags=["verify"])
 
 
 class CreateSessionRequest(BaseModel):
-    """Either finding_id OR target_url must be set (XOR enforced
-    in the handler). finding_id is the canonical path; target_url
-    is for ad-hoc verification without a prior finding."""
+    """Open one exact canonical session/finding Candidate Workbench."""
+    canonical_session_id: Optional[str] = None
     finding_id: Optional[str] = None
+    # Retained in the wire schema for a clear migration error. Production no
+    # longer permits finding-less/global target workspaces.
     target_url: Optional[str] = None
     note: Optional[str] = Field(
         default=None,
@@ -47,6 +43,8 @@ class CreateSessionRequest(BaseModel):
 
 class CreateSessionResponse(BaseModel):
     session_id: str
+    canonical_session_id: str
+    workbench_id: str
     finding_id: Optional[str]
     target_url: str
     allowed_origins: List[str]
@@ -100,34 +98,45 @@ async def create_session(
 ) -> CreateSessionResponse:
     """Create a new VerificationSession.
 
-    Provide EITHER finding_id (the canonical path — hydrate from a
-    confirmed finding) OR target_url (ad-hoc — verify against a URL
-    without a prior finding). Exactly one must be set."""
-    from core.verify.console import (
-        create_session_from_finding,
-        create_session_from_target,
-    )
+    Both canonical_session_id and finding_id are mandatory. The former
+    target-only/global fallback is intentionally refused."""
+    from core.epistemic.ledger import load_canonical_session_read_model
+    from core.verify.console import create_session_from_workbench
+    from core.verify.workbench import CandidateWorkbenchStore
 
-    if bool(req.finding_id) == bool(req.target_url):
+    if req.target_url or not req.canonical_session_id or not req.finding_id:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Provide EITHER finding_id OR target_url, not both/neither."
+                "Verify requires canonical_session_id plus finding_id; "
+                "target-only/global workspaces are not permitted."
             ),
         )
 
     try:
-        if req.finding_id:
-            session = create_session_from_finding(req.finding_id)
-        else:
-            session = create_session_from_target(
-                req.target_url or "", note=req.note
-            )
+        read_model = load_canonical_session_read_model(req.canonical_session_id)
+        store = CandidateWorkbenchStore()
+        workbench = store.open(read_model, finding_id=req.finding_id)
+        finding = next(item for item in read_model.findings if item.id == req.finding_id)
+        cited_ids = {item.observation_id for item in finding.citations}
+        observation = next(
+            item for item in read_model.observations if item.id in cited_ids
+        )
+        finding_value = finding.to_dict()
+        finding_value["target"] = observation.target
+        session = create_session_from_workbench(
+            workbench,
+            target_url=observation.target,
+            original_finding=finding_value,
+        )
+        session.candidate_workbench_store = store
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return CreateSessionResponse(
         session_id=session.session_id,
+        canonical_session_id=workbench.canonical_session_id,
+        workbench_id=workbench.workbench_id,
         finding_id=session.finding_id,
         target_url=session.target_url,
         allowed_origins=sorted(session.allowed_origins),
@@ -148,6 +157,8 @@ async def list_verify_sessions(
     for s in list_sessions():
         out.append({
             "session_id": s.session_id,
+            "canonical_session_id": s.canonical_session_id,
+            "workbench_id": s.workbench_id,
             "finding_id": s.finding_id,
             "target_url": s.target_url,
             "allowed_origins": sorted(s.allowed_origins),
@@ -481,6 +492,12 @@ async def send_exchange(
 # ──────────────────────── VC3: promote to repro ────────────────────────
 
 
+class EvidenceBindingRequest(BaseModel):
+    exchange_index: int = Field(..., ge=0)
+    observation_id: str
+    receipt_id: str
+
+
 class PromoteRequest(BaseModel):
     """POST /v1/verify/sessions/{id}/promote body.
 
@@ -494,14 +511,12 @@ class PromoteRequest(BaseModel):
             "omitted means include every captured exchange."
         ),
     )
+    evidence_bindings: List[EvidenceBindingRequest] = Field(default_factory=list)
     sanitize: bool = Field(
         default=True,
         description=(
-            "If True, auth headers/cookies in the rendered curl are "
-            "replaced with operator-readable placeholders ($TOKEN, "
-            "$SESSION_ID, etc.). Set False ONLY for local-debug "
-            "renders — the result is NOT safe to paste into a public "
-            "report."
+            "Must remain true. Candidate Workbench persistence never "
+            "accepts raw authentication material."
         ),
     )
 
@@ -534,16 +549,14 @@ async def promote_to_repro(
       * Copy to clipboard.
       * Show for operator review before pushing.
 
-    Sanitization replaces real auth tokens with placeholders. The
-    operator's session transcript still contains the real values
-    (they need them for their own debugging); the rendered repro
-    is the public-to-program version.
+    Selection persistence always replaces raw auth values with placeholders.
+    The secret-bearing exploratory transcript remains memory-only.
     """
+    import json
+    import shlex
+
+    from core.epistemic.ledger import load_canonical_session_read_model
     from core.verify.console import get_session
-    from core.verify.promoter import (
-        promote_transcript_to_repro,
-        render_repro_as_strings,
-    )
 
     sess = get_session(session_id)
     if sess is None:
@@ -560,28 +573,116 @@ async def promote_to_repro(
             ),
         )
 
-    entries, legend = promote_transcript_to_repro(
-        sess,
-        exchange_indices=req.exchange_indices,
-        sanitize=req.sanitize,
+    if not req.sanitize:
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate Workbench persistence always requires sanitization.",
+        )
+    workbench = sess.candidate_workbench
+    store = sess.candidate_workbench_store
+    if workbench is None or store is None or not sess.canonical_session_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Legacy/global Verify sessions cannot produce candidate evidence.",
+        )
+
+    indices = (
+        list(range(len(sess.transcript)))
+        if req.exchange_indices is None
+        else list(req.exchange_indices)
     )
+    if (
+        not indices
+        or len(set(indices)) != len(indices)
+        or any(index < 0 or index >= len(sess.transcript) for index in indices)
+    ):
+        raise HTTPException(status_code=400, detail="Exchange selection is invalid.")
+    bindings = {item.exchange_index: item for item in req.evidence_bindings}
+    if set(bindings) != set(indices) or len(bindings) != len(req.evidence_bindings):
+        raise HTTPException(
+            status_code=400,
+            detail="Every selected exchange requires one exact observation/receipt binding.",
+        )
+
+    read_model = load_canonical_session_read_model(sess.canonical_session_id)
+    try:
+        workbench = store.select_exchanges(
+            workbench,
+            exchanges=tuple(
+                (
+                    index,
+                    sess.transcript[index],
+                    bindings[index].observation_id,
+                    bindings[index].receipt_id,
+                )
+                for index in indices
+            ),
+            read_model=read_model,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    sess.candidate_workbench = workbench
+
+    by_index = {item.exchange_index: item for item in workbench.selections}
+    rendered_steps: List[str] = []
+    entry_values: List[Dict[str, Any]] = []
+    legend: Dict[str, str] = {
+        "$VALUE": "a target-specific value supplied by the triager",
+        "$REDACTED": "a sensitive request header value",
+    }
+    for ordinal, index in enumerate(indices, start=1):
+        selection = by_index[index]
+        lines = [f"curl -X {selection.method}"]
+        for name, value in selection.sanitized_headers:
+            lines.append(f"  -H {shlex.quote(f'{name}: {value}')}")
+            for placeholder in ("$TOKEN", "$CSRF_TOKEN", "$API_KEY", "$SESSION_ID"):
+                if placeholder in value:
+                    legend[placeholder] = "an operator-supplied credential placeholder"
+        if selection.request_shape.get("kind") != "none":
+            lines.append(
+                "  --data "
+                + shlex.quote(json.dumps(selection.request_shape, sort_keys=True))
+            )
+        lines.append(f"  {shlex.quote(selection.sanitized_url)}")
+        curl = " \\\n".join(lines)
+        response_excerpt = json.dumps(
+            {
+                "status": selection.response_status,
+                "shape": selection.response_shape,
+                "body_sha256": selection.response_body_sha256,
+                "observation_id": selection.observation_id,
+                "receipt_id": selection.receipt_id,
+            },
+            sort_keys=True,
+            indent=2,
+        )
+        prose = (
+            f"Send the receipt-bound `{selection.method}` request to "
+            f"`{selection.sanitized_url}`."
+        )
+        markdown = (
+            f"{prose}\n\n```bash\n{curl}\n```\n\n"
+            f"**Committed response evidence:**\n```json\n{response_excerpt}\n```"
+        )
+        rendered_steps.append(markdown)
+        entry_values.append({
+            "index": ordinal,
+            "method": selection.method,
+            "url": selection.sanitized_url,
+            "prose": prose,
+            "curl": curl,
+            "response_status": selection.response_status,
+            "response_excerpt": response_excerpt,
+            "markdown": markdown,
+            "observation_id": selection.observation_id,
+            "receipt_id": selection.receipt_id,
+            "selection_commitment": selection.selection_commitment,
+        })
     return PromoteResponse(
         finding_id=sess.finding_id,
-        target_url=sess.target_url,
-        entry_count=len(entries),
-        steps_to_reproduce=render_repro_as_strings(entries),
+        target_url=workbench.target_url,
+        entry_count=len(entry_values),
+        steps_to_reproduce=rendered_steps,
         placeholder_legend=legend,
-        entries=[
-            {
-                "index": e.index,
-                "method": e.method,
-                "url": e.url,
-                "prose": e.prose,
-                "curl": e.curl,
-                "response_status": e.response_status,
-                "response_excerpt": e.response_excerpt,
-                "markdown": e.markdown,
-            }
-            for e in entries
-        ],
+        entries=entry_values,
     )
