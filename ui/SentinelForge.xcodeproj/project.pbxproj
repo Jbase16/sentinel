@@ -25,7 +25,6 @@
 		56F1D7C10092F352980169CD /* GhostBrowserWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F23349083792B008C4E1131 /* GhostBrowserWindow.swift */; };
 		5BF1C14DFCA00863B476778E /* OperationalAlertBanners.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */; };
 		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
-		65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426219598E6076D786D8DAD8 /* ReportComposerView.swift */; };
 		6ACAA9191D686B0F50DE6548 /* OperationalStateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 882050DB17B4CE0CB0263245 /* OperationalStateModels.swift */; };
 		74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62409FA58DFFE1F4DBADB601 /* TerminalView.swift */; };
 		80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B8394185D36FC0D1095C1111 /* Shaders.metal */; };
@@ -81,7 +80,6 @@
 		2DBADD02037E358509CA4563 /* FoundryConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundryConsoleView.swift; sourceTree = "<group>"; };
 		3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressureGraphModels.swift; sourceTree = "<group>"; };
 		3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphView.swift; sourceTree = "<group>"; };
-		426219598E6076D786D8DAD8 /* ReportComposerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReportComposerView.swift; sourceTree = "<group>"; };
 		493C6711EF03532E783C01F1 /* GraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphModels.swift; sourceTree = "<group>"; };
 		4A68494FDEACABC92B894B50 /* AuditFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditFeedView.swift; sourceTree = "<group>"; };
 		56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TierBadgeView.swift; sourceTree = "<group>"; };
@@ -320,14 +318,6 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
-		ABF3011118C3208D743C9393 /* Report */ = {
-			isa = PBXGroup;
-			children = (
-				426219598E6076D786D8DAD8 /* ReportComposerView.swift */,
-			);
-			path = Report;
-			sourceTree = "<group>";
-		};
 		CBB201D7DEF1757F9F9AF0CC /* Navigation */ = {
 			isa = PBXGroup;
 			children = (
@@ -359,7 +349,6 @@
 				8AE47DA980531B2AFBDB8851 /* Ghost */,
 				00D139BD55DE3822C0141BC0 /* Graph */,
 				CBB201D7DEF1757F9F9AF0CC /* Navigation */,
-				ABF3011118C3208D743C9393 /* Report */,
 				84EFB1F64934F1A83E45E3BF /* Reporting */,
 				5F3DA0D8B483B48446528192 /* Scan */,
 				7B599657E542D35BC783E8B2 /* Settings */,
@@ -500,7 +489,6 @@
 				9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */,
 				96387A0346121E0ACC566A88 /* PressureGraphModels.swift in Sources */,
 				442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */,
-				65DA0F36B6B994075879AC8A /* ReportComposerView.swift in Sources */,
 				1B98978EE51F29E8B509AA59 /* ReportView.swift in Sources */,
 				4A1FF7DA7509E33F640B70A5 /* RetryBackoff.swift in Sources */,
 				E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */,
