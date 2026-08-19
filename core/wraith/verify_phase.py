@@ -236,14 +236,56 @@ async def run_verify_phase(
         "generic": VulnerabilityClass.GENERIC,
     }
 
-    # Build identity contexts. List of (name, headers, cookies) tuples.
-    identity_contexts: List[Tuple[str, Dict[str, str], Dict[str, str]]] = []
+    # Build identity contexts. The display name never establishes identity;
+    # an optional typed binding carries the exact principal coordinates used
+    # for canonical attribution.
+    identity_contexts: List[
+        Tuple[
+            str,
+            Dict[str, str],
+            Dict[str, str],
+            Dict[str, Any],
+            Optional[object],
+        ]
+    ] = []
+    allow_anonymous_fallback = False
     if personas:
+        from core.identity import CredentialFreshness, PrincipalIdentityBinding
         from core.wraith.persona_auth import authenticate_persona
         for p in personas:
             if not isinstance(p, dict):
                 continue
             name = str(p.get("name") or "anon")
+            binding = None
+            if p.get("identity_binding") is not None:
+                try:
+                    binding = PrincipalIdentityBinding.from_mapping(
+                        p["identity_binding"]
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        f"[verify_phase] refusing malformed identity binding "
+                        f"for persona {name!r}: {exc}"
+                    )
+                    continue
+                if binding.credential_freshness is not CredentialFreshness.FRESH:
+                    logger.warning(
+                        f"[verify_phase] refusing non-fresh live identity "
+                        f"for persona {name!r}"
+                    )
+                    continue
+                try:
+                    from core.wraith.canonical_evidence import (
+                        authority_from_wraith_session,
+                    )
+
+                    authority_from_wraith_session(session, candidates[0][0])
+                except (IndexError, TypeError, ValueError) as exc:
+                    logger.warning(
+                        f"[verify_phase] refusing identity without admitted "
+                        f"scope authority for persona {name!r}: {exc}"
+                    )
+                    continue
             try:
                 p_headers, p_cookies = await authenticate_persona(
                     p,
@@ -252,12 +294,22 @@ async def run_verify_phase(
             except Exception as e:
                 logger.warning(
                     f"[verify_phase] persona {name!r} auth failed: "
-                    f"{type(e).__name__}: {e} — falling back to anonymous for this identity"
+                    f"{type(e).__name__}: {e} — refusing named attribution"
                 )
-                p_headers, p_cookies = {}, {}
-            identity_contexts.append((name, p_headers, p_cookies))
+                if binding is None:
+                    allow_anonymous_fallback = True
+                continue
+            identity_contexts.append((name, p_headers, p_cookies, p, binding))
+    if personas and not identity_contexts and not allow_anonymous_fallback:
+        logger.warning(
+            "[verify_phase] no supplied persona passed identity/auth preflight; "
+            "refusing anonymous fallback"
+        )
+        return []
     if not identity_contexts:
-        identity_contexts.append(("anonymous", headers or {}, cookies or {}))
+        identity_contexts.append(
+            ("anonymous", headers or {}, cookies or {}, {}, None)
+        )
 
     verifier = VulnVerifier(session)
     engine = MutationEngine(scope_filter=scope_filter)
@@ -273,7 +325,13 @@ async def run_verify_phase(
         f"with {len(identity_contexts)} identity context(s)"
     )
     try:
-        for identity_name, id_headers, id_cookies in identity_contexts:
+        for (
+            identity_name,
+            id_headers,
+            id_cookies,
+            persona_config,
+            identity_binding,
+        ) in identity_contexts:
             authed = bool(id_headers) or bool(id_cookies)
             for url, label, vc_name in candidates:
                 vc = vc_map.get(vc_name, VulnerabilityClass.GENERIC)
@@ -304,7 +362,7 @@ async def run_verify_phase(
                         f"verified-{kind.lower()}-"
                         f"{abs(hash((url, payload, identity_name))) % 1_000_000}"
                     )
-                    confirmed.append({
+                    finding = {
                         "id": finding_id,
                         "type": f"{kind} (active verification)",
                         "severity": "HIGH",
@@ -327,7 +385,47 @@ async def run_verify_phase(
                             "persona": identity_name,
                             "authenticated": authed,
                         },
-                    })
+                    }
+                    if identity_binding is not None:
+                        try:
+                            from core.epistemic.ledger import EvidenceLedger
+                            from core.wraith.canonical_evidence import (
+                                WraithCanonicalEvidenceAdapter,
+                            )
+
+                            ledger = getattr(
+                                session,
+                                "canonical_evidence_ledger",
+                                None,
+                            ) or EvidenceLedger()
+                            setattr(session, "canonical_evidence_ledger", ledger)
+                            observation = WraithCanonicalEvidenceAdapter(
+                                ledger
+                            ).record_confirmation(
+                                session,
+                                persona_config=persona_config,
+                                binding=identity_binding,
+                                name=identity_name,
+                                headers=id_headers,
+                                cookies=id_cookies,
+                                url=url,
+                                label=label,
+                                kind=kind,
+                                confidence=float(confidence),
+                                evidence=evidence_str,
+                                payload=str(payload),
+                            )
+                            finding["metadata"]["observation_id"] = observation.id
+                            finding["metadata"][
+                                "identity_digest"
+                            ] = observation.identity.digest
+                        except (TypeError, ValueError, RuntimeError) as exc:
+                            logger.warning(
+                                f"[verify_phase] refusing non-canonical result "
+                                f"for bound persona {identity_name!r}: {exc}"
+                            )
+                            continue
+                    confirmed.append(finding)
                     logger.info(
                         f"[verify_phase] CONFIRMED {kind} on {url} "
                         f"as persona={identity_name!r} "
@@ -383,7 +481,7 @@ async def run_verify_phase(
     #
     # Requirements: 2+ authenticated identity contexts. With 0 or 1, this
     # comparison has no meaning and we skip.
-    auth_identities = [(n, h, c) for n, h, c in identity_contexts
+    auth_identities = [(n, h, c) for n, h, c, _p, _b in identity_contexts
                        if bool(h) or bool(c)]
     if len(auth_identities) >= 2:
         try:

@@ -80,6 +80,13 @@ class BindPersonaRequest(BaseModel):
     persona_spec: Optional[Dict[str, Any]] = None
     headers: Dict[str, str] = Field(default_factory=dict)
     cookies: Dict[str, str] = Field(default_factory=dict)
+    identity_binding: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Exact persona/actor/tenant/world/credential coordinates. "
+            "persona_name remains display-only."
+        ),
+    )
 
 
 class BindPersonaResponse(BaseModel):
@@ -130,6 +137,12 @@ async def create_session(
             original_finding=finding_value,
         )
         session.candidate_workbench_store = store
+        from core.identity import AssessmentIdentityContext, IdentityAuthorityBinding
+
+        if isinstance(getattr(observation, "identity", None), AssessmentIdentityContext):
+            session.identity_authority = IdentityAuthorityBinding.from_identity(
+                observation.identity
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -227,6 +240,28 @@ async def bind_persona(
     if sess is None:
         raise HTTPException(status_code=404, detail=f"session {session_id!r} not found")
 
+    from core.identity import CredentialFreshness, PrincipalIdentityBinding
+
+    try:
+        identity_binding = (
+            PrincipalIdentityBinding.from_mapping(req.identity_binding)
+            if req.identity_binding is not None
+            else None
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if identity_binding is not None:
+        if sess.identity_authority is None:
+            raise HTTPException(
+                status_code=409,
+                detail="exact identity binding requires a canonical finding authority",
+            )
+        if identity_binding.credential_freshness is not CredentialFreshness.FRESH:
+            raise HTTPException(
+                status_code=409,
+                detail="stale or unknown credentials cannot be bound as a live principal",
+            )
+
     resolved_headers: Dict[str, str] = {}
     resolved_cookies: Dict[str, str] = {}
 
@@ -240,6 +275,13 @@ async def bind_persona(
             resolved_headers.update(h)
             resolved_cookies.update(c)
         except Exception as e:
+            if identity_binding is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "persona authentication failed; exact identity was not bound"
+                    ),
+                ) from e
             logger.warning(
                 f"[verify] persona_auth failed for session {session_id[:8]}: "
                 f"{type(e).__name__}: {e}; falling back to explicit creds"
@@ -253,6 +295,21 @@ async def bind_persona(
     sess.persona_name = req.persona_name
     sess.persona_headers = resolved_headers
     sess.persona_cookies = resolved_cookies
+    sess.identity_binding = identity_binding
+    if identity_binding is not None:
+        from core.identity.credential_material import credential_material_commitment
+
+        effective_headers = dict(resolved_headers)
+        if resolved_cookies:
+            effective_headers["cookie"] = "; ".join(
+                f"{name}={value}" for name, value in resolved_cookies.items()
+            )
+        sess.persona_credential_commitment = credential_material_commitment(
+            headers=effective_headers,
+            cookies={},
+        )
+    else:
+        sess.persona_credential_commitment = None
     sess.last_activity_at = max(sess.last_activity_at, sess.created_at)
 
     return BindPersonaResponse(
@@ -318,6 +375,7 @@ class ExchangeResponse(BaseModel):
     in_scope: bool  # always True for a captured exchange — out-of-scope
                     # paths raise 403 before reaching here. Surfaced for
                     # UI symmetry.
+    canonical_observation_id: Optional[str] = None
 
 
 class ScopeViolationError(HTTPException):
@@ -404,6 +462,55 @@ async def send_exchange(
     for k, v in req.headers.items():
         merged_headers[str(k).lower()] = str(v)
 
+    # Exact attribution is preflighted before any I/O. Per-request credential
+    # substitution cannot silently retain the session's principal label.
+    if sess.identity_binding is not None:
+        from core.base.scope import canonical_origin
+        from core.identity import CredentialFreshness
+        from core.identity.credential_material import credential_material_commitment
+
+        if sess.identity_authority is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Verify identity authority is unavailable",
+            )
+        request_origin = canonical_origin(req.url)
+        if (
+            request_origin is None
+            or request_origin.as_url() != sess.identity_authority.target_origin
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="exact identity binding does not authorize cross-origin attribution",
+            )
+        if req.follow_redirects:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "exact identity attribution requires explicit redirect-hop capture"
+                ),
+            )
+        if (
+            sess.identity_binding.credential_freshness
+            is not CredentialFreshness.FRESH
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="stale or unknown credentials cannot act as a live principal",
+            )
+        effective_commitment = credential_material_commitment(
+            headers=merged_headers,
+            cookies={},
+        )
+        if effective_commitment != sess.persona_credential_commitment:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "request credential material differs from the exact bound principal; "
+                    "bind the replacement identity before sending"
+                ),
+            )
+
     # ── Step 4 — network I/O.
     started = _t.time()
     try:
@@ -479,6 +586,20 @@ async def send_exchange(
                                 # exchange is hermetic; persona is the
                                 # source of identity)
     )
+    canonical_observation_id = None
+    if sess.identity_binding is not None:
+        from core.epistemic.ledger import EvidenceLedger
+        from core.verify.canonical_evidence import VerifyCanonicalEvidenceAdapter
+
+        ledger = sess.canonical_evidence_ledger or EvidenceLedger()
+        sess.canonical_evidence_ledger = ledger
+        observation = VerifyCanonicalEvidenceAdapter(ledger).record_exchange(
+            sess,
+            step,
+            authority=sess.identity_authority,
+            binding=sess.identity_binding,
+        )
+        canonical_observation_id = observation.id
     sess.append_exchange(step)
 
     return ExchangeResponse(
@@ -486,6 +607,7 @@ async def send_exchange(
         transcript_length_after=len(sess.transcript),
         duration_ms=elapsed_ms,
         in_scope=True,
+        canonical_observation_id=canonical_observation_id,
     )
 
 

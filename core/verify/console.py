@@ -49,6 +49,12 @@ from core.ghost.flow import FlowStep
 
 if TYPE_CHECKING:
     from core.verify.workbench import CandidateWorkbench, CandidateWorkbenchStore
+    from core.epistemic.ledger import EvidenceLedger
+    from core.identity import (
+        AssessmentIdentityContext,
+        IdentityAuthorityBinding,
+        PrincipalIdentityBinding,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +95,23 @@ class VerificationSession:
     persona_name: Optional[str] = None
     persona_headers: Dict[str, str] = field(default_factory=dict)
     persona_cookies: Dict[str, str] = field(default_factory=dict)
+    # Exact attribution is separate from the operator-facing label and secret
+    # material. It is populated only from a cited canonical observation plus a
+    # typed principal binding.
+    identity_authority: Optional["IdentityAuthorityBinding"] = field(
+        default=None,
+        repr=False,
+    )
+    identity_binding: Optional["PrincipalIdentityBinding"] = field(
+        default=None,
+        repr=False,
+    )
+    persona_credential_commitment: Optional[str] = field(default=None, repr=False)
+    canonical_evidence_ledger: Optional["EvidenceLedger"] = field(
+        default=None,
+        repr=False,
+    )
+    canonical_observation_ids: List[str] = field(default_factory=list)
     # Original confirmation context from the finding's metadata —
     # vuln_class, payload, confidence, evidence excerpt. Read-only.
     original_finding: Optional[Dict[str, Any]] = None
@@ -170,6 +193,8 @@ class VerificationSession:
             "allowed_origins": sorted(self.allowed_origins),
             "persona_name": self.persona_name,
             "has_persona_auth": bool(self.persona_headers or self.persona_cookies),
+            "has_exact_identity_binding": self.identity_binding is not None,
+            "canonical_observation_ids": list(self.canonical_observation_ids),
             "original_finding_summary": (
                 _summarize_finding(self.original_finding)
                 if self.original_finding else None

@@ -282,13 +282,19 @@ class ScanRequest(BaseModel):
             raise ValueError("personas must be a list")
         if len(v) > 8:
             raise ValueError("personas list too large (max 8)")
-        # Shallow validation: ensure each persona is a dict with a name field.
+        from core.identity import PrincipalIdentityBinding
+
         for idx, item in enumerate(v):
             if not isinstance(item, dict):
                 raise ValueError(f"personas[{idx}] must be an object")
             name = item.get("name")
             if name is not None and (not isinstance(name, str) or not name.strip()):
                 raise ValueError(f"personas[{idx}].name must be a non-empty string")
+            if item.get("identity_binding") is not None:
+                try:
+                    PrincipalIdentityBinding.from_mapping(item["identity_binding"])
+                except ValueError as exc:
+                    raise ValueError(f"personas[{idx}]: {exc}") from exc
         return v
     @field_validator("oob")
     @classmethod
