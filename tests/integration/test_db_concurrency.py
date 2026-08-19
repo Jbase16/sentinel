@@ -93,5 +93,63 @@ class TestDBConcurrency(unittest.IsolatedAsyncioTestCase):
         val = await db.fetch_all("SELECT value FROM system_state WHERE key = ?", ("audit_test",))
         self.assertEqual(len(val), 0, "Partial write detected! Rollback failed.")
 
+    async def test_writes_require_an_explicit_non_global_session(self):
+        db = Database.instance()
+        await db.init()
+
+        global_rows = await db.fetch_all(
+            "SELECT id FROM sessions WHERE id = ?",
+            ("global_scan",),
+        )
+        self.assertEqual(global_rows, [])
+
+        with self.assertRaisesRegex(ValueError, "explicit session_id"):
+            db.save_finding({}, None)
+        with self.assertRaisesRegex(ValueError, "explicit session_id"):
+            db.save_issue({}, "")
+        with self.assertRaisesRegex(ValueError, "forbid.*global_scan"):
+            db.save_evidence({}, "global_scan")
+
+        with self.assertRaisesRegex(ValueError, "explicit session_id"):
+            await db.save_finding_txn({}, None, conn=db._db_connection)
+        with self.assertRaisesRegex(ValueError, "explicit session_id"):
+            await db.save_issue_txn({}, "", conn=db._db_connection)
+        with self.assertRaisesRegex(ValueError, "forbid.*global_scan"):
+            await db.save_evidence_txn(
+                {},
+                "global_scan",
+                conn=db._db_connection,
+            )
+
+        session_id = "explicit-session"
+        await db._save_session_impl({
+            "id": session_id,
+            "target": "https://owned.example.test",
+            "status": "active",
+            "start_time": "2026-08-18T00:00:00Z",
+            "logs": [],
+        })
+        await db.save_finding_txn(
+            {"tool": "test", "target": "owned.example.test"},
+            session_id,
+            conn=db._db_connection,
+        )
+        await db.save_issue_txn(
+            {"title": "test", "target": "owned.example.test"},
+            session_id,
+            conn=db._db_connection,
+        )
+        await db.save_evidence_txn(
+            {"tool": "test", "raw_output": "local fixture"},
+            session_id,
+            conn=db._db_connection,
+        )
+
+        for table in ("findings", "issues", "evidence"):
+            rows = await db.fetch_all(
+                f"SELECT DISTINCT session_id FROM {table}",
+            )
+            self.assertEqual(rows, [(session_id,)])
+
 if __name__ == '__main__':
     unittest.main()

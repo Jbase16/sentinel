@@ -38,6 +38,15 @@ from core.base.config import get_config
 logger = logging.getLogger(__name__)
 
 
+def _require_explicit_session_id(session_id: Any) -> str:
+    if not isinstance(session_id, str) or not session_id.strip():
+        raise ValueError("database writes require an explicit session_id")
+    normalized = session_id.strip()
+    if normalized == "global_scan":
+        raise ValueError("database writes forbid the global_scan session")
+    return normalized
+
+
 class Database:
     _instance = None
 
@@ -318,28 +327,6 @@ class Database:
         except Exception as e:
             logger.warning(f"[Database] Evidence migration check failed: {e}")
 
-        # Ensure "global_scan" session exists for sessionless scanner operations
-        await self._ensure_global_scan_session()
-
-    async def _ensure_global_scan_session(self) -> None:
-        """Create the global_scan session if it doesn't exist."""
-        try:
-            cursor = await self._db_connection.execute(
-                "SELECT id FROM sessions WHERE id = ?", ("global_scan",)
-            )
-            row = await cursor.fetchone()
-            if row is None:
-                await self._db_connection.execute(
-                    """
-                    INSERT INTO sessions (id, target, status, start_time)
-                    VALUES ('global_scan', 'system', 'active', datetime('now'))
-                    """
-                )
-                await self._db_connection.commit()
-                logger.info("[Database] Created global_scan session for sessionless operations")
-        except Exception as e:
-            logger.warning(f"[Database] Failed to ensure global_scan session: {e}")
-
     # ----------------------------
     # Low-level internal execution
     # ----------------------------
@@ -418,9 +405,11 @@ class Database:
     # Sessions
     # ----------------------------
     def save_session(self, session_data: Dict[str, Any]) -> None:
+        _require_explicit_session_id(session_data.get("id"))
         self.blackbox.fire_and_forget(self._save_session_impl, session_data)
 
     async def _save_session_impl(self, session_data: Dict[str, Any]):
+        session_id = _require_explicit_session_id(session_data.get("id"))
         # end_time is intentionally part of the column set so that scan completion
         # handlers in core/server/routers/scans.py can persist the terminal state.
         # When the scan is still running, end_time is None / NULL. See Bug #4 in
@@ -437,7 +426,7 @@ class Database:
                 logs=excluded.logs
         """,
             (
-                session_data["id"],
+                session_id,
                 session_data["target"],
                 session_data.get("status"),
                 session_data.get("start_time"),
@@ -449,14 +438,24 @@ class Database:
     # ----------------------------
     # Findings (legacy non-txn)
     # ----------------------------
-    def save_finding(self, finding: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0) -> None:
+    def save_finding(
+        self,
+        finding: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+    ) -> None:
+        session_id = _require_explicit_session_id(session_id)
         self.blackbox.fire_and_forget(self._save_finding_impl, finding, session_id, scan_sequence)
 
-    async def _save_finding_impl(self, finding: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0):
+    async def _save_finding_impl(
+        self,
+        finding: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+    ):
         import hashlib
 
-        # Provide default session_id to satisfy NOT NULL constraint
-        effective_session_id = session_id if session_id is not None else "global_scan"
+        session_id = _require_explicit_session_id(session_id)
 
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
@@ -469,7 +468,7 @@ class Database:
         """,
             (
                 fid,
-                effective_session_id,
+                session_id,
                 int(scan_sequence),
                 finding.get("tool", "unknown"),
                 finding.get("tool_version"),
@@ -483,14 +482,24 @@ class Database:
     # ----------------------------
     # Issues (legacy non-txn)
     # ----------------------------
-    def save_issue(self, issue: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0) -> None:
+    def save_issue(
+        self,
+        issue: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+    ) -> None:
+        session_id = _require_explicit_session_id(session_id)
         self.blackbox.fire_and_forget(self._save_issue_impl, issue, session_id, scan_sequence)
 
-    async def _save_issue_impl(self, issue: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0):
+    async def _save_issue_impl(
+        self,
+        issue: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+    ):
         import hashlib
 
-        # Provide default session_id to satisfy NOT NULL constraint
-        effective_session_id = session_id if session_id is not None else "global_scan"
+        session_id = _require_explicit_session_id(session_id)
 
         blob = json.dumps(issue, sort_keys=True)
         iid = hashlib.sha256(blob.encode()).hexdigest()
@@ -503,7 +512,7 @@ class Database:
         """,
             (
                 iid,
-                effective_session_id,
+                session_id,
                 int(scan_sequence),
                 issue.get("title", "unknown"),
                 issue.get("severity", "INFO"),
@@ -554,14 +563,22 @@ class Database:
     # ----------------------------
     # Evidence (legacy non-txn)
     # ----------------------------
-    def save_evidence(self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0) -> None:
+    def save_evidence(
+        self,
+        evidence_data: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+    ) -> None:
+        session_id = _require_explicit_session_id(session_id)
         self.blackbox.fire_and_forget(self._save_evidence_impl, evidence_data, session_id, scan_sequence)
 
     async def _save_evidence_impl(
-        self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0
+        self,
+        evidence_data: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
     ):
-        # Provide default session_id to satisfy NOT NULL constraint
-        effective_session_id = session_id if session_id is not None else "global_scan"
+        session_id = _require_explicit_session_id(session_id)
 
         await self._execute_internal(
             """
@@ -570,7 +587,7 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         """,
             (
-                effective_session_id,
+                session_id,
                 int(scan_sequence),
                 evidence_data.get("tool", "unknown"),
                 evidence_data.get("tool_version"),
@@ -620,12 +637,15 @@ class Database:
     # Transactional save methods
     # ----------------------------
     async def save_finding_txn(
-        self, finding: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None
+        self,
+        finding: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+        conn=None,
     ) -> None:
         import hashlib
 
-        # Provide default session_id to satisfy NOT NULL constraint
-        effective_session_id = session_id if session_id is not None else "global_scan"
+        session_id = _require_explicit_session_id(session_id)
 
         blob = json.dumps(finding, sort_keys=True)
         fid = hashlib.sha256(blob.encode()).hexdigest()
@@ -638,7 +658,7 @@ class Database:
         """,
             (
                 fid,
-                effective_session_id,
+                session_id,
                 int(scan_sequence),
                 finding.get("tool", "unknown"),
                 finding.get("tool_version"),
@@ -650,12 +670,15 @@ class Database:
         )
 
     async def save_issue_txn(
-        self, issue: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None
+        self,
+        issue: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+        conn=None,
     ) -> None:
         import hashlib
 
-        # Provide default session_id to satisfy NOT NULL constraint
-        effective_session_id = session_id if session_id is not None else "global_scan"
+        session_id = _require_explicit_session_id(session_id)
 
         blob = json.dumps(issue, sort_keys=True)
         iid = hashlib.sha256(blob.encode()).hexdigest()
@@ -668,7 +691,7 @@ class Database:
         """,
             (
                 iid,
-                effective_session_id,
+                session_id,
                 int(scan_sequence),
                 issue.get("title", "unknown"),
                 issue.get("severity", "INFO"),
@@ -678,10 +701,13 @@ class Database:
         )
 
     async def save_evidence_txn(
-        self, evidence_data: Dict[str, Any], session_id: Optional[str] = None, scan_sequence: int = 0, conn=None
+        self,
+        evidence_data: Dict[str, Any],
+        session_id: str,
+        scan_sequence: int = 0,
+        conn=None,
     ) -> None:
-        # Provide default session_id to satisfy NOT NULL constraint
-        effective_session_id = session_id if session_id is not None else "global_scan"
+        session_id = _require_explicit_session_id(session_id)
 
         await conn.execute(
             """
@@ -690,7 +716,7 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
         """,
             (
-                effective_session_id,
+                session_id,
                 int(scan_sequence),
                 evidence_data.get("tool", "unknown"),
                 evidence_data.get("tool_version"),
