@@ -10,6 +10,7 @@ from core.identity import (
     CredentialFreshness,
     IdentityAuthorityBinding,
     PrincipalIdentityBinding,
+    PrincipalIdentityResolver,
 )
 from core.identity.http_observation import (
     http_representation_ref,
@@ -87,7 +88,12 @@ class WraithCanonicalEvidenceAdapter:
             credential_cookies=cookies,
             **binding.identity_kwargs(),
         )
-        return record_http_observation(
+        resolver = getattr(session, "identity_resolver", None)
+        if resolver is None:
+            resolver = PrincipalIdentityResolver(identity.session_id)
+            setattr(session, "identity_resolver", resolver)
+        resolution = resolver.attribute(identity)
+        observation = record_http_observation(
             self.ledger,
             source="wraith_verify",
             identity=identity,
@@ -100,8 +106,15 @@ class WraithCanonicalEvidenceAdapter:
                 "confidence": float(confidence),
                 "evidence": evidence,
                 "payload": payload,
+                "principal_ref": resolution.principal_ref,
             },
         )
+        principal_refs = getattr(session, "canonical_principal_refs", None)
+        if principal_refs is None:
+            principal_refs = {}
+            setattr(session, "canonical_principal_refs", principal_refs)
+        principal_refs[observation.id] = resolution.principal_ref
+        return observation
 
 
 __all__ = ["WraithCanonicalEvidenceAdapter", "authority_from_wraith_session"]

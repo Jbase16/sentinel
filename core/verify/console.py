@@ -54,6 +54,7 @@ if TYPE_CHECKING:
         AssessmentIdentityContext,
         IdentityAuthorityBinding,
         PrincipalIdentityBinding,
+        PrincipalIdentityResolver,
     )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,11 @@ class VerificationSession:
         repr=False,
     )
     canonical_observation_ids: List[str] = field(default_factory=list)
+    identity_resolver: Optional["PrincipalIdentityResolver"] = field(
+        default=None,
+        repr=False,
+    )
+    canonical_principal_refs: Dict[str, str] = field(default_factory=dict)
     # Original confirmation context from the finding's metadata —
     # vuln_class, payload, confidence, evidence excerpt. Read-only.
     original_finding: Optional[Dict[str, Any]] = None
@@ -195,6 +201,7 @@ class VerificationSession:
             "has_persona_auth": bool(self.persona_headers or self.persona_cookies),
             "has_exact_identity_binding": self.identity_binding is not None,
             "canonical_observation_ids": list(self.canonical_observation_ids),
+            "canonical_principal_refs": dict(self.canonical_principal_refs),
             "original_finding_summary": (
                 _summarize_finding(self.original_finding)
                 if self.original_finding else None

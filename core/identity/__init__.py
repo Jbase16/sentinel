@@ -6,6 +6,11 @@ from .principal_binding import (
     IdentityAuthorityBinding,
     PrincipalIdentityBinding,
 )
+from .resolver import (
+    IdentityResolutionRefused,
+    PrincipalIdentityResolver,
+    PrincipalResolution,
+)
 from .scanner_adapter import (
     ScannerEvidenceContext,
     scan_admission_binding,
@@ -19,6 +24,9 @@ __all__ = [
     "IdentityBindingMismatch",
     "IdentityAuthorityBinding",
     "PrincipalIdentityBinding",
+    "IdentityResolutionRefused",
+    "PrincipalIdentityResolver",
+    "PrincipalResolution",
     "ScannerEvidenceContext",
     "scan_admission_binding",
     "scanner_evidence_context",

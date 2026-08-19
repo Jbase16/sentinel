@@ -419,6 +419,10 @@ async def run_verify_phase(
                             finding["metadata"][
                                 "identity_digest"
                             ] = observation.identity.digest
+                            finding["metadata"]["principal_ref"] = getattr(
+                                session,
+                                "canonical_principal_refs",
+                            )[observation.id]
                         except (TypeError, ValueError, RuntimeError) as exc:
                             logger.warning(
                                 f"[verify_phase] refusing non-canonical result "

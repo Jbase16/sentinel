@@ -9,6 +9,7 @@ from core.identity import (
     CredentialFreshness,
     IdentityAuthorityBinding,
     PrincipalIdentityBinding,
+    PrincipalIdentityResolver,
 )
 from core.identity.credential_material import credential_headers
 from core.identity.http_observation import (
@@ -53,6 +54,11 @@ class VerifyCanonicalEvidenceAdapter:
         # Consume the lease at the exact identity being recorded. This catches
         # accidental actor/tenant/session substitution before ledger admission.
         lease.consume(identity)
+        resolver = session.identity_resolver
+        if resolver is None:
+            resolver = PrincipalIdentityResolver(identity.session_id)
+            session.identity_resolver = resolver
+        resolution = resolver.attribute(identity)
         observation = record_http_observation(
             self.ledger,
             source="verify_console",
@@ -66,9 +72,13 @@ class VerifyCanonicalEvidenceAdapter:
                 "response_body_truncated": step.response_body_truncated,
                 "response_content_type": step.response_content_type,
                 "elapsed_ms": step.response_elapsed_ms,
+                "principal_ref": resolution.principal_ref,
             },
         )
         session.canonical_observation_ids.append(observation.id)
+        session.canonical_principal_refs[
+            observation.id
+        ] = resolution.principal_ref
         return observation
 
 
