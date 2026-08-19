@@ -12,7 +12,7 @@ This module bridges the gap. It:
   1. CRAWLS the target with the existing `core/web/HttpCrawler` (the
      orphaned infrastructure under core/web/ that was built but never
      wired). Same battle-tested code, accessed via thin adapter classes
-     so we don't drag in the full WebOrchestrator pipeline.
+     so we don't drag in the superseded mutation/evidence pipeline.
   2. CLASSIFIES each discovered URL into zero-or-more
      `(url, label, vuln_class)` probe candidates. Classification is
      content-aware: a `/search?url=...&q=...` URL spawns BOTH an SQLi
@@ -169,7 +169,7 @@ def classify_urls(
 #
 # The core/web/HttpCrawler is the existing battle-tested crawler. It expects
 # an ExecutionPolicy (sync http_get + assert_url_allowed) and an EventBus.
-# We don't need the full WebOrchestrator's mutation/evidence pipeline — we
+# We don't need the superseded mutation/evidence pipeline — we
 # just want URL discovery. So we provide MINIMAL adapters:
 #
 #   _ScopeOnlyPolicy: http_get via a regular httpx client, scope check via
