@@ -276,7 +276,7 @@ def _build_prose_for_step(
     # ("to reproduce the IDOR confirmation (payload: admin↔jim)") —
     # that voice leaks into PT2's submission output. The operator
     # narrates the bug in the impact/summary sections of the
-    # SubmissionRender (PT2); the steps themselves stay action-only.
+    # SubmissionCandidate render; the steps themselves stay action-only.
     # Keeping this stub here so we remember the intentional removal.
     _ = (index, finding_summary)
 

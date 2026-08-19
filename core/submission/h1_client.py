@@ -24,7 +24,8 @@ What this module deliberately does NOT do:
   * Post comments / replies on existing reports. That's PT4.
 
 The submission flow expects the operator to:
-  1. Build a SubmissionRender via core.reporting.submission_render.
+  1. Build and render a receipt-bound SubmissionCandidate via
+     core.reporting.submission_candidate.
   2. Call client.prepare(...) → returns the JSON payload Sentinel
      would send. Operator reads it.
   3. Call client.submit(...) ONLY when the operator is satisfied.

@@ -285,7 +285,7 @@ Sentinel will:
 
 Any confirmed finding goes through:
   1. Verify Console (Phase 5) for manual exchange capture
-  2. PT2 SubmissionRender for the markdown
+  2. Candidate Workbench + SubmissionCandidateRender for the markdown
   3. PT3 H1SubmissionClient for the submission (with `confirm=True`)
 
 The full handoff is one Python script away. The infrastructure is

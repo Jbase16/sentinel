@@ -352,7 +352,7 @@ class TestPromoteTranscript:
         include 'to reproduce the IDOR confirmation (payload: id:1→2)'
         which leaked Sentinel-internal scoring labels into the
         rendered repro. The operator-facing narrative belongs in
-        PT2's SubmissionRender summary/impact sections; the steps
+        the SubmissionCandidate's canonical claim sections; the steps
         themselves stay action-only ('send GET ...', 'response is
         HTTP 200, body shows ...'). The vuln class + payload move
         out of the steps."""
