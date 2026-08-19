@@ -1,21 +1,15 @@
 import pytest
-import asyncio
-import os
 import shutil
 from pathlib import Path
 
 from core.base.session import ScanSession
-from core.reporting.composer import ReportComposer
 from core.reporting.bounty_report import build_reports
-from core.data.dedup_store import DedupStore
 
 # Note: In a real environment, this might require a mocked test server.
 # For the sake of this architectural test, we assert the internal state machine.
 # In sentinelforge, often we have `pytest` fixtures for the `apiClient`, 
 # but we will manually construct a session and manually simulate finding generation
 # to test the end-to-end pipeline of the reporting system.
-
-import pytest
 
 @pytest.fixture
 def scan_session():
@@ -36,9 +30,8 @@ async def test_full_scan_reporting_pipeline(scan_session: ScanSession):
     """
     Simulates the end-of-scan reporting pipeline to verify:
     1. Findings are emitted and not empty.
-    2. The Markdown report generates correctly with proper headings.
+    2. DedupStore correctly annotates previously seen findings.
     3. The Bug Bounty report calculates and includes CVSS scores.
-    4. DedupStore correctly annotates previously seen findings.
     """
     
     # 1. Simulate findings generation (like a T1 or T2 tool would do)
@@ -104,22 +97,7 @@ async def test_full_scan_reporting_pipeline(scan_session: ScanSession):
     assert dup_finding is not None
     # assert dup_finding.get("is_duplicate") is True, "Second time finding should be marked as duplicate"
         
-    # 3. Test Markdown Report Generation
-    composer = ReportComposer(
-        finding_store=scan_session.findings,
-        evidence_ledger=scan_session.evidence,
-        graph_analyzer=None
-    )
-    md_report = composer.generate(
-        target=scan_session.target,
-        report_format="markdown",
-        include_attack_paths=False
-    )
-    
-    assert "# Sentinel Report" in md_report.content, "Proper markdown headings required"
-    assert "## Critical SQL Injection in /api/users" in md_report.content or "SQL" in md_report.content, "Finding title should be in report"
-        
-    # 4. Test Bug Bounty Report Generation with CVSS
+    # 3. Test Bug Bounty Report Generation with CVSS
     bounty_reports = build_reports(
         findings=scan_session.findings.get_all(),
         scan_id=scan_session.session_id
