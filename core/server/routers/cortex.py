@@ -15,9 +15,7 @@ from core.cortex.models import (
 from core.cortex.graph_analyzer import GraphAnalyzer
 from core.cortex.insight_engine import InsightEngine
 
-from core.data.findings_store import get_finding_store
 from core.epistemic.ledger import load_canonical_session_read_model
-from core.reporting.report_composer import ReportComposer
 from core.reporting.poc_generator import PoCGenerator, PoCSafetyError
 from core.cortex.canonical_graph import load_causal_graph_snapshot
 from core.server.routers.auth import verify_token
@@ -120,18 +118,6 @@ async def get_current_graph():
 # Reporting (Phase 12 – minimal, correct)
 # ---------------------------------------------------------------------------
 
-def get_report_composer(
-    finding_store=Depends(get_finding_store),
-    graph_analyzer: GraphAnalyzer = Depends(get_graph_analyzer),
-) -> ReportComposer:
-    from core.data.evidence_store import EvidenceStore
-    return ReportComposer(
-        finding_store=finding_store,
-        evidence_ledger=EvidenceStore.instance(),
-        graph_analyzer=graph_analyzer,
-    )
-
-
 def get_poc_generator() -> PoCGenerator:
     return PoCGenerator()
 
@@ -177,18 +163,6 @@ class PoCResponse(BaseModel):
     commands: List[str]
     notes: List[str]
     created_at: str
-
-
-class _ListStore:
-    """Minimal store adapter wrapping a pre-fetched list of entries.
-
-    Lets us build a session-scoped ReportComposer from DB rows without the
-    composer depending on session plumbing — it just calls ``get_all()``."""
-    def __init__(self, items):
-        self._items = list(items or [])
-
-    def get_all(self):
-        return list(self._items)
 
 
 def _require_session_target(

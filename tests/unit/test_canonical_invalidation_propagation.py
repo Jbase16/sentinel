@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from core.ai.scan_briefing import build_scan_briefing
 from core.base.config import SentinelConfig, StorageConfig
 from core.behavior.compiler import operation_atoms_from_records
@@ -22,27 +24,19 @@ from core.epistemic.ledger import (
     EvidenceLedger,
     LifecycleState,
 )
+from core.ghost.flow import FlowStep
 from core.identity import AssessmentIdentityContext, CredentialFreshness
-from core.reporting.report_composer import ReportComposer
+from core.reporting.submission_candidate import (
+    build_submission_candidate,
+    render_submission_candidate,
+)
+from core.verify.workbench import CandidateWorkbenchStore
 
 
 ORIGIN = "https://owned.example.test"
 SESSION_ID = "session-wo09"
 PROVENANCE_ROOT = "d" * 64
 TITLE = "Cross-persona owned note disclosure"
-
-
-class _ListStore:
-    def __init__(self, values: list[dict]) -> None:
-        self._values = values
-
-    def get_all(self) -> list[dict]:
-        return list(self._values)
-
-
-class _NoPathAnalyzer:
-    def critical_paths(self, max_paths: int = 5) -> list:
-        return []
 
 
 def _identity() -> AssessmentIdentityContext:
@@ -108,14 +102,6 @@ def _receipt_response() -> dict:
             "peer": empty_resolution,
         },
     }
-
-
-def _render_report(findings: list[dict], evidence: list[dict]) -> str:
-    return ReportComposer(
-        finding_store=_ListStore(findings),
-        evidence_ledger=_ListStore(evidence),
-        graph_analyzer=_NoPathAnalyzer(),
-    ).generate(target=ORIGIN, report_format="markdown").content
 
 
 def _triage_count(findings: list[dict]) -> int:
@@ -217,7 +203,32 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
             session_id=SESSION_ID,
             graph_dto=before_graph.graph_dto,
         )
-        before_report = _render_report(before_findings, before.evidence_views())
+        workbench_store = CandidateWorkbenchStore(
+            tmp_path / "workbenches",
+            receipt_store=receipt_store,
+        )
+        workbench = workbench_store.open(before, finding_id=finding.id)
+        step = FlowStep("GET", f"{ORIGIN}/notes/peer-owned")
+        step.set_response(
+            status=200,
+            headers={"Content-Type": "application/json"},
+            body='{"marker":"peer-owned"}',
+            content_type="application/json",
+        )
+        workbench = workbench_store.select_exchange(
+            workbench,
+            exchange_index=0,
+            step=step,
+            observation_id=observation.id,
+            receipt_id=reservation.receipt.receipt_id,
+            read_model=before,
+        )
+        before_candidate = build_submission_candidate(
+            before,
+            workbench_id=workbench.workbench_id,
+            workbench_store=workbench_store,
+        )
+        before_report = render_submission_candidate(before_candidate).markdown
         before_triage_count = _triage_count(before_findings)
 
         ledger.invalidate_observation(
@@ -237,7 +248,15 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
             session_id=SESSION_ID,
             graph_dto=after_graph.graph_dto,
         )
-        after_report = _render_report(after_findings, after.evidence_views())
+        with pytest.raises(
+            ValueError,
+            match="requires a finding in the exact session",
+        ):
+            build_submission_candidate(
+                after,
+                workbench_id=workbench.workbench_id,
+                workbench_store=workbench_store,
+            )
         after_triage_count = _triage_count(after_findings)
 
     assert ledger.get_state(observation.id).state is LifecycleState.INVALIDATED
@@ -254,6 +273,5 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
     assert "Findings (total): 1" in before_chat
     assert "0 finding(s) / 0 issue(s)" in after_chat
     assert TITLE in before_report
-    assert TITLE not in after_report
     assert before_triage_count == 1
     assert after_triage_count == 0
