@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -420,6 +421,172 @@ async def _run_anonymous_passive_one_click_phase(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def _completed_behavioral_provenance_root(outcome: Dict[str, Any]) -> str:
+    """Select the receipt's canonical proof root without trusting response data."""
+
+    def valid_root(value: Any) -> bool:
+        return (
+            isinstance(value, str)
+            and len(value) == 64
+            and all(character in "0123456789abcdef" for character in value)
+        )
+
+    execution = outcome.get("execution")
+    for candidate in (
+        outcome.get("provenance_root"),
+        execution.get("provenance_root") if isinstance(execution, dict) else None,
+    ):
+        if valid_root(candidate):
+            return candidate
+
+    roots = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "provenance_root" and valid_root(item):
+                    roots.add(item)
+                else:
+                    collect(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+
+    collect(outcome)
+    if len(roots) != 1:
+        raise ValueError("completed behavioral receipt has no unambiguous proof root")
+    return roots.pop()
+
+
+async def _route_completed_behavioral_finding(
+    req: ScanRequest,
+    *,
+    session: Any,
+    result: Dict[str, Any],
+    finding: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Relay one terminal proof through the canonical evidence funnel."""
+
+    receipt_summary = result.get("orchestration_receipt")
+    if not isinstance(receipt_summary, dict):
+        return None
+
+    from core.base.task_router import CompletedBehavioralProof, TaskRouter
+    from core.behavior.receipts import (
+        COMPLETED,
+        BehavioralReceiptStore,
+        ReceiptStoreError,
+    )
+
+    receipt_id = receipt_summary.get("receipt_id")
+    if receipt_summary.get("state") != COMPLETED or not isinstance(receipt_id, str):
+        raise ValueError("behavioral finding requires a completed orchestration receipt")
+    fingerprint = receipt_id.removeprefix("behavioral-")
+    try:
+        receipt = BehavioralReceiptStore().load(fingerprint)
+    except (OSError, ReceiptStoreError) as exc:
+        raise ValueError("completed behavioral receipt could not be loaded") from exc
+    if (
+        receipt is None
+        or receipt.receipt_id != receipt_id
+        or receipt.state != COMPLETED
+        or not isinstance(receipt.outcome, dict)
+    ):
+        raise ValueError("behavioral finding receipt is not durably completed")
+    if (
+        receipt.outcome.get("finding_confirmed") is not True
+        and receipt.outcome.get("oracle_verdict") != "confirmed"
+    ):
+        raise ValueError("behavioral finding receipt is not oracle-confirmed")
+    proof = CompletedBehavioralProof(
+        receipt_id=receipt.receipt_id,
+        provenance_root=_completed_behavioral_provenance_root(receipt.outcome),
+    )
+
+    profile = req.behavioral_one_click
+    session_id = getattr(session, "id", None)
+    if (
+        profile is None
+        or profile.is_anonymous_passive
+        or profile.source_persona_id is None
+        or not isinstance(session_id, str)
+        or not session_id
+    ):
+        raise ValueError("behavioral proof requires an exact paired scan session")
+
+    from core.behavior.normalize import stable_hash
+    from core.foundry.authorization import get_envelope
+    from core.foundry.identity_adapter import identity_from_vault_persona
+    from core.foundry.vault import PersonaVault
+    from core.identity import CredentialFreshness, scanner_evidence_context
+
+    envelope = get_envelope(profile.envelope_id)
+    persona = PersonaVault().get_persona(profile.source_persona_id)
+    if envelope is None or persona is None:
+        raise ValueError("behavioral proof identity source is unavailable")
+    knowledge = getattr(session, "knowledge", {})
+    knowledge = knowledge if isinstance(knowledge, dict) else {}
+    reset_epoch = knowledge.get("target_reset_epoch", 0)
+    if isinstance(reset_epoch, bool) or not isinstance(reset_epoch, int):
+        reset_epoch = 0
+    identity = identity_from_vault_persona(
+        envelope,
+        persona,
+        session_id=session_id,
+        target_origin=req.target,
+        target_reset_epoch=reset_epoch,
+        world_id=persona.persona_id,
+        target_actor_id="actor:unresolved",
+        tenant_id="tenant:unresolved",
+        credential_epoch=0,
+        credential_freshness=CredentialFreshness.UNKNOWN,
+        resource_id=stable_hash("resource", req.target),
+        representation_id=stable_hash(
+            "representation",
+            {"kind": "completed_behavioral_receipt", "receipt_id": receipt.receipt_id},
+        ),
+    )
+    operation = scanner_evidence_context(
+        session_id=session_id,
+        authorization_envelope_id=identity.authorization_envelope_id,
+        authorization_envelope_ref=identity.authorization_envelope_ref,
+        target=req.target,
+        tool_name="behavioral_proof",
+        exec_id=receipt.receipt_id,
+        exit_code=0,
+        world_id=persona.persona_id,
+    )
+    routed = await TaskRouter.instance().handle_tool_output(
+        tool_name="behavioral_proof",
+        stdout=json.dumps(
+            {
+                "schema_version": 1,
+                "receipt_id": receipt.receipt_id,
+                "state": receipt.state,
+                "outcome": receipt.outcome,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        stderr="",
+        rc=0,
+        metadata={
+            "target": req.target,
+            "session_id": session_id,
+            "args": [receipt.receipt_id],
+        },
+        identity=identity,
+        operation_family=operation.operation_family,
+        operation_instance=operation.operation_instance,
+        scanner_findings=(finding,),
+        completed_behavioral_proof=proof,
+    )
+    canonical_findings = routed.get("findings")
+    if not isinstance(canonical_findings, list) or len(canonical_findings) != 1:
+        raise ValueError("completed behavioral proof did not yield exactly one finding")
+    return canonical_findings[0]
+
+
 async def _run_behavioral_one_click_phase(
     req: ScanRequest,
     *,
@@ -554,6 +721,15 @@ async def _run_behavioral_one_click_phase(
             ) from exc
 
     if isinstance(finding, dict):
+        canonical_finding = await _route_completed_behavioral_finding(
+            req,
+            session=session,
+            result=result,
+            finding=finding,
+        )
+        if canonical_finding is not None:
+            finding = canonical_finding
+            result["finding"] = canonical_finding
         await session.findings.add_finding_async(finding, persist=True)
         session.log(
             "[behavior] Added the confirmed behavioral finding to this scan "

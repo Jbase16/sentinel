@@ -18,10 +18,19 @@
 
 import json
 import logging
+import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
 from core.behavior.compiler import OperationFamily, OperationInstance
-from core.epistemic.ledger import Citation, EvidenceLedger, Finding, FindingProposal
+from core.epistemic.ledger import (
+    ActiveProofCitation,
+    Citation,
+    ConfirmationLevel,
+    EvidenceLedger,
+    Finding,
+    FindingProposal,
+)
 from core.identity import AssessmentIdentityContext
 from core.utils.observer import Observable, Signal
 
@@ -31,6 +40,20 @@ from core.utils.observer import Observable, Signal
 from core.ai.ai_engine import AIEngine
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CompletedBehavioralProof:
+    """Terminal receipt material relayed by a behavioral evidence producer."""
+
+    receipt_id: str
+    provenance_root: str
+
+    def __post_init__(self) -> None:
+        if re.fullmatch(r"behavioral-[0-9a-f]{64}", self.receipt_id) is None:
+            raise ValueError("completed behavioral proof receipt is invalid")
+        if re.fullmatch(r"[0-9a-f]{64}", self.provenance_root) is None:
+            raise ValueError("completed behavioral proof provenance is invalid")
 
 
 class TaskRouter(Observable):
@@ -161,10 +184,19 @@ class TaskRouter(Observable):
         operation_family: OperationFamily,
         operation_instance: OperationInstance,
         scanner_findings: Optional[Sequence[Dict[str, Any]]] = None,
+        completed_behavioral_proof: Optional[CompletedBehavioralProof] = None,
     ) -> Dict[str, Any]:
         """Route one identity-bound tool output through the canonical ledger."""
 
         metadata = dict(metadata or {})
+        raw_scanner_findings = tuple(scanner_findings or ())
+        if completed_behavioral_proof is not None:
+            if rc != 0:
+                raise ValueError("completed behavioral proof requires successful output")
+            if len(raw_scanner_findings) != 1:
+                raise ValueError(
+                    "completed behavioral proof requires exactly one finding payload"
+                )
         supplied_session = metadata.get("session_id")
         if supplied_session not in {None, identity.session_id}:
             raise ValueError("tool output metadata session does not match identity")
@@ -192,13 +224,45 @@ class TaskRouter(Observable):
 
         assessed_proposals: List[FindingProposal] = []
         canonical_findings: List[Finding] = []
-        for raw_finding in scanner_findings or ():
-            proposal = self._scanner_proposal(raw_finding, observation.id, tool_name)
+        behavioral_proposal: Optional[FindingProposal] = None
+        for raw_finding in raw_scanner_findings:
+            proposal = self._scanner_proposal(
+                raw_finding,
+                observation.id,
+                tool_name,
+                source=(
+                    "behavioral_receipt"
+                    if completed_behavioral_proof is not None
+                    else "scanner"
+                ),
+            )
             assessed = self.ledger.assess_proposal(proposal)
             assessed_proposals.append(assessed)
+            if completed_behavioral_proof is not None:
+                behavioral_proposal = assessed
             # Scanner classification is passive evidence.  It remains an assessed
             # proposal until a completed R0 receipt and conduct provenance bind an
             # active proof; TaskRouter must not manufacture that authority.
+
+        if completed_behavioral_proof is not None:
+            if behavioral_proposal is None:
+                raise ValueError("completed behavioral proof proposal is unavailable")
+            citation = ActiveProofCitation(
+                observation_id=observation.id,
+                receipt_id=completed_behavioral_proof.receipt_id,
+                provenance_root=completed_behavioral_proof.provenance_root,
+            )
+            canonical_findings.append(
+                self.ledger.promote_canonical_finding(
+                    title=behavioral_proposal.title,
+                    severity=behavioral_proposal.severity,
+                    citations=list(behavioral_proposal.citations),
+                    description=behavioral_proposal.description,
+                    confirmation_level=ConfirmationLevel.CONFIRMED.value,
+                    metadata=behavioral_proposal.metadata,
+                    active_proof=[citation],
+                )
+            )
 
         if rc != 0:
             logger.info(
@@ -320,7 +384,11 @@ class TaskRouter(Observable):
 
     @staticmethod
     def _scanner_proposal(
-        raw_finding: Dict[str, Any], observation_id: str, tool_name: str
+        raw_finding: Dict[str, Any],
+        observation_id: str,
+        tool_name: str,
+        *,
+        source: str = "scanner",
     ) -> FindingProposal:
         finding = json.loads(json.dumps(raw_finding, sort_keys=True, default=str))
         title = str(finding.get("title") or finding.get("type") or "Scanner finding")
@@ -337,7 +405,7 @@ class TaskRouter(Observable):
             severity=severity,
             description=description,
             citations=[Citation(observation_id=observation_id)],
-            source="scanner",
+            source=source,
             metadata={
                 "tool": tool_name,
                 "type": finding.get("type", title),
