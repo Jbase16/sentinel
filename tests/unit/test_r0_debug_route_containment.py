@@ -154,12 +154,21 @@ class _BoundFakeDB:
             "session-b": [{"id": "finding-b", "title": "B-only finding"}],
         }
 
+    async def init(self):
+        return None
+
     async def get_session(self, session_id):
         return self.sessions.get(session_id)
 
     async def get_findings(self, session_id):
         self.finding_reads.append(session_id)
         return list(self.findings.get(session_id, []))
+
+    def load_read_model(self, session_id):
+        self.finding_reads.append(session_id)
+        return SimpleNamespace(
+            finding_views=lambda: list(self.findings.get(session_id, []))
+        )
 
     async def get_evidence(self, session_id):
         return []
@@ -207,6 +216,10 @@ async def test_poc_cannot_read_finding_from_another_session(
 
     fake_db = _BoundFakeDB()
     monkeypatch.setattr(Database, "instance", staticmethod(lambda: fake_db))
+    monkeypatch.setattr(
+        "core.server.routers.cortex.load_canonical_session_read_model",
+        fake_db.load_read_model,
+    )
 
     response = await protected_client.get(
         "/v1/cortex/reporting/poc/finding-b?session_id=session-a",

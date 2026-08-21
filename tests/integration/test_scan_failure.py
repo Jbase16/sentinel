@@ -1,9 +1,11 @@
 
 import unittest
-import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from core.cortex import events, reasoning
+from core.data.db import Database
 from core.server.routers.scans import start_scan, ScanRequest
-from core.errors import SentinelError, ErrorCode, SentinelSecurityError
+from core.server.state import ApplicationState
 from core.base.sequence import GlobalSequenceAuthority
 from core.cortex.events import GraphEventType
 
@@ -16,74 +18,44 @@ class TestScanFailure(unittest.IsolatedAsyncioTestCase):
 
     async def test_scan_exception_handling(self):
         """Verify that exceptions during scan execution emit a SCAN_FAILED event."""
-        print("\n--- Testing Scan Failure Emission ---")
-        
-        # Mock dependencies
-        mock_req = ScanRequest(target="example.com")
-        
-        with patch('core.server.routers.scans.reasoning_engine') as mock_reasoning, \
-             patch('core.data.db.Database') as mock_db, \
-             patch('core.server.routers.scans.get_event_bus') as mock_get_bus, \
-             patch('core.server.routers.scans.logger') as mock_logger, \
-             patch('core.server.routers.scans.GraphEvent') as mock_graph_event:
-            
-            # Setup reasoning engine failure
-            mock_reasoning.start_scan.side_effect = Exception("Simulated Reasoner Crash")
-            
-            # Setup Database async mocks
-            mock_database = mock_db.instance.return_value
-            
-            # Helper to return awaitable
-            def make_awaitable(result=None):
-                f = asyncio.Future()
-                f.set_result(result)
-                return f
+        mock_req = ScanRequest(target="http://localhost:9")
+        state = ApplicationState()
+        mock_database = MagicMock()
+        mock_database.init = AsyncMock()
+        mock_database.get_findings = AsyncMock(return_value=[])
+        mock_database.get_all_findings = AsyncMock(return_value=[])
+        mock_database.get_issues = AsyncMock(return_value=[])
+        mock_database.get_all_issues = AsyncMock(return_value=[])
+        mock_database.get_evidence = AsyncMock(return_value=[])
+        mock_database.blackbox.enqueue = AsyncMock()
+        mock_database.blackbox.flush = AsyncMock()
+        mock_bus = MagicMock()
 
-            # Configuration for Store initialization calls
-            mock_database.init.return_value = make_awaitable(None)
-            mock_database.get_findings.return_value = make_awaitable([])
-            mock_database.get_all_findings.return_value = make_awaitable([])
-            mock_database.get_issues.return_value = make_awaitable([])
-            mock_database.get_all_issues.return_value = make_awaitable([])
-            mock_database.get_evidence.return_value = make_awaitable([])
-            
-            # Configuration for _begin_scan calls
-            mock_database.load_graph_snapshot.return_value = make_awaitable(({}, []))
-            mock_database.save_graph_snapshot.return_value = make_awaitable(None)
-            
-            # Mock Event Bus
-            mock_bus = mock_get_bus.return_value
-            
-            # Execute
-            try:
-                await start_scan(mock_req, True, "test-session")
-            except Exception as e:
-                print(f"Unexpected sync failure: {e}")
-            
-            # Give background task time to run and crash
-            await asyncio.sleep(0.5)
-            
-            # Verify GraphEvent Instantiation
-            print("\n--- GraphEvent Instantiations ---")
-            found_failure_event = False
-            for call in mock_graph_event.call_args_list:
-                print(f"GraphEvent call: {call}")
-                args, kwargs = call
-                event_type = kwargs.get('type')
-                
-                # Check for SCAN_FAILED
-                if event_type == GraphEventType.SCAN_FAILED:
-                     print("✅ GraphEvent created with SCAN_FAILED")
-                     found_failure_event = True
-                     # Verify payload
-                     payload = kwargs.get('payload', {})
-                     if "Simulated Reasoner Crash" in payload.get('error', ''):
-                         print("✅ Error message verified in payload")
-                     else:
-                         print("❌ Error message mismatch in payload")
-            
-            if not found_failure_event:
-                 self.fail("❌ GraphEvent(type=SCAN_FAILED) NOT created.")
+        with (
+            patch.object(Database, "instance", return_value=mock_database),
+            patch("core.server.routers.scans.get_state", return_value=state),
+            patch.object(
+                reasoning.reasoning_engine,
+                "start_scan",
+                side_effect=Exception("Simulated Reasoner Crash"),
+            ),
+            patch.object(events, "get_event_bus", return_value=mock_bus),
+            patch.object(events, "GraphEvent") as mock_graph_event,
+        ):
+            response = await start_scan(mock_req)
+            await state.active_scan_task
+
+        assert response["status"] == "started"
+        failure_calls = [
+            call
+            for call in mock_graph_event.call_args_list
+            if call.kwargs.get("type") == GraphEventType.SCAN_FAILED
+        ]
+        self.assertEqual(len(failure_calls), 1)
+        self.assertIn(
+            "Simulated Reasoner Crash",
+            failure_calls[0].kwargs["payload"]["error"],
+        )
 
 if __name__ == '__main__':
     unittest.main()

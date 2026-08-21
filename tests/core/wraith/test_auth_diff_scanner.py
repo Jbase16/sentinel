@@ -151,7 +151,7 @@ async def test_persona_session_injects_bearer_token():
     # Create mutation request
     mutation_req = MutationRequest(
         method=HttpMethod.GET,
-        url="http://example.com/api/users",
+        url="http://localhost:8000/api/users",
     )
     
     # Execute request
@@ -206,7 +206,7 @@ async def test_persona_session_injects_cookies():
     # Create mutation request
     mutation_req = MutationRequest(
         method=HttpMethod.GET,
-        url="http://example.com/api/users",
+        url="http://localhost:8000/api/users",
     )
     
     # Execute request

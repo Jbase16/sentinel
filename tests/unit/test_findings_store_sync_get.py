@@ -20,6 +20,7 @@ Real-world manifestation:
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import patch
 
 
 def test_sync_add_get_outside_event_loop():
@@ -28,11 +29,13 @@ def test_sync_add_get_outside_event_loop():
     doesn't regress."""
     from core.data.findings_store import FindingsStore
 
-    store = FindingsStore()
-    store.add_finding({"id": "regression-1", "type": "X"})
+    store = FindingsStore(session_id="regression-session")
+    with patch.object(store.db, "save_finding") as save_finding:
+        store.add_finding({"id": "regression-1", "type": "X"})
     f = store.get("regression-1")
     assert f is not None
     assert f["id"] == "regression-1"
+    assert save_finding.call_args.args[1] == "regression-session"
 
 
 def test_sync_add_get_inside_event_loop():
