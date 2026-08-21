@@ -1959,6 +1959,8 @@ class TestBehavioralAuthorizationEndpoint:
                         "persistedQuery": {"version": 1, "sha256Hash": digest}
                     },
                 }]),
+                # Typed admission requires observed success before replay is executable.
+                "response_status": 200,
                 "response_body": json.dumps({"owner": marker}),
             }
 
