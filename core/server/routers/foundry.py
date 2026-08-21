@@ -1660,12 +1660,21 @@ async def run_behavioral_authorization_endpoint(
                         baselines = await proof_boundary.acquire_baselines()
                         reader_records = [dict(baselines.reader_record)]
                         owner_records = [dict(baselines.owner_record)]
+                        proof_shadow_context = OwnedExperimentShadowContext(
+                            authorization=envelope,
+                            actor_persona_id=peer_persona.persona_id,
+                            executor=proof_executors[
+                                peer_persona.persona_id
+                            ],
+                            peer_persona_id=source_persona.persona_id,
+                        )
                         proof_shadow = shadow_orchestrator.run(
                             reader_records,
                             target_origin=target_origin,
                             world_id=peer_persona.persona_id,
                             peer_records=owner_records,
                             peer_world_id=source_persona.persona_id,
+                            experiment_context=proof_shadow_context,
                         )
                         proof_plan = obligation_resolver.plan(proof_shadow)
                         selected_proof = proof_plan.selected
