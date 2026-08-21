@@ -1268,6 +1268,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 from core.cortex.tool_execution_admission import (
                     CanonicalToolExecutionAdmission,
                     ToolExecutionProposal,
+                    ToolPolicyInputError,
                     ToolProposalAdmissionDenied,
                 )
                 from core.net.egress import scope_context_authorizer
@@ -1395,11 +1396,16 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                     source: str = "strategos",
                     reason: str = "Strategos selected the tool for the active intent",
                 ) -> List[Dict]:
-                    policy_snapshot = (
-                        reasoning_engine.strategos.tool_policy_snapshot(tool)
-                        if source == "strategos"
-                        else None
-                    )
+                    try:
+                        policy_snapshot = (
+                            reasoning_engine.strategos.tool_policy_snapshot(tool)
+                            if source == "strategos"
+                            else None
+                        )
+                    except ToolPolicyInputError as exc:
+                        tool_outcomes["attempted"] += 1
+                        tool_outcomes["failed"] += 1
+                        raise ToolError(tool, 1, str(exc)) from exc
                     proposal = ToolExecutionProposal.build(
                         source=source,
                         tool=tool,
