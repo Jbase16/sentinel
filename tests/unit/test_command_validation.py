@@ -1,7 +1,9 @@
 """Unit tests for command execution security and validation."""
+import ast
 import pytest
 import sys
 import os
+from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -198,20 +200,24 @@ class TestNoShellTrue:
     """Verify shell=True is not used anywhere in subprocess calls."""
 
     def test_no_shell_in_codebase(self):
-        """Grep for shell=True patterns in Python source."""
-        import subprocess
-        # Exclude core/forge/validator.py: it is the security validator whose JOB
-        # is to DETECT shell=True (the string appears in its regex patterns and
-        # comments, not as an actual subprocess(shell=True) call).
-        result = subprocess.run(
-            ["grep", "-r", "shell=True", "core/", "--include=*.py",
-             "--exclude=validator.py"],
-            capture_output=True,
-            text=True,
-        )
-        # Should find nothing in source code
-        assert result.returncode != 0 or not result.stdout.strip(), \
-            f"Found shell=True in code:\n{result.stdout}"
+        """Reject executable shell=True keywords, ignoring comments and strings."""
+        core_root = Path(__file__).resolve().parents[2] / "core"
+        violations = []
+
+        for source_path in core_root.rglob("*.py"):
+            tree = ast.parse(source_path.read_text(), filename=str(source_path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                if any(
+                    keyword.arg == "shell"
+                    and isinstance(keyword.value, ast.Constant)
+                    and keyword.value.value is True
+                    for keyword in node.keywords
+                ):
+                    violations.append(f"{source_path}:{node.lineno}")
+
+        assert not violations, f"Found executable shell=True calls: {violations}"
 
 
 # NOTE: CORS validation tests must live next to the implementation.
