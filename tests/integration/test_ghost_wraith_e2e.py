@@ -4,9 +4,11 @@ The interception hook records admitted exchanges for later offline analysis.
 It does not run strategy, execute mutations, or promote findings inline.
 """
 
+import sys
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import mitmproxy
 import pytest
 from mitmproxy import http
 
@@ -20,7 +22,11 @@ ADMITTED_ORIGIN = "http://127.0.0.1:3003"
 
 
 @pytest.fixture(autouse=True)
-def isolated_flow_mapper():
+def isolated_ghost_runtime(monkeypatch):
+    # test_system_loop replaces these process-wide modules during collection.
+    # Restore the installed implementation while this contract test executes.
+    monkeypatch.setitem(sys.modules, "mitmproxy", mitmproxy)
+    monkeypatch.setitem(sys.modules, "mitmproxy.http", http)
     FlowMapper._instance = None
     try:
         yield
