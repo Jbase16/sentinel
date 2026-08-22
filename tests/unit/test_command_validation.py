@@ -145,7 +145,7 @@ class TestAPIValidators:
     # NOTE: InstallRequest was removed in the api→routers refactor (tool
     # installation is no longer a request-validated endpoint). The two
     # InstallRequest validator tests that lived here were dropped — there is
-    # no current symbol to test. (Calibration cleanup; tracked in #33.)
+    # no current symbol to test.
 
 
 class TestTargetSanitization:
