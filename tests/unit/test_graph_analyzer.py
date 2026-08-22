@@ -1,6 +1,7 @@
 import unittest
 import asyncio
 import json
+from unittest.mock import patch
 from core.cortex.graph_analyzer import GraphAnalyzer, _calculate_fingerprint, _serialize_graph_input
 from core.cortex.models import TopologyRequest, AnalysisCaps
 
@@ -8,6 +9,21 @@ class TestGraphAnalyzer(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         # Initialize analyzer with 2 workers
         self.analyzer = GraphAnalyzer(max_workers=2)
+
+    async def asyncTearDown(self):
+        self.analyzer.executor.shutdown(wait=True, cancel_futures=True)
+
+    async def test_darwin_avoids_process_pool_creation(self):
+        with patch("core.cortex.graph_analyzer.sys.platform", "darwin"), patch(
+            "core.cortex.graph_analyzer.ProcessPoolExecutor"
+        ) as process_pool:
+            analyzer = GraphAnalyzer(max_workers=1)
+
+        try:
+            self.assertEqual(analyzer._executor_kind, "thread")
+            process_pool.assert_not_called()
+        finally:
+            analyzer.executor.shutdown(wait=True, cancel_futures=True)
 
     async def test_fingerprint_determinism(self):
         graph_a = {"nodes": [{"id": "a"}, {"id": "b"}], "edges": [{"source": "a", "target": "b"}]}

@@ -3,6 +3,7 @@ import hashlib
 import json
 import time
 import logging
+import sys
 from typing import List, Dict, Any, Tuple, Optional
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, TimeoutError
 from core.cortex.models import TopologyRequest, TopologyResponse, PathResult, AnalysisCaps
@@ -119,6 +120,21 @@ class GraphAnalyzer:
         # Prefer a ProcessPool for CPU-heavy networkx analysis, but fall back
         # safely when the environment forbids process primitives (e.g. sandboxed
         # runners where `os.sysconf`/semaphores are restricted).
+        if sys.platform == "darwin":
+            # CPython's process launch can fork before exec. Once Apple Network
+            # frameworks have started threads, their at-fork handlers can abort
+            # that child before it reaches exec. Threads preserve correctness and
+            # avoid a native crash in the long-lived macOS server process.
+            self.executor = ThreadPoolExecutor(max_workers=max_workers)
+            self._executor_kind = "thread"
+        else:
+            self._initialize_process_executor(max_workers)
+
+        # Simple in-memory cache: fingerprint -> TopologyResponse
+        # In prod this should be Redis or similar if scaling out.
+        self._cache: Dict[str, TopologyResponse] = {}
+
+    def _initialize_process_executor(self, max_workers: int) -> None:
         try:
             self.executor = ProcessPoolExecutor(max_workers=max_workers)
             self._executor_kind = "process"
@@ -129,9 +145,6 @@ class GraphAnalyzer:
             )
             self.executor = ThreadPoolExecutor(max_workers=max_workers)
             self._executor_kind = "thread"
-        # Simple in-memory cache: fingerprint -> TopologyResponse
-        # In prod this should be Redis or similar if scaling out.
-        self._cache: Dict[str, TopologyResponse] = {} 
 
     async def analyze(self, request: TopologyRequest) -> TopologyResponse:
         """
