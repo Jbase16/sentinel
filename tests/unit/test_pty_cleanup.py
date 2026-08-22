@@ -1,8 +1,8 @@
 """
 Tests for PTY session cleanup — verifies zombie process reaping.
 
-All OS calls (fork, close, kill, waitpid) are mocked to prevent
-real process creation or signals.
+All PTY/process calls (openpty, Popen, close, kill, waitpid) are mocked to
+prevent real process creation or signals.
 """
 
 import os
@@ -27,10 +27,19 @@ class TestPTYCleanup(unittest.TestCase):
     @patch(f"{_PTY}.os.waitpid")
     @patch(f"{_PTY}.os.kill")
     @patch(f"{_PTY}.os.close")
-    @patch(f"{_PTY}.pty.fork", return_value=(1234, 5678))
+    @patch("subprocess.Popen")
+    @patch(f"{_PTY}.pty.openpty", return_value=(5678, 5679))
     def test_close_calls_waitpid(
-        self, mock_fork, mock_close, mock_kill, mock_waitpid, mock_sleep, mock_thread
+        self,
+        mock_openpty,
+        mock_popen,
+        mock_close,
+        mock_kill,
+        mock_waitpid,
+        mock_sleep,
+        mock_thread,
     ):
+        mock_popen.return_value.pid = 1234
         # First waitpid (WNOHANG): child still alive → (0, 0)
         # Second waitpid (blocking): child reaped → (1234, 0)
         mock_waitpid.side_effect = [(0, 0), (1234, 0)]
@@ -38,10 +47,13 @@ class TestPTYCleanup(unittest.TestCase):
         from core.engine.pty_manager import PTYSession
         session = PTYSession("test-session")
 
+        mock_openpty.assert_called_once_with()
+        mock_popen.assert_called_once()
+
         session.close()
 
         # 1. FD closed
-        mock_close.assert_called_with(5678)
+        mock_close.assert_any_call(5678)
 
         # 2. SIGTERM sent
         mock_kill.assert_any_call(1234, 15)
@@ -60,17 +72,29 @@ class TestPTYCleanup(unittest.TestCase):
     @patch(f"{_PTY}.os.waitpid", return_value=(1234, 0))
     @patch(f"{_PTY}.os.kill")
     @patch(f"{_PTY}.os.close")
-    @patch(f"{_PTY}.pty.fork", return_value=(1234, 5678))
+    @patch("subprocess.Popen")
+    @patch(f"{_PTY}.pty.openpty", return_value=(5678, 5679))
     def test_close_handles_already_dead(
-        self, mock_fork, mock_close, mock_kill, mock_waitpid, mock_sleep, mock_thread
+        self,
+        mock_openpty,
+        mock_popen,
+        mock_close,
+        mock_kill,
+        mock_waitpid,
+        mock_sleep,
+        mock_thread,
     ):
+        mock_popen.return_value.pid = 1234
         from core.engine.pty_manager import PTYSession
         session = PTYSession("test-session")
+
+        mock_openpty.assert_called_once_with()
+        mock_popen.assert_called_once()
 
         session.close()
 
         # FD closed
-        mock_close.assert_called_with(5678)
+        mock_close.assert_any_call(5678)
 
         # SIGTERM sent
         mock_kill.assert_called_with(1234, 15)

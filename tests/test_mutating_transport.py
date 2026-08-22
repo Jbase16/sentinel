@@ -2,7 +2,7 @@ import pytest
 from typing import Dict, Any
 
 from core.web.transport import MutatingTransport, BaselineHandle
-from core.web.contracts.models import WebMission, BaselineSignature, DeltaVector
+from core.web.contracts.models import WebMission, BaselineSignature, DeltaVector, HttpExchange
 from core.web.contracts.events import EventEnvelope, EventType
 from core.web.contracts.enums import WebMethod, WebAuthMode, VulnerabilityClass, DeltaSeverity
 from core.web.contracts.ids import MissionId, ScanId, SessionId, RequestId, PrincipalId
@@ -107,7 +107,13 @@ def test_mutate_without_baseline_raises(fixtures):
         request_id=RequestId(value="req-00000000"),
         principal_id=ctx.principal_id,
         method=WebMethod.GET,
-        url="http://target.local"
+        url="http://target.local",
+        exchange=HttpExchange(
+            request_id=RequestId(value="req-00000000"),
+            url="http://target.local",
+            method=WebMethod.GET,
+            response_status=200,
+        ),
     )
 
     with pytest.raises(ValueError, match="Mutation requested without a registered, valid BaselineHandle."):
@@ -161,7 +167,7 @@ def test_strict_event_bus_validates(fixtures):
     # Emit bad envelope (missing mission_id)
     with pytest.raises(ValueError):
         strict_bus.emit(EventEnvelope(
-            event_type=EventType.WEB_AUTH_SUCCESS,
+            event_type=EventType.WEB_AUTH_ESTABLISHED,
             scan_id=ScanId(value="s-12345678"),
             session_id=SessionId(value="ss-12345678"),
             # missing mission_id, though pydantic might catch it first if we construct it natively
@@ -171,7 +177,7 @@ def test_strict_event_bus_validates(fixtures):
     # Let's test payload validation. We'll construct a valid envelope but inject bad payload data
     # (Pydantic envelope validates basic dict, strict bus validates strict draft 2020-12 structure).
     envelope = EventEnvelope(
-        event_type=EventType.WEB_AUTH_SUCCESS,
+        event_type=EventType.WEB_AUTH_ESTABLISHED,
         mission_id=MissionId(value="m-12345678"),
         scan_id=ScanId(value="s-12345678"),
         session_id=SessionId(value="ss-12345678"),
