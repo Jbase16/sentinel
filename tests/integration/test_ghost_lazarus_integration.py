@@ -17,6 +17,7 @@ and assert byte-transparency.
 """
 
 import asyncio
+import logging
 import pytest
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 from mitmproxy import http
@@ -81,10 +82,7 @@ async def test_ghost_lazarus_integration_success():
     """
     INVARIANT: GhostAddon.response() must successfully invoke LazarusEngine for JS.
 
-    This test verifies:
-    1. GhostAddon.response() doesn't crash when processing JS
-    2. LazarusEngine.response() is called via async task
-    3. Error handling captures Lazarus failures
+    This test verifies passive delegation without finding promotion.
     """
     # Setup: Create session with mock findings store
     session = ScanSession(target="example.com")
@@ -98,27 +96,19 @@ async def test_ghost_lazarus_integration_success():
     # mock flow uses a plain dict, so neutralize it — it's not under test here.
     addon.session_bridge = Mock()
 
-    # Mock LazarusEngine.response() to track if it's called
-    original_response = addon.lazarus.response
-    addon.lazarus.response = AsyncMock(side_effect=original_response)
+    addon.lazarus.response = AsyncMock()
 
     # Create JavaScript flow
     js_flow = _create_mock_js_flow()
 
-    # Execute: response() is an async mitmproxy hook — await it directly.
-    # (It used to be invoked unawaited, so this body never actually ran.)
+    original_content = js_flow.response.content
+    original_text = js_flow.response.text
     await addon.response(js_flow)
 
-    # Verify: LazarusEngine.response() was called
-    addon.lazarus.response.assert_called_once()
-
-    # Verify: Server header finding was added
-    assert session.findings.add_finding.called
-    server_findings = [
-        call for call in session.findings.add_finding.call_args_list
-        if "server_header" in str(call)
-    ]
-    assert len(server_findings) > 0
+    addon.lazarus.response.assert_awaited_once_with(js_flow)
+    assert js_flow.response.content == original_content
+    assert js_flow.response.text == original_text
+    session.findings.add_finding.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -149,7 +139,7 @@ async def test_ghost_lazarus_integration_non_js_skipped():
 
 
 @pytest.mark.asyncio
-async def test_ghost_lazarus_error_handling():
+async def test_ghost_lazarus_error_handling(caplog):
     """
     INVARIANT: Lazarus failures must not crash GhostAddon and must be logged.
 
@@ -168,20 +158,14 @@ async def test_ghost_lazarus_error_handling():
     # Create JavaScript flow
     js_flow = _create_mock_js_flow()
 
-    # Execute: Should not crash despite Lazarus error (async hook — await it)
-    await addon.response(js_flow)
+    original_content = js_flow.response.content
+    with caplog.at_level(logging.ERROR, logger="core.ghost.proxy"):
+        await addon.response(js_flow)
 
-    # Verify: Error was captured as a finding
-    error_findings = [
-        call for call in session.findings.add_finding.call_args_list
-        if "lazarus_error" in str(call)
-    ]
-    assert len(error_findings) > 0
-
-    # Extract the error finding
-    error_finding = error_findings[0][0][0]  # First call, first arg
-    assert error_finding["type"] == "lazarus_error"
-    assert "AI service unavailable" in error_finding["metadata"]["error"]
+    addon.lazarus.response.assert_awaited_once_with(js_flow)
+    assert "Lazarus processing failed: AI service unavailable" in caplog.text
+    assert js_flow.response.content == original_content
+    session.findings.add_finding.assert_not_called()
 
 
 @pytest.mark.asyncio
