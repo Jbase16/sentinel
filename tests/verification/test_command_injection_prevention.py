@@ -17,9 +17,8 @@ DEFENSE:
 - Never concatenate user input into command strings
 """
 
-import subprocess
+import ast
 import pytest
-from unittest.mock import patch, Mock, MagicMock
 from pathlib import Path
 
 import sys
@@ -27,6 +26,28 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from core.toolkit.registry import get_tool_command, TOOLS
+
+
+def _dotted_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _dotted_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+def _shell_true_lines(source: str) -> list[int]:
+    tree = ast.parse(source)
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "shell"
+        and isinstance(keyword.value, ast.Constant)
+        and keyword.value.value is True
+    ]
 
 
 def test_get_tool_command_returns_argv_list():
@@ -44,7 +65,8 @@ def test_get_tool_command_returns_argv_list():
     assert all(isinstance(arg, str) for arg in cmd), "All arguments must be strings"
 
     # Verify first element is the binary name
-    assert cmd[0] == "nmap"
+    assert Path(cmd[0]).name == "nmap"
+    assert stdin is None
 
     # Verify target appears as a distinct argument (not concatenated)
     assert "example.com" in cmd
@@ -83,7 +105,7 @@ def test_malicious_target_cannot_inject_arguments():
 
         # 2. CRITICAL: Verify no NEW arguments were injected
         # The nmap command has a fixed number of arguments
-        expected_arg_count = len(TOOLS["nmap"]["cmd"])
+        expected_arg_count = len(TOOLS["nmap"].cmd_template)
         assert len(cmd) == expected_arg_count, (
             f"INJECTION DETECTED! Expected {expected_arg_count} args, got {len(cmd)} "
             f"for target '{malicious}'.\n"
@@ -103,40 +125,30 @@ def test_malicious_target_cannot_inject_arguments():
 
 def test_subprocess_usage_in_runner_is_safe():
     """
-    INVARIANT: subprocess.Popen in runner.py must use argv list, not shell=True.
+    INVARIANT: scanner execution must expand an argv list without a shell.
 
     This verifies the execution code is correct by reading the source.
     """
-    # Read runner.py source code
-    runner_path = Path(__file__).parent.parent.parent / "core" / "engine" / "runner.py"
-    assert runner_path.exists(), "runner.py not found"
+    runner_path = (
+        Path(__file__).parent.parent.parent / "core" / "engine" / "scanner_engine.py"
+    )
+    tree = ast.parse(runner_path.read_text())
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and _dotted_name(node.func) == "asyncio.create_subprocess_exec"
+    ]
 
-    content = runner_path.read_text()
-
-    # Find subprocess.Popen call
-    assert "subprocess.Popen" in content, "Expected subprocess.Popen usage"
-
-    # Extract the Popen call (lines around it)
-    lines = content.split('\n')
-    popen_lines = [i for i, line in enumerate(lines) if 'subprocess.Popen' in line]
-
-    assert len(popen_lines) > 0, "No subprocess.Popen found"
-
-    # Check surrounding lines for shell=True
-    for line_num in popen_lines:
-        # Check next 10 lines for shell= parameter
-        context = '\n'.join(lines[line_num:line_num + 10])
-
-        assert "shell=True" not in context, (
-            f"Found shell=True near line {line_num} in runner.py:\n{context}\n"
-            f"This is a CRITICAL SECURITY VULNERABILITY!"
-        )
-
-        # Verify cmd is the first argument (should be a variable, not a string)
-        popen_line = lines[line_num]
-        assert "cmd," in context or "cmd " in context, (
-            f"Expected 'cmd' as first argument to Popen at line {line_num}"
-        )
+    assert calls, "ScannerEngine has no argv-based subprocess execution call"
+    assert any(
+        call.args
+        and isinstance(call.args[0], ast.Starred)
+        and isinstance(call.args[0].value, ast.Name)
+        and call.args[0].value.id == "cmd"
+        for call in calls
+    ), "ScannerEngine must expand the validated cmd argv list"
+    assert _shell_true_lines(runner_path.read_text()) == []
 
 
 def test_no_shlex_split_in_execution_path():
@@ -154,7 +166,7 @@ def test_no_shlex_split_in_execution_path():
 
     files_to_check = [
         toolkit_dir / "registry.py",
-        engine_dir / "runner.py",
+        engine_dir / "scanner_engine.py",
     ]
 
     for filepath in files_to_check:
@@ -162,16 +174,21 @@ def test_no_shlex_split_in_execution_path():
             continue
 
         content = filepath.read_text()
+        tree = ast.parse(content)
 
-        # Check for shlex.split usage
-        assert "shlex.split" not in content, (
+        shlex_calls = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and _dotted_name(node.func) == "shlex.split"
+        ]
+        assert shlex_calls == [], (
             f"Found 'shlex.split' in {filepath}. "
             f"This suggests string-based command construction, which is vulnerable to injection."
         )
 
-        # Check for shell=True usage
-        assert "shell=True" not in content, (
-            f"Found 'shell=True' in {filepath}. "
+        assert _shell_true_lines(content) == [], (
+            f"Found an executable shell=True call in {filepath}. "
             f"This is a CRITICAL SECURITY VULNERABILITY!"
         )
 
@@ -183,7 +200,7 @@ def test_tool_definitions_are_lists():
     This ensures every tool is defined safely from the start.
     """
     for tool_name, tool_def in TOOLS.items():
-        cmd = tool_def.get("cmd")
+        cmd = tool_def.cmd_template
 
         assert isinstance(cmd, list), (
             f"Tool '{tool_name}' has cmd as {type(cmd)}. "
@@ -229,21 +246,27 @@ def test_ci_gate_no_shell_true_in_codebase():
     """
     core_dir = Path(__file__).parent.parent.parent / "core"
 
-    # Search for shell=True in all Python files
+    # Search the Python AST for executable shell=True keyword arguments.
     violations = []
     for py_file in core_dir.rglob("*.py"):
         if py_file.name.startswith("test_"):
             continue  # Skip test files
 
-        content = py_file.read_text()
-        if "shell=True" in content:
-            violations.append(str(py_file.relative_to(core_dir.parent)))
+        lines = _shell_true_lines(py_file.read_text())
+        violations.extend(
+            f"{py_file.relative_to(core_dir.parent)}:{line}" for line in lines
+        )
 
     assert len(violations) == 0, (
-        f"Found shell=True in {len(violations)} files:\n" +
+        f"Found {len(violations)} executable shell=True calls:\n" +
         "\n".join(f"  - {f}" for f in violations) +
         "\n\nThis is a BLOCKING CI failure. Remove all shell=True usage."
     )
+
+
+def test_shell_true_gate_ignores_text_but_detects_executable_keyword():
+    assert _shell_true_lines('message = "recommend shell=True only as text"') == []
+    assert _shell_true_lines('subprocess.run("tool", shell=True)') == [1]
 
 
 if __name__ == "__main__":
