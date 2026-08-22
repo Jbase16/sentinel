@@ -51,6 +51,13 @@ def _reset_event_runtime() -> None:
     events_module.reset_contract_state()
 
 
+def _reset_lazarus_runtime() -> None:
+    """Discard test-local Lazarus mocks and caches without importing Ghost."""
+    lazarus_module = sys.modules.get("core.ghost.lazarus")
+    if lazarus_module is not None:
+        lazarus_module.LazarusEngine._instance = None
+
+
 def _close_persistence_runtime() -> None:
     """Close loop-bound persistence resources before the next test starts."""
     from core.data.blackbox import BlackBox
@@ -106,12 +113,14 @@ def isolate_process_runtime():
     """Give every test fresh sequence, event, and persistence runtimes."""
     from core.base.sequence import GlobalSequenceAuthority
 
+    _reset_lazarus_runtime()
     _reset_event_runtime()
     GlobalSequenceAuthority.reset_for_testing()
     GlobalSequenceAuthority.initialize_for_testing(start=1)
     try:
         yield
     finally:
+        _reset_lazarus_runtime()
         _close_persistence_runtime()
         _reset_event_runtime()
         GlobalSequenceAuthority.reset_for_testing()

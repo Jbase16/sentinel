@@ -50,6 +50,7 @@ ui/SentinelForge.xcodeproj/xcuserdata/
 *.db
 *.sqlite
 *.sqlite3
+/MagicMock/
 /data/graphql_capture*.jsonl
 /archive_stage/
 /artifacts/
