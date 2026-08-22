@@ -2,11 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import os
 import sys
 import warnings
-import atexit
 
 import pytest
 
@@ -17,9 +15,8 @@ if _REPO_ROOT not in sys.path:
 
 
 def pytest_configure(config):
-    # Register markers referenced across the suite even when optional plugins
-    # (like pytest-asyncio) aren't installed.
-    config.addinivalue_line("markers", "asyncio: run async test via built-in asyncio runner")
+    # Register the marker used by the pinned pytest-asyncio runtime.
+    config.addinivalue_line("markers", "asyncio: run async test via pytest-asyncio")
 
     # Enable development mode for tests so loopback port wildcards are allowed.
     os.environ.setdefault("SENTINEL_DEBUG", "true")
@@ -43,69 +40,91 @@ def pytest_configure(config):
         pass
 
 
+def _reset_event_runtime() -> None:
+    """Reset process-wide event state that must share the sequence epoch."""
+    import core.cortex.event_store as event_store_module
+    import core.cortex.events as events_module
+
+    event_store_module._store = None
+    events_module._event_bus = None
+    events_module.reset_run_id()
+    events_module.reset_contract_state()
+
+
+def _close_persistence_runtime() -> None:
+    """Close loop-bound persistence resources before the next test starts."""
+    from core.data.blackbox import BlackBox
+    from core.data.db import Database
+
+    db = Database._instance
+    blackbox = BlackBox._instance
+
+    if db is not None and db._db_connection is not None:
+        preferred_loop = db._loop
+        owns_loop = (
+            preferred_loop is None
+            or preferred_loop.is_closed()
+            or preferred_loop.is_running()
+        )
+        loop = asyncio.new_event_loop() if owns_loop else preferred_loop
+
+        async def close_runtime() -> None:
+            worker = getattr(db.blackbox, "_worker_task", None)
+            if (
+                worker is not None
+                and not worker.done()
+                and worker.get_loop() is asyncio.get_running_loop()
+            ):
+                await db.blackbox.shutdown()
+            await db.close()
+
+        try:
+            loop.run_until_complete(close_runtime())
+        finally:
+            if owns_loop:
+                loop.close()
+
+    if db is not None:
+        db._db_connection = None
+        db._initialized = False
+        db._init_lock = None
+        db._db_lock = None
+        db._loop = None
+
+    if blackbox is not None:
+        blackbox._draining = True
+        blackbox._stopped = True
+
+    fresh_blackbox = BlackBox()
+    BlackBox._instance = fresh_blackbox
+    if db is not None:
+        db.blackbox = fresh_blackbox
+
+
 @pytest.fixture(autouse=True)
-def isolate_global_sequence_authority():
-    """Give every test a fresh, initialized global sequence authority."""
+def isolate_process_runtime():
+    """Give every test fresh sequence, event, and persistence runtimes."""
     from core.base.sequence import GlobalSequenceAuthority
 
+    _reset_event_runtime()
     GlobalSequenceAuthority.reset_for_testing()
     GlobalSequenceAuthority.initialize_for_testing(start=1)
     try:
         yield
     finally:
+        _close_persistence_runtime()
+        _reset_event_runtime()
         GlobalSequenceAuthority.reset_for_testing()
 
 
-def pytest_pyfunc_call(pyfuncitem):
-    """
-    Minimal asyncio runner for async tests.
-
-    The repo's test suite uses `async def` tests and `@pytest.mark.asyncio`,
-    but the environment running these tests may not have `pytest-asyncio`
-    installed. This hook runs coroutine tests via `asyncio.run()` so unit
-    tests remain executable without extra dependencies.
-    """
-    testfunction = pyfuncitem.obj
-    if not inspect.iscoroutinefunction(testfunction):
-        return None
-
-    # Only pass fixtures that are explicit arguments to the test function.
-    argnames = getattr(pyfuncitem, "_fixtureinfo", None)
-    argnames = getattr(argnames, "argnames", ()) if argnames is not None else ()
-    kwargs = {name: pyfuncitem.funcargs[name] for name in argnames}
-
-    asyncio.run(testfunction(**kwargs))
-    return True
-
-
 def pytest_unconfigure(config):
-    """
-    Clean up after pytest finishes.
-    
-    Python 3.14 has stricter asyncio shutdown that can cause
-    'Bad file descriptor' errors during pytest-asyncio teardown.
-    We suppress these by forcing cleanup of known singletons.
-    """
-    # Force cleanup of async singletons that may hold file descriptors
+    """Clean up process-wide test runtimes after pytest finishes."""
     try:
-        from core.data.db import Database
-        if Database._instance is not None and Database._instance._db_connection:
-            import asyncio
-            try:
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(Database._instance.close())
-                loop.close()
-            except Exception:
-                pass
-            Database._instance = None
+        _close_persistence_runtime()
     except Exception:
         pass
-    
+
     try:
-        from core.data.blackbox import BlackBox
-        if BlackBox._instance is not None:
-            BlackBox._instance._stopped = True
-            BlackBox._instance._draining = True
-            BlackBox._instance = None
+        _reset_event_runtime()
     except Exception:
         pass
