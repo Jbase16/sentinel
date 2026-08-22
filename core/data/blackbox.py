@@ -39,12 +39,22 @@ class BlackBox:
         self._draining = False
         self._stopped = False
 
-    def start(self):
-        """Start the writer loop if not already running."""
-        # Conditional branch.
-        if self._worker_task is None or self._worker_task.done():
-            self._worker_task = asyncio.create_task(self._writer_loop(), name="BlackBox-Writer")
-            logger.info("[BlackBox] Writer loop started.")
+    def start(self) -> bool:
+        """Start the writer loop when called from an active event loop."""
+        if self._worker_task is not None and not self._worker_task.done():
+            return True
+        if self._draining or self._stopped:
+            return False
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("[BlackBox] Writer start deferred: no running event loop.")
+            return False
+
+        self._worker_task = loop.create_task(self._writer_loop(), name="BlackBox-Writer")
+        logger.info("[BlackBox] Writer loop started.")
+        return True
 
     async def _writer_loop(self):
         """Forever loop consuming write tasks."""
@@ -100,8 +110,9 @@ class BlackBox:
              raise RuntimeError("[BlackBox] Cannot write: System is shutting down.")
              
         # Conditional branch.
-        if self._worker_task is None:
-            self.start()
+        if self._worker_task is None or self._worker_task.done():
+            if not self.start():
+                raise RuntimeError("[BlackBox] Cannot enqueue without an active event loop.")
             
         future = asyncio.get_running_loop().create_future()
         await self._queue.put((func, args, kwargs, future))
@@ -112,8 +123,11 @@ class BlackBox:
         Wait until all queued write operations have completed.
         Safe to call at lifecycle boundaries.
         """
-        if self._worker_task is None:
-            return
+        if self._worker_task is None or self._worker_task.done():
+            if self._queue.empty():
+                return
+            if not self.start():
+                raise RuntimeError("[BlackBox] Cannot flush without an active writer.")
         await self._queue.join()
 
     def fire_and_forget(self, func: Callable[..., Awaitable[Any]], *args, **kwargs) -> None:
@@ -125,10 +139,6 @@ class BlackBox:
              logger.warning(f"[BlackBox] Drop write to {func.__name__}: draining/stopped.")
              return
              
-        # Conditional branch.
-        if self._worker_task is None:
-            self.start()
-
         # We push to queue synchronously? No, queue.put is async if full.
         # But queue is unbounded by default.
         try:
@@ -136,6 +146,10 @@ class BlackBox:
         except asyncio.QueueFull:
              # Should not happen with unbounded
              logger.error("[BlackBox] Queue full! Dropping write.")
+             return
+
+        if self._worker_task is None or self._worker_task.done():
+            self.start()
 
     async def shutdown(self):
         """
@@ -145,6 +159,16 @@ class BlackBox:
         3. Stop worker.
         """
         logger.info(f"[BlackBox] Initiating Shutdown. Pending writes: {self._queue.qsize()}")
+
+        if self._worker_task is None or self._worker_task.done():
+            if self._queue.empty():
+                self._draining = True
+                self._stopped = True
+                logger.info("[BlackBox] Shutdown Complete.")
+                return
+            if not self.start():
+                raise RuntimeError("[BlackBox] Cannot drain without an active writer.")
+
         self._draining = True
         
         # Insert sentinel to wake up loop if it's idle
