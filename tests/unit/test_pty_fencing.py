@@ -8,7 +8,7 @@ stale threads cannot read from recycled file descriptors.
 import unittest
 from unittest.mock import patch, MagicMock
 
-# All OS-level calls must be mocked to prevent real forks / signals.
+# All OS-level calls must be mocked to prevent real processes / signals.
 _PTY = "core.engine.pty_manager"
 
 
@@ -27,14 +27,25 @@ class TestPTYFencing(unittest.TestCase):
     @patch(f"{_PTY}.os.waitpid", return_value=(0, 0))
     @patch(f"{_PTY}.os.kill")
     @patch(f"{_PTY}.os.close")
-    @patch(f"{_PTY}.pty.fork", return_value=(100, 5))
+    @patch("subprocess.Popen")
+    @patch(f"{_PTY}.pty.openpty", return_value=(5, 6))
     def test_fence_check_terminates_ghost_reader(
-        self, mock_fork, mock_close, mock_kill, mock_waitpid, mock_thread
+        self,
+        mock_openpty,
+        mock_popen,
+        mock_close,
+        mock_kill,
+        mock_waitpid,
+        mock_thread,
     ):
+        mock_popen.return_value.pid = 100
         from core.engine.pty_manager import PTYManager
 
         manager = PTYManager.instance()
         session = manager.create_session("victim-session")
+
+        mock_openpty.assert_called_once_with()
+        mock_popen.assert_called_once()
 
         # Ownership should be registered on creation
         self.assertTrue(manager.verify_fd_ownership(5, "victim-session"))
@@ -52,9 +63,18 @@ class TestPTYFencing(unittest.TestCase):
     @patch(f"{_PTY}.os.close")
     @patch(f"{_PTY}.select.select", return_value=([5], [], []))
     @patch(f"{_PTY}.os.read", return_value=b"hello")
-    @patch(f"{_PTY}.pty.fork", return_value=(100, 5))
+    @patch("subprocess.Popen")
+    @patch(f"{_PTY}.pty.openpty", return_value=(5, 6))
     def test_reader_loop_respects_fence(
-        self, mock_fork, mock_read, mock_select, mock_close, mock_kill, mock_waitpid, mock_thread
+        self,
+        mock_openpty,
+        mock_popen,
+        mock_read,
+        mock_select,
+        mock_close,
+        mock_kill,
+        mock_waitpid,
+        mock_thread,
     ):
         """
         When verify_fd_ownership returns False, os.read must NOT be called.
@@ -63,9 +83,12 @@ class TestPTYFencing(unittest.TestCase):
 
         # Set up a manager where ownership check will fail
         manager = PTYManager.instance()
+        mock_popen.return_value.pid = 100
 
         with patch.object(manager, "verify_fd_ownership", return_value=False):
             session = PTYSession("ghost-session")
+            mock_openpty.assert_called_once_with()
+            mock_popen.assert_called_once()
             session.fd = 5
             session.session_id = "ghost-session"
 
@@ -81,16 +104,28 @@ class TestPTYFencing(unittest.TestCase):
     @patch(f"{_PTY}.os.close")
     @patch(f"{_PTY}.select.select", return_value=([5], [], []))
     @patch(f"{_PTY}.os.read", return_value=b"data")
-    @patch(f"{_PTY}.pty.fork", return_value=(100, 5))
+    @patch("subprocess.Popen")
+    @patch(f"{_PTY}.pty.openpty", return_value=(5, 6))
     def test_reader_loop_abort(
-        self, mock_fork, mock_read, mock_select, mock_close, mock_kill, mock_waitpid, mock_thread
+        self,
+        mock_openpty,
+        mock_popen,
+        mock_read,
+        mock_select,
+        mock_close,
+        mock_kill,
+        mock_waitpid,
+        mock_thread,
     ):
         from core.engine.pty_manager import PTYSession, PTYManager
 
         manager = PTYManager.instance()
+        mock_popen.return_value.pid = 100
 
         with patch.object(manager, "verify_fd_ownership", return_value=False):
             session = PTYSession("test-id")
+            mock_openpty.assert_called_once_with()
+            mock_popen.assert_called_once()
             session.fd = 5
             session.session_id = "test-id"
 
