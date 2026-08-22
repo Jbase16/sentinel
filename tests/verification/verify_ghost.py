@@ -62,7 +62,7 @@ async def test_ghost_protocol():
                 print("    [SUCCESS] Parameter captured!")
                 found_ghost = True
     
-    session.stop_ghost()
+    await session.stop_ghost()
     
     # Conditional branch.
     if found_ghost:

@@ -306,7 +306,7 @@ class ScanSession:
         import asyncio
         asyncio.create_task(self.ghost.start())
 
-    def stop_ghost(self):
+    async def stop_ghost(self) -> None:
         """
         Deactivate the Ghost Protocol proxy.
         
@@ -315,7 +315,7 @@ class ScanSession:
         """
         # Conditional branch.
         if self.ghost:
-            self.ghost.stop()  # Shut down the proxy
+            await self.ghost.stop()  # Shut down the proxy and release its listener
             self.ghost = None  # Clear the reference
 
     def log(self, message: str):
