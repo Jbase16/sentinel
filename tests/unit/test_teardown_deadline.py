@@ -49,7 +49,10 @@ def _run_script(source: str, timeout_s: float) -> subprocess.CompletedProcess:
             timeout=timeout_s,
             capture_output=True,
             text=True,
-            cwd=str(REPO_ROOT),
+            # On macOS, close_fds=False plus no cwd/preexec_fn selects
+            # posix_spawn instead of an unsafe fork from pytest's threaded
+            # process. Python-created descriptors are non-inheritable.
+            close_fds=False,
         )
         return proc
     finally:
@@ -57,6 +60,22 @@ def _run_script(source: str, timeout_s: float) -> subprocess.CompletedProcess:
             os.unlink(script_path)
         except OSError:
             pass
+
+
+@pytest.mark.skipif(
+    not hasattr(subprocess, "_fork_exec"),
+    reason="fork-exec implementation is POSIX-specific",
+)
+def test_script_runner_avoids_fork_exec(monkeypatch):
+    def reject_fork(*args, **kwargs):
+        raise AssertionError("fork_exec used")
+
+    monkeypatch.setattr(subprocess, "_fork_exec", reject_fork)
+
+    result = _run_script("print('spawn-safe')", timeout_s=5.0)
+
+    assert result.returncode == 0
+    assert result.stdout.strip() == "spawn-safe"
 
 
 def test_scan_session_construction_exits_cleanly():
