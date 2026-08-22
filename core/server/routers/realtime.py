@@ -48,7 +48,7 @@ async def validate_websocket_connection(
     if origin and not is_origin_allowed(origin, config.security.allowed_origins):
         logger.warning(f"[WebSocket] {endpoint_name} denied origin: {origin}")
         # Reject handshake
-        await websocket.close(code=4403, reason="Unauthorized")
+        await websocket.close(code=4003, reason="Origin not allowed")
         return False
 
     # Endpoint-specific guardrails
