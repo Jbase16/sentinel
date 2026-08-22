@@ -8,6 +8,8 @@ import sys
 import warnings
 import atexit
 
+import pytest
+
 # Ensure application modules resolve from repo root, not tests/* shadow packages.
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _REPO_ROOT not in sys.path:
@@ -39,6 +41,19 @@ def pytest_configure(config):
     except Exception:
         # Tests that don't emit events/decisions shouldn't fail hard here.
         pass
+
+
+@pytest.fixture(autouse=True)
+def isolate_global_sequence_authority():
+    """Give every test a fresh, initialized global sequence authority."""
+    from core.base.sequence import GlobalSequenceAuthority
+
+    GlobalSequenceAuthority.reset_for_testing()
+    GlobalSequenceAuthority.initialize_for_testing(start=1)
+    try:
+        yield
+    finally:
+        GlobalSequenceAuthority.reset_for_testing()
 
 
 def pytest_pyfunc_call(pyfuncitem):
