@@ -24,9 +24,11 @@ class TestPTYInteraction(unittest.IsolatedAsyncioTestCase):
                  patch('core.server.routers.realtime.PTYManager') as mock_manager_cls:
                 mock_manager = mock_manager_cls.instance.return_value
                 input_msg = json.dumps({"type": "input", "data": "echo hi\n"})
+                arrow_up = "\x1b[A"
                 resize_msg = json.dumps({"type": "resize", "rows": 20, "cols": 40})
                 responses = [
                     input_msg,
+                    arrow_up,
                     resize_msg,
                     asyncio.CancelledError("Test End"),
                 ]
@@ -46,8 +48,12 @@ class TestPTYInteraction(unittest.IsolatedAsyncioTestCase):
                 except asyncio.CancelledError:
                     pass
 
-                mock_manager.write_input.assert_called_once_with(
-                    "test-session", "echo hi\n"
+                self.assertEqual(
+                    mock_manager.write_input.call_args_list,
+                    [
+                        unittest.mock.call("test-session", "echo hi\n"),
+                        unittest.mock.call("test-session", arrow_up),
+                    ],
                 )
                 mock_manager.resize.assert_called_once_with("test-session", 40, 20)
                 mock_manager.detach_listener.assert_called_once()

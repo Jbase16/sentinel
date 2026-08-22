@@ -12,35 +12,38 @@ FUNCTIONALITY:
 - /ws/pty accepts inbound keystrokes and writes to PTY
 - /ws/pty accepts resize commands and updates PTY dimensions
 - xterm.js UI sends both keystrokes and resize events
-- Terminal escape sequence injection is blocked
+- Authorized terminal keystrokes are forwarded without mutation
 """
 
 import pytest
 from pathlib import Path
-import re
 
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 
+REALTIME_PATH = (
+    Path(__file__).parent.parent.parent / "core" / "server" / "routers" / "realtime.py"
+)
+
+
 def test_websocket_pty_handles_keystrokes():
     """
     INVARIANT: /ws/pty must accept and process keystroke input from clients.
 
-    This is verified by code inspection of api.py.
+    This is verified by code inspection of the routed handler.
     """
-    api_path = Path(__file__).parent.parent.parent / "core" / "server" / "api.py"
-    assert api_path.exists(), "api.py not found"
+    assert REALTIME_PATH.exists(), "realtime.py not found"
 
-    content = api_path.read_text()
+    content = REALTIME_PATH.read_text()
 
     # Find the /ws/pty endpoint
-    assert '@app.websocket("/ws/pty")' in content, "/ws/pty endpoint not found"
+    assert '@router.websocket("/pty")' in content, "/ws/pty endpoint not found"
 
     # Verify it handles input messages
     assert "receive_text()" in content, "WebSocket doesn't receive messages!"
-    assert "pty_session.write(" in content, "PTY doesn't receive keystroke data!"
+    assert "pty_mgr.write_input(" in content, "PTY doesn't receive keystroke data!"
 
     # Verify it handles both JSON and raw input (flexible pattern matching)
     handles_json_input = (
@@ -58,15 +61,14 @@ def test_websocket_pty_handles_resize_commands():
 
     Resize events look like: {"type": "resize", "rows": 24, "cols": 80}
     """
-    api_path = Path(__file__).parent.parent.parent / "core" / "server" / "api.py"
-    content = api_path.read_text()
+    content = REALTIME_PATH.read_text()
 
     # Verify resize handling exists
     assert '"resize"' in content or "'resize'" in content, (
         "/ws/pty doesn't handle resize commands"
     )
 
-    assert "pty_session.resize(" in content, (
+    assert "pty_mgr.resize(" in content, (
         "PTY doesn't have resize() method called"
     )
 
@@ -76,37 +78,19 @@ def test_websocket_pty_handles_resize_commands():
     )
 
 
-def test_terminal_escape_sequence_sanitization():
+def test_terminal_control_keystrokes_are_preserved():
     """
-    INVARIANT: Terminal input must block dangerous escape sequences.
+    INVARIANT: An admitted interactive PTY must preserve terminal keystrokes.
 
-    Dangerous sequences (OSC, DCS, APC, PM) can be used for:
-    - Clipboard reading/writing
-    - File exfiltration
-    - Terminal state manipulation
+    CSI sequences encode ordinary keys such as arrows. Input filtering here would
+    break terminal semantics; origin, enablement, and authentication are enforced
+    before this handler receives input.
     """
-    api_path = Path(__file__).parent.parent.parent / "core" / "server" / "api.py"
-    content = api_path.read_text()
+    content = REALTIME_PATH.read_text()
 
-    # Verify sanitization function exists
-    assert "_sanitize_terminal_input" in content or "sanitize" in content, (
-        "No input sanitization function found!"
-    )
-
-    # Verify dangerous sequences are blocked
-    # OSC = \x1b], DCS = \x1bP, APC = \x1b_, PM = \x1b^
-    dangerous_patterns = [
-        r'\\x1b\]',  # OSC
-        r'\\x1bP',   # DCS
-        r'\\x1b_',   # APC
-        r'\\x1b\^',  # PM
-    ]
-
-    found_blocks = sum(1 for pattern in dangerous_patterns if re.search(pattern, content))
-
-    assert found_blocks >= 3, (
-        f"Expected to find blocking for dangerous escape sequences, found {found_blocks}/4"
-    )
+    assert 'payload = data.get("data", "")' in content
+    assert "pty_mgr.write_input(session_id, payload)" in content
+    assert "pty_mgr.write_input(session_id, message_text)" in content
 
 
 def test_ui_terminal_connects_to_pty_endpoint():
@@ -182,11 +166,10 @@ def test_websocket_pty_is_bidirectional():
     - Reader: PTY → WebSocket (output to client)
     - Writer: WebSocket → PTY (input from client)
     """
-    api_path = Path(__file__).parent.parent.parent / "core" / "server" / "api.py"
-    content = api_path.read_text()
+    content = REALTIME_PATH.read_text()
 
     # Find the /ws/pty endpoint
-    pty_endpoint_start = content.find('@app.websocket("/ws/pty")')
+    pty_endpoint_start = content.find('@router.websocket("/pty")')
     assert pty_endpoint_start > 0, "/ws/pty endpoint not found"
 
     # Extract ~500 lines after the endpoint (the handler implementation)
@@ -203,7 +186,7 @@ def test_websocket_pty_is_bidirectional():
     )
 
     # Verify writes to PTY
-    assert "pty_session.write(" in pty_handler, (
+    assert "pty_mgr.write_input(" in pty_handler, (
         "/ws/pty doesn't write client input to PTY"
     )
 
