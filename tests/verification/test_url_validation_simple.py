@@ -2,7 +2,6 @@
 Simple verification script for URL validation logic.
 This script tests the validation logic without importing the full module.
 """
-import sys
 from urllib.parse import urlparse
 
 
@@ -86,9 +85,8 @@ def test_url_validation():
     print(f"Passed: {passed}/{len(test_cases)}")
     print(f"Failed: {failed}/{len(test_cases)}")
     
-    return failed == 0
+    assert failed == 0, f"{failed} URL validation cases failed"
 
 
 if __name__ == "__main__":
-    success = test_url_validation()
-    sys.exit(0 if success else 1)
+    test_url_validation()
