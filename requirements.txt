@@ -17,6 +17,7 @@ click==8.1.8
 click-option-group==0.5.9
 colorama==0.4.6
 cryptography==46.0.3
+curl_cffi==0.13.0
 diskcache==5.6.3
 distlib==0.4.0
 distro==1.9.0
@@ -43,7 +44,6 @@ identify==2.6.15
 idna==3.11
 importlib_metadata==8.7.1
 iniconfig==2.3.0
-instructor==1.12.0
 Jinja2==3.1.6
 jiter==0.10.0
 jsonschema==4.25.1
@@ -53,11 +53,12 @@ markdown-it-py==4.0.0
 MarkupSafe==3.0.3
 mcp==1.23.3
 mdurl==0.1.2
+mitmproxy==12.2.1
 mpmath==1.3.0
 multidict==6.7.0
 networkx==3.6.1
 nodeenv==1.10.0
-numpy==2.4.0
+numpy==2.3.5
 openai==1.109.1
 opentelemetry-api==1.37.0
 opentelemetry-exporter-otlp-proto-common==1.37.0
@@ -76,12 +77,13 @@ pre_commit==4.5.1
 propcache==0.4.1
 protobuf==6.33.2
 pycparser==2.23
-pydantic==2.12.5
+pydantic==2.11.10
 pydantic-settings==2.12.0
-pydantic_core==2.41.5
+pydantic_core==2.33.2
 Pygments==2.19.2
 PyJWT==2.10.1
 pytest==9.0.2
+pytest-asyncio==1.3.0
 python-dotenv==1.2.1
 python-multipart==0.0.21
 PyYAML==6.0.3
@@ -90,14 +92,13 @@ regex==2025.11.3
 requests==2.32.5
 rich==13.5.3
 rpds-py==0.30.0
-ruamel.yaml==0.19.1
+ruamel.yaml==0.18.16
 ruamel.yaml.clib==0.2.14
 safetensors==0.7.0
 semgrep==1.146.0
 sentencepiece==0.2.1
--e git+https://github.com/Jbase16/sentinel.git@6533d86987682f8baf3a8f2c89c72cc33baec013#egg=sentinelforge
+-e .
 setuptools==80.9.0
-shell_gpt==1.4.5
 shellingham==1.5.4
 sniffio==1.3.1
 soupsieve==2.8.1
@@ -113,7 +114,7 @@ tqdm==4.67.1
 transformers==4.57.3
 typer==0.21.0
 typing-inspection==0.4.2
-typing_extensions==4.15.0
+typing_extensions==4.14.0
 urllib3==2.6.2
 uvicorn==0.40.0
 uvloop==0.22.1
