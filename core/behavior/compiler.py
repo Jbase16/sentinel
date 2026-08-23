@@ -242,6 +242,7 @@ class OperationContract:
     source_refs: Tuple[str, ...] = ()
     requires_owned_state: bool = False
     cleanup_operation_id: Optional[str] = None
+    observed_sequence_rank: Optional[int] = None
 
     def __post_init__(self) -> None:
         normalized_operation_id = _semantic_name(
@@ -264,6 +265,15 @@ class OperationContract:
                     field_name="cleanup_operation_id",
                 ),
             )
+        if (
+            self.observed_sequence_rank is not None
+            and (
+                not isinstance(self.observed_sequence_rank, int)
+                or isinstance(self.observed_sequence_rank, bool)
+                or self.observed_sequence_rank < 0
+            )
+        ):
+            raise ValueError("observed_sequence_rank must be a non-negative integer")
         object.__setattr__(self, "requires", _unique_capabilities(self.requires))
         object.__setattr__(self, "produces", _unique_capabilities(self.produces))
         object.__setattr__(self, "source_refs", tuple(sorted(set(self.source_refs))))
@@ -613,7 +623,18 @@ def _ordered_steps(
                 if capability not in available
             }
             return None, _unique_capabilities(missing)
-        operation = min(ready, key=lambda item: (item.cost, item.operation_id))
+        operation = min(
+            ready,
+            key=lambda item: (
+                item.cost,
+                (
+                    item.observed_sequence_rank
+                    if item.observed_sequence_rank is not None
+                    else len(operations)
+                ),
+                item.operation_id,
+            ),
+        )
         ordered.append(operation.operation_id)
         available.update(operation.produces)
         remaining.remove(operation.operation_id)
@@ -1053,6 +1074,17 @@ def operation_contracts_from_records(
         world_id=world_id,
         limits=limits,
     )
+    observed_sequence_ranks: Dict[str, int] = {}
+    for index, record in enumerate(records):
+        try:
+            exchange = normalize_exchange(
+                record,
+                source_id=str(record.get("id") or index),
+                world_id=str(record.get("persona_id") or world_id),
+            )
+        except (TypeError, ValueError):
+            continue
+        observed_sequence_ranks.setdefault(exchange.action_id, index)
     by_family: Dict[str, list[OperationInstance]] = {}
     for instance in instances:
         by_family.setdefault(instance.family_id, []).append(instance)
@@ -1076,6 +1108,9 @@ def operation_contracts_from_records(
                 observed_success=bool(successes),
                 source_refs=tuple(
                     item.source_ref for item in (successes or family_instances)
+                ),
+                observed_sequence_rank=observed_sequence_ranks.get(
+                    family.action_id
                 ),
             )
         )

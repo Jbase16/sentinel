@@ -3159,11 +3159,22 @@ def redacted_graph_bound_prerequisite_execution_outcome(
             effect_witness_ref is not None
             and not typed_ref(
                 effect_witness_ref,
-                "graph_bound_independent_effect_witness",
+                (
+                    "graph_bound_independent_effect_witness"
+                    if family == "omission"
+                    else "graph_bound_reordering_effect_witness"
+                ),
             )
         )
-        or (effect_witness_ref is not None)
-        != (runtime_value_inequality_ref is not None)
+        or (
+            family == "omission"
+            and (effect_witness_ref is not None)
+            != (runtime_value_inequality_ref is not None)
+        )
+        or (
+            family == "reordering"
+            and runtime_value_inequality_ref is not None
+        )
         or (
             runtime_value_inequality_ref is not None
             and not typed_ref(
@@ -3176,7 +3187,10 @@ def redacted_graph_bound_prerequisite_execution_outcome(
             and verdict in {"confirmed", "refuted"}
             and effect_witness_ref is None
         )
-        or (family == "reordering" and effect_witness_ref is not None)
+        or (
+            family == "reordering"
+            and (effect_witness_ref is not None) != confirmed
+        )
         or not isinstance(terminal_refs, (list, tuple))
         or len(terminal_refs) != 3
         or any(not isinstance(item, str) for item in terminal_refs)
@@ -3215,9 +3229,9 @@ def redacted_graph_bound_prerequisite_execution_outcome(
         or not isinstance(provenance_root, str)
         or re.fullmatch(r"[0-9a-f]{64}", provenance_root) is None
         or not isinstance(finding_confirmed, bool)
-        or finding_confirmed != (confirmed and family == "omission")
+        or finding_confirmed != confirmed
         or (candidate_ref is not None)
-        != (confirmed and family == "omission")
+        != confirmed
         or (
             candidate_ref is not None
             and not typed_ref(
@@ -3225,7 +3239,6 @@ def redacted_graph_bound_prerequisite_execution_outcome(
                 "graph_bound_prerequisite_candidate",
             )
         )
-        or (family == "reordering" and confirmed)
         or response.get("adversarial_triage_required") is not True
         or response.get("promotion_authority") is not False
         or response.get("finding_authority") is not False
