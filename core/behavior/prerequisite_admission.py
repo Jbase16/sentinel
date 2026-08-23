@@ -261,6 +261,7 @@ def _budget_payload(
     treatment_request_units: int,
     control_request_units: int,
     cleanup_request_units: int,
+    cleanup_verification_request_units: int,
     total_request_units: int,
     policy_total_request_limit: int,
 ) -> Dict[str, Any]:
@@ -271,6 +272,9 @@ def _budget_payload(
         "treatment_request_units": treatment_request_units,
         "control_request_units": control_request_units,
         "cleanup_request_units": cleanup_request_units,
+        "cleanup_verification_request_units": (
+            cleanup_verification_request_units
+        ),
         "total_request_units": total_request_units,
         "policy_total_request_limit": policy_total_request_limit,
         "manifest_request_ceiling": MAX_GRAPH_BOUND_MANIFEST_REQUEST_UNITS,
@@ -289,6 +293,7 @@ class GraphBoundRequestBudgetManifest:
     treatment_request_units: int
     control_request_units: int
     cleanup_request_units: int
+    cleanup_verification_request_units: int
     total_request_units: int
     policy_total_request_limit: int
     manifest_request_ceiling: int = MAX_GRAPH_BOUND_MANIFEST_REQUEST_UNITS
@@ -305,14 +310,23 @@ class GraphBoundRequestBudgetManifest:
         policy_ref: str,
         policy_total_request_limit: int,
     ) -> "GraphBoundRequestBudgetManifest":
+        if len(specification.cleanup.bindings) != 1:
+            raise GraphBoundManifestAdmissionDenied(
+                "graph_bound_multiple_cleanup_lifecycles_unsupported"
+            )
         baseline_units = len(specification.delta.baseline_operation_ids)
         treatment_units = baseline_units
         if specification.delta.family is PrerequisiteCounterfactualFamily.OMISSION:
             treatment_units -= 1
         control_units = baseline_units
         cleanup_units = len(specification.cleanup.bindings) * len(_INSTANCE_ROLES)
+        cleanup_verification_units = cleanup_units
         total_units = (
-            baseline_units + treatment_units + control_units + cleanup_units
+            baseline_units
+            + treatment_units
+            + control_units
+            + cleanup_units
+            + cleanup_verification_units
         )
         if (
             total_units > policy_total_request_limit
@@ -328,6 +342,7 @@ class GraphBoundRequestBudgetManifest:
             treatment_request_units=treatment_units,
             control_request_units=control_units,
             cleanup_request_units=cleanup_units,
+            cleanup_verification_request_units=cleanup_verification_units,
             total_request_units=total_units,
             policy_total_request_limit=policy_total_request_limit,
         )
@@ -339,6 +354,7 @@ class GraphBoundRequestBudgetManifest:
             treatment_request_units=treatment_units,
             control_request_units=control_units,
             cleanup_request_units=cleanup_units,
+            cleanup_verification_request_units=cleanup_verification_units,
             total_request_units=total_units,
             policy_total_request_limit=policy_total_request_limit,
         )
@@ -351,6 +367,9 @@ class GraphBoundRequestBudgetManifest:
             treatment_request_units=self.treatment_request_units,
             control_request_units=self.control_request_units,
             cleanup_request_units=self.cleanup_request_units,
+            cleanup_verification_request_units=(
+                self.cleanup_verification_request_units
+            ),
             total_request_units=self.total_request_units,
             policy_total_request_limit=self.policy_total_request_limit,
         )
@@ -359,6 +378,7 @@ class GraphBoundRequestBudgetManifest:
             self.treatment_request_units,
             self.control_request_units,
             self.cleanup_request_units,
+            self.cleanup_verification_request_units,
             self.total_request_units,
             self.policy_total_request_limit,
             self.manifest_request_ceiling,
@@ -380,6 +400,7 @@ class GraphBoundRequestBudgetManifest:
                 + self.treatment_request_units
                 + self.control_request_units
                 + self.cleanup_request_units
+                + self.cleanup_verification_request_units
             )
             or self.total_request_units > self.policy_total_request_limit
             or self.manifest_request_ceiling
@@ -402,6 +423,9 @@ class GraphBoundRequestBudgetManifest:
                 treatment_request_units=self.treatment_request_units,
                 control_request_units=self.control_request_units,
                 cleanup_request_units=self.cleanup_request_units,
+                cleanup_verification_request_units=(
+                    self.cleanup_verification_request_units
+                ),
                 total_request_units=self.total_request_units,
                 policy_total_request_limit=self.policy_total_request_limit,
             ),
@@ -957,6 +981,9 @@ class GraphBoundManifestAdmissionPlanner:
         budget_blocked = 0
         policy_limit = executor.policy.budget.max_total_requests
         for specification in compilation.specifications:
+            if len(specification.cleanup.bindings) != 1:
+                safety_blocked += 1
+                continue
             backend_blocker = _BACKEND_BLOCKER_BY_FAMILY.get(
                 specification.delta.family
             )

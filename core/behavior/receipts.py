@@ -3039,8 +3039,185 @@ def redacted_proof_experiment_omission_outcome(
     }
 
 
+def redacted_graph_bound_prerequisite_execution_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the only graph-bound execution fields allowed at rest."""
+
+    def typed_ref(value: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(value, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", value)
+        )
+
+    kind = response.get("kind")
+    mode = response.get("mode")
+    status = response.get("status")
+    verdict = response.get("oracle_verdict")
+    family = response.get("family")
+    claim_contract_id = response.get("claim_contract_id")
+    plan_id = response.get("plan_id")
+    provisioning_id = response.get("provisioning_id")
+    oracle_requirement_id = response.get("oracle_requirement_id")
+    reference_state_id = response.get("reference_state_id")
+    oracle_evaluation_id = response.get("oracle_evaluation_id")
+    effect_witness_ref = response.get("effect_witness_ref")
+    runtime_value_inequality_ref = response.get(
+        "runtime_value_inequality_ref"
+    )
+    terminal_refs = response.get("terminal_evidence_refs")
+    cleanup_refs = response.get("cleanup_evidence_refs")
+    provenance_root = response.get("provenance_root")
+    candidate_ref = response.get("finding_candidate_ref")
+    finding_confirmed = response.get("finding_confirmed")
+    counts = {
+        key: response.get(key)
+        for key in (
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "cleanup_verifications_attempted",
+            "cleanup_verifications_completed",
+            "ownership_grants_removed",
+            "target_requests_sent",
+        )
+    }
+    confirmed = verdict == "confirmed"
+    if (
+        kind != "graph_bound_prerequisite_execution"
+        or mode != "behavioral_graph_bound_prerequisite_execution_v1"
+        or status not in {"confirmed", "refuted", "inconclusive"}
+        or verdict != status
+        or family not in {"omission", "reordering"}
+        or response.get("receipt_state") != COMPLETED
+        or not typed_ref(
+            claim_contract_id,
+            "graph_bound_execution_claim_contract",
+        )
+        or not typed_ref(plan_id, "graph_bound_prepared_request_plan")
+        or not typed_ref(
+            provisioning_id,
+            "graph_bound_fresh_world_provisioning",
+        )
+        or not typed_ref(
+            oracle_requirement_id,
+            "prerequisite_effect_oracle_requirement",
+        )
+        or not typed_ref(reference_state_id, "state")
+        or not typed_ref(
+            oracle_evaluation_id,
+            "graph_bound_prerequisite_oracle_evaluation",
+        )
+        or (
+            effect_witness_ref is not None
+            and not typed_ref(
+                effect_witness_ref,
+                "graph_bound_independent_effect_witness",
+            )
+        )
+        or (effect_witness_ref is not None)
+        != (runtime_value_inequality_ref is not None)
+        or (
+            runtime_value_inequality_ref is not None
+            and not typed_ref(
+                runtime_value_inequality_ref,
+                "graph_bound_runtime_value_inequality_attestation",
+            )
+        )
+        or (
+            family == "omission"
+            and verdict in {"confirmed", "refuted"}
+            and effect_witness_ref is None
+        )
+        or (family == "reordering" and effect_witness_ref is not None)
+        or not isinstance(terminal_refs, (list, tuple))
+        or len(terminal_refs) != 3
+        or any(not isinstance(item, str) for item in terminal_refs)
+        or len(set(terminal_refs)) != 3
+        or any(
+            not typed_ref(item, "graph_bound_terminal_observation")
+            for item in terminal_refs
+        )
+        or not isinstance(cleanup_refs, (list, tuple))
+        or len(cleanup_refs) != 6
+        or any(not isinstance(item, str) for item in cleanup_refs)
+        or len(set(cleanup_refs)) != 6
+        or any(
+            not typed_ref(item, "graph_bound_cleanup_evidence")
+            for item in cleanup_refs
+        )
+        or response.get("cleanup_status") != "verified"
+        or response.get("orphaned_owned_state_possible") is not False
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            for value in counts.values()
+        )
+        or any(
+            counts[key] != 3
+            for key in (
+                "cleanup_steps_attempted",
+                "cleanup_steps_completed",
+                "cleanup_verifications_attempted",
+                "cleanup_verifications_completed",
+                "ownership_grants_removed",
+            )
+        )
+        or counts["target_requests_sent"] < 9
+        or not isinstance(provenance_root, str)
+        or re.fullmatch(r"[0-9a-f]{64}", provenance_root) is None
+        or not isinstance(finding_confirmed, bool)
+        or finding_confirmed != (confirmed and family == "omission")
+        or (candidate_ref is not None)
+        != (confirmed and family == "omission")
+        or (
+            candidate_ref is not None
+            and not typed_ref(
+                candidate_ref,
+                "graph_bound_prerequisite_candidate",
+            )
+        )
+        or (family == "reordering" and confirmed)
+        or response.get("adversarial_triage_required") is not True
+        or response.get("promotion_authority") is not False
+        or response.get("finding_authority") is not False
+    ):
+        raise ReceiptStoreError(
+            "graph-bound prerequisite execution outcome is invalid"
+        )
+    return {
+        "kind": kind,
+        "mode": mode,
+        "status": status,
+        "receipt_state": COMPLETED,
+        "claim_contract_id": claim_contract_id,
+        "plan_id": plan_id,
+        "family": family,
+        "provisioning_id": provisioning_id,
+        "oracle_requirement_id": oracle_requirement_id,
+        "reference_state_id": reference_state_id,
+        "oracle_evaluation_id": oracle_evaluation_id,
+        "oracle_verdict": verdict,
+        "effect_witness_ref": effect_witness_ref,
+        "runtime_value_inequality_ref": runtime_value_inequality_ref,
+        "terminal_evidence_refs": list(terminal_refs),
+        "cleanup_evidence_refs": list(cleanup_refs),
+        "cleanup_status": "verified",
+        **counts,
+        "orphaned_owned_state_possible": False,
+        "provenance_root": provenance_root,
+        "finding_candidate_ref": candidate_ref,
+        "finding_confirmed": finding_confirmed,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    if response.get("kind") == "graph_bound_prerequisite_execution":
+        return redacted_graph_bound_prerequisite_execution_outcome(response)
     if response.get("kind") == "proof_experiment_generalized_authorization":
         return redacted_proof_experiment_generalized_authorization_outcome(
             response
@@ -3110,6 +3287,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "graph_bound_prerequisite_execution":
+        return redacted_graph_bound_prerequisite_execution_outcome(value)
     if value.get("kind") == "proof_experiment_generalized_authorization":
         return redacted_proof_experiment_generalized_authorization_outcome(
             value

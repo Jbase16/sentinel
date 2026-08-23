@@ -267,12 +267,12 @@ def test_current_capture_authority_and_selected_plan_are_revalidated(tmp_path):
 
 
 def test_budget_race_aborts_new_receipt_without_partial_reservation(tmp_path):
-    executor, calls, _scope_calls = _executor(max_total_requests=14)
+    executor, calls, _scope_calls = _executor(max_total_requests=17)
     records, lifecycle, state, compilation, admission, binding = _context(
         executor=executor
     )
     expected = _expected_actions(binding)
-    assert len(expected) == 14
+    assert len(expected) == 17
     store = _RacingReceiptStore(
         tmp_path / "race-receipts",
         budget=executor.policy.budget,

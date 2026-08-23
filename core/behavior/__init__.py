@@ -68,6 +68,9 @@ Graph-bound prerequisite manifests, request binding, and claim admission remain
 explicit-only through their ``prerequisite_*`` modules. Claim-consuming fresh-world
 traffic is separately default-off and explicit-only through
 :mod:`core.behavior.prerequisite_provisioning`; importing this package cannot send it.
+Claim-consuming terminal experiment traffic and target-side cleanup verification are
+separately default-off and explicit-only through
+:mod:`core.behavior.prerequisite_execution`; importing this package cannot send them.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

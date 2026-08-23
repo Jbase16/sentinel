@@ -97,6 +97,39 @@ def _context(records=None, *, executor=None):
     return records, lifecycle, state_machine, compilation, admission, result
 
 
+def test_omission_plan_seals_cross_world_effect_witness_override():
+    *_context_values, result = _context()
+    plan = next(item for item in result.plans if item.family == "omission")
+    terminal_operation_id = plan.baseline_operation_ids[-1]
+    terminal = {
+        phase: next(
+            item
+            for item in plan.request_bindings
+            if item.phase == phase
+            and item.operation_id == terminal_operation_id
+        )
+        for phase in ("baseline", "treatment", "control")
+    }
+    baseline_ids = set(terminal["baseline"].input_binding_ids)
+    treatment_ids = set(terminal["treatment"].input_binding_ids)
+    witness = terminal["control"]
+
+    assert baseline_ids - treatment_ids == {
+        witness.runtime_override_binding_id
+    }
+    assert witness.input_binding_ids == terminal["baseline"].input_binding_ids
+    assert witness.runtime_override_source_world_slot_id == (
+        terminal["baseline"].world_slot_id
+    )
+    assert witness.runtime_override_source_world_slot_id != witness.world_slot_id
+    assert witness.runtime_override_source_create_operation_id is not None
+    assert witness.request_mutation_ref is None
+    assert sum(
+        item.runtime_override_binding_id is not None
+        for item in plan.request_bindings
+    ) == 1
+
+
 def test_binder_reconstructs_exact_sequences_and_endpoint_budget_entries():
     executor, calls, scope_calls = _executor()
     _records, _lifecycle, _state, compilation, admission, result = _context(
@@ -133,8 +166,8 @@ def test_binder_reconstructs_exact_sequences_and_endpoint_budget_entries():
         terminal_operation_id = plan.baseline_operation_ids[-1]
         stages = tuple(
             (
-                "cleanup"
-                if item.phase == "cleanup"
+                item.phase
+                if item.phase in {"cleanup", "cleanup_verification"}
                 else (
                     "dispatch"
                     if item.operation_id == terminal_operation_id
@@ -146,19 +179,33 @@ def test_binder_reconstructs_exact_sequences_and_endpoint_budget_entries():
         assert stages == tuple(
             sorted(
                 stages,
-                key={"provision": 0, "dispatch": 1, "cleanup": 2}.__getitem__,
+                key={
+                    "provision": 0,
+                    "dispatch": 1,
+                    "cleanup": 2,
+                    "cleanup_verification": 3,
+                }.__getitem__,
+            )
+        )
+        expected_terminal_roles = (
+            (
+                "independent_control",
+                "valid_baseline",
+                "counterfactual_treatment",
+            )
+            if plan.family == "omission"
+            else (
+                "valid_baseline",
+                "counterfactual_treatment",
+                "independent_control",
             )
         )
         assert tuple(
             item.world_role
             for item in plan.request_bindings
-            if item.phase != "cleanup"
+            if item.phase in {"baseline", "treatment", "control"}
             and item.operation_id == terminal_operation_id
-        ) == (
-            "valid_baseline",
-            "counterfactual_treatment",
-            "independent_control",
-        )
+        ) == expected_terminal_roles
         assert "endpoint_budget_bindings_not_compiled" not in (
             plan.remaining_execution_blockers
         )
@@ -183,8 +230,8 @@ def test_omission_removes_only_the_bound_query_and_reordering_changes_only_order
             for item in plan.request_bindings
             if item.request_mutation_ref is not None
         ]
-        assert len(mutations) == 1
-        mutation = mutations[0]
+        assert len(mutations) == 2
+        mutation = next(item for item in mutations if item.phase == "treatment")
         assert mutation.phase == "treatment"
         assert mutation.operation_id == plan.treatment_operation_ids[-1]
         raw = next(
@@ -195,6 +242,13 @@ def test_omission_removes_only_the_bound_query_and_reordering_changes_only_order
         query = dict(parse_qsl(urlsplit(raw.url).query, keep_blank_values=True))
         assert len(query) == 1
         assert set(query.values()) in ({FIRST_TOKEN}, {SECOND_TOKEN})
+        verification = next(
+            item
+            for item in mutations
+            if item.phase == "cleanup_verification"
+        )
+        assert verification.world_role == "counterfactual_treatment"
+        assert verification.request_template_ref == mutation.request_template_ref
         assert tuple(
             item.operation_id
             for item in plan.request_bindings
