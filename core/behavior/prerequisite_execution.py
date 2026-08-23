@@ -327,8 +327,7 @@ class GraphBoundPrerequisiteOracleEvaluation:
             )
             or confirmed
             != (
-                self.family == "omission"
-                and self.valid_baseline_observed
+                self.valid_baseline_observed
                 and self.independent_control_observed
                 and self.treatment_reference_effect_observed
                 and self.independent_effect_witness_observed
@@ -355,10 +354,19 @@ class GraphBoundPrerequisiteOracleEvaluation:
                 self.effect_witness_ref is not None
                 and not self.effect_witness_ref.startswith(
                     "graph_bound_independent_effect_witness:"
+                    if self.family == "omission"
+                    else "graph_bound_reordering_effect_witness:"
                 )
             )
-            or (self.effect_witness_ref is not None)
-            != (self.runtime_value_inequality_ref is not None)
+            or (
+                self.family == "omission"
+                and (self.effect_witness_ref is not None)
+                != (self.runtime_value_inequality_ref is not None)
+            )
+            or (
+                self.family == "reordering"
+                and self.runtime_value_inequality_ref is not None
+            )
             or (
                 self.runtime_value_inequality_ref is not None
                 and not self.runtime_value_inequality_ref.startswith(
@@ -395,14 +403,16 @@ class GraphBoundPrerequisiteOracleEvaluation:
         baseline = by_role["valid_baseline"]
         treatment = by_role["counterfactual_treatment"]
         control = by_role["independent_control"]
-        witness_observed = bool(
+        omission_witness_observed = bool(
             family == "omission"
             and control.runtime_binding_override_ref is not None
             and control.runtime_value_inequality_ref is not None
             and control.status in _PREREQUISITE_REJECTION_STATUSES
         )
         control_observed = (
-            witness_observed if family == "omission" else control.reference_match
+            omission_witness_observed
+            if family == "omission"
+            else control.reference_match
         )
         effect_witness_ref = (
             stable_hash(
@@ -421,9 +431,30 @@ class GraphBoundPrerequisiteOracleEvaluation:
                     "rejection_status": control.status,
                 },
             )
-            if witness_observed
+            if omission_witness_observed
             else None
         )
+        if (
+            family == "reordering"
+            and baseline.reference_match
+            and treatment.reference_match
+            and control.reference_match
+        ):
+            effect_witness_ref = stable_hash(
+                "graph_bound_reordering_effect_witness",
+                {
+                    "oracle_requirement_id": oracle_requirement_id,
+                    "plan_id": plan_id,
+                    "reference_state_id": reference_state_id,
+                    "terminal_evidence_refs": [
+                        item.evidence_ref for item in values
+                    ],
+                    "counterfactual": (
+                        "swap_adjacent_independent_prerequisites"
+                    ),
+                },
+            )
+        witness_observed = effect_witness_ref is not None
         uncertainty = set()
         verdict = GraphBoundPrerequisiteOracleVerdict.INCONCLUSIVE
         if not baseline.reference_match:
@@ -435,10 +466,8 @@ class GraphBoundPrerequisiteOracleEvaluation:
                 else "independent_control_reference_mismatch"
             )
         if not uncertainty:
-            if treatment.reference_match and family == "omission":
+            if treatment.reference_match:
                 verdict = GraphBoundPrerequisiteOracleVerdict.CONFIRMED
-            elif treatment.reference_match and family == "reordering":
-                uncertainty.add("reordering_security_effect_not_defined")
             elif treatment.status in _PREREQUISITE_REJECTION_STATUSES:
                 verdict = GraphBoundPrerequisiteOracleVerdict.REFUTED
             else:
@@ -476,7 +505,7 @@ class GraphBoundPrerequisiteOracleEvaluation:
             "effect_witness_ref": effect_witness_ref,
             "runtime_value_inequality_ref": (
                 control.runtime_value_inequality_ref
-                if witness_observed
+                if omission_witness_observed
                 else None
             ),
             "finding_candidate_ref": candidate_ref,
@@ -505,7 +534,7 @@ class GraphBoundPrerequisiteOracleEvaluation:
             effect_witness_ref=effect_witness_ref,
             runtime_value_inequality_ref=(
                 control.runtime_value_inequality_ref
-                if witness_observed
+                if omission_witness_observed
                 else None
             ),
             finding_candidate_ref=candidate_ref,
@@ -681,8 +710,7 @@ class GraphBoundPrerequisiteExecutionResult:
             or self.target_requests_sent != expected_requests
             or self.finding_confirmed
             != (
-                self.family == "omission"
-                and self.oracle.verdict
+                self.oracle.verdict
                 is GraphBoundPrerequisiteOracleVerdict.CONFIRMED
                 and self.oracle.independent_effect_witness_observed
             )
@@ -1095,7 +1123,7 @@ def _execution_outcome(
 ) -> Dict[str, Any]:
     finding_confirmed = (
         oracle.verdict is GraphBoundPrerequisiteOracleVerdict.CONFIRMED
-        and authority.runtime_plan.plan.family == "omission"
+        and oracle.independent_effect_witness_observed
     )
     return {
         "kind": GRAPH_BOUND_PREREQUISITE_EXECUTION_KIND,

@@ -99,6 +99,7 @@ def _case(
     wire_equivalent_capability=False,
     single_use_capability=False,
     runtime_schema_drift=False,
+    enforce_prerequisite_order=False,
     records=None,
 ):
     calls = []
@@ -170,6 +171,11 @@ def _case(
                 return 404, {"error": "not found"}
             if terminal_transport_fails and object_id == "runtime-workflow-2":
                 raise RuntimeError("simulated terminal transport failure")
+            if (
+                enforce_prerequisite_order
+                and world["prerequisites"][:2] != ["first", "second"]
+            ):
+                return 409, {"error": "prerequisite order required"}
             query = dict(parse_qsl(parsed.query, keep_blank_values=True))
             required_capability_count = 1 if single_prerequisite else 2
             if secure and len(query) < required_capability_count:
@@ -425,8 +431,10 @@ async def test_one_click_selected_graph_plan_is_default_off_without_traffic(tmp_
 
 
 @pytest.mark.asyncio
-async def test_one_click_rejects_ambiguous_same_terminal_omission_plans(tmp_path):
-    boundary, store, executor, _registry, calls, _worlds, _plan = _case(tmp_path)
+async def test_one_click_selects_unique_reordering_when_omission_is_ambiguous(
+    tmp_path,
+):
+    boundary, store, executor, _registry, calls, worlds, _plan = _case(tmp_path)
     shadow = _shadow_for_boundary(boundary)
     assert sum(
         plan.family == "omission"
@@ -454,9 +462,54 @@ async def test_one_click_rejects_ambiguous_same_terminal_omission_plans(tmp_path
         capture_freshness=boundary.capture_freshness,
     )
 
-    assert run.status == "selected_plan_unavailable"
-    assert run.dispatched is False
-    assert calls == []
+    assert run.status == "completed"
+    assert run.dispatched is True
+    assert run.execution is not None
+    assert run.execution.family == "reordering"
+    assert run.execution.status == "confirmed"
+    assert run.finding is not None
+    assert run.finding.family == "reordering"
+    finding = run.finding.to_finding()
+    assert finding["metadata"]["counterfactual_family"] == "reordering"
+    assert "prerequisite_reordering" in finding["tags"]
+    assert len(calls) == run.execution.target_requests_sent
+    assert all(world["archived"] for world in worlds.values())
+
+
+@pytest.mark.asyncio
+async def test_one_click_reordering_refutation_never_builds_finding(tmp_path):
+    boundary, store, executor, _registry, calls, worlds, _plan = _case(
+        tmp_path,
+        enforce_prerequisite_order=True,
+    )
+    shadow = _shadow_for_boundary(boundary)
+
+    run = await GraphBoundPrerequisiteOneClickDispatcher(
+        target_origin=boundary.target_origin,
+        world_id=boundary.world_id,
+        actor_persona_id=boundary.actor_persona_id,
+        authorization=boundary.authorization,
+        executor=executor,
+        receipt_store=store,
+        claim_config=GraphBoundExecutionClaimConfig(enabled=True),
+        execution_config=GraphBoundPrerequisiteExecutionConfig(enabled=True),
+    ).run(
+        boundary.records,
+        lifecycle=shadow.lifecycle,
+        state_machine=shadow.state_machine,
+        compilation=shadow.prerequisite_experiments,
+        payout_goal_plan=shadow.payout_goal_plan,
+        graph=shadow.graph,
+        capture_freshness=boundary.capture_freshness,
+    )
+
+    assert run.status == "completed"
+    assert run.execution is not None
+    assert run.execution.family == "reordering"
+    assert run.execution.status == "refuted"
+    assert run.finding is None
+    assert len(calls) == run.execution.target_requests_sent
+    assert all(world["archived"] for world in worlds.values())
 
 
 @pytest.mark.asyncio
@@ -961,7 +1014,7 @@ async def test_wire_equivalent_capability_override_is_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reordering_response_match_remains_non_promoting_inconclusive(
+async def test_reordering_response_match_builds_typed_positive_witness(
     tmp_path,
 ):
     boundary, store, _executor, _registry, _calls, _worlds, _plan = _case(
@@ -973,15 +1026,38 @@ async def test_reordering_response_match_remains_non_promoting_inconclusive(
         config=GraphBoundPrerequisiteExecutionConfig(enabled=True),
     ).execute()
 
-    assert result.status == "inconclusive"
-    assert result.finding_confirmed is False
-    assert result.oracle.finding_candidate_ref is None
-    assert result.oracle.uncertainty_reasons == (
-        "reordering_security_effect_not_defined",
+    assert result.status == "confirmed"
+    assert result.finding_confirmed is True
+    assert result.oracle.finding_candidate_ref is not None
+    assert result.oracle.effect_witness_ref.startswith(
+        "graph_bound_reordering_effect_witness:"
     )
+    assert result.oracle.runtime_value_inequality_ref is None
+    assert result.oracle.uncertainty_reasons == ()
     receipt, _path = _receipt(store)
     assert receipt.state == "completed"
     assert receipt.outcome["family"] == "reordering"
+    assert receipt.outcome["finding_confirmed"] is True
+
+
+@pytest.mark.asyncio
+async def test_reordering_order_enforcement_is_refuted_without_finding(tmp_path):
+    boundary, store, _executor, _registry, _calls, _worlds, _plan = _case(
+        tmp_path,
+        family="reordering",
+        enforce_prerequisite_order=True,
+    )
+    result = await GraphBoundPrerequisiteExperimentExecutor(
+        boundary.admit().claim(),
+        config=GraphBoundPrerequisiteExecutionConfig(enabled=True),
+    ).execute()
+
+    assert result.status == "refuted"
+    assert result.finding_confirmed is False
+    assert result.oracle.finding_candidate_ref is None
+    assert result.oracle.effect_witness_ref is None
+    receipt, _path = _receipt(store)
+    assert receipt.state == "completed"
     assert receipt.outcome["finding_confirmed"] is False
 
 

@@ -62,6 +62,7 @@ class GraphBoundPrerequisiteFindingCandidate:
     """Strict adapter from a completed positive receipt to a finding payload."""
 
     finding_id: str
+    family: str
     claim_contract_id: str
     plan_id: str
     provisioning_id: str
@@ -69,7 +70,7 @@ class GraphBoundPrerequisiteFindingCandidate:
     reference_state_id: str
     oracle_evaluation_id: str
     effect_witness_ref: str
-    runtime_value_inequality_ref: str
+    runtime_value_inequality_ref: Optional[str]
     terminal_evidence_refs: Tuple[str, ...]
     cleanup_evidence_refs: Tuple[str, ...]
     provenance_root: str
@@ -81,7 +82,7 @@ class GraphBoundPrerequisiteFindingCandidate:
     graph_target_ref: str
     graph_digest: str
     selection_ref: str
-    proof_kind: str = "graph_bound_prerequisite_omission_fail_open"
+    proof_kind: str
     finding_authority: bool = True
 
     @classmethod
@@ -100,14 +101,24 @@ class GraphBoundPrerequisiteFindingCandidate:
             candidate_outcome
         )
         if (
-            redacted["family"] != "omission"
+            redacted["family"] not in {"omission", "reordering"}
             or redacted["status"] != "confirmed"
             or redacted["finding_confirmed"] is not True
             or redacted["cleanup_status"] != "verified"
             or redacted["orphaned_owned_state_possible"] is not False
             or not isinstance(redacted["finding_candidate_ref"], str)
             or not isinstance(redacted["effect_witness_ref"], str)
-            or not isinstance(redacted["runtime_value_inequality_ref"], str)
+            or (
+                redacted["family"] == "omission"
+                and not isinstance(
+                    redacted["runtime_value_inequality_ref"],
+                    str,
+                )
+            )
+            or (
+                redacted["family"] == "reordering"
+                and redacted["runtime_value_inequality_ref"] is not None
+            )
             or not isinstance(redacted.get("selection_ref"), str)
         ):
             raise GraphBoundPrerequisiteOneClickDenied(
@@ -115,6 +126,7 @@ class GraphBoundPrerequisiteFindingCandidate:
             )
         return cls(
             finding_id=redacted["finding_candidate_ref"],
+            family=redacted["family"],
             claim_contract_id=redacted["claim_contract_id"],
             plan_id=redacted["plan_id"],
             provisioning_id=redacted["provisioning_id"],
@@ -138,13 +150,18 @@ class GraphBoundPrerequisiteFindingCandidate:
             graph_target_ref=redacted["graph_target_ref"],
             graph_digest=redacted["graph_digest"],
             selection_ref=redacted["selection_ref"],
+            proof_kind=(
+                "graph_bound_prerequisite_omission_fail_open"
+                if redacted["family"] == "omission"
+                else "graph_bound_prerequisite_reordering_fail_open"
+            ),
         )
 
     def __post_init__(self) -> None:
         payload = {
             "oracle_requirement_id": self.oracle_requirement_id,
             "plan_id": self.plan_id,
-            "family": "omission",
+            "family": self.family,
             "terminal_evidence_refs": list(self.terminal_evidence_refs),
             "effect_witness_ref": self.effect_witness_ref,
             "verdict": "confirmed",
@@ -162,11 +179,30 @@ class GraphBoundPrerequisiteFindingCandidate:
         if (
             self.finding_id
             != stable_hash("graph_bound_prerequisite_candidate", payload)
+            or self.family not in {"omission", "reordering"}
+            or not self.effect_witness_ref.startswith(
+                "graph_bound_independent_effect_witness:"
+                if self.family == "omission"
+                else "graph_bound_reordering_effect_witness:"
+            )
             or len(self.terminal_evidence_refs) != 3
             or len(self.cleanup_evidence_refs) != 6
             or self.selection_ref
             != stable_hash("graph_bound_one_click_selection", selection_payload)
-            or self.proof_kind != "graph_bound_prerequisite_omission_fail_open"
+            or self.proof_kind
+            != (
+                "graph_bound_prerequisite_omission_fail_open"
+                if self.family == "omission"
+                else "graph_bound_prerequisite_reordering_fail_open"
+            )
+            or (
+                self.family == "omission"
+                and not isinstance(self.runtime_value_inequality_ref, str)
+            )
+            or (
+                self.family == "reordering"
+                and self.runtime_value_inequality_ref is not None
+            )
             or not self.finding_authority
         ):
             raise ValueError("graph-bound prerequisite finding candidate is invalid")
@@ -182,6 +218,7 @@ class GraphBoundPrerequisiteFindingCandidate:
             "graph_target_ref": self.graph_target_ref,
             "graph_digest": self.graph_digest,
         }
+        reordering = self.family == "reordering"
         return {
             "id": self.finding_id,
             "type": "State-machine prerequisite enforcement failure",
@@ -190,20 +227,34 @@ class GraphBoundPrerequisiteFindingCandidate:
             "target": self.plan_id,
             "message": (
                 "Three fresh owned worlds reproduced the captured terminal "
-                "effect after an object-bound prerequisite was omitted, while "
-                "an independently valid cross-world capability was rejected."
+                + (
+                    "effect after exactly one sealed adjacent prerequisite "
+                    "order swap, while an independent original-order control "
+                    "reproduced the reference effect."
+                    if reordering
+                    else (
+                        "effect after an object-bound prerequisite was omitted, "
+                        "while an independently valid cross-world capability "
+                        "was rejected."
+                    )
+                )
             ),
             "tags": [
                 "verified",
                 "business_logic",
                 "state_machine",
                 "graph_bound_prerequisite",
-                "prerequisite_omission",
+                (
+                    "prerequisite_reordering"
+                    if reordering
+                    else "prerequisite_omission"
+                ),
             ],
             "families": ["confirmed_vuln"],
             "metadata": {
                 "vuln_class": "business_logic",
                 "subtype": self.proof_kind,
+                "counterfactual_family": self.family,
                 "finding_candidate_ref": self.finding_id,
                 "claim_contract_id": self.claim_contract_id,
                 "plan_id": self.plan_id,
@@ -454,11 +505,17 @@ class GraphBoundPrerequisiteOneClickDispatcher:
         eligible = tuple(
             plan
             for plan in plans
-            if plan.family == "omission"
+            if plan.family in {"omission", "reordering"}
             and plan.baseline_operation_ids
             and plan.baseline_operation_ids[-1] == terminal_operation_id
         )
-        return eligible[0] if len(eligible) == 1 else None
+        omissions = tuple(plan for plan in eligible if plan.family == "omission")
+        if len(omissions) == 1:
+            return omissions[0]
+        reorderings = tuple(
+            plan for plan in eligible if plan.family == "reordering"
+        )
+        return reorderings[0] if len(reorderings) == 1 else None
 
     async def run(
         self,
