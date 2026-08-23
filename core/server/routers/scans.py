@@ -27,25 +27,52 @@ class BehavioralOneClickProfile(BaseModel):
     """Exact pre-authorized profile for one behavioral URL phase."""
 
     mode: Literal["paired_persona", "anonymous_passive"] = "paired_persona"
+    completion: Literal["continue_scan", "behavioral_phase_only"] = "continue_scan"
     envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     peer_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    prior_source_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
+    prior_peer_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
 
     @model_validator(mode="after")
     def validate_profile_shape(self) -> "BehavioralOneClickProfile":
         if self.mode == "anonymous_passive":
-            if self.source_persona_id is not None or self.peer_persona_id is not None:
-                raise ValueError("anonymous passive one-click forbids persona identities")
+            if (
+                self.source_persona_id is not None
+                or self.peer_persona_id is not None
+                or self.prior_source_records is not None
+                or self.prior_peer_records is not None
+            ):
+                raise ValueError(
+                    "anonymous passive one-click forbids persona identities "
+                    "and paired capture artifacts"
+                )
             return self
         if self.source_persona_id is None or self.peer_persona_id is None:
             raise ValueError("paired-persona one-click requires both persona identities")
         if self.source_persona_id == self.peer_persona_id:
             raise ValueError("behavioral one-click personas must be distinct")
+        if (self.prior_source_records is None) != (
+            self.prior_peer_records is None
+        ):
+            raise ValueError("prior behavioral capture requires both personas")
         return self
 
     @property
     def is_anonymous_passive(self) -> bool:
         return self.mode == "anonymous_passive"
+
+    @property
+    def is_behavioral_phase_only(self) -> bool:
+        return self.is_anonymous_passive or self.completion == "behavioral_phase_only"
 
 
 def _bounded_behavioral_phase_summary(
@@ -70,7 +97,11 @@ def _bounded_behavioral_phase_summary(
     independent = result.get("independent_proof")
     independent = independent if isinstance(independent, dict) else {}
 
-    finding_id = finding.get("id") or result.get("finding_ref")
+    finding_id = (
+        finding.get("id")
+        or result.get("finding_ref")
+        or result.get("finding_candidate_ref")
+    )
     finding_type = finding.get("type")
     if not isinstance(finding_id, str):
         finding_id = None
@@ -83,13 +114,18 @@ def _bounded_behavioral_phase_summary(
         cleaned = " ".join(value.split())
         return cleaned[:limit] or None
 
-    cleanup_status = bounded_string(execution.get("status"), limit=64)
+    cleanup_status = bounded_string(result.get("cleanup_status"), limit=64)
+    if cleanup_status is None:
+        cleanup_status = bounded_string(execution.get("status"), limit=64)
     if cleanup_status is None:
         result_status = bounded_string(result.get("status"), limit=64)
         if result_status in {"cleanup_failed", "aborted"}:
             cleanup_status = result_status
 
-    cleanup_steps = execution.get("cleanup_steps_completed")
+    cleanup_steps = execution.get(
+        "cleanup_steps_completed",
+        result.get("cleanup_steps_completed"),
+    )
     if (
         isinstance(cleanup_steps, bool)
         or not isinstance(cleanup_steps, int)
@@ -467,8 +503,24 @@ async def _route_completed_behavioral_finding(
 ) -> Optional[Dict[str, Any]]:
     """Relay one terminal proof through the canonical evidence funnel."""
 
+    profile = req.behavioral_one_click
+    session_id = getattr(session, "id", None)
+    if (
+        profile is None
+        or profile.is_anonymous_passive
+        or profile.source_persona_id is None
+        or profile.peer_persona_id is None
+        or not isinstance(session_id, str)
+        or not session_id
+    ):
+        raise ValueError("behavioral proof requires an exact paired scan session")
+
     receipt_summary = result.get("orchestration_receipt")
     if not isinstance(receipt_summary, dict):
+        if result.get("kind") == "graph_bound_prerequisite_execution":
+            raise ValueError(
+                "graph-bound finding requires a durable orchestration receipt"
+            )
         return None
 
     from core.base.task_router import CompletedBehavioralProof, TaskRouter
@@ -476,6 +528,7 @@ async def _route_completed_behavioral_finding(
         COMPLETED,
         BehavioralReceiptStore,
         ReceiptStoreError,
+        redacted_receipt_context,
     )
 
     receipt_id = receipt_summary.get("receipt_id")
@@ -493,26 +546,45 @@ async def _route_completed_behavioral_finding(
         or not isinstance(receipt.outcome, dict)
     ):
         raise ValueError("behavioral finding receipt is not durably completed")
+    target = urlparse(req.target)
+    expected_context = redacted_receipt_context(
+        target_origin=f"{target.scheme}://{target.netloc}",
+        envelope_id=profile.envelope_id,
+        source_persona_id=profile.source_persona_id,
+        peer_persona_id=profile.peer_persona_id,
+    )
+    if receipt.context != expected_context:
+        raise ValueError(
+            "behavioral finding receipt context does not match exact scan request"
+        )
+    if result.get("kind") != receipt.outcome.get("kind"):
+        raise ValueError(
+            "behavioral finding result kind does not match completed receipt"
+        )
     if (
         receipt.outcome.get("finding_confirmed") is not True
         and receipt.outcome.get("oracle_verdict") != "confirmed"
     ):
         raise ValueError("behavioral finding receipt is not oracle-confirmed")
+    if receipt.outcome.get("kind") == "graph_bound_prerequisite_execution":
+        from core.behavior.prerequisite_one_click import (
+            GraphBoundPrerequisiteFindingCandidate,
+        )
+
+        expected_finding = (
+            GraphBoundPrerequisiteFindingCandidate.from_completed_outcome(
+                receipt.outcome
+            ).to_finding()
+        )
+        if finding != expected_finding:
+            raise ValueError(
+                "graph-bound finding does not match its completed receipt"
+            )
+        finding = expected_finding
     proof = CompletedBehavioralProof(
         receipt_id=receipt.receipt_id,
         provenance_root=_completed_behavioral_provenance_root(receipt.outcome),
     )
-
-    profile = req.behavioral_one_click
-    session_id = getattr(session, "id", None)
-    if (
-        profile is None
-        or profile.is_anonymous_passive
-        or profile.source_persona_id is None
-        or not isinstance(session_id, str)
-        or not session_id
-    ):
-        raise ValueError("behavioral proof requires an exact paired scan session")
 
     from core.behavior.normalize import stable_hash
     from core.foundry.authorization import get_envelope
@@ -631,6 +703,8 @@ async def _run_behavioral_one_click_phase(
                     envelope_id=profile.envelope_id,
                     source_persona_id=profile.source_persona_id,
                     peer_persona_id=profile.peer_persona_id,
+                    prior_source_records=profile.prior_source_records,
+                    prior_peer_records=profile.prior_peer_records,
                 ),
                 _=True,
             )
@@ -717,6 +791,27 @@ async def _run_behavioral_one_click_phase(
             raise SentinelError(
                 ErrorCode.SCAN_INITIALIZATION_ERROR,
                 "Cached behavioral finding failed validation",
+                details={"phase": "behavioral_one_click"},
+            ) from exc
+    if (
+        not isinstance(finding, dict)
+        and result.get("kind") == "graph_bound_prerequisite_execution"
+        and result.get("finding_confirmed") is True
+    ):
+        from core.behavior.prerequisite_one_click import (
+            GraphBoundPrerequisiteFindingCandidate,
+        )
+
+        try:
+            finding = (
+                GraphBoundPrerequisiteFindingCandidate.from_completed_outcome(
+                    result
+                ).to_finding()
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise SentinelError(
+                ErrorCode.SCAN_INITIALIZATION_ERROR,
+                "Cached graph-bound behavioral finding failed validation",
                 details={"phase": "behavioral_one_click"},
             ) from exc
 
@@ -1127,10 +1222,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         )
         if (
             req.behavioral_one_click is not None
-            and req.behavioral_one_click.is_anonymous_passive
+            and req.behavioral_one_click.is_behavioral_phase_only
         ):
-            # This profile is the complete scan. Ordinary tools and the active
-            # verification phases would destroy its passive-only attribution.
+            # This profile is the complete scan. Ordinary tools and active
+            # verification would exceed its explicitly bounded authority.
             allowed_tools = []
         # Phase 2H: subtract any banned_tools the policy enforcement set
         # (e.g. nuclei_mutating disabled by NO_DOS). banned_tools is a Set;
@@ -1240,15 +1335,21 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             tool_outcomes = {"attempted": 0, "succeeded": 0, "failed": 0}
             try:
                 await _run_behavioral_one_click_phase(req, session=session)
-                passive_only = bool(
+                behavioral_phase_only = bool(
                     req.behavioral_one_click is not None
-                    and req.behavioral_one_click.is_anonymous_passive
+                    and req.behavioral_one_click.is_behavioral_phase_only
                 )
-                if passive_only:
-                    session.log(
-                        "[behavior] Anonymous passive profile completed; ordinary "
-                        "reasoning, tools, verification, and receipts remain skipped."
-                    )
+                if behavioral_phase_only:
+                    if req.behavioral_one_click.is_anonymous_passive:
+                        session.log(
+                            "[behavior] Anonymous passive profile completed; ordinary "
+                            "reasoning, tools, verification, and receipts remain skipped."
+                        )
+                    else:
+                        session.log(
+                            "[behavior] Behavioral phase-only profile completed; "
+                            "ordinary reasoning, tools, and verification remain skipped."
+                        )
                 else:
                     _action_dispatcher.action_approved.connect(
                         _on_action_approved
@@ -1437,7 +1538,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         )
                     return response
 
-                if not passive_only:
+                if not behavioral_phase_only:
                     # Store dispatch_tool on state for external callers
                     state.scan_state["_dispatch_tool"] = dispatch_tool
 
@@ -1470,7 +1571,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # briefing, and reports, with zero extra plumbing.
                 # Every probe is hard-gated through the same sealed scope
                 # registry the scan uses for tools (single source of truth).
-                if _should_run_active_verification(req.mode, passive_only=passive_only):
+                if _should_run_active_verification(
+                    req.mode,
+                    passive_only=behavioral_phase_only,
+                ):
                     try:
                         from core.wraith.verify_phase import run_verify_phase
                         # Build candidate target set: original + any hosts the
@@ -2281,7 +2385,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # gate failure never kills a scan and never suppresses anything.
                 if (
                     req.mode in ("standard", "bug_bounty", "bounty")
-                    and not passive_only
+                    and not behavioral_phase_only
                 ):
                     try:
                         from core.toolkit.finding_verifier import (

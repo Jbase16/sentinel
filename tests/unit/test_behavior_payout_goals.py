@@ -113,6 +113,38 @@ def _blocker_codes(candidate):
     return {item.code for item in candidate.blockers}
 
 
+def test_graph_absent_context_preserves_v1_identity_payload():
+    context = _context(
+        owned_worlds=("alice-secret-world",),
+        role_worlds=("alice-secret-world",),
+        backends=("authorization_replay",),
+        workflows=("controlled_authorization",),
+        lifecycle=True,
+    )
+    expected_payload = {
+        "target_ref": context.target_ref,
+        "selected_world_ref": context.selected_world_ref,
+        "authorization_ref": context.authorization_ref,
+        "authorization_approved": context.authorization_approved,
+        "origin_authorized": context.origin_authorized,
+        "allowed_workflows": list(context.allowed_workflows),
+        "max_owned_worlds": context.max_owned_worlds,
+        "owned_world_refs": list(context.owned_world_refs),
+        "role_world_refs": list(context.role_world_refs),
+        "fresh_anonymous_available": context.fresh_anonymous_available,
+        "lifecycle_available": context.lifecycle_available,
+        "callback_receiver_available": context.callback_receiver_available,
+        "available_backends": list(context.available_backends),
+    }
+
+    assert context.graph_bound_prerequisite_terminal_ids == ()
+    assert "graph_bound_prerequisite_terminal_ids" not in context.to_dict()
+    assert context.context_ref == stable_hash(
+        "payout_goal_context",
+        expected_payload,
+    )
+
+
 def test_planning_context_rejects_an_invalid_selected_world():
     with pytest.raises(ValueError, match="selected_world_id"):
         _context(selected_world="")

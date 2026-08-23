@@ -9,6 +9,7 @@ from threading import Barrier
 
 import pytest
 
+from core.behavior.normalize import stable_hash
 from core.behavior.receipts import (
     ABORTED,
     COMPLETED,
@@ -16,6 +17,7 @@ from core.behavior.receipts import (
     BehavioralReceiptStore,
     BehavioralReceiptContext,
     ReceiptStoreError,
+    redacted_graph_bound_prerequisite_denial_response,
     redacted_fresh_owned_boundary_outcome,
     redacted_outcome,
     redacted_compiled_outcome,
@@ -35,6 +37,50 @@ def _context():
         source_persona_id="source-secret",
         peer_persona_id="peer-secret",
     )
+
+
+def _graph_denial_evidence(graph_receipt_id: str):
+    cleanup = {
+        "status": "uncertain",
+        "cleanup_steps_attempted": 1,
+        "cleanup_steps_completed": 1,
+        "cleanup_verifications_attempted": 1,
+        "cleanup_verifications_completed": 1,
+        "ownership_grants_removed": 1,
+        "cleanup_evidence_refs": [
+            f"graph_bound_cleanup_evidence:{'1' * 64}",
+            f"graph_bound_cleanup_evidence:{'2' * 64}",
+        ],
+        "orphaned_owned_state_possible": True,
+    }
+    payload = {
+        "kind": "graph_bound_prerequisite_execution_denial",
+        "status": "denied",
+        "graph_receipt_id": graph_receipt_id,
+        "reason_code": "graph_bound_runtime_value_extraction_failed",
+        "category": "lineage",
+        "claim_contract_id": (
+            f"graph_bound_execution_claim_contract:{'3' * 64}"
+        ),
+        "capture_freshness_ref": (
+            f"graph_bound_capture_freshness:{'5' * 64}"
+        ),
+        "plan_id": f"graph_bound_prepared_request_plan:{'4' * 64}",
+        "family": "omission",
+        "cleanup": cleanup,
+        "finding_confirmed": False,
+        "promotion_authority": False,
+        "finding_authority": False,
+        "retry_authority": False,
+    }
+    return {
+        "schema_version": 1,
+        "denial_evidence_ref": stable_hash(
+            "graph_bound_prerequisite_denial_evidence",
+            payload,
+        ),
+        **payload,
+    }
 
 
 def _response():
@@ -309,6 +355,63 @@ def test_aborted_or_reserved_receipt_cannot_refresh_budget(tmp_path):
             reservation_token=reservation.reservation_token,
             outcome=redacted_outcome(_response()),
         )
+
+
+def test_aborted_receipt_persists_strict_graph_denial_evidence(tmp_path):
+    store = BehavioralReceiptStore(tmp_path)
+    fingerprint = _fingerprint()
+    reservation = store.reserve(fingerprint, context=_context())
+    assert reservation.reservation_token is not None
+    evidence = _graph_denial_evidence(reservation.receipt.receipt_id)
+
+    aborted = store.abort(
+        fingerprint,
+        reservation_token=reservation.reservation_token,
+        reason="graph_bound_experiment_execution_failed",
+        terminal_evidence=evidence,
+    )
+    reloaded = store.load(fingerprint)
+
+    assert aborted.state == ABORTED
+    assert aborted.terminal_evidence == evidence
+    assert reloaded is not None
+    assert reloaded.terminal_evidence == evidence
+    response = redacted_graph_bound_prerequisite_denial_response(
+        reloaded,
+        reused=False,
+    )
+    assert response["graph_receipt"] == {
+        "receipt_id": reservation.receipt.receipt_id,
+        "state": ABORTED,
+    }
+    assert response["orchestration_receipt"]["state"] == ABORTED
+    assert response["reused"] is False
+    assert response["denial"]["retry_authority"] is False
+
+
+def test_graph_denial_evidence_rejects_unredacted_fields(tmp_path):
+    store = BehavioralReceiptStore(tmp_path)
+    fingerprint = _fingerprint()
+    reservation = store.reserve(fingerprint, context=_context())
+    assert reservation.reservation_token is not None
+    evidence = _graph_denial_evidence(reservation.receipt.receipt_id)
+    evidence["raw_response"] = {"exportToken": "must-not-persist"}
+
+    with pytest.raises(
+        ReceiptStoreError,
+        match="denial evidence fields are invalid",
+    ):
+        store.abort(
+            fingerprint,
+            reservation_token=reservation.reservation_token,
+            reason="graph_bound_experiment_execution_failed",
+            terminal_evidence=evidence,
+        )
+
+    loaded = store.load(fingerprint)
+    assert loaded is not None
+    assert loaded.state == RESERVED
+    assert "must-not-persist" not in json.dumps(loaded.to_dict())
 
 
 def test_only_reserving_process_can_finalize_receipt(tmp_path):

@@ -10,6 +10,11 @@ from core.behavior.orchestrator import (
     BehavioralShadowOrchestrator,
     OwnedExperimentShadowContext,
 )
+from core.behavior.payout_goals import (
+    GoalPlanningContext,
+    SecurityProperty,
+    _world_requirement,
+)
 from core.behavior.prerequisite_admission import (
     GRAPH_BOUND_PREREQUISITE_WORKFLOW,
     GraphBoundManifestAdmissionPlanner,
@@ -134,9 +139,11 @@ def test_valid_context_seals_each_graph_specification_without_dispatch_authority
     assert omission.budget.treatment_request_units == 3
     assert omission.budget.control_request_units == 4
     assert omission.budget.cleanup_request_units == 3
-    assert omission.budget.total_request_units == 14
+    assert omission.budget.cleanup_verification_request_units == 3
+    assert omission.budget.total_request_units == 17
     assert reordering.budget.treatment_request_units == 4
-    assert reordering.budget.total_request_units == 15
+    assert reordering.budget.cleanup_verification_request_units == 3
+    assert reordering.budget.total_request_units == 18
 
     for manifest in result.manifests:
         assert tuple(item.role for item in manifest.world_slots) == (
@@ -328,7 +335,104 @@ def test_ordinary_shadow_run_carries_static_admission_without_executing_it():
     )
     assert admitted.prerequisite_admission.dispatch_authority is False
     assert admitted.prerequisite_admission.target_requests_sent == 0
+    assert "graph_bound_prerequisite" in (
+        admitted.payout_goal_plan.context.available_backends
+    )
+    assert admitted.payout_goal_plan.selected is not None
+    assert admitted.payout_goal_plan.selected.backend == "graph_bound_prerequisite"
+    assert (
+        admitted.payout_goal_plan.selected.world_requirement.required_workflows
+        == (GRAPH_BOUND_PREREQUISITE_WORKFLOW,)
+    )
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("workflows", "expected_backend"),
+    (
+        (
+            (
+                "behavioral_compiled_owned_sequence",
+                "behavioral_state_machine_omission",
+                "behavioral_state_machine_omission_confirmation",
+            ),
+            "prerequisite_omission",
+        ),
+        (
+            (
+                GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+                "behavioral_compiled_owned_sequence",
+                "behavioral_state_machine_omission",
+                "behavioral_state_machine_omission_confirmation",
+            ),
+            "graph_bound_prerequisite",
+        ),
+    ),
+)
+def test_payout_backend_preserves_legacy_authority_and_prefers_graph_when_signed(
+    workflows,
+    expected_backend,
+):
+    context = GoalPlanningContext.build(
+        target_ref=stable_hash("security_obligation_target", ORIGIN),
+        target_origin=ORIGIN,
+        authorization=_authorization(workflows=workflows),
+        selected_world_id="alice",
+        owned_world_ids=("alice",),
+        lifecycle_available=True,
+        available_backends=(
+            "graph_bound_prerequisite",
+            "prerequisite_omission",
+        ),
+        graph_bound_prerequisite_terminal_ids=(f"action:{'a' * 64}",),
+    )
+    requirement, backend = _world_requirement(
+        SecurityProperty.PREREQUISITE_ENFORCEMENT,
+        label="export",
+        context=context,
+        terminal_operation_id=f"action:{'a' * 64}",
+    )
+
+    assert backend == expected_backend
+    assert requirement.required_workflows == (
+        (GRAPH_BOUND_PREREQUISITE_WORKFLOW,)
+        if expected_backend == "graph_bound_prerequisite"
+        else workflows
+    )
+
+
+def test_graph_backend_is_bound_to_the_exact_compiled_terminal():
+    graph_terminal_id = f"action:{'a' * 64}"
+    other_terminal_id = f"action:{'b' * 64}"
+    context = GoalPlanningContext.build(
+        target_ref=stable_hash("security_obligation_target", ORIGIN),
+        target_origin=ORIGIN,
+        authorization=_authorization(
+            workflows=(
+                GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+                "behavioral_compiled_owned_sequence",
+                "behavioral_state_machine_omission",
+                "behavioral_state_machine_omission_confirmation",
+            )
+        ),
+        selected_world_id="alice",
+        owned_world_ids=("alice",),
+        lifecycle_available=True,
+        available_backends=(
+            "graph_bound_prerequisite",
+            "prerequisite_omission",
+        ),
+        graph_bound_prerequisite_terminal_ids=(graph_terminal_id,),
+    )
+
+    _requirement, backend = _world_requirement(
+        SecurityProperty.PREREQUISITE_ENFORCEMENT,
+        label="export",
+        context=context,
+        terminal_operation_id=other_terminal_id,
+    )
+
+    assert backend == "prerequisite_omission"
 
 
 def test_static_admission_module_has_no_async_or_transport_surface():
@@ -345,3 +449,118 @@ def test_static_admission_module_has_no_async_or_transport_surface():
     assert "raw_send" not in source
     assert ".execute(" not in source
     assert ".try_reserve(" not in source
+
+
+def test_static_admission_rejects_multiple_cleanup_lifecycles_before_budget():
+    lifecycle, state_machine, compilation = _compile(_branch_join_records())
+    original = compilation.specifications[0]
+    candidate = next(
+        item
+        for item in state_machine.candidates
+        if item.candidate_id == original.state_machine_candidate_id
+    )
+    support_rule = next(
+        item
+        for item in compilation.support_matrix
+        if item.rule_id == original.support_rule_id
+    )
+    first_lifecycle = next(
+        item
+        for item in lifecycle.candidates
+        if item.lifecycle_id == original.cleanup.bindings[0].lifecycle_id
+    )
+    second_lifecycle = replace(
+        first_lifecycle,
+        lifecycle_id=stable_hash(
+            "owned_lifecycle",
+            "static-admission-second-cleanup",
+        ),
+        create_operation_id=stable_hash(
+            "action",
+            "static-admission-second-create",
+        ),
+        cleanup_operation_id=stable_hash(
+            "action",
+            "static-admission-second-cleanup",
+        ),
+        cleanup_binding_id=stable_hash(
+            "lineage_binding",
+            "static-admission-second-cleanup",
+        ),
+    )
+    fresh_state = type(original.fresh_state).build(
+        world_ref=original.fresh_state.world_ref,
+        lifecycle_ids=(
+            first_lifecycle.lifecycle_id,
+            second_lifecycle.lifecycle_id,
+        ),
+        baseline_source_ref=original.fresh_state.baseline_source_ref,
+        reference_state_id=original.fresh_state.reference_state_id,
+        reference_response_status=(
+            original.fresh_state.reference_response_status
+        ),
+        reference_response_body_hash=(
+            original.fresh_state.reference_response_body_hash
+        ),
+    )
+    cleanup = type(original.cleanup).build(
+        (first_lifecycle, second_lifecycle)
+    )
+    two_cleanup_spec = type(original).build(
+        candidate=candidate,
+        support_rule=support_rule,
+        delta=original.delta,
+        fresh_state=fresh_state,
+        cleanup=cleanup,
+        execution_blockers=original.execution_blockers,
+    )
+    specifications = tuple(
+        sorted(
+            (
+                two_cleanup_spec,
+                *(
+                    item
+                    for item in compilation.specifications
+                    if item.spec_id != original.spec_id
+                ),
+            ),
+            key=lambda item: item.spec_id,
+        )
+    )
+    compilation_payload = compilation.to_dict()
+    compilation_payload.pop("schema_version")
+    compilation_payload.pop("result_id")
+    compilation_payload["specifications"] = [
+        item.to_dict() for item in specifications
+    ]
+    compilation = replace(
+        compilation,
+        result_id=stable_hash(
+            "graph_bound_experiment_compilation",
+            compilation_payload,
+        ),
+        specifications=specifications,
+    )
+
+    executor, calls = _executor()
+    result = GraphBoundManifestAdmissionPlanner().plan(
+        compilation=compilation,
+        target_origin=ORIGIN,
+        target_ref=stable_hash("security_obligation_target", ORIGIN),
+        world_id="alice",
+        authorization=_authorization(),
+        executor=executor,
+        actor_persona_id="alice",
+    )
+
+    assert len(two_cleanup_spec.cleanup.bindings) == 2
+    assert result.status == "ready_for_explicit_execution_boundary"
+    assert len(result.manifests) == len(compilation.specifications) - 1
+    assert result.diagnostics.safety_blocked_specifications == 1
+    assert result.diagnostics.budget_blocked_specifications == 0
+    assert all(
+        manifest.specification.spec_id != two_cleanup_spec.spec_id
+        for manifest in result.manifests
+    )
+    assert executor.policy.budget.snapshot()["total_requests"] == 0
+    assert calls == []

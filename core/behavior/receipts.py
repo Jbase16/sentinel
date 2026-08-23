@@ -351,6 +351,7 @@ class BehavioralExecutionReceipt:
     reservation_hash: Optional[str] = field(default=None, repr=False)
     outcome: Optional[Dict[str, Any]] = None
     abort_reason: Optional[str] = None
+    terminal_evidence: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -364,6 +365,7 @@ class BehavioralExecutionReceipt:
             "reservation_hash": self.reservation_hash,
             "outcome": copy.deepcopy(self.outcome),
             "abort_reason": self.abort_reason,
+            "terminal_evidence": copy.deepcopy(self.terminal_evidence),
         }
 
     @classmethod
@@ -388,12 +390,14 @@ class BehavioralExecutionReceipt:
         reservation_hash = value.get("reservation_hash")
         outcome = value.get("outcome")
         abort_reason = value.get("abort_reason")
+        terminal_evidence = value.get("terminal_evidence")
         if state == RESERVED:
             if (
                 not isinstance(reservation_hash, str)
                 or not re_full_sha256(reservation_hash)
                 or outcome is not None
                 or abort_reason is not None
+                or terminal_evidence is not None
             ):
                 raise ReceiptStoreError("behavioral reserved receipt is invalid")
         elif reservation_hash is not None:
@@ -401,8 +405,13 @@ class BehavioralExecutionReceipt:
 
         normalized_outcome: Optional[Dict[str, Any]] = None
         normalized_reason: Optional[str] = None
+        normalized_terminal_evidence: Optional[Dict[str, Any]] = None
         if state == COMPLETED:
-            if not isinstance(outcome, Mapping) or abort_reason is not None:
+            if (
+                not isinstance(outcome, Mapping)
+                or abort_reason is not None
+                or terminal_evidence is not None
+            ):
                 raise ReceiptStoreError("behavioral completed receipt is invalid")
             normalized_outcome = _redacted_stored_outcome(outcome)
             if normalized_outcome != dict(outcome):
@@ -413,6 +422,20 @@ class BehavioralExecutionReceipt:
             if _ABORT_REASON.fullmatch(abort_reason) is None:
                 raise ReceiptStoreError("behavioral receipt abort reason is invalid")
             normalized_reason = abort_reason
+            if terminal_evidence is not None:
+                if not isinstance(terminal_evidence, Mapping):
+                    raise ReceiptStoreError(
+                        "behavioral terminal evidence is invalid"
+                    )
+                normalized_terminal_evidence = (
+                    redacted_graph_bound_prerequisite_denial_evidence(
+                        terminal_evidence
+                    )
+                )
+                if normalized_terminal_evidence != dict(terminal_evidence):
+                    raise ReceiptStoreError(
+                        "behavioral terminal evidence is not strictly redacted"
+                    )
 
         return cls(
             receipt_id=receipt_id,
@@ -424,6 +447,7 @@ class BehavioralExecutionReceipt:
             reservation_hash=reservation_hash,
             outcome=normalized_outcome,
             abort_reason=normalized_reason,
+            terminal_evidence=normalized_terminal_evidence,
         )
 
 
@@ -3039,8 +3063,435 @@ def redacted_proof_experiment_omission_outcome(
     }
 
 
+def redacted_graph_bound_prerequisite_execution_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the only graph-bound execution fields allowed at rest."""
+
+    def typed_ref(value: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(value, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", value)
+        )
+
+    kind = response.get("kind")
+    mode = response.get("mode")
+    status = response.get("status")
+    verdict = response.get("oracle_verdict")
+    family = response.get("family")
+    claim_contract_id = response.get("claim_contract_id")
+    capture_freshness_ref = response.get("capture_freshness_ref")
+    plan_id = response.get("plan_id")
+    provisioning_id = response.get("provisioning_id")
+    oracle_requirement_id = response.get("oracle_requirement_id")
+    reference_state_id = response.get("reference_state_id")
+    oracle_evaluation_id = response.get("oracle_evaluation_id")
+    effect_witness_ref = response.get("effect_witness_ref")
+    runtime_value_inequality_ref = response.get(
+        "runtime_value_inequality_ref"
+    )
+    terminal_refs = response.get("terminal_evidence_refs")
+    cleanup_refs = response.get("cleanup_evidence_refs")
+    provenance_root = response.get("provenance_root")
+    candidate_ref = response.get("finding_candidate_ref")
+    finding_confirmed = response.get("finding_confirmed")
+    selection = {
+        key: response.get(key)
+        for key in (
+            "payout_goal_plan_id",
+            "payout_candidate_id",
+            "payout_goal_id",
+            "payout_terminal_operation_id",
+            "specification_id",
+            "plan_id",
+            "graph_target_ref",
+            "graph_digest",
+        )
+    }
+    selection_ref = response.get("selection_ref")
+    selection_present = selection_ref is not None or any(
+        value is not None
+        for key, value in selection.items()
+        if key != "plan_id"
+    )
+    counts = {
+        key: response.get(key)
+        for key in (
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "cleanup_verifications_attempted",
+            "cleanup_verifications_completed",
+            "ownership_grants_removed",
+            "target_requests_sent",
+        )
+    }
+    confirmed = verdict == "confirmed"
+    if (
+        kind != "graph_bound_prerequisite_execution"
+        or mode != "behavioral_graph_bound_prerequisite_execution_v1"
+        or status not in {"confirmed", "refuted", "inconclusive"}
+        or verdict != status
+        or family not in {"omission", "reordering"}
+        or response.get("receipt_state") != COMPLETED
+        or not typed_ref(
+            claim_contract_id,
+            "graph_bound_execution_claim_contract",
+        )
+        or not typed_ref(
+            capture_freshness_ref,
+            "graph_bound_capture_freshness",
+        )
+        or not typed_ref(plan_id, "graph_bound_prepared_request_plan")
+        or not typed_ref(
+            provisioning_id,
+            "graph_bound_fresh_world_provisioning",
+        )
+        or not typed_ref(
+            oracle_requirement_id,
+            "prerequisite_effect_oracle_requirement",
+        )
+        or not typed_ref(reference_state_id, "state")
+        or not typed_ref(
+            oracle_evaluation_id,
+            "graph_bound_prerequisite_oracle_evaluation",
+        )
+        or (
+            effect_witness_ref is not None
+            and not typed_ref(
+                effect_witness_ref,
+                "graph_bound_independent_effect_witness",
+            )
+        )
+        or (effect_witness_ref is not None)
+        != (runtime_value_inequality_ref is not None)
+        or (
+            runtime_value_inequality_ref is not None
+            and not typed_ref(
+                runtime_value_inequality_ref,
+                "graph_bound_runtime_value_inequality_attestation",
+            )
+        )
+        or (
+            family == "omission"
+            and verdict in {"confirmed", "refuted"}
+            and effect_witness_ref is None
+        )
+        or (family == "reordering" and effect_witness_ref is not None)
+        or not isinstance(terminal_refs, (list, tuple))
+        or len(terminal_refs) != 3
+        or any(not isinstance(item, str) for item in terminal_refs)
+        or len(set(terminal_refs)) != 3
+        or any(
+            not typed_ref(item, "graph_bound_terminal_observation")
+            for item in terminal_refs
+        )
+        or not isinstance(cleanup_refs, (list, tuple))
+        or len(cleanup_refs) != 6
+        or any(not isinstance(item, str) for item in cleanup_refs)
+        or len(set(cleanup_refs)) != 6
+        or any(
+            not typed_ref(item, "graph_bound_cleanup_evidence")
+            for item in cleanup_refs
+        )
+        or response.get("cleanup_status") != "verified"
+        or response.get("orphaned_owned_state_possible") is not False
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+            for value in counts.values()
+        )
+        or any(
+            counts[key] != 3
+            for key in (
+                "cleanup_steps_attempted",
+                "cleanup_steps_completed",
+                "cleanup_verifications_attempted",
+                "cleanup_verifications_completed",
+                "ownership_grants_removed",
+            )
+        )
+        or counts["target_requests_sent"] < 9
+        or not isinstance(provenance_root, str)
+        or re.fullmatch(r"[0-9a-f]{64}", provenance_root) is None
+        or not isinstance(finding_confirmed, bool)
+        or finding_confirmed != (confirmed and family == "omission")
+        or (candidate_ref is not None)
+        != (confirmed and family == "omission")
+        or (
+            candidate_ref is not None
+            and not typed_ref(
+                candidate_ref,
+                "graph_bound_prerequisite_candidate",
+            )
+        )
+        or (family == "reordering" and confirmed)
+        or response.get("adversarial_triage_required") is not True
+        or response.get("promotion_authority") is not False
+        or response.get("finding_authority") is not False
+        or (
+            selection_present
+            and (
+                not typed_ref(selection_ref, "graph_bound_one_click_selection")
+                or not typed_ref(
+                    selection["payout_goal_plan_id"],
+                    "payout_goal_plan",
+                )
+                or not typed_ref(
+                    selection["payout_candidate_id"],
+                    "payout_goal_candidate",
+                )
+                or not typed_ref(
+                    selection["payout_goal_id"],
+                    "security_witness_goal",
+                )
+                or not typed_ref(
+                    selection["payout_terminal_operation_id"],
+                    "action",
+                )
+                or not typed_ref(
+                    selection["specification_id"],
+                    "graph_bound_prerequisite_experiment",
+                )
+                or selection["plan_id"] != plan_id
+                or not typed_ref(
+                    selection["graph_target_ref"],
+                    "security_obligation_target",
+                )
+                or not typed_ref(
+                    selection["graph_digest"],
+                    "security_obligation_graph",
+                )
+                or selection_ref
+                != stable_hash("graph_bound_one_click_selection", selection)
+            )
+        )
+    ):
+        raise ReceiptStoreError(
+            "graph-bound prerequisite execution outcome is invalid"
+        )
+    outcome = {
+        "kind": kind,
+        "mode": mode,
+        "status": status,
+        "receipt_state": COMPLETED,
+        "claim_contract_id": claim_contract_id,
+        "capture_freshness_ref": capture_freshness_ref,
+        "plan_id": plan_id,
+        "family": family,
+        "provisioning_id": provisioning_id,
+        "oracle_requirement_id": oracle_requirement_id,
+        "reference_state_id": reference_state_id,
+        "oracle_evaluation_id": oracle_evaluation_id,
+        "oracle_verdict": verdict,
+        "effect_witness_ref": effect_witness_ref,
+        "runtime_value_inequality_ref": runtime_value_inequality_ref,
+        "terminal_evidence_refs": list(terminal_refs),
+        "cleanup_evidence_refs": list(cleanup_refs),
+        "cleanup_status": "verified",
+        **counts,
+        "orphaned_owned_state_possible": False,
+        "provenance_root": provenance_root,
+        "finding_candidate_ref": candidate_ref,
+        "finding_confirmed": finding_confirmed,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+    if selection_present:
+        outcome.update({**selection, "selection_ref": selection_ref})
+    return outcome
+
+
+def redacted_graph_bound_prerequisite_denial_evidence(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate graph-denial evidence that is safe to retain on an abort."""
+
+    required_fields = {
+        "schema_version",
+        "kind",
+        "status",
+        "denial_evidence_ref",
+        "graph_receipt_id",
+        "reason_code",
+        "category",
+        "claim_contract_id",
+        "capture_freshness_ref",
+        "plan_id",
+        "family",
+        "cleanup",
+        "finding_confirmed",
+        "promotion_authority",
+        "finding_authority",
+        "retry_authority",
+    }
+    if set(value) != required_fields:
+        raise ReceiptStoreError("graph-bound denial evidence fields are invalid")
+
+    def typed_ref(item: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(item, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", item)
+        )
+
+    cleanup = value.get("cleanup")
+    cleanup_fields = {
+        "status",
+        "cleanup_steps_attempted",
+        "cleanup_steps_completed",
+        "cleanup_verifications_attempted",
+        "cleanup_verifications_completed",
+        "ownership_grants_removed",
+        "cleanup_evidence_refs",
+        "orphaned_owned_state_possible",
+    }
+    if not isinstance(cleanup, Mapping) or set(cleanup) != cleanup_fields:
+        raise ReceiptStoreError("graph-bound denial cleanup evidence is invalid")
+    counts = {
+        key: cleanup.get(key)
+        for key in (
+            "cleanup_steps_attempted",
+            "cleanup_steps_completed",
+            "cleanup_verifications_attempted",
+            "cleanup_verifications_completed",
+            "ownership_grants_removed",
+        )
+    }
+    cleanup_refs = cleanup.get("cleanup_evidence_refs")
+    orphaned = cleanup.get("orphaned_owned_state_possible")
+    verified = (
+        all(value == 3 for value in counts.values())
+        and orphaned is False
+    )
+    if (
+        cleanup.get("status") not in {"verified", "failed", "uncertain"}
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in counts.values()
+        )
+        or counts["cleanup_steps_completed"]
+        > counts["cleanup_steps_attempted"]
+        or counts["cleanup_verifications_completed"]
+        > counts["cleanup_verifications_attempted"]
+        or counts["ownership_grants_removed"]
+        > counts["cleanup_verifications_completed"]
+        or not isinstance(orphaned, bool)
+        or (cleanup.get("status") == "verified") != verified
+        or (cleanup.get("status") == "verified") == orphaned
+        or not isinstance(cleanup_refs, (list, tuple))
+        or len(cleanup_refs)
+        != counts["cleanup_steps_attempted"]
+        + counts["cleanup_verifications_attempted"]
+        or list(cleanup_refs) != sorted(set(cleanup_refs))
+        or any(
+            not typed_ref(item, "graph_bound_cleanup_evidence")
+            for item in cleanup_refs
+        )
+    ):
+        raise ReceiptStoreError("graph-bound denial cleanup evidence is inconsistent")
+
+    graph_receipt_id = value.get("graph_receipt_id")
+    reason_code = value.get("reason_code")
+    category = value.get("category")
+    normalized_cleanup = {
+        "status": cleanup.get("status"),
+        **counts,
+        "cleanup_evidence_refs": list(cleanup_refs),
+        "orphaned_owned_state_possible": orphaned,
+    }
+    payload = {
+        "kind": "graph_bound_prerequisite_execution_denial",
+        "status": "denied",
+        "graph_receipt_id": graph_receipt_id,
+        "reason_code": reason_code,
+        "category": category,
+        "claim_contract_id": value.get("claim_contract_id"),
+        "capture_freshness_ref": value.get("capture_freshness_ref"),
+        "plan_id": value.get("plan_id"),
+        "family": value.get("family"),
+        "cleanup": normalized_cleanup,
+        "finding_confirmed": False,
+        "promotion_authority": False,
+        "finding_authority": False,
+        "retry_authority": False,
+    }
+    if (
+        value.get("schema_version") != 1
+        or value.get("kind") != payload["kind"]
+        or value.get("status") != "denied"
+        or not isinstance(graph_receipt_id, str)
+        or not graph_receipt_id.startswith("behavioral-")
+        or not re_full_sha256(graph_receipt_id[len("behavioral-") :])
+        or not isinstance(reason_code, str)
+        or _ABORT_REASON.fullmatch(reason_code) is None
+        or not isinstance(category, str)
+        or _ABORT_REASON.fullmatch(category) is None
+        or not typed_ref(
+            value.get("claim_contract_id"),
+            "graph_bound_execution_claim_contract",
+        )
+        or not typed_ref(
+            value.get("capture_freshness_ref"),
+            "graph_bound_capture_freshness",
+        )
+        or not typed_ref(
+            value.get("plan_id"),
+            "graph_bound_prepared_request_plan",
+        )
+        or value.get("family") not in {"omission", "reordering"}
+        or value.get("finding_confirmed") is not False
+        or value.get("promotion_authority") is not False
+        or value.get("finding_authority") is not False
+        or value.get("retry_authority") is not False
+        or value.get("denial_evidence_ref")
+        != stable_hash("graph_bound_prerequisite_denial_evidence", payload)
+    ):
+        raise ReceiptStoreError("graph-bound denial evidence is invalid")
+    return {
+        "schema_version": 1,
+        "denial_evidence_ref": value.get("denial_evidence_ref"),
+        **payload,
+    }
+
+
+def redacted_graph_bound_prerequisite_denial_response(
+    receipt: BehavioralExecutionReceipt,
+    *,
+    reused: bool,
+) -> Dict[str, Any]:
+    """Build one public denial solely from a durably aborted root receipt."""
+
+    if not isinstance(receipt, BehavioralExecutionReceipt):
+        raise TypeError("receipt must be a BehavioralExecutionReceipt")
+    if not isinstance(reused, bool):
+        raise TypeError("reused must be boolean")
+    if receipt.state != ABORTED or receipt.terminal_evidence is None:
+        raise ReceiptStoreError("graph-bound denial receipt is not terminal")
+    evidence = redacted_graph_bound_prerequisite_denial_evidence(
+        receipt.terminal_evidence
+    )
+    return {
+        "schema_version": 1,
+        "kind": "graph_bound_prerequisite_execution_denial",
+        "status": "denied",
+        "reused": reused,
+        "graph_receipt": {
+            "receipt_id": evidence["graph_receipt_id"],
+            "state": ABORTED,
+        },
+        "orchestration_receipt": {
+            "receipt_id": receipt.receipt_id,
+            "state": ABORTED,
+        },
+        "denial": evidence,
+    }
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    if response.get("kind") == "graph_bound_prerequisite_execution":
+        return redacted_graph_bound_prerequisite_execution_outcome(response)
     if response.get("kind") == "proof_experiment_generalized_authorization":
         return redacted_proof_experiment_generalized_authorization_outcome(
             response
@@ -3110,6 +3561,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "graph_bound_prerequisite_execution":
+        return redacted_graph_bound_prerequisite_execution_outcome(value)
     if value.get("kind") == "proof_experiment_generalized_authorization":
         return redacted_proof_experiment_generalized_authorization_outcome(
             value
@@ -3345,6 +3798,7 @@ class BehavioralReceiptStore:
         state: str,
         outcome: Optional[Mapping[str, Any]] = None,
         abort_reason: Optional[str] = None,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
     ) -> BehavioralExecutionReceipt:
         if state not in {COMPLETED, ABORTED}:
             raise ValueError("receipt terminal state is invalid")
@@ -3371,8 +3825,22 @@ class BehavioralReceiptStore:
                 _redacted_stored_outcome(outcome) if outcome is not None else None
             )
             normalized_reason = abort_reason
-            if state == COMPLETED and normalized_outcome is None:
-                raise ReceiptStoreError("completed receipt requires a redacted outcome")
+            normalized_terminal_evidence = (
+                redacted_graph_bound_prerequisite_denial_evidence(
+                    terminal_evidence
+                )
+                if terminal_evidence is not None
+                else None
+            )
+            if state == COMPLETED:
+                if normalized_outcome is None:
+                    raise ReceiptStoreError(
+                        "completed receipt requires a redacted outcome"
+                    )
+                if normalized_terminal_evidence is not None:
+                    raise ReceiptStoreError(
+                        "completed receipt cannot contain terminal denial evidence"
+                    )
             if state == ABORTED:
                 if (
                     not isinstance(normalized_reason, str)
@@ -3391,6 +3859,7 @@ class BehavioralReceiptStore:
                 updated_at=time.time(),
                 outcome=normalized_outcome,
                 abort_reason=normalized_reason,
+                terminal_evidence=normalized_terminal_evidence,
             )
             self._atomic_replace(
                 path,
@@ -3420,11 +3889,17 @@ class BehavioralReceiptStore:
         )
 
     def abort(
-        self, fingerprint: str, *, reservation_token: str, reason: str
+        self,
+        fingerprint: str,
+        *,
+        reservation_token: str,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
     ) -> BehavioralExecutionReceipt:
         return self._advance(
             fingerprint,
             reservation_token=reservation_token,
             state=ABORTED,
             abort_reason=reason,
+            terminal_evidence=terminal_evidence,
         )

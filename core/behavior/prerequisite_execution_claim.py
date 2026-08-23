@@ -23,6 +23,11 @@ from core.safety.proof_budget import ProofBudget
 
 from .lifecycle import LifecycleMiningResult
 from .normalize import stable_hash
+from .prerequisite_capture_freshness import (
+    GraphBoundCaptureFreshnessBinding,
+    GraphBoundCaptureFreshnessDenied,
+    graph_bound_capture_artifact_ref,
+)
 from .prerequisite_admission import (
     GraphBoundExperimentManifest,
     GraphBoundManifestAdmissionPlanner,
@@ -35,6 +40,8 @@ from .prerequisite_request_binding import (
     GraphBoundRequestBindingResult,
 )
 from .receipts import (
+    ABORTED,
+    BehavioralExecutionReceipt,
     BehavioralReceiptContext,
     BehavioralReceiptStore,
     redacted_receipt_context,
@@ -50,7 +57,12 @@ _HASH_REF = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{64}$")
 _BARE_HASH = re.compile(r"^[0-9a-f]{64}$")
 _SEMANTIC = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _SUPPORTED_FAMILIES = frozenset({"omission", "reordering"})
-_RUNTIME_STAGE_ORDER = {"provision": 0, "dispatch": 1, "cleanup": 2}
+_RUNTIME_STAGE_ORDER = {
+    "provision": 0,
+    "dispatch": 1,
+    "cleanup": 2,
+    "cleanup_verification": 3,
+}
 _RESOLVED_BLOCKERS = frozenset(
     {
         "atomic_budget_not_reserved",
@@ -62,9 +74,21 @@ _RESOLVED_BLOCKERS = frozenset(
 class GraphBoundExecutionClaimDenied(RuntimeError):
     """The graph-bound claim failed before target execution was possible."""
 
-    def __init__(self, reason: str, *, category: str = "admission") -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        category: str = "admission",
+        terminal_receipt: Optional[BehavioralExecutionReceipt] = None,
+    ) -> None:
         super().__init__(reason)
         self.category = category
+        if terminal_receipt is not None and (
+            not isinstance(terminal_receipt, BehavioralExecutionReceipt)
+            or terminal_receipt.state != ABORTED
+        ):
+            raise ValueError("graph-bound terminal receipt is invalid")
+        self.terminal_receipt = terminal_receipt
 
 
 def _hash_ref(value: object, prefix: Optional[str] = None) -> bool:
@@ -94,6 +118,7 @@ def _preview_payload(
     plan: GraphBoundPreparedRequestPlan,
     binding: GraphBoundRequestBindingResult,
     manifest: GraphBoundExperimentManifest,
+    capture_freshness_ref: str,
     receipt_fingerprint_ref: str,
     remaining_execution_blockers: Sequence[str],
 ) -> Dict[str, Any]:
@@ -109,6 +134,7 @@ def _preview_payload(
         "authorization_ref": manifest.authorization_ref,
         "authority_context_ref": manifest.authority_context_ref,
         "policy_ref": binding.policy_ref,
+        "capture_freshness_ref": capture_freshness_ref,
         "family": plan.family,
         "action_binding_ids": [item.binding_id for item in plan.request_bindings],
         "budget_binding_ids": [item.entry_id for item in plan.budget_bindings],
@@ -144,6 +170,7 @@ class GraphBoundExecutionClaimPreview:
     authorization_ref: str
     authority_context_ref: str
     policy_ref: str
+    capture_freshness_ref: str
     family: str
     action_binding_ids: Tuple[str, ...]
     budget_binding_ids: Tuple[str, ...]
@@ -171,6 +198,7 @@ class GraphBoundExecutionClaimPreview:
         plan: GraphBoundPreparedRequestPlan,
         binding: GraphBoundRequestBindingResult,
         manifest: GraphBoundExperimentManifest,
+        capture_freshness_ref: str,
         receipt_fingerprint_ref: str,
         remaining_execution_blockers: Sequence[str],
     ) -> "GraphBoundExecutionClaimPreview":
@@ -179,6 +207,7 @@ class GraphBoundExecutionClaimPreview:
             plan=plan,
             binding=binding,
             manifest=manifest,
+            capture_freshness_ref=capture_freshness_ref,
             receipt_fingerprint_ref=receipt_fingerprint_ref,
             remaining_execution_blockers=blockers,
         )
@@ -195,6 +224,7 @@ class GraphBoundExecutionClaimPreview:
             authorization_ref=manifest.authorization_ref,
             authority_context_ref=manifest.authority_context_ref,
             policy_ref=binding.policy_ref or "",
+            capture_freshness_ref=capture_freshness_ref,
             family=plan.family,
             action_binding_ids=tuple(item.binding_id for item in plan.request_bindings),
             budget_binding_ids=tuple(item.entry_id for item in plan.budget_bindings),
@@ -217,6 +247,7 @@ class GraphBoundExecutionClaimPreview:
             "authorization_ref": self.authorization_ref,
             "authority_context_ref": self.authority_context_ref,
             "policy_ref": self.policy_ref,
+            "capture_freshness_ref": self.capture_freshness_ref,
             "family": self.family,
             "action_binding_ids": list(self.action_binding_ids),
             "budget_binding_ids": list(self.budget_binding_ids),
@@ -254,6 +285,10 @@ class GraphBoundExecutionClaimPreview:
             (self.authorization_ref, "graph_bound_authorization"),
             (self.authority_context_ref, "experiment_authority_context"),
             (self.policy_ref, "graph_bound_experiment_policy"),
+            (
+                self.capture_freshness_ref,
+                "graph_bound_capture_freshness",
+            ),
             (self.budget_preview_ref, "graph_bound_budget_preview"),
             (
                 self.receipt_fingerprint_ref,
@@ -320,6 +355,7 @@ class GraphBoundExecutionClaimPreview:
             "authorization_ref": self.authorization_ref,
             "authority_context_ref": self.authority_context_ref,
             "policy_ref": self.policy_ref,
+            "capture_freshness_ref": self.capture_freshness_ref,
             "family": self.family,
             "action_binding_ids": list(self.action_binding_ids),
             "budget_binding_ids": list(self.budget_binding_ids),
@@ -479,6 +515,11 @@ class _ClaimRuntimePlan:
     policy_ref: str
     authorization_ref: str
     authority_context_ref: str
+    oracle_requirement_id: str
+    reference_state_id: str
+    reference_response_status: int
+    reference_response_body_hash: str
+    cleanup_requirement_id: str
     authorization: AuthorizationEnvelope = field(repr=False, compare=False)
     executor: PolicyExecutor = field(repr=False, compare=False)
 
@@ -488,9 +529,13 @@ class _ClaimRuntimePlan:
                 "cleanup"
                 if item.phase == "cleanup"
                 else (
-                    "dispatch"
-                    if item.operation_id == self.terminal_operation_id
-                    else "provision"
+                    "cleanup_verification"
+                    if item.phase == "cleanup_verification"
+                    else (
+                        "dispatch"
+                        if item.operation_id == self.terminal_operation_id
+                        else "provision"
+                    )
                 )
             )
             for item in self.plan.request_bindings
@@ -504,6 +549,7 @@ class _ClaimRuntimePlan:
             or stages
             != tuple(sorted(stages, key=_RUNTIME_STAGE_ORDER.__getitem__))
             or stages.count("dispatch") != 3
+            or stages.count("cleanup_verification") != 3
             or not self.actor_persona_id
             or _canonical_origin(self.target_origin) != self.target_origin
             or not _hash_ref(self.policy_ref, "graph_bound_experiment_policy")
@@ -511,6 +557,19 @@ class _ClaimRuntimePlan:
             or not _hash_ref(
                 self.authority_context_ref,
                 "experiment_authority_context",
+            )
+            or not _hash_ref(
+                self.oracle_requirement_id,
+                "prerequisite_effect_oracle_requirement",
+            )
+            or not _hash_ref(self.reference_state_id, "state")
+            or isinstance(self.reference_response_status, bool)
+            or not isinstance(self.reference_response_status, int)
+            or not 200 <= self.reference_response_status < 300
+            or not _hash_ref(self.reference_response_body_hash, "sha256")
+            or not _hash_ref(
+                self.cleanup_requirement_id,
+                "graph_cleanup_requirement",
             )
             or not isinstance(self.authorization, AuthorizationEnvelope)
             or not isinstance(self.executor, PolicyExecutor)
@@ -556,14 +615,38 @@ class _GraphBoundProvisioningAuthority:
     def state(self) -> str:
         return self._resources.state
 
+    @property
+    def terminal_receipt(self) -> Optional[BehavioralExecutionReceipt]:
+        return self._resources.terminal_receipt
+
+    @property
+    def receipt_id(self) -> str:
+        return self._resources.receipt_id
+
     def mark_provisioned(self) -> None:
         self._resources.mark_provisioned()
+
+    def begin_execution(self) -> None:
+        self._resources.begin_execution()
 
     def note_budget_units(self, count: int) -> None:
         self._resources.note_budget_units(count)
 
-    def abort(self, *, expected_state: str, reason: str) -> int:
-        return self._resources.abort(expected_state=expected_state, reason=reason)
+    def abort(
+        self,
+        *,
+        expected_state: str,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
+        return self._resources.abort(
+            expected_state=expected_state,
+            reason=reason,
+            terminal_evidence=terminal_evidence,
+        )
+
+    def complete(self, *, outcome: Mapping[str, Any]) -> Any:
+        return self._resources.complete(outcome=outcome)
 
 
 class _ClaimResources:
@@ -587,6 +670,7 @@ class _ClaimResources:
         self._receipt_reservation_token: Optional[str] = receipt_reservation_token
         self._authorized_budget_units = 0
         self._state = "active"
+        self._terminal_receipt: Optional[BehavioralExecutionReceipt] = None
         self._lock = threading.RLock()
         if (
             isinstance(expected_units, bool)
@@ -600,6 +684,15 @@ class _ClaimResources:
     def state(self) -> str:
         with self._lock:
             return self._state
+
+    @property
+    def terminal_receipt(self) -> Optional[BehavioralExecutionReceipt]:
+        with self._lock:
+            return self._terminal_receipt
+
+    @property
+    def receipt_id(self) -> str:
+        return f"behavioral-{self.receipt_fingerprint}"
 
     @property
     def reserved_units(self) -> int:
@@ -636,11 +729,24 @@ class _ClaimResources:
                 )
             self._state = "provisioned"
 
+    def begin_execution(self) -> None:
+        with self._lock:
+            if self._state != "provisioned":
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_dispatch_state_mismatch",
+                    category="claim",
+                )
+            self._state = "executing"
+
     def note_budget_units(self, count: int) -> None:
         if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
             raise ValueError("graph-bound budget unit count is invalid")
         with self._lock:
-            if self._state not in {"provisioning", "provisioned"}:
+            if self._state not in {
+                "provisioning",
+                "provisioned",
+                "executing",
+            }:
                 raise GraphBoundExecutionClaimDenied(
                     "graph_bound_execution_budget_accounting_state_mismatch",
                     category="claim",
@@ -657,7 +763,13 @@ class _ClaimResources:
                 )
             self._authorized_budget_units += count
 
-    def abort(self, *, expected_state: str, reason: str) -> int:
+    def abort(
+        self,
+        *,
+        expected_state: str,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
         if _SEMANTIC.fullmatch(str(reason or "")) is None:
             raise ValueError("graph-bound execution abort reason is invalid")
         with self._lock:
@@ -673,11 +785,13 @@ class _ClaimResources:
                     category="receipt",
                 )
             receipt_error: Optional[Exception] = None
+            terminal_receipt: Optional[BehavioralExecutionReceipt] = None
             try:
-                self.receipt_store.abort(
+                terminal_receipt = self.receipt_store.abort(
                     self.receipt_fingerprint,
                     reservation_token=token,
                     reason=reason,
+                    terminal_evidence=terminal_evidence,
                 )
             except Exception as exc:  # pragma: no cover - defensive store seam
                 receipt_error = exc
@@ -685,6 +799,7 @@ class _ClaimResources:
             released = self.budget.release_reservation(self.budget_reservation_id)
             self._receipt_reservation_token = None
             self._state = "aborted"
+            self._terminal_receipt = terminal_receipt
             if receipt_error is not None:
                 raise GraphBoundExecutionClaimDenied(
                     "graph_bound_execution_budget_released_but_receipt_abort_failed",
@@ -694,8 +809,75 @@ class _ClaimResources:
                 raise GraphBoundExecutionClaimDenied(
                     "graph_bound_execution_budget_release_mismatch",
                     category="budget",
+                    terminal_receipt=terminal_receipt,
                 )
             return released
+
+    def complete(self, *, outcome: Mapping[str, Any]) -> Any:
+        if not isinstance(outcome, Mapping):
+            raise TypeError("graph-bound execution outcome must be a mapping")
+        with self._lock:
+            if self._state != "executing":
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_claim_state_mismatch",
+                    category="claim",
+                )
+            token = self._receipt_reservation_token
+            if token is None:
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_receipt_token_unavailable",
+                    category="receipt",
+                )
+            if (
+                self._authorized_budget_units != self.expected_units
+                or self.budget.reservation_remaining(
+                    self.budget_reservation_id
+                )
+                != 0
+            ):
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_completion_budget_mismatch",
+                    category="budget",
+                )
+            try:
+                receipt = self.receipt_store.complete(
+                    self.receipt_fingerprint,
+                    reservation_token=token,
+                    outcome=outcome,
+                )
+            except Exception as exc:
+                try:
+                    self.receipt_store.abort(
+                        self.receipt_fingerprint,
+                        reservation_token=token,
+                        reason="graph_bound_execution_receipt_completion_failed",
+                    )
+                except Exception as abort_exc:
+                    self._receipt_reservation_token = None
+                    self._state = "aborted"
+                    raise GraphBoundExecutionClaimDenied(
+                        "graph_bound_execution_receipt_terminalization_failed",
+                        category="receipt",
+                    ) from abort_exc
+                self._receipt_reservation_token = None
+                self._state = "aborted"
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_receipt_completion_failed",
+                    category="receipt",
+                ) from exc
+            released = self.budget.release_reservation(
+                self.budget_reservation_id
+            )
+            if released != 0:
+                self._receipt_reservation_token = None
+                self._state = "completed"
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_completed_with_budget_residue",
+                    category="budget",
+                )
+            self._receipt_reservation_token = None
+            self._state = "completed"
+            return receipt
 
 
 class GraphBoundExecutionClaim:
@@ -797,6 +979,7 @@ class GraphBoundExecutionClaimAdmission:
         compilation: GraphBoundExperimentCompilationResult,
         admission: GraphBoundManifestAdmissionResult,
         request_binding: GraphBoundRequestBindingResult,
+        capture_freshness: GraphBoundCaptureFreshnessBinding,
         plan_id: str,
         config: Optional[GraphBoundExecutionClaimConfig] = None,
         receipt_store: Optional[BehavioralReceiptStore] = None,
@@ -826,6 +1009,10 @@ class GraphBoundExecutionClaimAdmission:
             raise TypeError("admission must be a GraphBoundManifestAdmissionResult")
         if not isinstance(request_binding, GraphBoundRequestBindingResult):
             raise TypeError("request_binding must be a GraphBoundRequestBindingResult")
+        if not isinstance(capture_freshness, GraphBoundCaptureFreshnessBinding):
+            raise TypeError(
+                "capture_freshness must be a GraphBoundCaptureFreshnessBinding"
+            )
         if not isinstance(plan_id, str) or not _hash_ref(
             plan_id,
             "graph_bound_prepared_request_plan",
@@ -854,6 +1041,7 @@ class GraphBoundExecutionClaimAdmission:
         self.compilation = compilation
         self.admission = admission
         self.request_binding = request_binding
+        self.capture_freshness = capture_freshness
         self.plan_id = plan_id
         self.config = (
             config
@@ -879,6 +1067,31 @@ class GraphBoundExecutionClaimAdmission:
                 "graph_bound_execution_authorization_not_copyable",
                 category="authority",
             ) from exc
+
+        try:
+            current_source_capture_ref = graph_bound_capture_artifact_ref(
+                self.records,
+                target_origin=self.target_origin,
+                world_id=self.world_id,
+            )
+        except GraphBoundCaptureFreshnessDenied as exc:
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_current_capture_invalid",
+                category="freshness",
+            ) from exc
+        if (
+            not self.capture_freshness.selection_revalidated
+            or self.capture_freshness.target_ref
+            != stable_hash("behavioral_capture_target", self.target_origin)
+            or self.capture_freshness.source_world_ref
+            != stable_hash("world", self.world_id)
+            or self.capture_freshness.current_source_capture_ref
+            != current_source_capture_ref
+        ):
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_capture_freshness_binding_mismatch",
+                category="freshness",
+            )
 
         target_ref = stable_hash(
             "security_obligation_target",
@@ -1003,7 +1216,19 @@ class GraphBoundExecutionClaimAdmission:
             "authorization_ref": manifest.authorization_ref,
             "authority_context_ref": manifest.authority_context_ref,
             "policy_ref": fresh_binding.policy_ref,
+            "capture_freshness_ref": self.capture_freshness.binding_id,
             "family": plan.family,
+            "oracle_requirement_id": manifest.specification.oracle.oracle_id,
+            "reference_state_id": (
+                manifest.specification.fresh_state.reference_state_id
+            ),
+            "reference_response_status": (
+                manifest.specification.fresh_state.reference_response_status
+            ),
+            "reference_response_body_hash": (
+                manifest.specification.fresh_state.reference_response_body_hash
+            ),
+            "cleanup_requirement_id": manifest.specification.cleanup.cleanup_id,
             "action_binding_ids": [item.binding_id for item in plan.request_bindings],
             "budget_binding_ids": [item.entry_id for item in plan.budget_bindings],
             "budget_preview_ref": plan.budget_preview_ref,
@@ -1018,6 +1243,7 @@ class GraphBoundExecutionClaimAdmission:
             plan=plan,
             binding=fresh_binding,
             manifest=manifest,
+            capture_freshness_ref=self.capture_freshness.binding_id,
             receipt_fingerprint_ref=fingerprint_ref,
             remaining_execution_blockers=remaining_blockers,
         )
@@ -1040,6 +1266,21 @@ class GraphBoundExecutionClaimAdmission:
                 policy_ref=preview.policy_ref,
                 authorization_ref=preview.authorization_ref,
                 authority_context_ref=preview.authority_context_ref,
+                oracle_requirement_id=(
+                    manifest.specification.oracle.oracle_id
+                ),
+                reference_state_id=(
+                    manifest.specification.fresh_state.reference_state_id
+                ),
+                reference_response_status=(
+                    manifest.specification.fresh_state.reference_response_status
+                ),
+                reference_response_body_hash=(
+                    manifest.specification.fresh_state.reference_response_body_hash
+                ),
+                cleanup_requirement_id=(
+                    manifest.specification.cleanup.cleanup_id
+                ),
                 authorization=authorization,
                 executor=self.executor,
             ),
@@ -1062,6 +1303,12 @@ class GraphBoundExecutionClaimAdmission:
             raise GraphBoundExecutionClaimDenied(
                 "graph_bound_execution_claim_replay_denied",
                 category="receipt",
+                terminal_receipt=(
+                    reservation.receipt
+                    if reservation.receipt.state == ABORTED
+                    and reservation.receipt.terminal_evidence is not None
+                    else None
+                ),
             )
         receipt_token = reservation.reservation_token
         if not receipt_token:

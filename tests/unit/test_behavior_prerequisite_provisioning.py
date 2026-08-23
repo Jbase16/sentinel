@@ -18,6 +18,9 @@ from core.safety.ownership_registry import OwnershipRegistry
 from core.safety.proof_budget import ProofBudget
 from core.safety.provenance import ProvenanceSink
 from tests.unit.test_behavior_prerequisite_admission import _authorization
+from tests.unit.test_behavior_prerequisite_execution_claim import (
+    _capture_freshness,
+)
 from tests.unit.test_behavior_prerequisite_experiments import ORIGIN, WORKFLOW_ID
 from tests.unit.test_behavior_prerequisite_request_binding import _context
 
@@ -112,6 +115,7 @@ def _active_case(
         compilation=compilation,
         admission=admission,
         request_binding=binding,
+        capture_freshness=_capture_freshness(records),
         plan_id=binding.plans[0].plan_id,
         config=GraphBoundExecutionClaimConfig(enabled=True),
         receipt_store=store,

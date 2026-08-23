@@ -4,8 +4,8 @@ R5B3b1 reconstructs current captured request templates, applies the one declared
 counterfactual, classifies every action, evaluates the current policy, and previews
 the exact ordered budget reservation. Raw request material remains ephemeral and is
 excluded from every public artifact. The reservation order places all fresh-world
-prerequisites before the three terminal actions and cleanup suffix. This module cannot
-reserve budget or send traffic.
+prerequisites before the three terminal actions, cleanup suffix, and independent
+post-cleanup verification reads. This module cannot reserve budget or send traffic.
 """
 
 from __future__ import annotations
@@ -75,6 +75,8 @@ GRAPH_BOUND_REQUEST_BINDING_MODE = "behavioral_graph_bound_request_binding_v1"
 _HASH_REF = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{64}$")
 _SEMANTIC = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _PHASES = ("baseline", "treatment", "control")
+_CLEANUP_PHASE = "cleanup"
+_CLEANUP_VERIFICATION_PHASE = "cleanup_verification"
 _WORLD_ROLE_BY_PHASE = {
     "baseline": "valid_baseline",
     "treatment": "counterfactual_treatment",
@@ -361,6 +363,9 @@ def _action_payload(
     expected_side_effect: str,
     input_binding_ids: Sequence[str],
     request_mutation_ref: Optional[str],
+    runtime_override_binding_id: Optional[str],
+    runtime_override_source_world_slot_id: Optional[str],
+    runtime_override_source_create_operation_id: Optional[str],
     conditional_cleanup: bool,
     policy_decision_ref: str,
 ) -> Dict[str, Any]:
@@ -380,6 +385,13 @@ def _action_payload(
         "expected_side_effect": expected_side_effect,
         "input_binding_ids": list(input_binding_ids),
         "request_mutation_ref": request_mutation_ref,
+        "runtime_override_binding_id": runtime_override_binding_id,
+        "runtime_override_source_world_slot_id": (
+            runtime_override_source_world_slot_id
+        ),
+        "runtime_override_source_create_operation_id": (
+            runtime_override_source_create_operation_id
+        ),
         "conditional_cleanup": conditional_cleanup,
         "policy_decision_ref": policy_decision_ref,
         "policy_allowed": True,
@@ -407,6 +419,9 @@ class GraphBoundRequestActionBinding:
     expected_side_effect: str
     input_binding_ids: Tuple[str, ...]
     request_mutation_ref: Optional[str]
+    runtime_override_binding_id: Optional[str]
+    runtime_override_source_world_slot_id: Optional[str]
+    runtime_override_source_create_operation_id: Optional[str]
     conditional_cleanup: bool
     policy_decision_ref: str
     policy_allowed: bool = True
@@ -431,6 +446,13 @@ class GraphBoundRequestActionBinding:
             expected_side_effect=self.expected_side_effect,
             input_binding_ids=self.input_binding_ids,
             request_mutation_ref=self.request_mutation_ref,
+            runtime_override_binding_id=self.runtime_override_binding_id,
+            runtime_override_source_world_slot_id=(
+                self.runtime_override_source_world_slot_id
+            ),
+            runtime_override_source_create_operation_id=(
+                self.runtime_override_source_create_operation_id
+            ),
             conditional_cleanup=self.conditional_cleanup,
             policy_decision_ref=self.policy_decision_ref,
         )
@@ -443,13 +465,17 @@ class GraphBoundRequestActionBinding:
             if isinstance(expected_method, str)
             else self.method in (expected_method or ())
         )
-        cleanup = self.phase == "cleanup"
+        cleanup = self.phase == _CLEANUP_PHASE
+        cleanup_verification = self.phase == _CLEANUP_VERIFICATION_PHASE
+        conditional_cleanup = cleanup or cleanup_verification
+        runtime_override = self.runtime_override_binding_id is not None
         if (
             self.binding_id != stable_hash("graph_bound_request_action", payload)
             or not _hash_ref(self.manifest_id, "graph_bound_experiment_manifest")
             or not _hash_ref(self.world_slot_id, "graph_bound_fresh_world_slot")
             or self.world_role not in _WORLD_ROLE_BY_PHASE.values()
-            or self.phase not in {*_PHASES, "cleanup"}
+            or self.phase
+            not in {*_PHASES, _CLEANUP_PHASE, _CLEANUP_VERIFICATION_PHASE}
             or isinstance(self.ordinal, bool)
             or not isinstance(self.ordinal, int)
             or self.ordinal < 0
@@ -476,12 +502,54 @@ class GraphBoundRequestActionBinding:
                     "graph_counterfactual_delta",
                 )
             )
+            or runtime_override
+            != (self.runtime_override_source_world_slot_id is not None)
+            or runtime_override
+            != (self.runtime_override_source_create_operation_id is not None)
+            or (
+                runtime_override
+                and (
+                    self.phase != "control"
+                    or self.world_role != _WORLD_ROLE_BY_PHASE["control"]
+                    or self.runtime_override_binding_id
+                    not in self.input_binding_ids
+                    or not _hash_ref(
+                        self.runtime_override_binding_id,
+                        "lineage_binding",
+                    )
+                    or not _hash_ref(
+                        self.runtime_override_source_world_slot_id,
+                        "graph_bound_fresh_world_slot",
+                    )
+                    or self.runtime_override_source_world_slot_id
+                    == self.world_slot_id
+                    or not _hash_ref(
+                        self.runtime_override_source_create_operation_id,
+                        "action",
+                    )
+                    or self.request_mutation_ref is not None
+                )
+            )
             or (
                 self.request_mutation_ref is not None
-                and self.phase != "treatment"
+                and not (
+                    self.phase == "treatment"
+                    or (
+                        cleanup_verification
+                        and self.world_role
+                        == _WORLD_ROLE_BY_PHASE["treatment"]
+                    )
+                )
             )
-            or self.conditional_cleanup != cleanup
+            or self.conditional_cleanup != conditional_cleanup
             or cleanup != (self.action_class == OWNED_UPDATE_LOW_RISK)
+            or (
+                cleanup_verification
+                and (
+                    self.action_class != SAFE_READ
+                    or self.method not in {"GET", "HEAD"}
+                )
+            )
             or not _hash_ref(
                 self.policy_decision_ref,
                 "graph_bound_policy_decision",
@@ -512,6 +580,13 @@ class GraphBoundRequestActionBinding:
                 expected_side_effect=self.expected_side_effect,
                 input_binding_ids=self.input_binding_ids,
                 request_mutation_ref=self.request_mutation_ref,
+                runtime_override_binding_id=self.runtime_override_binding_id,
+                runtime_override_source_world_slot_id=(
+                    self.runtime_override_source_world_slot_id
+                ),
+                runtime_override_source_create_operation_id=(
+                    self.runtime_override_source_create_operation_id
+                ),
                 conditional_cleanup=self.conditional_cleanup,
                 policy_decision_ref=self.policy_decision_ref,
             ),
@@ -696,6 +771,31 @@ class GraphBoundPreparedRequestPlan:
             for phase in _PHASES
         }
         raw_by_id = {item.binding_id: item for item in self.ephemeral_requests}
+        runtime_overrides = tuple(
+            item
+            for item in self.request_bindings
+            if item.runtime_override_binding_id is not None
+        )
+        terminal_actions = {
+            phase: tuple(
+                item
+                for item in self.request_bindings
+                if item.phase == phase
+                and item.operation_id == self.baseline_operation_ids[-1]
+            )
+            for phase in _PHASES
+        }
+        omission_witness_shape = bool(
+            self.family == "omission"
+            and all(len(terminal_actions[phase]) == 1 for phase in _PHASES)
+            and len(runtime_overrides) == 1
+            and runtime_overrides[0] is terminal_actions["control"][0]
+            and set(terminal_actions["baseline"][0].input_binding_ids)
+            - set(terminal_actions["treatment"][0].input_binding_ids)
+            == {runtime_overrides[0].runtime_override_binding_id}
+            and terminal_actions["control"][0].input_binding_ids
+            == terminal_actions["baseline"][0].input_binding_ids
+        )
         if (
             self.plan_id != stable_hash("graph_bound_prepared_request_plan", payload)
             or self.mode != GRAPH_BOUND_REQUEST_BINDING_MODE
@@ -715,7 +815,7 @@ class GraphBoundPreparedRequestPlan:
             or phase_operations["control"] != self.baseline_operation_ids
             or phase_operations["treatment"] != self.treatment_operation_ids
             or any(
-                item.phase != "cleanup"
+                item.phase in _PHASES
                 and item.world_role != _WORLD_ROLE_BY_PHASE[item.phase]
                 for item in self.request_bindings
             )
@@ -723,10 +823,22 @@ class GraphBoundPreparedRequestPlan:
                 item.request_mutation_ref is not None
                 for item in self.request_bindings
             )
-            != (1 if self.family == "omission" else 0)
+            != (2 if self.family == "omission" else 0)
             or any(
                 item.request_mutation_ref not in {None, self.delta_id}
                 for item in self.request_bindings
+            )
+            or len(runtime_overrides)
+            != (1 if self.family == "omission" else 0)
+            or (self.family == "omission" and not omission_witness_shape)
+            or (
+                self.family == "omission"
+                and runtime_overrides[0].runtime_override_source_world_slot_id
+                not in {
+                    item.world_slot_id
+                    for item in self.request_bindings
+                    if item.phase == "baseline"
+                }
             )
             or not self.request_bindings
             or tuple(item.ordinal for item in self.request_bindings)
@@ -1157,7 +1269,12 @@ class GraphBoundRequestBinder:
         request: EphemeralRehydratedStep,
         create_operation_ids: frozenset[str],
         cleanup: bool,
+        cleanup_verification: bool = False,
     ) -> Tuple[str, str, bool]:
+        if cleanup and cleanup_verification:
+            raise GraphBoundRequestBindingDenied(
+                "graph_bound_request_phase_is_ambiguous"
+            )
         if cleanup:
             if (
                 request.method not in {"PATCH", "PUT"}
@@ -1167,6 +1284,12 @@ class GraphBoundRequestBinder:
                     "graph_bound_cleanup_request_is_not_safe"
                 )
             return OWNED_UPDATE_LOW_RISK, "cleanup_owned_test_object", True
+        if cleanup_verification:
+            if request.method not in {"GET", "HEAD"}:
+                raise GraphBoundRequestBindingDenied(
+                    "graph_bound_cleanup_verification_request_is_not_safe"
+                )
+            return SAFE_READ, "none", True
         if request.operation_id in create_operation_ids:
             if (
                 request.method != "POST"
@@ -1194,6 +1317,9 @@ class GraphBoundRequestBinder:
         input_bindings: Sequence[LineageBinding],
         output_bindings: Sequence[LineageBinding],
         request_mutation_ref: Optional[str],
+        runtime_override_binding_id: Optional[str],
+        runtime_override_source_world_slot_id: Optional[str],
+        runtime_override_source_create_operation_id: Optional[str],
         action_class: str,
         expected_side_effect: str,
         conditional_cleanup: bool,
@@ -1267,6 +1393,13 @@ class GraphBoundRequestBinder:
             expected_side_effect=expected_side_effect,
             input_binding_ids=tuple(sorted(set(input_binding_ids))),
             request_mutation_ref=request_mutation_ref,
+            runtime_override_binding_id=runtime_override_binding_id,
+            runtime_override_source_world_slot_id=(
+                runtime_override_source_world_slot_id
+            ),
+            runtime_override_source_create_operation_id=(
+                runtime_override_source_create_operation_id
+            ),
             conditional_cleanup=conditional_cleanup,
             policy_decision_ref=policy_decision_ref,
         )
@@ -1287,6 +1420,13 @@ class GraphBoundRequestBinder:
             expected_side_effect=expected_side_effect,
             input_binding_ids=tuple(sorted(set(input_binding_ids))),
             request_mutation_ref=request_mutation_ref,
+            runtime_override_binding_id=runtime_override_binding_id,
+            runtime_override_source_world_slot_id=(
+                runtime_override_source_world_slot_id
+            ),
+            runtime_override_source_create_operation_id=(
+                runtime_override_source_create_operation_id
+            ),
             conditional_cleanup=conditional_cleanup,
             policy_decision_ref=policy_decision_ref,
         )
@@ -1362,12 +1502,17 @@ class GraphBoundRequestBinder:
             request: EphemeralRehydratedStep,
             input_bindings: Sequence[LineageBinding],
             mutation_ref: Optional[str] = None,
+            runtime_override_binding_id: Optional[str] = None,
+            runtime_override_source_world_slot_id: Optional[str] = None,
+            runtime_override_source_create_operation_id: Optional[str] = None,
             cleanup: bool = False,
+            cleanup_verification: bool = False,
         ) -> None:
             action_class, expected_effect, conditional = self._expected_action(
                 request=request,
                 create_operation_ids=create_operation_ids,
                 cleanup=cleanup,
+                cleanup_verification=cleanup_verification,
             )
             bound = self._bind_action(
                 manifest=manifest,
@@ -1383,6 +1528,13 @@ class GraphBoundRequestBinder:
                     if item.producer_operation_id == request.operation_id
                 ),
                 request_mutation_ref=mutation_ref,
+                runtime_override_binding_id=runtime_override_binding_id,
+                runtime_override_source_world_slot_id=(
+                    runtime_override_source_world_slot_id
+                ),
+                runtime_override_source_create_operation_id=(
+                    runtime_override_source_create_operation_id
+                ),
                 action_class=action_class,
                 expected_side_effect=expected_effect,
                 conditional_cleanup=conditional,
@@ -1402,6 +1554,7 @@ class GraphBoundRequestBinder:
             )
             for phase in _PHASES
         }
+        terminal_requests = {}
 
         def append_phase_operation(*, phase: str, operation_id: str) -> None:
             world_role = _WORLD_ROLE_BY_PHASE[phase]
@@ -1412,6 +1565,9 @@ class GraphBoundRequestBinder:
                 if item.consumer_operation_id == operation_id
             )
             mutation_ref = None
+            runtime_override_binding_id = None
+            runtime_override_source_world_slot_id = None
+            runtime_override_source_create_operation_id = None
             if (
                 phase == "treatment"
                 and specification.delta.family
@@ -1438,22 +1594,71 @@ class GraphBoundRequestBinder:
                     if item.binding_id != target_binding_id
                 )
                 mutation_ref = specification.delta.delta_id
+            if (
+                phase == "control"
+                and specification.delta.family
+                is PrerequisiteCounterfactualFamily.OMISSION
+                and operation_id == specification.terminal_operation_id
+            ):
+                target_binding_id = specification.delta.target_binding_ids[0]
+                binding = recipe_bindings.get(target_binding_id)
+                if binding is None or binding not in input_bindings:
+                    raise GraphBoundRequestBindingDenied(
+                        "graph_bound_effect_witness_binding_is_not_current"
+                    )
+                producer_create_bindings = tuple(
+                    item
+                    for item in recipe.bindings
+                    if item.consumer_operation_id
+                    == binding.producer_operation_id
+                    and item.producer_operation_id in create_operation_ids
+                )
+                if len(producer_create_bindings) != 1:
+                    raise GraphBoundRequestBindingDenied(
+                        "graph_bound_effect_witness_producer_is_not_directly_owned"
+                    )
+                runtime_override_binding_id = target_binding_id
+                runtime_override_source_world_slot_id = slots[
+                    "valid_baseline"
+                ].slot_id
+                runtime_override_source_create_operation_id = (
+                    producer_create_bindings[0].producer_operation_id
+                )
             append_request(
                 world_role=world_role,
                 phase=phase,
                 request=request,
                 input_bindings=input_bindings,
                 mutation_ref=mutation_ref,
+                runtime_override_binding_id=runtime_override_binding_id,
+                runtime_override_source_world_slot_id=(
+                    runtime_override_source_world_slot_id
+                ),
+                runtime_override_source_create_operation_id=(
+                    runtime_override_source_create_operation_id
+                ),
             )
+            if operation_id == specification.terminal_operation_id:
+                terminal_requests[phase] = (
+                    request,
+                    input_bindings,
+                    mutation_ref,
+                )
 
         # Provision all three fresh worlds before any terminal experiment action.
         # The reserved sequence can therefore stop at a hard boundary without
         # dispatching a baseline, treatment, or control observation.
+        terminal_phases = (
+            ("control", "baseline", "treatment")
+            if specification.delta.family
+            is PrerequisiteCounterfactualFamily.OMISSION
+            else _PHASES
+        )
         for phase in _PHASES:
             for operation_id in phase_operation_ids[phase]:
                 if operation_id != specification.terminal_operation_id:
                     append_phase_operation(phase=phase, operation_id=operation_id)
-        for phase in _PHASES:
+        for phase in terminal_phases:
             if specification.terminal_operation_id not in phase_operation_ids[phase]:
                 raise GraphBoundRequestBindingDenied(
                     "graph_bound_terminal_operation_is_missing"
@@ -1472,6 +1677,19 @@ class GraphBoundRequestBinder:
                     input_bindings=(cleanup_binding,),
                     cleanup=True,
                 )
+        for phase in _PHASES:
+            world_role = _WORLD_ROLE_BY_PHASE[phase]
+            terminal_request, input_bindings, mutation_ref = terminal_requests[
+                phase
+            ]
+            append_request(
+                world_role=world_role,
+                phase=_CLEANUP_VERIFICATION_PHASE,
+                request=terminal_request,
+                input_bindings=input_bindings,
+                mutation_ref=mutation_ref,
+                cleanup_verification=True,
+            )
 
         public_requests = tuple(request_bindings)
         public_budget = tuple(budget_bindings)
@@ -1482,13 +1700,20 @@ class GraphBoundRequestBinder:
             )
         phase_counts = {
             phase: sum(item.phase == phase for item in public_requests)
-            for phase in (*_PHASES, "cleanup")
+            for phase in (
+                *_PHASES,
+                _CLEANUP_PHASE,
+                _CLEANUP_VERIFICATION_PHASE,
+            )
         }
         if phase_counts != {
             "baseline": manifest.budget.baseline_request_units,
             "treatment": manifest.budget.treatment_request_units,
             "control": manifest.budget.control_request_units,
-            "cleanup": manifest.budget.cleanup_request_units,
+            _CLEANUP_PHASE: manifest.budget.cleanup_request_units,
+            _CLEANUP_VERIFICATION_PHASE: (
+                manifest.budget.cleanup_verification_request_units
+            ),
         }:
             raise GraphBoundRequestBindingDenied(
                 "graph_bound_bound_request_phase_count_mismatch"

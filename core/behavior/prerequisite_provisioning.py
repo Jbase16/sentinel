@@ -9,6 +9,7 @@ values in memory. Terminal experiment actions are deliberately not dispatched.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, NoReturn, Optional, Sequence, Tuple
@@ -449,6 +450,7 @@ def _runtime_entries(runtime_plan: Any) -> Tuple[
     Tuple[_RuntimeEntry, ...],
     Tuple[_RuntimeEntry, ...],
     Tuple[_RuntimeEntry, ...],
+    Tuple[_RuntimeEntry, ...],
 ]:
     plan = runtime_plan.plan
     raw_by_id = {item.binding_id: item for item in plan.ephemeral_requests}
@@ -478,23 +480,42 @@ def _runtime_entries(runtime_plan: Any) -> Tuple[
     provision = tuple(
         item
         for item in entries
-        if item.binding.phase != "cleanup"
+        if item.binding.phase in {"baseline", "treatment", "control"}
         and item.binding.operation_id != runtime_plan.terminal_operation_id
     )
     dispatch = tuple(
         item
         for item in entries
-        if item.binding.phase != "cleanup"
+        if item.binding.phase in {"baseline", "treatment", "control"}
         and item.binding.operation_id == runtime_plan.terminal_operation_id
     )
     cleanup = tuple(item for item in entries if item.binding.phase == "cleanup")
+    cleanup_verification = tuple(
+        item
+        for item in entries
+        if item.binding.phase == "cleanup_verification"
+    )
     cleanup_role_counts = {
         role: sum(item.binding.world_role == role for item in cleanup)
         for role in _WORLD_ROLES
     }
+    expected_dispatch_roles = (
+        (
+            "independent_control",
+            "valid_baseline",
+            "counterfactual_treatment",
+        )
+        if plan.family == "omission"
+        else _WORLD_ROLES
+    )
     if (
-        entries != (*provision, *dispatch, *cleanup)
-        or tuple(item.binding.world_role for item in dispatch) != _WORLD_ROLES
+        entries != (*provision, *dispatch, *cleanup, *cleanup_verification)
+        or tuple(item.binding.world_role for item in dispatch)
+        != expected_dispatch_roles
+        or tuple(
+            item.binding.world_role for item in cleanup_verification
+        )
+        != _WORLD_ROLES
         or not cleanup
         or len(set(cleanup_role_counts.values())) != 1
         or 0 in cleanup_role_counts.values()
@@ -505,7 +526,7 @@ def _runtime_entries(runtime_plan: Any) -> Tuple[
             "graph_bound_provisioning_stage_contract_mismatch",
             category="plan",
         )
-    return provision, dispatch, cleanup
+    return provision, dispatch, cleanup, cleanup_verification
 
 
 def _validate_runtime_authority(runtime_plan: Any) -> None:
@@ -566,13 +587,101 @@ def _validate_runtime_authority(runtime_plan: Any) -> None:
         )
 
 
+def _runtime_override_inequality_attestation(
+    entry: _RuntimeEntry,
+    runtime_values: Mapping[Tuple[str, str], Any],
+) -> Optional[str]:
+    binding_id = entry.binding.runtime_override_binding_id
+    source_world_slot_id = (
+        entry.binding.runtime_override_source_world_slot_id
+    )
+    if binding_id is None:
+        return None
+    source_key = (source_world_slot_id, binding_id)
+    destination_key = (entry.binding.world_slot_id, binding_id)
+    if source_key not in runtime_values or destination_key not in runtime_values:
+        raise GraphBoundFreshWorldProvisioningDenied(
+            "graph_bound_runtime_override_value_unavailable",
+            category="lineage",
+        )
+    override_binding = next(
+        (
+            binding
+            for binding in entry.input_bindings
+            if binding.binding_id == binding_id
+        ),
+        None,
+    )
+    if override_binding is None:
+        raise GraphBoundFreshWorldProvisioningDenied(
+            "graph_bound_runtime_override_binding_unavailable",
+            category="lineage",
+        )
+
+    def materialize(override_value: Any) -> EphemeralRehydratedStep:
+        request = entry.request
+        for binding in entry.input_bindings:
+            value = (
+                override_value
+                if binding.binding_id == binding_id
+                else runtime_values[(entry.binding.world_slot_id, binding.binding_id)]
+            )
+            request = _apply_binding(request, binding, value)
+        return request
+
+    def wire_shape(request: EphemeralRehydratedStep) -> Tuple[Any, ...]:
+        body = request.body
+        if not isinstance(body, (str, bytes, type(None))):
+            body = json.dumps(
+                body,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        return (
+            request.method,
+            request.url,
+            tuple(sorted((str(key), str(value)) for key, value in request.headers.items())),
+            body,
+        )
+
+    source_request = materialize(runtime_values[source_key])
+    destination_request = materialize(runtime_values[destination_key])
+    if wire_shape(source_request) == wire_shape(destination_request):
+        raise GraphBoundFreshWorldProvisioningDenied(
+            "graph_bound_runtime_override_wire_values_not_distinct",
+            category="lineage",
+        )
+    return stable_hash(
+        "graph_bound_runtime_value_inequality_attestation",
+        {
+            "request_binding_id": entry.binding.binding_id,
+            "binding_id": binding_id,
+            "source_world_slot_id": source_world_slot_id,
+            "destination_world_slot_id": entry.binding.world_slot_id,
+            "source_create_operation_id": (
+                entry.binding.runtime_override_source_create_operation_id
+            ),
+            "values_present": True,
+            "values_distinct": True,
+        },
+    )
+
+
 def _rehydrate(
     entry: _RuntimeEntry,
     runtime_values: Mapping[Tuple[str, str], Any],
 ) -> EphemeralRehydratedStep:
+    _runtime_override_inequality_attestation(entry, runtime_values)
     request = entry.request
     for binding in entry.input_bindings:
-        key = (entry.binding.world_slot_id, binding.binding_id)
+        source_world_slot_id = (
+            entry.binding.runtime_override_source_world_slot_id
+            if binding.binding_id
+            == entry.binding.runtime_override_binding_id
+            else entry.binding.world_slot_id
+        )
+        key = (source_world_slot_id, binding.binding_id)
         if key not in runtime_values:
             raise GraphBoundFreshWorldProvisioningDenied(
                 "graph_bound_runtime_dependency_value_unavailable",
@@ -598,6 +707,7 @@ async def _cleanup_and_abort(
     authority: _GraphBoundProvisioningAuthority,
     dispatch_entries: Sequence[_RuntimeEntry],
     cleanup_entries: Sequence[_RuntimeEntry],
+    cleanup_verification_entries: Sequence[_RuntimeEntry],
     runtime_values: Mapping[Tuple[str, str], Any],
     created: Mapping[Tuple[str, str], _CreatedState],
     expected_state: str,
@@ -610,7 +720,8 @@ async def _cleanup_and_abort(
     reservation_id = authority.budget_reservation_id
     cleanup_count = len(cleanup_entries)
     before_cleanup = budget.reservation_remaining(reservation_id)
-    skip_count = before_cleanup - cleanup_count
+    verification_count = len(cleanup_verification_entries)
+    skip_count = before_cleanup - cleanup_count - verification_count
     if skip_count < 0:
         orphaned = True
     elif skip_count:
@@ -688,6 +799,13 @@ async def _cleanup_and_abort(
                 skipped = budget.skip_reservation_entries(reservation_id, 1)
                 authority.note_budget_units(skipped)
 
+    remaining = budget.reservation_remaining(reservation_id)
+    if remaining != verification_count:
+        orphaned = True
+    if remaining:
+        skipped = budget.skip_reservation_entries(reservation_id, remaining)
+        authority.note_budget_units(skipped)
+
     try:
         authority.abort(expected_state=expected_state, reason=reason)
     except GraphBoundExecutionClaimDenied as exc:
@@ -727,6 +845,17 @@ def _require_owned_dependencies(
         for binding in entry.input_bindings
         if binding.producer_operation_id in create_operation_ids
     )
+    if entry.binding.runtime_override_source_world_slot_id is not None:
+        source_dependency = state.created.get(
+            (
+                entry.binding.runtime_override_source_world_slot_id,
+                entry.binding.runtime_override_source_create_operation_id,
+            )
+        )
+        dependencies = (
+            *dependencies,
+            source_dependency,
+        )
     registry = runtime_plan.executor.policy.ownership_registry
     if dependencies and (
         registry is None
@@ -916,6 +1045,7 @@ def _build_provisioning_evidence(
     provision_entries: Sequence[_RuntimeEntry],
     dispatch_entries: Sequence[_RuntimeEntry],
     cleanup_entries: Sequence[_RuntimeEntry],
+    cleanup_verification_entries: Sequence[_RuntimeEntry],
     state: _ProvisioningState,
 ) -> GraphBoundFreshWorldProvisioningEvidence:
     if any(
@@ -930,7 +1060,11 @@ def _build_provisioning_evidence(
         )
     for entry in dispatch_entries:
         _rehydrate(entry, state.runtime_values)
-    expected_remaining = len(dispatch_entries) + len(cleanup_entries)
+    expected_remaining = (
+        len(dispatch_entries)
+        + len(cleanup_entries)
+        + len(cleanup_verification_entries)
+    )
     if authority.remaining_units != expected_remaining:
         raise GraphBoundFreshWorldProvisioningDenied(
             "graph_bound_provisioning_budget_boundary_mismatch",
@@ -968,6 +1102,7 @@ async def _complete_provisioning_probe(
     evidence: GraphBoundFreshWorldProvisioningEvidence,
     dispatch_entries: Sequence[_RuntimeEntry],
     cleanup_entries: Sequence[_RuntimeEntry],
+    cleanup_verification_entries: Sequence[_RuntimeEntry],
     state: _ProvisioningState,
 ) -> GraphBoundFreshWorldProvisioningResult:
     authority.mark_provisioned()
@@ -975,6 +1110,7 @@ async def _complete_provisioning_probe(
         authority=authority,
         dispatch_entries=dispatch_entries,
         cleanup_entries=cleanup_entries,
+        cleanup_verification_entries=cleanup_verification_entries,
         runtime_values=state.runtime_values,
         created=state.created,
         expected_state="provisioned",
@@ -1010,6 +1146,7 @@ async def _raise_after_provisioning_failure(
     authority: _GraphBoundProvisioningAuthority,
     dispatch_entries: Sequence[_RuntimeEntry],
     cleanup_entries: Sequence[_RuntimeEntry],
+    cleanup_verification_entries: Sequence[_RuntimeEntry],
     state: _ProvisioningState,
     error: Exception,
 ) -> NoReturn:
@@ -1043,6 +1180,7 @@ async def _raise_after_provisioning_failure(
             authority=authority,
             dispatch_entries=dispatch_entries,
             cleanup_entries=cleanup_entries,
+            cleanup_verification_entries=cleanup_verification_entries,
             runtime_values=state.runtime_values,
             created=state.created,
             expected_state="provisioning",
@@ -1125,7 +1263,9 @@ class GraphBoundFreshWorldProvisioner:
             runtime = authority.runtime_plan
             try:
                 _validate_runtime_authority(runtime)
-                provision, dispatch, cleanup = _runtime_entries(runtime)
+                provision, dispatch, cleanup, cleanup_verification = (
+                    _runtime_entries(runtime)
+                )
             except Exception as exc:
                 try:
                     authority.abort(
@@ -1156,6 +1296,7 @@ class GraphBoundFreshWorldProvisioner:
                     provision_entries=provision,
                     dispatch_entries=dispatch,
                     cleanup_entries=cleanup,
+                    cleanup_verification_entries=cleanup_verification,
                     state=state,
                 )
                 return await _complete_provisioning_probe(
@@ -1163,6 +1304,7 @@ class GraphBoundFreshWorldProvisioner:
                     evidence=evidence,
                     dispatch_entries=dispatch,
                     cleanup_entries=cleanup,
+                    cleanup_verification_entries=cleanup_verification,
                     state=state,
                 )
             except Exception as exc:
@@ -1170,6 +1312,7 @@ class GraphBoundFreshWorldProvisioner:
                     authority=authority,
                     dispatch_entries=dispatch,
                     cleanup_entries=cleanup,
+                    cleanup_verification_entries=cleanup_verification,
                     state=state,
                     error=exc,
                 )
