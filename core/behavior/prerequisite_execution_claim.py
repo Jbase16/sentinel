@@ -35,6 +35,8 @@ from .prerequisite_request_binding import (
     GraphBoundRequestBindingResult,
 )
 from .receipts import (
+    ABORTED,
+    BehavioralExecutionReceipt,
     BehavioralReceiptContext,
     BehavioralReceiptStore,
     redacted_receipt_context,
@@ -67,9 +69,21 @@ _RESOLVED_BLOCKERS = frozenset(
 class GraphBoundExecutionClaimDenied(RuntimeError):
     """The graph-bound claim failed before target execution was possible."""
 
-    def __init__(self, reason: str, *, category: str = "admission") -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        category: str = "admission",
+        terminal_receipt: Optional[BehavioralExecutionReceipt] = None,
+    ) -> None:
         super().__init__(reason)
         self.category = category
+        if terminal_receipt is not None and (
+            not isinstance(terminal_receipt, BehavioralExecutionReceipt)
+            or terminal_receipt.state != ABORTED
+        ):
+            raise ValueError("graph-bound terminal receipt is invalid")
+        self.terminal_receipt = terminal_receipt
 
 
 def _hash_ref(value: object, prefix: Optional[str] = None) -> bool:
@@ -584,6 +598,14 @@ class _GraphBoundProvisioningAuthority:
     def state(self) -> str:
         return self._resources.state
 
+    @property
+    def terminal_receipt(self) -> Optional[BehavioralExecutionReceipt]:
+        return self._resources.terminal_receipt
+
+    @property
+    def receipt_id(self) -> str:
+        return self._resources.receipt_id
+
     def mark_provisioned(self) -> None:
         self._resources.mark_provisioned()
 
@@ -593,8 +615,18 @@ class _GraphBoundProvisioningAuthority:
     def note_budget_units(self, count: int) -> None:
         self._resources.note_budget_units(count)
 
-    def abort(self, *, expected_state: str, reason: str) -> int:
-        return self._resources.abort(expected_state=expected_state, reason=reason)
+    def abort(
+        self,
+        *,
+        expected_state: str,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
+        return self._resources.abort(
+            expected_state=expected_state,
+            reason=reason,
+            terminal_evidence=terminal_evidence,
+        )
 
     def complete(self, *, outcome: Mapping[str, Any]) -> Any:
         return self._resources.complete(outcome=outcome)
@@ -621,6 +653,7 @@ class _ClaimResources:
         self._receipt_reservation_token: Optional[str] = receipt_reservation_token
         self._authorized_budget_units = 0
         self._state = "active"
+        self._terminal_receipt: Optional[BehavioralExecutionReceipt] = None
         self._lock = threading.RLock()
         if (
             isinstance(expected_units, bool)
@@ -634,6 +667,15 @@ class _ClaimResources:
     def state(self) -> str:
         with self._lock:
             return self._state
+
+    @property
+    def terminal_receipt(self) -> Optional[BehavioralExecutionReceipt]:
+        with self._lock:
+            return self._terminal_receipt
+
+    @property
+    def receipt_id(self) -> str:
+        return f"behavioral-{self.receipt_fingerprint}"
 
     @property
     def reserved_units(self) -> int:
@@ -704,7 +746,13 @@ class _ClaimResources:
                 )
             self._authorized_budget_units += count
 
-    def abort(self, *, expected_state: str, reason: str) -> int:
+    def abort(
+        self,
+        *,
+        expected_state: str,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
         if _SEMANTIC.fullmatch(str(reason or "")) is None:
             raise ValueError("graph-bound execution abort reason is invalid")
         with self._lock:
@@ -720,11 +768,13 @@ class _ClaimResources:
                     category="receipt",
                 )
             receipt_error: Optional[Exception] = None
+            terminal_receipt: Optional[BehavioralExecutionReceipt] = None
             try:
-                self.receipt_store.abort(
+                terminal_receipt = self.receipt_store.abort(
                     self.receipt_fingerprint,
                     reservation_token=token,
                     reason=reason,
+                    terminal_evidence=terminal_evidence,
                 )
             except Exception as exc:  # pragma: no cover - defensive store seam
                 receipt_error = exc
@@ -732,6 +782,7 @@ class _ClaimResources:
             released = self.budget.release_reservation(self.budget_reservation_id)
             self._receipt_reservation_token = None
             self._state = "aborted"
+            self._terminal_receipt = terminal_receipt
             if receipt_error is not None:
                 raise GraphBoundExecutionClaimDenied(
                     "graph_bound_execution_budget_released_but_receipt_abort_failed",
@@ -741,6 +792,7 @@ class _ClaimResources:
                 raise GraphBoundExecutionClaimDenied(
                     "graph_bound_execution_budget_release_mismatch",
                     category="budget",
+                    terminal_receipt=terminal_receipt,
                 )
             return released
 
@@ -1201,6 +1253,12 @@ class GraphBoundExecutionClaimAdmission:
             raise GraphBoundExecutionClaimDenied(
                 "graph_bound_execution_claim_replay_denied",
                 category="receipt",
+                terminal_receipt=(
+                    reservation.receipt
+                    if reservation.receipt.state == ABORTED
+                    and reservation.receipt.terminal_evidence is not None
+                    else None
+                ),
             )
         receipt_token = reservation.reservation_token
         if not receipt_token:

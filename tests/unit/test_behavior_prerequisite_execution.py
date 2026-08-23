@@ -95,6 +95,7 @@ def _case(
     global_capability=False,
     wire_equivalent_capability=False,
     single_use_capability=False,
+    runtime_schema_drift=False,
     records=None,
 ):
     calls = []
@@ -124,6 +125,10 @@ def _case(
             raise AssertionError(f"unknown runtime world for {method} {url}")
         if method == "GET" and path.endswith("/first"):
             world["prerequisites"].append("first")
+            if runtime_schema_drift:
+                return 200, {
+                    "rotatedFirstToken": f"runtime-first-token-{object_id}"
+                }
             return 200, {
                 "firstToken": (
                     (
@@ -842,6 +847,76 @@ async def test_global_capability_override_is_rejected_before_terminal_traffic(
     assert first_export_index > last_cleanup_index
     receipt, _path = _receipt(store)
     assert receipt.state == "aborted"
+
+
+@pytest.mark.asyncio
+async def test_runtime_schema_drift_persists_redacted_denial_and_cleanup(
+    tmp_path,
+):
+    boundary, store, _executor, registry, calls, worlds, _plan = _case(
+        tmp_path,
+        runtime_schema_drift=True,
+    )
+
+    with pytest.raises(
+        GraphBoundPrerequisiteExecutionDenied,
+        match="graph_bound_runtime_value_extraction_failed",
+    ) as raised:
+        await GraphBoundPrerequisiteExperimentExecutor(
+            boundary.admit().claim(),
+            config=GraphBoundPrerequisiteExecutionConfig(enabled=True),
+        ).execute()
+
+    error = raised.value
+    assert error.category == "lineage"
+    assert error.cleanup is not None
+    assert error.cleanup.status == "uncertain"
+    assert error.cleanup.cleanup_steps_attempted == 1
+    assert error.cleanup.cleanup_steps_completed == 1
+    assert error.cleanup.cleanup_verifications_attempted == 1
+    assert error.cleanup.cleanup_verifications_completed == 0
+    assert error.cleanup.ownership_grants_removed == 0
+    assert error.orphaned_owned_state_possible is True
+    assert error.terminal_receipt is not None
+    assert error.terminal_receipt.state == "aborted"
+
+    evidence = error.terminal_receipt.terminal_evidence
+    assert evidence is not None
+    assert evidence["reason_code"] == (
+        "graph_bound_runtime_value_extraction_failed"
+    )
+    assert evidence["category"] == "lineage"
+    assert evidence["cleanup"] == error.cleanup.to_dict()
+    assert evidence["finding_confirmed"] is False
+    assert evidence["promotion_authority"] is False
+    assert evidence["finding_authority"] is False
+    assert evidence["retry_authority"] is False
+    assert not any(
+        call[3].get("proof_goal") == "graph_bound_prerequisite_terminal"
+        for call in calls
+    )
+    assert all(world["archived"] for world in worlds.values())
+    assert any(
+        registry.is_owned(f"{ORIGIN}/api/workflows/{object_id}")
+        for object_id in worlds
+    )
+
+    receipt, path = _receipt(store)
+    assert receipt.terminal_evidence == evidence
+    encoded = path.read_text(encoding="utf-8")
+    assert "runtime-first-token" not in encoded
+    assert "rotatedFirstToken" not in encoded
+    before_replay = len(calls)
+    with pytest.raises(
+        GraphBoundExecutionClaimDenied,
+        match="graph_bound_execution_claim_replay_denied",
+    ) as replay:
+        boundary.admit()
+    assert replay.value.terminal_receipt is not None
+    assert replay.value.terminal_receipt.terminal_evidence == evidence
+    assert len(calls) == before_replay
+    with pytest.raises((TypeError, ValueError, RuntimeError)):
+        GraphBoundPrerequisiteFindingCandidate.from_completed_outcome(evidence)
 
 
 @pytest.mark.asyncio

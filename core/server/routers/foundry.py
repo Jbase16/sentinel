@@ -747,9 +747,11 @@ async def run_behavioral_authorization_endpoint(
     from core.behavior.explorer import BehavioralReadExplorer
     from core.behavior.graphql_catalog import PersistedOperationCatalog
     from core.behavior.receipts import (
+        ABORTED,
         COMPLETED,
         BehavioralReceiptStore,
         ReceiptStoreError,
+        redacted_graph_bound_prerequisite_denial_response,
         redacted_outcome,
         redacted_receipt_context,
         request_fingerprint,
@@ -1451,6 +1453,17 @@ async def run_behavioral_authorization_endpoint(
                     "reused": True,
                 }
                 return cached
+            if (
+                reservation.receipt.state == ABORTED
+                and reservation.receipt.terminal_evidence is not None
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=redacted_graph_bound_prerequisite_denial_response(
+                        reservation.receipt,
+                        reused=True,
+                    ),
+                )
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -3242,6 +3255,49 @@ async def run_behavioral_authorization_endpoint(
         GraphBoundPrerequisiteExecutionDenied,
         GraphBoundPrerequisiteOneClickDenied,
     ) as exc:
+        terminal_receipt = getattr(exc, "terminal_receipt", None)
+        if (
+            terminal_receipt is not None
+            and terminal_receipt.terminal_evidence is not None
+        ):
+            if (
+                receipt_store is None
+                or receipt_fingerprint is None
+                or receipt_reservation_token is None
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "graph-bound denial orchestration receipt is unavailable"
+                    ),
+                ) from exc
+            try:
+                root_receipt = receipt_store.abort(
+                    receipt_fingerprint,
+                    reservation_token=receipt_reservation_token,
+                    reason="controlled_execution_denied",
+                    terminal_evidence=terminal_receipt.terminal_evidence,
+                )
+                denial_response = (
+                    redacted_graph_bound_prerequisite_denial_response(
+                        root_receipt,
+                        reused=False,
+                    )
+                )
+            except (OSError, ReceiptStoreError) as receipt_exc:
+                logger.exception(
+                    "failed to persist graph-bound denial evidence"
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "graph-bound denial receipt terminalization failed"
+                    ),
+                ) from receipt_exc
+            raise HTTPException(
+                status_code=409,
+                detail=denial_response,
+            ) from exc
         if (
             receipt_store is not None
             and receipt_fingerprint is not None
@@ -3505,9 +3561,11 @@ async def run_behavioral_authorization_from_url_endpoint(
         validate_controlled_capture_context,
     )
     from core.behavior.receipts import (
+        ABORTED,
         COMPLETED,
         BehavioralReceiptStore,
         ReceiptStoreError,
+        redacted_graph_bound_prerequisite_denial_response,
         redacted_outcome,
         redacted_receipt_context,
         request_fingerprint,
@@ -3828,6 +3886,14 @@ async def run_behavioral_authorization_from_url_endpoint(
     receipt_store = BehavioralReceiptStore()
 
     def duplicate_response(receipt):
+        if receipt.state == ABORTED and receipt.terminal_evidence is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=redacted_graph_bound_prerequisite_denial_response(
+                    receipt,
+                    reused=True,
+                ),
+            )
         if receipt.state == COMPLETED and receipt.outcome:
             cached = dict(receipt.outcome)
             cached["status"] = "already_executed"
@@ -3892,15 +3958,17 @@ async def run_behavioral_authorization_from_url_endpoint(
             detail="behavioral receipt reservation token unavailable; capture refused",
         )
 
-    def abort_receipt(reason: str) -> None:
+    def abort_receipt(reason: str, *, terminal_evidence=None):
         try:
-            receipt_store.abort(
+            return receipt_store.abort(
                 fingerprint,
                 reservation_token=reservation_token,
                 reason=reason,
+                terminal_evidence=terminal_evidence,
             )
         except (OSError, ReceiptStoreError):
             logger.exception("failed to terminate one-click behavioral receipt")
+            return None
 
     try:
         source_capture, peer_capture, script_urls = await capture_persona_pair(
@@ -3926,7 +3994,48 @@ async def run_behavioral_authorization_from_url_endpoint(
     except asyncio.CancelledError:
         abort_receipt("capture_orchestration_cancelled")
         raise
-    except HTTPException:
+    except HTTPException as exc:
+        detail = exc.detail
+        if (
+            exc.status_code == 409
+            and isinstance(detail, dict)
+            and detail.get("schema_version") == 1
+            and detail.get("kind")
+            == "graph_bound_prerequisite_execution_denial"
+            and detail.get("status") == "denied"
+            and isinstance(detail.get("denial"), dict)
+        ):
+            terminal_receipt = abort_receipt(
+                "controlled_execution_denied",
+                terminal_evidence=detail["denial"],
+            )
+            if terminal_receipt is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "graph-bound denial capture receipt "
+                        "terminalization failed"
+                    ),
+                ) from exc
+            try:
+                denial_response = (
+                    redacted_graph_bound_prerequisite_denial_response(
+                        terminal_receipt,
+                        reused=False,
+                    )
+                )
+            except (TypeError, ReceiptStoreError) as receipt_exc:
+                logger.exception(
+                    "failed to render persisted graph-bound denial evidence"
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="graph-bound denial capture receipt is invalid",
+                ) from receipt_exc
+            raise HTTPException(
+                status_code=409,
+                detail=denial_response,
+            ) from exc
         abort_receipt("behavioral_run_rejected")
         raise
     except (CaptureConflict, PersonaWindowUnavailable) as exc:

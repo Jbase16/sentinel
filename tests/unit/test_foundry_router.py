@@ -2547,6 +2547,162 @@ class TestBehavioralAuthorizationEndpoint:
         assert len(traffic) == 3
         assert len(list((tmp_path / "behavioral_receipts").glob("*.json"))) == 2
 
+    def test_one_click_graph_denial_replays_outer_receipt_without_capture(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        from core.behavior.normalize import stable_hash
+        from core.server.routers import driver
+        import core.server.routers.foundry as foundry_module
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+
+        request, capture_request, source_persona, peer_persona = (
+            self._one_click_request(graph_bound=True)
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        graph_receipt_id = f"behavioral-{'1' * 64}"
+        cleanup = {
+            "status": "uncertain",
+            "cleanup_steps_attempted": 1,
+            "cleanup_steps_completed": 1,
+            "cleanup_verifications_attempted": 1,
+            "cleanup_verifications_completed": 0,
+            "ownership_grants_removed": 0,
+            "cleanup_evidence_refs": [
+                f"graph_bound_cleanup_evidence:{'2' * 64}",
+                f"graph_bound_cleanup_evidence:{'3' * 64}",
+            ],
+            "orphaned_owned_state_possible": True,
+        }
+        denial_payload = {
+            "kind": "graph_bound_prerequisite_execution_denial",
+            "status": "denied",
+            "graph_receipt_id": graph_receipt_id,
+            "reason_code": "graph_bound_runtime_value_extraction_failed",
+            "category": "lineage",
+            "claim_contract_id": (
+                f"graph_bound_execution_claim_contract:{'4' * 64}"
+            ),
+            "plan_id": f"graph_bound_prepared_request_plan:{'5' * 64}",
+            "family": "omission",
+            "cleanup": cleanup,
+            "finding_confirmed": False,
+            "promotion_authority": False,
+            "finding_authority": False,
+            "retry_authority": False,
+        }
+        denial = {
+            "schema_version": 1,
+            "denial_evidence_ref": stable_hash(
+                "graph_bound_prerequisite_denial_evidence",
+                denial_payload,
+            ),
+            **denial_payload,
+        }
+        inner_detail = {
+            "schema_version": 1,
+            "kind": "graph_bound_prerequisite_execution_denial",
+            "status": "denied",
+            "reused": False,
+            "graph_receipt": {
+                "receipt_id": graph_receipt_id,
+                "state": "aborted",
+            },
+            "orchestration_receipt": {
+                "receipt_id": f"behavioral-{'6' * 64}",
+                "state": "aborted",
+            },
+            "denial": denial,
+            "debug": {"exportToken": "raw-runtime-secret"},
+        }
+        window_checks = 0
+        captures = 0
+        executions = 0
+
+        async def validate_windows(persona_ids):
+            nonlocal window_checks
+            window_checks += 1
+            assert tuple(persona_ids) == (
+                source_persona.persona_id,
+                peer_persona.persona_id,
+            )
+
+        async def capture_pair(**_kwargs):
+            nonlocal captures
+            captures += 1
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=source_persona.persona_id,
+                    path="/private/source-capture.jsonl",
+                    records=tuple(capture_request.source_records),
+                    captured_bytes=123,
+                    limit_reached=False,
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=peer_persona.persona_id,
+                    path="/private/peer-capture.jsonl",
+                    records=tuple(capture_request.peer_records),
+                    captured_bytes=456,
+                    limit_reached=False,
+                ),
+                (),
+            )
+
+        async def deny_execution(*_args, **_kwargs):
+            nonlocal executions
+            executions += 1
+            raise HTTPException(status_code=409, detail=inner_detail)
+
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(
+            foundry_module,
+            "run_behavioral_authorization_endpoint",
+            deny_execution,
+        )
+
+        with pytest.raises(HTTPException) as first_error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+        with pytest.raises(HTTPException) as duplicate_error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+
+        first = first_error.value.detail
+        duplicate = duplicate_error.value.detail
+        assert first_error.value.status_code == 409
+        assert duplicate_error.value.status_code == 409
+        assert first["reused"] is False
+        assert duplicate["reused"] is True
+        assert duplicate["denial"] == first["denial"] == denial
+        assert duplicate["graph_receipt"] == first["graph_receipt"]
+        assert duplicate["orchestration_receipt"] == (
+            first["orchestration_receipt"]
+        )
+        assert first["orchestration_receipt"] != inner_detail[
+            "orchestration_receipt"
+        ]
+        assert window_checks == captures == executions == 1
+
+        receipts = list((tmp_path / "behavioral_receipts").glob("*.json"))
+        assert len(receipts) == 1
+        stored = json.loads(receipts[0].read_text(encoding="utf-8"))
+        assert stored["state"] == "aborted"
+        assert stored["terminal_evidence"] == denial
+        encoded = json.dumps([first, duplicate, stored], sort_keys=True)
+        assert "exportToken" not in encoded
+        assert "raw-runtime-secret" not in encoded
+
     def test_graph_bound_one_click_requires_signed_workflow_before_capture(
         self,
         monkeypatch,
@@ -2766,6 +2922,134 @@ class TestBehavioralAuthorizationEndpoint:
             json.loads(path.read_text(encoding="utf-8"))["state"]
             for path in receipts
         } == {"aborted"}
+
+    def test_graph_execution_denial_replays_durable_cleanup_evidence(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        import core.behavior.prerequisite_one_click as one_click_module
+        from core.behavior.normalize import stable_hash
+        from core.behavior.prerequisite_execution import (
+            GraphBoundExperimentCleanupResult,
+            GraphBoundPrerequisiteExecutionDenied,
+        )
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+
+        request, _source_persona, _peer_persona = self._omission_request(
+            graph_bound=True
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        executions = 0
+
+        class DeniedExecution:
+            def __init__(self, claim, *_args, **_kwargs):
+                self.claim = claim
+
+            async def execute(self):
+                nonlocal executions
+                executions += 1
+                authority = self.claim._begin_provisioning()
+                cleanup = GraphBoundExperimentCleanupResult(
+                    status="uncertain",
+                    cleanup_steps_attempted=1,
+                    cleanup_steps_completed=1,
+                    cleanup_verifications_attempted=1,
+                    cleanup_verifications_completed=0,
+                    ownership_grants_removed=0,
+                    cleanup_evidence_refs=(
+                        f"graph_bound_cleanup_evidence:{'1' * 64}",
+                        f"graph_bound_cleanup_evidence:{'2' * 64}",
+                    ),
+                    orphaned_owned_state_possible=True,
+                )
+                payload = {
+                    "kind": "graph_bound_prerequisite_execution_denial",
+                    "status": "denied",
+                    "graph_receipt_id": authority.receipt_id,
+                    "reason_code": (
+                        "graph_bound_runtime_value_extraction_failed"
+                    ),
+                    "category": "lineage",
+                    "claim_contract_id": self.claim.contract.contract_id,
+                    "plan_id": authority.runtime_plan.plan.plan_id,
+                    "family": authority.runtime_plan.plan.family,
+                    "cleanup": cleanup.to_dict(),
+                    "finding_confirmed": False,
+                    "promotion_authority": False,
+                    "finding_authority": False,
+                    "retry_authority": False,
+                }
+                evidence = {
+                    "schema_version": 1,
+                    "denial_evidence_ref": stable_hash(
+                        "graph_bound_prerequisite_denial_evidence",
+                        payload,
+                    ),
+                    **payload,
+                }
+                authority.abort(
+                    expected_state=authority.state,
+                    reason="graph_bound_experiment_orphan_risk",
+                    terminal_evidence=evidence,
+                )
+                raise GraphBoundPrerequisiteExecutionDenied(
+                    payload["reason_code"],
+                    category="lineage",
+                    cleanup=cleanup,
+                    terminal_receipt=authority.terminal_receipt,
+                )
+
+        monkeypatch.setattr(
+            one_click_module,
+            "GraphBoundPrerequisiteExperimentExecutor",
+            DeniedExecution,
+        )
+
+        with pytest.raises(HTTPException) as first_error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+        with pytest.raises(HTTPException) as duplicate_error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert first_error.value.status_code == 409
+        assert duplicate_error.value.status_code == 409
+        first = first_error.value.detail
+        duplicate = duplicate_error.value.detail
+        assert first["kind"] == "graph_bound_prerequisite_execution_denial"
+        assert first["status"] == "denied"
+        assert first["reused"] is False
+        assert duplicate["reused"] is True
+        assert duplicate["denial"] == first["denial"]
+        assert duplicate["graph_receipt"] == first["graph_receipt"]
+        assert duplicate["orchestration_receipt"] == (
+            first["orchestration_receipt"]
+        )
+        assert first["denial"]["retry_authority"] is False
+        assert first["denial"]["finding_authority"] is False
+        assert executions == 1
+
+        receipts = list((tmp_path / "behavioral_receipts").glob("*.json"))
+        assert len(receipts) == 2
+        stored = [
+            json.loads(path.read_text(encoding="utf-8"))
+            for path in receipts
+        ]
+        assert {item["state"] for item in stored} == {"aborted"}
+        assert all(item["terminal_evidence"] is not None for item in stored)
+        encoded = json.dumps(stored, sort_keys=True)
+        assert "exportToken" not in encoded
+        assert "runtime-workflow" not in encoded
 
     def test_generalized_cancellation_uses_neutral_receipt_reason(
         self,

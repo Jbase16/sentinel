@@ -41,6 +41,12 @@ from .prerequisite_provisioning import (
     _runtime_override_inequality_attestation,
     _validate_runtime_authority,
 )
+from .receipts import (
+    ABORTED,
+    BehavioralExecutionReceipt,
+    ReceiptStoreError,
+    redacted_graph_bound_prerequisite_denial_evidence,
+)
 
 GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV = (
     "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION"
@@ -63,6 +69,7 @@ _PREREQUISITE_REJECTION_STATUSES = frozenset(
     {400, 401, 403, 404, 409, 410, 422}
 )
 _PROVENANCE_ROOT = re.compile(r"^[0-9a-f]{64}$")
+_DENIAL_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 class GraphBoundPrerequisiteExecutionDenied(RuntimeError):
@@ -74,10 +81,17 @@ class GraphBoundPrerequisiteExecutionDenied(RuntimeError):
         *,
         category: str = "execution",
         cleanup: Optional["GraphBoundExperimentCleanupResult"] = None,
+        terminal_receipt: Optional[BehavioralExecutionReceipt] = None,
     ) -> None:
         super().__init__(reason)
         self.category = category
         self.cleanup = cleanup
+        if terminal_receipt is not None and (
+            not isinstance(terminal_receipt, BehavioralExecutionReceipt)
+            or terminal_receipt.state != ABORTED
+        ):
+            raise ValueError("graph-bound terminal receipt is invalid")
+        self.terminal_receipt = terminal_receipt
         self.orphaned_owned_state_possible = bool(
             cleanup is not None and cleanup.orphaned_owned_state_possible
         )
@@ -1146,6 +1160,91 @@ class GraphBoundPrerequisiteExperimentExecutor:
         self._lock = asyncio.Lock()
         self._consumed = False
 
+    @staticmethod
+    def _denial_identity(
+        error: BaseException,
+        *,
+        fallback_reason: str,
+        fallback_category: str = "execution",
+    ) -> Tuple[str, str]:
+        reason = fallback_reason
+        category = fallback_category
+        if isinstance(
+            error,
+            (
+                GraphBoundPrerequisiteExecutionDenied,
+                GraphBoundFreshWorldProvisioningDenied,
+                GraphBoundExecutionClaimDenied,
+            ),
+        ):
+            candidate_reason = str(error)
+            candidate_category = str(error.category)
+            if _DENIAL_CODE.fullmatch(candidate_reason) is not None:
+                reason = candidate_reason
+            if _DENIAL_CODE.fullmatch(candidate_category) is not None:
+                category = candidate_category
+        return reason, category
+
+    def _abort_with_denial_evidence(
+        self,
+        *,
+        authority: _GraphBoundProvisioningAuthority,
+        expected_state: str,
+        abort_reason: str,
+        denial_reason: str,
+        denial_category: str,
+        cleanup: GraphBoundExperimentCleanupResult,
+    ) -> BehavioralExecutionReceipt:
+        payload = {
+            "kind": "graph_bound_prerequisite_execution_denial",
+            "status": "denied",
+            "graph_receipt_id": authority.receipt_id,
+            "reason_code": denial_reason,
+            "category": denial_category,
+            "claim_contract_id": self.claim.contract.contract_id,
+            "plan_id": authority.runtime_plan.plan.plan_id,
+            "family": authority.runtime_plan.plan.family,
+            "cleanup": cleanup.to_dict(),
+            "finding_confirmed": False,
+            "promotion_authority": False,
+            "finding_authority": False,
+            "retry_authority": False,
+        }
+        try:
+            evidence = redacted_graph_bound_prerequisite_denial_evidence(
+                {
+                    "schema_version": 1,
+                    "denial_evidence_ref": stable_hash(
+                        "graph_bound_prerequisite_denial_evidence",
+                        payload,
+                    ),
+                    **payload,
+                }
+            )
+        except (TypeError, ValueError, ReceiptStoreError) as exc:
+            authority.abort(
+                expected_state=expected_state,
+                reason=abort_reason,
+            )
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_denial_evidence_build_failed",
+                category="receipt",
+                terminal_receipt=authority.terminal_receipt,
+            ) from exc
+        authority.abort(
+            expected_state=expected_state,
+            reason=abort_reason,
+            terminal_evidence=evidence,
+        )
+        receipt = authority.terminal_receipt
+        if receipt is None or receipt.terminal_evidence != evidence:
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_denial_evidence_terminalization_failed",
+                category="receipt",
+                terminal_receipt=receipt,
+            )
+        return receipt
+
     async def _abort_after_failure(
         self,
         *,
@@ -1178,6 +1277,7 @@ class GraphBoundPrerequisiteExperimentExecutor:
                 if isinstance(cleanup_error, asyncio.CancelledError)
                 else None
             )
+        terminal_receipt: Optional[BehavioralExecutionReceipt] = None
         if authority.state not in {"aborted", "completed"}:
             reason = (
                 "graph_bound_experiment_orphan_risk"
@@ -1185,15 +1285,30 @@ class GraphBoundPrerequisiteExperimentExecutor:
                 else "graph_bound_experiment_execution_failed"
             )
             try:
-                authority.abort(
-                    expected_state=authority.state,
-                    reason=reason,
-                )
+                if isinstance(error, asyncio.CancelledError):
+                    authority.abort(
+                        expected_state=authority.state,
+                        reason=reason,
+                    )
+                else:
+                    denial_reason, denial_category = self._denial_identity(
+                        error,
+                        fallback_reason="graph_bound_prerequisite_execution_failed",
+                    )
+                    terminal_receipt = self._abort_with_denial_evidence(
+                        authority=authority,
+                        expected_state=authority.state,
+                        abort_reason=reason,
+                        denial_reason=denial_reason,
+                        denial_category=denial_category,
+                        cleanup=cleanup,
+                    )
             except GraphBoundExecutionClaimDenied as exc:
                 raise GraphBoundPrerequisiteExecutionDenied(
                     str(exc),
                     category=exc.category,
                     cleanup=cleanup,
+                    terminal_receipt=exc.terminal_receipt,
                 ) from exc
         if isinstance(error, asyncio.CancelledError):
             raise error
@@ -1204,16 +1319,19 @@ class GraphBoundPrerequisiteExperimentExecutor:
                 str(error),
                 category=error.category,
                 cleanup=cleanup,
+                terminal_receipt=terminal_receipt,
             ) from error
         if isinstance(error, GraphBoundFreshWorldProvisioningDenied):
             raise GraphBoundPrerequisiteExecutionDenied(
                 str(error),
                 category=error.category,
                 cleanup=cleanup,
+                terminal_receipt=terminal_receipt,
             ) from error
         raise GraphBoundPrerequisiteExecutionDenied(
             "graph_bound_prerequisite_execution_failed",
             cleanup=cleanup,
+            terminal_receipt=terminal_receipt,
         ) from error
 
     async def execute(self) -> GraphBoundPrerequisiteExecutionResult:
@@ -1371,16 +1489,34 @@ class GraphBoundPrerequisiteExperimentExecutor:
                     if cleanup.orphaned_owned_state_possible
                     else "graph_bound_experiment_terminal_failed"
                 )
+                terminal_receipt: Optional[BehavioralExecutionReceipt] = None
                 try:
-                    authority.abort(
-                        expected_state=authority.state,
-                        reason=reason,
-                    )
+                    if isinstance(terminal_error, asyncio.CancelledError):
+                        authority.abort(
+                            expected_state=authority.state,
+                            reason=reason,
+                        )
+                    else:
+                        denial_reason, denial_category = self._denial_identity(
+                            terminal_error,
+                            fallback_reason=(
+                                "graph_bound_prerequisite_terminal_failed"
+                            ),
+                        )
+                        terminal_receipt = self._abort_with_denial_evidence(
+                            authority=authority,
+                            expected_state=authority.state,
+                            abort_reason=reason,
+                            denial_reason=denial_reason,
+                            denial_category=denial_category,
+                            cleanup=cleanup,
+                        )
                 except GraphBoundExecutionClaimDenied as exc:
                     raise GraphBoundPrerequisiteExecutionDenied(
                         str(exc),
                         category=exc.category,
                         cleanup=cleanup,
+                        terminal_receipt=exc.terminal_receipt,
                     ) from exc
                 if isinstance(terminal_error, asyncio.CancelledError):
                     raise terminal_error
@@ -1392,27 +1528,36 @@ class GraphBoundPrerequisiteExperimentExecutor:
                         str(terminal_error),
                         category=terminal_error.category,
                         cleanup=cleanup,
+                        terminal_receipt=terminal_receipt,
                     ) from terminal_error
                 raise GraphBoundPrerequisiteExecutionDenied(
                     "graph_bound_prerequisite_terminal_failed",
                     cleanup=cleanup,
+                    terminal_receipt=terminal_receipt,
                 ) from terminal_error
             if cleanup.status != "verified":
+                terminal_receipt = None
                 try:
-                    authority.abort(
+                    terminal_receipt = self._abort_with_denial_evidence(
+                        authority=authority,
                         expected_state=authority.state,
-                        reason="graph_bound_experiment_cleanup_unverified",
+                        abort_reason="graph_bound_experiment_cleanup_unverified",
+                        denial_reason="graph_bound_experiment_cleanup_unverified",
+                        denial_category="cleanup",
+                        cleanup=cleanup,
                     )
                 except GraphBoundExecutionClaimDenied as exc:
                     raise GraphBoundPrerequisiteExecutionDenied(
                         str(exc),
                         category=exc.category,
                         cleanup=cleanup,
+                        terminal_receipt=exc.terminal_receipt,
                     ) from exc
                 raise GraphBoundPrerequisiteExecutionDenied(
                     "graph_bound_experiment_cleanup_unverified",
                     category="cleanup",
                     cleanup=cleanup,
+                    terminal_receipt=terminal_receipt,
                 )
 
             sink = authority.runtime_plan.executor.provenance
@@ -1423,21 +1568,28 @@ class GraphBoundPrerequisiteExperimentExecutor:
                 or not isinstance(provenance_root, str)
                 or _PROVENANCE_ROOT.fullmatch(provenance_root) is None
             ):
+                terminal_receipt = None
                 try:
-                    authority.abort(
+                    terminal_receipt = self._abort_with_denial_evidence(
+                        authority=authority,
                         expected_state=authority.state,
-                        reason="graph_bound_experiment_provenance_invalid",
+                        abort_reason="graph_bound_experiment_provenance_invalid",
+                        denial_reason="graph_bound_experiment_provenance_invalid",
+                        denial_category="provenance",
+                        cleanup=cleanup,
                     )
                 except GraphBoundExecutionClaimDenied as exc:
                     raise GraphBoundPrerequisiteExecutionDenied(
                         str(exc),
                         category=exc.category,
                         cleanup=cleanup,
+                        terminal_receipt=exc.terminal_receipt,
                     ) from exc
                 raise GraphBoundPrerequisiteExecutionDenied(
                     "graph_bound_experiment_provenance_invalid",
                     category="provenance",
                     cleanup=cleanup,
+                    terminal_receipt=terminal_receipt,
                 )
 
             target_requests_sent = (
