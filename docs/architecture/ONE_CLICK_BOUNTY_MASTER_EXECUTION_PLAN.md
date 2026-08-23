@@ -73,6 +73,13 @@ complete. Multiple commits are allowed when the slice has independently reviewab
 units, but unrelated OCB slices must not be collapsed into one commit. If a push is
 blocked, report the blocker and leave the slice explicitly incomplete.
 
+Start every OCB slice from the current synchronized `main` on one dedicated short-lived
+`codex/ocb-*` branch. A slice branch contains only that slice and its required tests,
+evidence, and documentation. Push the branch early for remote visibility, but do not
+merge it until the slice gates pass and the handoff is reviewed. After merge, resync
+`main` before creating the next slice branch. Direct slice development on `main` is not
+allowed.
+
 ## 4. Evidence vocabulary
 
 These labels are intentionally cumulative:
@@ -317,6 +324,7 @@ Every implementation work order must state and prove:
 - **Repository gate:** full suite at the work-order checkpoint.
 - **External gate:** a real-wire lab scenario when observable behavior changes.
 - **Documentation:** detailed plan plus this master ledger updated to the exact SHA.
+- **Branch:** one current-main-based `codex/ocb-*` branch containing only this slice.
 - **Delivery:** at least one focused slice commit pushed to the shared remote, with the
   pushed SHA recorded in the handoff.
 
