@@ -108,7 +108,7 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Latent capability-directed discovery | Passive and cataloged | Capability-linked JavaScript, source-map, and OpenAPI routes become published or specified semantic operations; unmatched and ambiguous routes remain coverage deficits. | Feed every source through ordinary acquisition and actively confirm only through separately admitted R4-R8 workflows. |
 | Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
-| State-machine prerequisite omission oracle | Production-wired for one narrow graph-bound omission path; external components pass | Exact same-world lineage preserves a content-addressed DAG; one unambiguous payout-selected terminal can execute sealed baseline, omission treatment, and independent control across three fresh owned worlds, compare canonical effects, require a cross-world rejection witness, and verify cleanup. | Close full `OCB-S15` capture-freshness, denied-evidence, and ordinary-Scan gaps; add a positive reordering effect oracle and production selection; define replay and stale-state capability/freshness semantics. |
+| State-machine prerequisite omission oracle | Production-wired for one narrow graph-bound omission path; external components pass | Exact same-world lineage preserves a content-addressed DAG; one unambiguous payout-selected terminal can execute sealed baseline, omission treatment, and independent control across three fresh owned worlds, compare canonical effects, require a cross-world rejection witness, verify cleanup, and persist redacted denial/cleanup state. | Close full `OCB-S15` capture-freshness and external ordinary-Scan/denial acceptance gaps; add a positive reordering effect oracle and production selection; define replay and stale-state capability/freshness semantics. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
 | Ordinary one-click behavioral bridge | Implemented for family A and one narrow family-B omission path; external direct-route components pass | The native Scan UI can send paired-persona or anonymous-passive profiles; the backend can consume the exact payout-selected graph omission plan under separate signed workflow and execution gates, with no fallback to a broader executor. | Prove the Scan promotion/persistence seam and remaining full `OCB-S15` contracts externally, then coordinate the remaining permitted property families without manufacturing authority. |
 | Proof topology selector | Implemented, bounded, and consumed by the narrow graph omission caller | `PayoutGoalTopologyPlanner` selects the minimum supported topology and now binds the graph backend to the exact compiled terminal before ordinary-click dispatch. Graph-absent v1 plan identities remain stable. | Add only separately admitted executable topologies, beginning with a defined positive reordering oracle. |
@@ -690,8 +690,10 @@ per-endpoint traffic ceiling.
   - [x] Production `behavioral_phase_only` ordinary-Scan completion surface at
     Sentinel `2cca4f0`; it preserves canonical promotion and persistence while
     suppressing all post-behavior reasoning, tools, dispatch, and verification.
-  - [ ] Full `OCB-S15`: temporal prior-versus-current capture freshness, durable
-    denied-path receipt/cleanup evidence, and external ordinary-Scan persistence proof.
+  - [x] Durable, strictly redacted denied-path graph and cleanup evidence at Sentinel
+    `0eb7a76`, including traffic-free direct and URL-capture duplicate replay.
+  - [ ] Full `OCB-S15`: temporal prior-versus-current capture freshness plus external
+    ordinary-Scan persistence and durable-denial acceptance proof.
   - [ ] Production reordering selection and a positive reordering effect oracle.
 - [ ] Replay and stale-state specifications after their capability-freshness and
   post-cleanup effect oracles are defined.
@@ -1008,6 +1010,17 @@ verifies every sealed cleanup. Cleanup uncertainty remains terminal and reports 
 orphaned state. Cancellation aborts the claimed graph receipt and direct receipt, while
 the URL wrapper independently aborts its outer receipt before propagating.
 
+At Sentinel `0eb7a76`, a graph execution denial terminalizes the claimed graph receipt
+with a strictly validated redacted evidence record: semantic reason/category, typed
+claim and plan identities, proof family, cleanup counters and evidence references,
+truthful orphan-risk state, and explicit false finding, promotion, and retry authority.
+Raw responses, URLs, runtime values, tokens, and runtime workflow identifiers are not
+admitted. The direct endpoint copies that evidence into its root receipt, and the URL
+capture wrapper copies only the revalidated evidence into its own root receipt. Both
+render HTTP `409` from durable state; an identical request replays the same denial before
+capture or execution. Persistence or validation failure returns `503` instead of
+claiming a durable denial.
+
 Only a completed, positively stored graph outcome with verified cleanup can construct
 `GraphBoundPrerequisiteFindingCandidate`. The selection bundle binds the payout plan,
 candidate, goal, exact terminal, specification, prepared plan, graph target, and graph
@@ -1017,8 +1030,8 @@ equality, reconstructs the exact finding from the stored outcome, and refuses an
 tampered or spliced candidate before writing canonical evidence. The candidate requires
 adversarial triage and grants neither report-promotion nor submission authority.
 
-The full Python 3.12 repository suite passed `2627` tests with `1` skip and `3` warnings
-at this checkpoint. The later external run `s15-live-20260822-final`, bound to Sentinel
+The full Python 3.12 repository suite passed `2634` tests with `1` skip and `3` warnings
+at Sentinel `0eb7a76`. The earlier external run `s15-live-20260822-final`, bound to Sentinel
 `9967de6` and lab `fda7b0c`, confirmed the vulnerable twin and refuted the secure twin.
 Each primary run sent `14` requests, completed and independently verified cleanup for
 all three fresh worlds, left zero active objects, and reused the completed receipt with
@@ -1026,6 +1039,11 @@ zero target and bridge traffic. The response-schema-drift control returned HTTP 
 before a terminal action, cleaned the one runtime object whose ID had been learned, and
 left zero active target state, but the denial exposed neither graph receipt state nor a
 cleanup-verification receipt.
+
+The durable denial contract at `0eb7a76` closes that production-surface gap but does not
+retroactively change the older external artifact. A fresh external run must still prove
+the redacted denial, cleanup/orphan-risk truth, and zero-traffic duplicate through the
+ordinary capture/Scan path.
 
 That artifact is deliberately `partial`, not a full `OCB-S15` pass. The direct public
 endpoint accepts one set of submitted records and cannot compare a prior artifact with a
@@ -1053,6 +1071,12 @@ finding candidate tied to the durable proof receipt. The external lab has now ob
 that narrow behavior for both a vulnerable and enforcing secure target, including
 three-world cleanup and zero-traffic duplicate handling.
 
+When that narrow execution is denied, Sentinel can now retain a safe explanation of the
+reason and cleanup state without storing the target's raw response, URL, runtime token,
+or runtime identifier. Repeating the same denied URL-capture request returns the stored
+answer without recapturing the browser or rerunning the experiment. This behavior is
+suite-proved but still awaits a new external acceptance run.
+
 For example, in an owned lab workflow where an approval token is supposed to be
 required before export, Sentinel can prove that the normal approved export works, test
 the same export without the approved prerequisite on a fresh object, reject a token from
@@ -1072,6 +1096,11 @@ exactly three creates; it permits no cross-object reads, privilege mutation, del
 real-user data access. Every request must remain within the signed origin, sealed action
 sequence, ownership registry, and pre-reserved budget. The continuation workflow and
 graph workflow are mutually exclusive before graph dispatch.
+
+The `0eb7a76` denial-evidence change grants no new traffic or execution authority. The
+first run uses the same admitted graph budget; a duplicate denied URL-capture request
+now stops earlier and therefore reduces traffic. Stored denial evidence cannot create a
+finding, promote a report, authorize retry, or bypass any gate.
 
 Disabling any graph gate prevents graph experiment traffic, but it does not disable the
 already-authorized ordinary-click URL capture that precedes direct graph selection. That
