@@ -27,6 +27,7 @@ class BehavioralOneClickProfile(BaseModel):
     """Exact pre-authorized profile for one behavioral URL phase."""
 
     mode: Literal["paired_persona", "anonymous_passive"] = "paired_persona"
+    completion: Literal["continue_scan", "behavioral_phase_only"] = "continue_scan"
     envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     peer_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
@@ -46,6 +47,10 @@ class BehavioralOneClickProfile(BaseModel):
     @property
     def is_anonymous_passive(self) -> bool:
         return self.mode == "anonymous_passive"
+
+    @property
+    def is_behavioral_phase_only(self) -> bool:
+        return self.is_anonymous_passive or self.completion == "behavioral_phase_only"
 
 
 def _bounded_behavioral_phase_summary(
@@ -1193,10 +1198,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
         )
         if (
             req.behavioral_one_click is not None
-            and req.behavioral_one_click.is_anonymous_passive
+            and req.behavioral_one_click.is_behavioral_phase_only
         ):
-            # This profile is the complete scan. Ordinary tools and the active
-            # verification phases would destroy its passive-only attribution.
+            # This profile is the complete scan. Ordinary tools and active
+            # verification would exceed its explicitly bounded authority.
             allowed_tools = []
         # Phase 2H: subtract any banned_tools the policy enforcement set
         # (e.g. nuclei_mutating disabled by NO_DOS). banned_tools is a Set;
@@ -1306,15 +1311,21 @@ async def begin_scan_logic(req: ScanRequest) -> str:
             tool_outcomes = {"attempted": 0, "succeeded": 0, "failed": 0}
             try:
                 await _run_behavioral_one_click_phase(req, session=session)
-                passive_only = bool(
+                behavioral_phase_only = bool(
                     req.behavioral_one_click is not None
-                    and req.behavioral_one_click.is_anonymous_passive
+                    and req.behavioral_one_click.is_behavioral_phase_only
                 )
-                if passive_only:
-                    session.log(
-                        "[behavior] Anonymous passive profile completed; ordinary "
-                        "reasoning, tools, verification, and receipts remain skipped."
-                    )
+                if behavioral_phase_only:
+                    if req.behavioral_one_click.is_anonymous_passive:
+                        session.log(
+                            "[behavior] Anonymous passive profile completed; ordinary "
+                            "reasoning, tools, verification, and receipts remain skipped."
+                        )
+                    else:
+                        session.log(
+                            "[behavior] Behavioral phase-only profile completed; "
+                            "ordinary reasoning, tools, and verification remain skipped."
+                        )
                 else:
                     _action_dispatcher.action_approved.connect(
                         _on_action_approved
@@ -1503,7 +1514,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                         )
                     return response
 
-                if not passive_only:
+                if not behavioral_phase_only:
                     # Store dispatch_tool on state for external callers
                     state.scan_state["_dispatch_tool"] = dispatch_tool
 
@@ -1536,7 +1547,10 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # briefing, and reports, with zero extra plumbing.
                 # Every probe is hard-gated through the same sealed scope
                 # registry the scan uses for tools (single source of truth).
-                if _should_run_active_verification(req.mode, passive_only=passive_only):
+                if _should_run_active_verification(
+                    req.mode,
+                    passive_only=behavioral_phase_only,
+                ):
                     try:
                         from core.wraith.verify_phase import run_verify_phase
                         # Build candidate target set: original + any hosts the
@@ -2347,7 +2361,7 @@ async def begin_scan_logic(req: ScanRequest) -> str:
                 # gate failure never kills a scan and never suppresses anything.
                 if (
                     req.mode in ("standard", "bug_bounty", "bounty")
-                    and not passive_only
+                    and not behavioral_phase_only
                 ):
                     try:
                         from core.toolkit.finding_verifier import (

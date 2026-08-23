@@ -74,9 +74,13 @@ class _RunnerSession(_Session):
 class _RunnerEventBus:
     def __init__(self):
         self.events = []
+        self.scan_starts = []
 
-    def emit_scan_started(self, *_args, **_kwargs):
-        return None
+    def emit_scan_started(self, target, allowed_tools, session_id):
+        self.scan_starts.append((target, list(allowed_tools), session_id))
+
+    def subscribe_async(self, *_args, **_kwargs):
+        return SimpleNamespace(unsubscribe=lambda: True)
 
     def emit(self, event):
         self.events.append(event)
@@ -150,6 +154,24 @@ def test_paired_persona_profile_still_requires_both_identities():
         match="paired-persona one-click requires both persona identities",
     ):
         BehavioralOneClickProfile(envelope_id=ENVELOPE_ID)
+
+
+def test_paired_persona_profile_can_stop_after_behavioral_phase():
+    default = BehavioralOneClickProfile(
+        envelope_id=ENVELOPE_ID,
+        source_persona_id=SOURCE_PERSONA_ID,
+        peer_persona_id=PEER_PERSONA_ID,
+    )
+    bounded = BehavioralOneClickProfile(
+        completion="behavioral_phase_only",
+        envelope_id=ENVELOPE_ID,
+        source_persona_id=SOURCE_PERSONA_ID,
+        peer_persona_id=PEER_PERSONA_ID,
+    )
+
+    assert default.completion == "continue_scan"
+    assert default.is_behavioral_phase_only is False
+    assert bounded.is_behavioral_phase_only is True
 
 
 def test_behavioral_phase_summary_is_bounded_and_redacted():
@@ -616,6 +638,97 @@ async def test_anonymous_passive_scan_skips_reasoning_tools_and_verification(
     assert state.scan_state["status"] == "completed"
     assert session.status == "completed"
     assert reasoning_called is False
+
+
+@pytest.mark.asyncio
+async def test_paired_behavioral_phase_only_scan_skips_post_proof_authority(
+    monkeypatch,
+):
+    state = ApplicationState()
+    monkeypatch.setattr(ApplicationState, "_instance", state)
+
+    database = MagicMock()
+    database.init = AsyncMock()
+    database.blackbox.enqueue = AsyncMock()
+    database.blackbox.flush = AsyncMock()
+    monkeypatch.setattr(
+        "core.server.routers.scans.Database.instance",
+        lambda: database,
+    )
+    monkeypatch.setattr("core.base.session.ScanSession", _RunnerSession)
+    monkeypatch.setattr(
+        "core.toolkit.tools.get_installed_tools",
+        lambda: {"nuclei_safe": object()},
+    )
+    event_bus = _RunnerEventBus()
+    monkeypatch.setattr("core.cortex.events.get_event_bus", lambda: event_bus)
+
+    async def execute(_request, *, session):
+        await session.findings.add_finding_async(
+            {"id": "graph-finding", "type": "behavioral_graph"},
+            persist=True,
+        )
+        return {
+            "kind": "graph_bound_prerequisite_execution",
+            "status": "completed",
+        }
+
+    monkeypatch.setattr(
+        "core.server.routers.scans._run_behavioral_one_click_phase",
+        execute,
+    )
+
+    async def forbidden_reasoning(**_kwargs):
+        raise AssertionError("phase-only scan must not start ordinary reasoning")
+
+    monkeypatch.setattr(
+        "core.cortex.reasoning.reasoning_engine.start_scan",
+        forbidden_reasoning,
+    )
+
+    def forbidden_connect(*_args):
+        raise AssertionError("phase-only scan must not connect ActionDispatcher")
+
+    dispatcher = SimpleNamespace(
+        action_approved=SimpleNamespace(
+            connect=forbidden_connect,
+            disconnect=lambda *_args: None,
+        )
+    )
+    monkeypatch.setattr(
+        "core.base.action_dispatcher.ActionDispatcher.instance",
+        lambda: dispatcher,
+    )
+
+    session_id = await begin_scan_logic(
+        ScanRequest(
+            target="https://example.test/",
+            mode="bug_bounty",
+            scope=["example.test"],
+            scope_strict=True,
+            behavioral_one_click={
+                "completion": "behavioral_phase_only",
+                "envelope_id": ENVELOPE_ID,
+                "source_persona_id": SOURCE_PERSONA_ID,
+                "peer_persona_id": PEER_PERSONA_ID,
+            },
+        )
+    )
+    await state.active_scan_task
+
+    session = await state.get_session(session_id)
+    assert state.scan_state["status"] == "completed"
+    assert session.status == "completed"
+    assert session.findings.added == [
+        ({"id": "graph-finding", "type": "behavioral_graph"}, True)
+    ]
+    assert event_bus.scan_starts == [
+        ("https://example.test/", [], "behavioral-scan-session")
+    ]
+    assert any(
+        "Behavioral phase-only profile completed" in message
+        for message in session.logs
+    )
 
 
 @pytest.mark.asyncio
