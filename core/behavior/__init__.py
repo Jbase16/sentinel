@@ -64,6 +64,10 @@ Generalized locator-bound authorization execution remains separately default-off
 explicit-only through :mod:`core.behavior.experiment_generalized_authorization`.
 Admitted prerequisite-omission execution remains separately default-off and
 explicit-only through :mod:`core.behavior.experiment_omission`.
+Graph-bound prerequisite manifests, request binding, and claim admission remain
+explicit-only through their ``prerequisite_*`` modules. Claim-consuming fresh-world
+traffic is separately default-off and explicit-only through
+:mod:`core.behavior.prerequisite_provisioning`; importing this package cannot send it.
 """
 
 from .graph import BehaviorGraph, GraphLimits, ObservationResult

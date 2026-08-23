@@ -66,6 +66,38 @@ def test_numeric_ids_are_matched_as_strings():
     assert not r.is_owned("http://h/api/Baskets/8")
 
 
+def test_exact_created_value_check_and_unregister_are_actor_bound():
+    registry = OwnershipRegistry()
+    create_url = "http://h/api/workflows"
+    assert registry.register_created_value(
+        create_url,
+        "workflow-1",
+        actor_persona="alice",
+    ) == ("http://h", "workflows", "workflow-1")
+
+    assert registry.is_created_value_owned(
+        create_url,
+        "workflow-1",
+        actor_persona="alice",
+    )
+    assert not registry.is_created_value_owned(
+        create_url,
+        "workflow-1",
+        actor_persona="mallory",
+    )
+    assert not registry.unregister_created_value(
+        create_url,
+        "workflow-1",
+        actor_persona="mallory",
+    )
+    assert registry.unregister_created_value(
+        create_url,
+        "workflow-1",
+        actor_persona="alice",
+    )
+    assert not registry.is_created_value_owned(create_url, "workflow-1")
+
+
 def test_native_witness_registers_only_the_exact_persona_destination():
     destination_ref = "interaction_destination:" + "d" * 64
     witness = NativeOwnedCreationWitness(

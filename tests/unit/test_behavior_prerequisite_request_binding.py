@@ -130,6 +130,35 @@ def test_binder_reconstructs_exact_sequences_and_endpoint_budget_entries():
         )
         assert all(item.policy_allowed for item in plan.request_bindings)
         assert all(not item.reserved for item in plan.budget_bindings)
+        terminal_operation_id = plan.baseline_operation_ids[-1]
+        stages = tuple(
+            (
+                "cleanup"
+                if item.phase == "cleanup"
+                else (
+                    "dispatch"
+                    if item.operation_id == terminal_operation_id
+                    else "provision"
+                )
+            )
+            for item in plan.request_bindings
+        )
+        assert stages == tuple(
+            sorted(
+                stages,
+                key={"provision": 0, "dispatch": 1, "cleanup": 2}.__getitem__,
+            )
+        )
+        assert tuple(
+            item.world_role
+            for item in plan.request_bindings
+            if item.phase != "cleanup"
+            and item.operation_id == terminal_operation_id
+        ) == (
+            "valid_baseline",
+            "counterfactual_treatment",
+            "independent_control",
+        )
         assert "endpoint_budget_bindings_not_compiled" not in (
             plan.remaining_execution_blockers
         )

@@ -209,6 +209,51 @@ class OwnershipRegistry:
         }
         return key
 
+    def unregister_created_value(
+        self,
+        create_url: str,
+        object_id: Any,
+        *,
+        actor_persona: Optional[str] = None,
+    ) -> bool:
+        """Remove one exact ownership grant after verified cleanup.
+
+        A mismatched actor cannot revoke another persona's grant. Callers must
+        invoke this only after the corresponding cleanup request succeeds.
+        """
+
+        key = _created_key(create_url, object_id)
+        if key is None:
+            return False
+        current = self._owned.get(key)
+        if current is None:
+            return False
+        if (
+            actor_persona is not None
+            and current.get("actor_persona") != actor_persona
+        ):
+            return False
+        del self._owned[key]
+        return True
+
+    def is_created_value_owned(
+        self,
+        create_url: str,
+        object_id: Any,
+        *,
+        actor_persona: Optional[str] = None,
+    ) -> bool:
+        """Check one exact create response value without URL-shape inference."""
+
+        key = _created_key(create_url, object_id)
+        current = self._owned.get(key) if key is not None else None
+        if current is None:
+            return False
+        return (
+            actor_persona is None
+            or current.get("actor_persona") == actor_persona
+        )
+
     def register_admitted_capture_value(
         self,
         create_url: str,

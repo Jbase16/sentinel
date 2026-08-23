@@ -3,8 +3,8 @@
 R5B3b2a revalidates the current authority, capture, graph compilation, static
 manifest, concrete request plan, policy decisions, and ordered budget sequence before
 it performs two local side effects: reserving a durable receipt and atomically holding
-the complete proof budget. The resulting lease has no transport, provisioning,
-backend-dispatch, effect-oracle, cleanup, finding, or promotion authority.
+the complete proof budget. This module has no transport or backend-dispatch surface;
+its claimed handle can be consumed only by a separate default-off active boundary.
 """
 
 from __future__ import annotations
@@ -50,6 +50,7 @@ _HASH_REF = re.compile(r"^[a-z][a-z0-9_]*:[0-9a-f]{64}$")
 _BARE_HASH = re.compile(r"^[0-9a-f]{64}$")
 _SEMANTIC = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
 _SUPPORTED_FAMILIES = frozenset({"omission", "reordering"})
+_RUNTIME_STAGE_ORDER = {"provision": 0, "dispatch": 1, "cleanup": 2}
 _RESOLVED_BLOCKERS = frozenset(
     {
         "atomic_budget_not_reserved",
@@ -470,11 +471,60 @@ class GraphBoundExecutionClaimConfig:
 
 
 @dataclass(frozen=True, repr=False)
+class _ClaimRuntimePlan:
+    plan: GraphBoundPreparedRequestPlan = field(repr=False)
+    terminal_operation_id: str
+    actor_persona_id: str = field(repr=False)
+    target_origin: str = field(repr=False)
+    policy_ref: str
+    authorization_ref: str
+    authority_context_ref: str
+    authorization: AuthorizationEnvelope = field(repr=False, compare=False)
+    executor: PolicyExecutor = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        stages = tuple(
+            (
+                "cleanup"
+                if item.phase == "cleanup"
+                else (
+                    "dispatch"
+                    if item.operation_id == self.terminal_operation_id
+                    else "provision"
+                )
+            )
+            for item in self.plan.request_bindings
+        )
+        if (
+            not _hash_ref(self.terminal_operation_id, "action")
+            or self.plan.baseline_operation_ids[-1]
+            != self.terminal_operation_id
+            or self.plan.treatment_operation_ids[-1]
+            != self.terminal_operation_id
+            or stages
+            != tuple(sorted(stages, key=_RUNTIME_STAGE_ORDER.__getitem__))
+            or stages.count("dispatch") != 3
+            or not self.actor_persona_id
+            or _canonical_origin(self.target_origin) != self.target_origin
+            or not _hash_ref(self.policy_ref, "graph_bound_experiment_policy")
+            or not _hash_ref(self.authorization_ref, "graph_bound_authorization")
+            or not _hash_ref(
+                self.authority_context_ref,
+                "experiment_authority_context",
+            )
+            or not isinstance(self.authorization, AuthorizationEnvelope)
+            or not isinstance(self.executor, PolicyExecutor)
+        ):
+            raise ValueError("graph-bound claim runtime plan is invalid")
+
+
+@dataclass(frozen=True, repr=False)
 class _PreparedClaim:
     preview: GraphBoundExecutionClaimPreview
     fingerprint: str = field(repr=False)
     receipt_context: BehavioralReceiptContext = field(repr=False)
     actions: Tuple[Tuple[str, str], ...] = field(repr=False)
+    runtime_plan: _ClaimRuntimePlan = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -482,8 +532,38 @@ class _PreparedClaim:
             or not self.actions
             or len(self.actions) != self.preview.total_request_units
             or any(not action or not endpoint for action, endpoint in self.actions)
+            or self.runtime_plan.plan.plan_id != self.preview.plan_id
         ):
             raise ValueError("prepared graph-bound execution claim is invalid")
+
+
+class _GraphBoundProvisioningAuthority:
+    """Private bridge from a consumed claim to the active provisioning module."""
+
+    def __init__(self, resources: "_ClaimResources") -> None:
+        self._resources = resources
+        self.runtime_plan = resources.runtime_plan
+
+    @property
+    def budget_reservation_id(self) -> str:
+        return self._resources.budget_reservation_id
+
+    @property
+    def remaining_units(self) -> int:
+        return self._resources.reserved_units
+
+    @property
+    def state(self) -> str:
+        return self._resources.state
+
+    def mark_provisioned(self) -> None:
+        self._resources.mark_provisioned()
+
+    def note_budget_units(self, count: int) -> None:
+        self._resources.note_budget_units(count)
+
+    def abort(self, *, expected_state: str, reason: str) -> int:
+        return self._resources.abort(expected_state=expected_state, reason=reason)
 
 
 class _ClaimResources:
@@ -496,13 +576,16 @@ class _ClaimResources:
         receipt_fingerprint: str,
         receipt_reservation_token: str,
         expected_units: int,
+        runtime_plan: _ClaimRuntimePlan,
     ) -> None:
         self.budget = budget
         self.budget_reservation_id = budget_reservation_id
         self.receipt_store = receipt_store
         self.receipt_fingerprint = receipt_fingerprint
         self.expected_units = expected_units
+        self.runtime_plan = runtime_plan
         self._receipt_reservation_token: Optional[str] = receipt_reservation_token
+        self._authorized_budget_units = 0
         self._state = "active"
         self._lock = threading.RLock()
         if (
@@ -534,6 +617,46 @@ class _ClaimResources:
                 )
             self._state = "claimed"
 
+    def begin_provisioning(self) -> _GraphBoundProvisioningAuthority:
+        with self._lock:
+            if self._state != "claimed":
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_claim_not_available_for_provisioning",
+                    category="claim",
+                )
+            self._state = "provisioning"
+            return _GraphBoundProvisioningAuthority(self)
+
+    def mark_provisioned(self) -> None:
+        with self._lock:
+            if self._state != "provisioning":
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_provisioning_state_mismatch",
+                    category="claim",
+                )
+            self._state = "provisioned"
+
+    def note_budget_units(self, count: int) -> None:
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise ValueError("graph-bound budget unit count is invalid")
+        with self._lock:
+            if self._state not in {"provisioning", "provisioned"}:
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_budget_accounting_state_mismatch",
+                    category="claim",
+                )
+            expected = self.expected_units - self._authorized_budget_units - count
+            if (
+                expected < 0
+                or self.budget.reservation_remaining(self.budget_reservation_id)
+                != expected
+            ):
+                raise GraphBoundExecutionClaimDenied(
+                    "graph_bound_execution_budget_accounting_mismatch",
+                    category="budget",
+                )
+            self._authorized_budget_units += count
+
     def abort(self, *, expected_state: str, reason: str) -> int:
         if _SEMANTIC.fullmatch(str(reason or "")) is None:
             raise ValueError("graph-bound execution abort reason is invalid")
@@ -558,6 +681,7 @@ class _ClaimResources:
                 )
             except Exception as exc:  # pragma: no cover - defensive store seam
                 receipt_error = exc
+            expected_release = self.expected_units - self._authorized_budget_units
             released = self.budget.release_reservation(self.budget_reservation_id)
             self._receipt_reservation_token = None
             self._state = "aborted"
@@ -566,7 +690,7 @@ class _ClaimResources:
                     "graph_bound_execution_budget_released_but_receipt_abort_failed",
                     category="receipt",
                 ) from receipt_error
-            if released != self.expected_units:
+            if released != expected_release:
                 raise GraphBoundExecutionClaimDenied(
                     "graph_bound_execution_budget_release_mismatch",
                     category="budget",
@@ -575,7 +699,7 @@ class _ClaimResources:
 
 
 class GraphBoundExecutionClaim:
-    """One claimed lease with abort-only authority in this slice."""
+    """One claimed lease with abort or internal provisioning handoff authority."""
 
     def __init__(
         self,
@@ -595,6 +719,9 @@ class GraphBoundExecutionClaim:
 
     def abort(self, reason: str = "graph_bound_execution_claim_aborted") -> int:
         return self._resources.abort(expected_state="claimed", reason=reason)
+
+    def _begin_provisioning(self) -> _GraphBoundProvisioningAuthority:
+        return self._resources.begin_provisioning()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -822,6 +949,10 @@ class GraphBoundExecutionClaimAdmission:
                 "graph_bound_execution_selected_manifest_unavailable"
             )
         manifest = manifests[0]
+        if manifest.specification.spec_id != plan.specification_id:
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_specification_identity_mismatch"
+            )
 
         raw_by_id = {item.binding_id: item for item in plan.ephemeral_requests}
         if set(raw_by_id) != {item.binding_id for item in plan.request_bindings}:
@@ -901,6 +1032,17 @@ class GraphBoundExecutionClaimAdmission:
             fingerprint=fingerprint,
             receipt_context=context,
             actions=actions,
+            runtime_plan=_ClaimRuntimePlan(
+                plan=plan,
+                terminal_operation_id=manifest.specification.terminal_operation_id,
+                actor_persona_id=self.actor_persona_id,
+                target_origin=self.target_origin,
+                policy_ref=preview.policy_ref,
+                authorization_ref=preview.authorization_ref,
+                authority_context_ref=preview.authority_context_ref,
+                authorization=authorization,
+                executor=self.executor,
+            ),
         )
 
     def validate_preflight(self) -> GraphBoundExecutionClaimPreview:
@@ -980,6 +1122,7 @@ class GraphBoundExecutionClaimAdmission:
                 receipt_fingerprint=prepared.fingerprint,
                 receipt_reservation_token=receipt_token,
                 expected_units=prepared.preview.total_request_units,
+                runtime_plan=prepared.runtime_plan,
             )
         except Exception as exc:
             budget.release_reservation(budget_reservation_id)

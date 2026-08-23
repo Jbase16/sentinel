@@ -333,6 +333,27 @@ def test_receipt_abort_failure_still_releases_budget_and_closes_lease(tmp_path):
     assert store.load(store.last_fingerprint).state == "reserved"
 
 
+def test_abort_detects_unaccounted_budget_reservation_consumption(tmp_path):
+    boundary, store, executor, _records, binding = _boundary(tmp_path)
+    expected = _expected_actions(binding)
+    claim = boundary.admit().claim()
+    reservation_id = claim._resources.budget_reservation_id
+    executor.policy.budget.record(
+        *expected[0],
+        reservation_id=reservation_id,
+    )
+
+    with pytest.raises(
+        GraphBoundExecutionClaimDenied,
+        match="budget_release_mismatch",
+    ):
+        claim.abort()
+
+    assert claim.state == "aborted"
+    assert claim.reserved_units == 0
+    assert store.load(store.last_fingerprint).state == "aborted"
+
+
 def test_claim_contract_is_content_addressed_and_rejects_flag_tampering(tmp_path):
     boundary, _store, _executor_value, _records, _binding = _boundary(tmp_path)
     lease = boundary.admit()
@@ -343,7 +364,7 @@ def test_claim_contract_is_content_addressed_and_rejects_flag_tampering(tmp_path
     lease.abort()
 
 
-def test_claim_module_has_no_transport_provisioning_or_finding_surface():
+def test_claim_module_has_no_transport_or_finding_surface():
     source_path = (
         Path(__file__).parents[2]
         / "core"
@@ -358,5 +379,7 @@ def test_claim_module_has_no_transport_provisioning_or_finding_surface():
     assert ".execute(" not in source
     assert ".record(" not in source
     assert "PolicyExecutor(" not in source
+    assert "Finding" not in source
+    assert "SubmissionCandidate" not in source
     assert "finding_store" not in source
     assert "world_manager" not in source
