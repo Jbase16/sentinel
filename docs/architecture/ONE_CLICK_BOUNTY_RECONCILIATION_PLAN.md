@@ -687,7 +687,10 @@ per-endpoint traffic ceiling.
     and zero-residue components at Sentinel `9967de6` and lab `fda7b0c`.
   - [x] Response-schema drift refused with HTTP `409` before terminal traffic; the
     independently measured target cleaned its one known object and retained zero state.
-  - [ ] Full `OCB-S15`: temporal prior-versus-current capture freshness, structured
+  - [x] Production `behavioral_phase_only` ordinary-Scan completion surface at
+    Sentinel `2cca4f0`; it preserves canonical promotion and persistence while
+    suppressing all post-behavior reasoning, tools, dispatch, and verification.
+  - [ ] Full `OCB-S15`: temporal prior-versus-current capture freshness, durable
     denied-path receipt/cleanup evidence, and external ordinary-Scan persistence proof.
   - [ ] Production reordering selection and a positive reordering effect oracle.
 - [ ] Replay and stale-state specifications after their capability-freshness and
@@ -1028,7 +1031,12 @@ That artifact is deliberately `partial`, not a full `OCB-S15` pass. The direct p
 endpoint accepts one set of submitted records and cannot compare a prior artifact with a
 separate current capture, so it cannot prove temporal stale-capture refusal. It also
 returns the graph result directly and does not exercise the ordinary Scan promotion and
-`FindingsStore` persistence seam. Reordering remains unfinished: current graph execution
+`FindingsStore` persistence seam. Sentinel `2cca4f0` adds an explicit paired-persona
+`behavioral_phase_only` Scan completion mode for that proof: the normal receipt-bound
+promotion and persistence path remains active, while ordinary tools, reasoning,
+ActionDispatcher, active verification, and the final finding verifier are skipped. That
+surface is suite-proved but not yet externally accepted. Reordering remains unfinished:
+current graph execution
 can only adjudicate it as refuted or inconclusive; the matching effect remains
 `reordering_security_effect_not_defined`, so it cannot produce a finding. Broader replay
 and stale-state specifications remain deferred until their capability-freshness and
