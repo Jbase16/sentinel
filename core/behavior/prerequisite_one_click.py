@@ -13,6 +13,9 @@ from .lifecycle import LifecycleMiningResult
 from .normalize import stable_hash
 from .obligations import SecurityObligationGraph
 from .payout_goals import PayoutGoalPlan, ProofTopology, SecurityProperty
+from .prerequisite_capture_freshness import (
+    GraphBoundCaptureFreshnessBinding,
+)
 from .prerequisite_contracts import GRAPH_BOUND_PREREQUISITE_WORKFLOW
 from .prerequisite_admission import GraphBoundManifestAdmissionPlanner
 from .prerequisite_execution import (
@@ -466,6 +469,7 @@ class GraphBoundPrerequisiteOneClickDispatcher:
         compilation: GraphBoundExperimentCompilationResult,
         payout_goal_plan: PayoutGoalPlan,
         graph: SecurityObligationGraph,
+        capture_freshness: Optional[GraphBoundCaptureFreshnessBinding] = None,
     ) -> GraphBoundPrerequisiteOneClickRun:
         if not isinstance(payout_goal_plan, PayoutGoalPlan):
             raise TypeError("payout_goal_plan must be a PayoutGoalPlan")
@@ -528,6 +532,13 @@ class GraphBoundPrerequisiteOneClickDispatcher:
                 payout_candidate_id=selected.candidate_id,
                 disabled_gates=disabled_gates,
             )
+        if not isinstance(
+            capture_freshness,
+            GraphBoundCaptureFreshnessBinding,
+        ):
+            raise GraphBoundPrerequisiteOneClickDenied(
+                "graph_bound_one_click_capture_freshness_is_required"
+            )
 
         admission = GraphBoundManifestAdmissionPlanner().plan(
             compilation=compilation,
@@ -570,6 +581,7 @@ class GraphBoundPrerequisiteOneClickDispatcher:
             compilation=compilation,
             admission=admission,
             request_binding=binding,
+            capture_freshness=capture_freshness,
             plan_id=plan.plan_id,
             config=self.claim_config,
             receipt_store=self.receipt_store,

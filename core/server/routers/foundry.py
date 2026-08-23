@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from core.server.routers.auth import verify_sensitive_token
 
@@ -126,6 +126,16 @@ class RunBehavioralAuthorizationRequest(BaseModel):
     peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
     peer_records: List[Dict[str, Any]] = Field(..., min_length=1, max_length=20_000)
+    prior_source_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
+    prior_peer_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
     script_urls: List[str] = Field(default_factory=list, max_length=64)
     source_controls: List[Dict[str, Any]] = Field(
         default_factory=list,
@@ -141,6 +151,14 @@ class RunBehavioralAuthorizationRequest(BaseModel):
         max_length=4096,
     )
 
+    @model_validator(mode="after")
+    def validate_prior_capture_pair(self) -> "RunBehavioralAuthorizationRequest":
+        if (self.prior_source_records is None) != (
+            self.prior_peer_records is None
+        ):
+            raise ValueError("prior behavioral capture requires both personas")
+        return self
+
 
 class RunBehavioralAuthorizationFromURLRequest(BaseModel):
     """Capture two owned worlds from one URL, then run the primary planner."""
@@ -149,6 +167,26 @@ class RunBehavioralAuthorizationFromURLRequest(BaseModel):
     envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     peer_persona_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
+    prior_source_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
+    prior_peer_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
+
+    @model_validator(mode="after")
+    def validate_prior_capture_pair(
+        self,
+    ) -> "RunBehavioralAuthorizationFromURLRequest":
+        if (self.prior_source_records is None) != (
+            self.prior_peer_records is None
+        ):
+            raise ValueError("prior behavioral capture requires both personas")
+        return self
 
 
 class RunOwnedReadProofRequest(BaseModel):
@@ -686,6 +724,48 @@ def _bounded_script_urls(script_urls: List[str], scope_filter) -> List[str]:
     return sorted(in_scope)[:16]
 
 
+def _graph_bound_capture_selection_descriptor(run) -> Dict[str, Any]:
+    """Return the value-instance-independent graph selection shape."""
+
+    payout_plan = run.payout_goal_plan
+    selected = payout_plan.selected
+    selected_value = None
+    if selected is not None:
+        goal = selected.goal.to_dict()
+        selected_value = {
+            "status": selected.status,
+            "backend": selected.backend,
+            "blockers": list(selected.blockers),
+            "goal": {
+                key: goal.get(key)
+                for key in (
+                    "security_property",
+                    "sink",
+                    "terminal_operation_id",
+                    "witness_requirements",
+                )
+            },
+            "world_requirement": selected.world_requirement.to_dict(),
+        }
+    plans = [
+        {
+            "family": plan.family,
+            "baseline_operation_ids": list(plan.baseline_operation_ids),
+            "treatment_operation_ids": list(plan.treatment_operation_ids),
+            "remaining_execution_blockers": list(
+                plan.remaining_execution_blockers
+            ),
+        }
+        for plan in run.prerequisite_requests.plans
+    ]
+    plans.sort(key=lambda value: json.dumps(value, sort_keys=True))
+    return {
+        "payout_status": payout_plan.status,
+        "selected": selected_value,
+        "plans": plans,
+    }
+
+
 @router.post("/behavioral-authorization")
 async def run_behavioral_authorization_endpoint(
     req: RunBehavioralAuthorizationRequest,
@@ -822,6 +902,10 @@ async def run_behavioral_authorization_endpoint(
         GRAPH_BOUND_PREREQUISITE_WORKFLOW,
         GraphBoundManifestAdmissionDenied,
     )
+    from core.behavior.prerequisite_capture_freshness import (
+        GraphBoundCaptureFreshnessBinding,
+        GraphBoundCaptureFreshnessDenied,
+    )
     from core.behavior.prerequisite_execution import (
         GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV,
         GraphBoundPrerequisiteExecutionConfig,
@@ -876,6 +960,27 @@ async def run_behavioral_authorization_endpoint(
             )
         source_records = _bounded_in_scope_records(req.source_records, scope_filter)
         peer_records = _bounded_in_scope_records(req.peer_records, scope_filter)
+        prior_source_records = None
+        prior_peer_records = None
+        if req.prior_source_records is not None:
+            if (
+                _behavioral_capture_bytes(
+                    req.prior_source_records,
+                    req.prior_peer_records or [],
+                )
+                > _MAX_BEHAVIORAL_CAPTURE_BYTES
+            ):
+                raise ValueError(
+                    "prior paired capture exceeds the 16 MiB execution limit"
+                )
+            prior_source_records = _bounded_in_scope_records(
+                req.prior_source_records,
+                scope_filter,
+            )
+            prior_peer_records = _bounded_in_scope_records(
+                req.prior_peer_records or [],
+                scope_filter,
+            )
         script_urls = _bounded_script_urls(req.script_urls, scope_filter)
         if req.interaction_page_url and not scope_filter(req.interaction_page_url):
             raise ValueError("interaction page is outside the target origin")
@@ -883,6 +988,13 @@ async def run_behavioral_authorization_endpoint(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not source_records or not peer_records:
         raise HTTPException(status_code=400, detail="paired captures have no in-scope records")
+    if req.prior_source_records is not None and (
+        not prior_source_records or not prior_peer_records
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="prior paired captures have no in-scope records",
+        )
     source_controls = tuple(req.source_controls)
     peer_controls = tuple(req.peer_controls)
     try:
@@ -1051,6 +1163,7 @@ async def run_behavioral_authorization_endpoint(
         .lower()
         in {"1", "true", "yes", "on"}
     )
+    capture_freshness = None
     if (
         continuation_config.enabled
         and GRAPH_BOUND_PREREQUISITE_WORKFLOW in envelope.allowed_workflows
@@ -1075,6 +1188,31 @@ async def run_behavioral_authorization_endpoint(
                 f"signed workflow: {GRAPH_BOUND_PREREQUISITE_WORKFLOW}"
             ),
         )
+    if (
+        graph_bound_claim_gate_enabled
+        and graph_bound_provisioning_gate_enabled
+        and graph_bound_execution_gate_enabled
+    ):
+        if prior_source_records is None or prior_peer_records is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "graph-bound prerequisite execution requires an explicit "
+                    "prior paired capture"
+                ),
+            )
+        try:
+            capture_freshness = GraphBoundCaptureFreshnessBinding.build(
+                prior_source_records=prior_source_records,
+                prior_peer_records=prior_peer_records,
+                current_source_records=source_records,
+                current_peer_records=peer_records,
+                target_origin=target_origin,
+                source_world_id=source_persona.persona_id,
+                peer_world_id=peer_persona.persona_id,
+            )
+        except GraphBoundCaptureFreshnessDenied as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     if omission_confirmation_config.enabled:
         missing_workflows = sorted(
             {
@@ -1420,6 +1558,11 @@ async def run_behavioral_authorization_endpoint(
                 "peer_persona_id": peer_persona.persona_id,
                 "source_records": source_records,
                 "peer_records": peer_records,
+                "capture_freshness_ref": (
+                    capture_freshness.binding_id
+                    if capture_freshness is not None
+                    else None
+                ),
                 "script_urls": script_urls,
                 "interaction_catalog_id": interaction_preview.catalog_id,
             })
@@ -1630,9 +1773,23 @@ async def run_behavioral_authorization_endpoint(
         prerequisite_executor=graph_bound_prerequisite_executor,
     )
     shadow_run = None
+    graph_prior_shadow_run = None
     adaptive_result = None
     adaptive_origin_shadow = None
     try:
+        if capture_freshness is not None:
+            graph_prior_shadow_run = shadow_orchestrator.run(
+                prior_source_records or (),
+                target_origin=target_origin,
+                world_id=source_persona.persona_id,
+                peer_records=prior_peer_records or (),
+                peer_world_id=peer_persona.persona_id,
+                artifacts=(),
+                controls=(),
+                peer_controls=(),
+                interaction_page_url=None,
+                experiment_context=shadow_context,
+            )
         shadow_run = shadow_orchestrator.run(
             source_records,
             target_origin=target_origin,
@@ -1646,7 +1803,15 @@ async def run_behavioral_authorization_endpoint(
             experiment_context=shadow_context,
         )
         shadow_response = shadow_run.to_dict()
-    except Exception:
+    except Exception as exc:
+        if capture_freshness is not None and graph_prior_shadow_run is None:
+            abort_reserved_root_receipt(
+                "graph_bound_prior_capture_analysis_failed"
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="graph-bound prior capture cannot be reconstructed",
+            ) from exc
         logger.exception("behavioral shadow orchestration failed")
         shadow_response = {
             "schema_version": 1,
@@ -1655,6 +1820,28 @@ async def run_behavioral_authorization_endpoint(
             "status": "error",
             "error_code": "shadow_orchestration_failed",
         }
+
+    if (
+        capture_freshness is not None
+        and graph_prior_shadow_run is not None
+        and shadow_run is not None
+    ):
+        try:
+            capture_freshness = capture_freshness.bind_selection(
+                prior_selection=(
+                    _graph_bound_capture_selection_descriptor(
+                        graph_prior_shadow_run
+                    )
+                ),
+                current_selection=(
+                    _graph_bound_capture_selection_descriptor(shadow_run)
+                ),
+            )
+        except GraphBoundCaptureFreshnessDenied as exc:
+            abort_reserved_root_receipt(
+                "graph_bound_capture_selection_changed"
+            )
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     if shadow_run is None and resolver_config.enabled:
         if (
@@ -3123,10 +3310,11 @@ async def run_behavioral_authorization_endpoint(
     adaptive_proof_handoff = None
     graph_bound_one_click_run = None
     generalized_one_click_run = None
+    graph_bound_shadow_run = shadow_run
     try:
         if (
             cross_persona_proof_run is None
-            and shadow_run is not None
+            and graph_bound_shadow_run is not None
             and graph_bound_prerequisite_executor is not None
             and receipt_store is not None
         ):
@@ -3147,11 +3335,14 @@ async def run_behavioral_authorization_endpoint(
                     execution_gate_enabled=graph_bound_execution_gate_enabled,
                 ).run(
                     source_records,
-                    lifecycle=shadow_run.lifecycle,
-                    state_machine=shadow_run.state_machine,
-                    compilation=shadow_run.prerequisite_experiments,
-                    payout_goal_plan=shadow_run.payout_goal_plan,
-                    graph=shadow_run.graph,
+                    lifecycle=graph_bound_shadow_run.lifecycle,
+                    state_machine=graph_bound_shadow_run.state_machine,
+                    compilation=(
+                        graph_bound_shadow_run.prerequisite_experiments
+                    ),
+                    payout_goal_plan=graph_bound_shadow_run.payout_goal_plan,
+                    graph=graph_bound_shadow_run.graph,
+                    capture_freshness=capture_freshness,
                 )
             )
         if (
@@ -3632,7 +3823,7 @@ async def run_behavioral_authorization_from_url_endpoint(
 
     try:
         target_url = validate_capture_url(req.target_url)
-        target_origin, _scope_filter = _behavioral_scope_filter(target_url)
+        target_origin, scope_filter = _behavioral_scope_filter(target_url)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -3835,6 +4026,48 @@ async def run_behavioral_authorization_from_url_endpoint(
             ),
         )
 
+    graph_bound_execution_active = (
+        graph_bound_claim_gate_enabled
+        and graph_bound_provisioning_gate_enabled
+        and graph_bound_execution_gate_enabled
+    )
+    prior_source_records = None
+    prior_peer_records = None
+    if graph_bound_execution_active and req.prior_source_records is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "graph-bound prerequisite execution requires an explicit "
+                "prior paired capture"
+            ),
+        )
+    if req.prior_source_records is not None:
+        try:
+            if (
+                _behavioral_capture_bytes(
+                    req.prior_source_records,
+                    req.prior_peer_records or [],
+                )
+                > _MAX_BEHAVIORAL_CAPTURE_BYTES
+            ):
+                raise ValueError(
+                    "prior paired capture exceeds the 16 MiB execution limit"
+                )
+            prior_source_records = _bounded_in_scope_records(
+                req.prior_source_records,
+                scope_filter,
+            )
+            prior_peer_records = _bounded_in_scope_records(
+                req.prior_peer_records or [],
+                scope_filter,
+            )
+            if not prior_source_records or not prior_peer_records:
+                raise ValueError(
+                    "prior paired captures have no in-scope records"
+                )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     try:
         fingerprint = request_fingerprint({
             "schema_version": 2,
@@ -3876,6 +4109,16 @@ async def run_behavioral_authorization_from_url_endpoint(
             "envelope_id": req.envelope_id,
             "source_persona_id": source_persona.persona_id,
             "peer_persona_id": peer_persona.persona_id,
+            "prior_capture_ref": (
+                request_fingerprint(
+                    {
+                        "source_records": prior_source_records,
+                        "peer_records": prior_peer_records,
+                    }
+                )
+                if prior_source_records is not None
+                else None
+            ),
         })
     except (TypeError, ValueError) as exc:
         raise HTTPException(
@@ -3984,6 +4227,8 @@ async def run_behavioral_authorization_from_url_endpoint(
                 peer_persona_id=peer_persona.persona_id,
                 source_records=list(source_capture.records),
                 peer_records=list(peer_capture.records),
+                prior_source_records=prior_source_records,
+                prior_peer_records=prior_peer_records,
                 script_urls=list(script_urls),
                 source_controls=list(source_capture.controls),
                 peer_controls=list(peer_capture.controls),

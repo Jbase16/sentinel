@@ -446,6 +446,8 @@ class TestBehavioralAuthorizationEndpoint:
             peer_persona_id=peer_persona.persona_id,
             source_records=source_records,
             peer_records=peer_records,
+            prior_source_records=(list(source_records) if graph_bound else None),
+            prior_peer_records=(list(peer_records) if graph_bound else None),
         )
         return request, source_persona, peer_persona
 
@@ -463,6 +465,12 @@ class TestBehavioralAuthorizationEndpoint:
                 envelope_id=request.envelope_id,
                 source_persona_id=source_persona.persona_id,
                 peer_persona_id=peer_persona.persona_id,
+                prior_source_records=(
+                    list(request.source_records) if graph_bound else None
+                ),
+                prior_peer_records=(
+                    list(request.peer_records) if graph_bound else None
+                ),
             ),
             request,
             source_persona,
@@ -588,6 +596,8 @@ class TestBehavioralAuthorizationEndpoint:
             peer_persona_id=peer_persona.persona_id,
             source_records=source_records,
             peer_records=peer_records,
+            prior_source_records=(list(source_records) if graph_bound else None),
+            prior_peer_records=(list(peer_records) if graph_bound else None),
         )
         return request, source_persona, peer_persona
 
@@ -2595,6 +2605,9 @@ class TestBehavioralAuthorizationEndpoint:
             "claim_contract_id": (
                 f"graph_bound_execution_claim_contract:{'4' * 64}"
             ),
+            "capture_freshness_ref": (
+                f"graph_bound_capture_freshness:{'7' * 64}"
+            ),
             "plan_id": f"graph_bound_prepared_request_plan:{'5' * 64}",
             "family": "omission",
             "cleanup": cleanup,
@@ -2721,6 +2734,8 @@ class TestBehavioralAuthorizationEndpoint:
             envelope_id=capture_request.envelope_id,
             source_persona_id=source_persona.persona_id,
             peer_persona_id=peer_persona.persona_id,
+            prior_source_records=list(capture_request.source_records),
+            prior_peer_records=list(capture_request.peer_records),
         )
         for name in (
             "SENTINELFORGE_BEHAVIOR_PRIMARY",
@@ -2741,6 +2756,212 @@ class TestBehavioralAuthorizationEndpoint:
         assert error.value.status_code == 409
         assert "graph-bound prerequisite" in error.value.detail
         assert "missing signed workflow" in error.value.detail
+
+    def test_graph_execution_requires_prior_capture_before_window_access(
+        self,
+        monkeypatch,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            RunBehavioralAuthorizationFromURLRequest,
+            run_behavioral_authorization_from_url_endpoint,
+        )
+
+        capture_request, source_persona, peer_persona = self._omission_request(
+            graph_bound=True,
+            legacy_omission=False,
+        )
+        request = RunBehavioralAuthorizationFromURLRequest(
+            target_url=f"{self.ORIGIN}/app",
+            envelope_id=capture_request.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("missing prior capture must fail before windows")
+
+        monkeypatch.setattr(driver, "validate_persona_windows", forbidden)
+        monkeypatch.setattr(driver, "capture_persona_pair", forbidden)
+
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+
+        assert error.value.status_code == 409
+        assert "requires an explicit prior paired capture" in error.value.detail
+
+    def test_stale_prior_capture_refuses_graph_execution_and_replay_traffic(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, capture_request, source_persona, peer_persona = (
+            self._one_click_request(graph_bound=True)
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        stale_source = [dict(item) for item in capture_request.source_records]
+        stale_source[0] = {
+            **stale_source[0],
+            "response_status": 409,
+            "response_body": '{"error":"workflow changed"}',
+        }
+        window_checks = 0
+        captures = 0
+
+        async def validate_windows(_persona_ids):
+            nonlocal window_checks
+            window_checks += 1
+
+        async def capture_pair(**_kwargs):
+            nonlocal captures
+            captures += 1
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=source_persona.persona_id,
+                    path="/private/current-source.jsonl",
+                    records=tuple(stale_source),
+                    captured_bytes=123,
+                    limit_reached=False,
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=peer_persona.persona_id,
+                    path="/private/current-peer.jsonl",
+                    records=tuple(capture_request.peer_records),
+                    captured_bytes=123,
+                    limit_reached=False,
+                ),
+                (),
+            )
+
+        async def forbidden_send(*_args, **_kwargs):
+            raise AssertionError("stale capture must fail before graph traffic")
+
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden_send)
+
+        with pytest.raises(HTTPException) as first_error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+        with pytest.raises(HTTPException) as duplicate_error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+
+        assert first_error.value.status_code == 409
+        assert first_error.value.detail == "graph_bound_prior_capture_is_stale"
+        assert duplicate_error.value.status_code == 409
+        assert "already reserved or terminal" in duplicate_error.value.detail
+        assert window_checks == captures == 1
+        receipts = list((tmp_path / "behavioral_receipts").glob("*.json"))
+        assert len(receipts) == 1
+        stored = json.loads(receipts[0].read_text(encoding="utf-8"))
+        assert stored["state"] == "aborted"
+        assert stored["terminal_evidence"] is None
+
+    def test_changed_current_lineage_refuses_stale_graph_selection(
+        self,
+        monkeypatch,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            RunBehavioralAuthorizationFromURLRequest,
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        capture_request, source_persona, peer_persona = self._omission_request(
+            graph_bound=True,
+            legacy_omission=False,
+        )
+        request = RunBehavioralAuthorizationFromURLRequest(
+            target_url=f"{self.ORIGIN}/app",
+            envelope_id=capture_request.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+            prior_source_records=list(capture_request.source_records),
+            prior_peer_records=list(capture_request.peer_records),
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        current_source = [dict(item) for item in capture_request.source_records]
+        current_source[2] = {
+            **current_source[2],
+            "url": current_source[2]["url"].replace(
+                "token_4a5b6c7d8e9f0123",
+                "token_9a5b6c7d8e9f0123",
+            ),
+        }
+        captures = 0
+
+        async def validate_windows(_persona_ids):
+            return None
+
+        async def capture_pair(**_kwargs):
+            nonlocal captures
+            captures += 1
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=source_persona.persona_id,
+                    path="/private/current-source-lineage.jsonl",
+                    records=tuple(current_source),
+                    captured_bytes=256,
+                    limit_reached=False,
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=peer_persona.persona_id,
+                    path="/private/current-peer-lineage.jsonl",
+                    records=tuple(capture_request.peer_records),
+                    captured_bytes=64,
+                    limit_reached=False,
+                ),
+                (),
+            )
+
+        async def forbidden_send(*_args, **_kwargs):
+            raise AssertionError("changed lineage must fail before graph traffic")
+
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden_send)
+
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+
+        assert error.value.status_code == 409
+        assert error.value.detail == (
+            "graph_bound_prior_capture_selection_is_stale"
+        )
+        assert captures == 1
 
     def test_selected_graph_plan_never_falls_through_to_generalized_execution(
         self,
@@ -2983,6 +3204,9 @@ class TestBehavioralAuthorizationEndpoint:
                     ),
                     "category": "lineage",
                     "claim_contract_id": self.claim.contract.contract_id,
+                    "capture_freshness_ref": (
+                        self.claim.contract.preview.capture_freshness_ref
+                    ),
                     "plan_id": authority.runtime_plan.plan.plan_id,
                     "family": authority.runtime_plan.plan.family,
                     "cleanup": cleanup.to_dict(),
@@ -3050,6 +3274,40 @@ class TestBehavioralAuthorizationEndpoint:
         encoded = json.dumps(stored, sort_keys=True)
         assert "exportToken" not in encoded
         assert "runtime-workflow" not in encoded
+
+    def test_direct_graph_execution_cannot_bypass_prior_capture_binding(
+        self,
+        monkeypatch,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+
+        request, _source_persona, _peer_persona = self._omission_request(
+            graph_bound=True,
+            legacy_omission=False,
+        )
+        request = request.model_copy(
+            update={
+                "prior_source_records": None,
+                "prior_peer_records": None,
+            }
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert error.value.status_code == 409
+        assert "requires an explicit prior paired capture" in error.value.detail
 
     def test_generalized_cancellation_uses_neutral_receipt_reason(
         self,
@@ -3220,6 +3478,8 @@ class TestBehavioralAuthorizationEndpoint:
             envelope_id=capture_request.envelope_id,
             source_persona_id=source_persona.persona_id,
             peer_persona_id=peer_persona.persona_id,
+            prior_source_records=list(capture_request.source_records),
+            prior_peer_records=list(capture_request.peer_records),
         )
         for name in (
             "SENTINELFORGE_BEHAVIOR_PRIMARY",
@@ -3234,6 +3494,16 @@ class TestBehavioralAuthorizationEndpoint:
         graph_runs = []
         graph_dispatchers = []
         original_graph_run = GraphBoundPrerequisiteOneClickDispatcher.run
+        current_source_encoded = json.dumps(capture_request.source_records)
+        for prior, current in (
+            ("workflow_7fa9f13a2b4c5d6e", "workflow_8fa9f13a2b4c5d6e"),
+            ("token_4a5b6c7d8e9f0123", "token_5a5b6c7d8e9f0123"),
+        ):
+            current_source_encoded = current_source_encoded.replace(
+                prior,
+                current,
+            )
+        current_source_records = tuple(json.loads(current_source_encoded))
 
         async def capture_graph_run(dispatcher, *args, **kwargs):
             run = await original_graph_run(dispatcher, *args, **kwargs)
@@ -3252,7 +3522,7 @@ class TestBehavioralAuthorizationEndpoint:
                 driver.PersonaCaptureArtifact(
                     persona_id=source_persona.persona_id,
                     path="/private/source-graph-capture.jsonl",
-                    records=tuple(capture_request.source_records),
+                    records=current_source_records,
                     captured_bytes=512,
                     limit_reached=False,
                     page_url=f"{self.ORIGIN}/app",
@@ -3329,6 +3599,9 @@ class TestBehavioralAuthorizationEndpoint:
         )
         assert graph_runs[0].dispatched is True, graph_runs[0]
         assert result["kind"] == "graph_bound_prerequisite_execution"
+        assert result["capture_freshness_ref"].startswith(
+            "graph_bound_capture_freshness:"
+        )
         traffic_after_first_run = len(traffic)
         duplicate = _run(
             run_behavioral_authorization_from_url_endpoint(request, _=True)
@@ -3340,6 +3613,12 @@ class TestBehavioralAuthorizationEndpoint:
                     envelope_id=request.envelope_id,
                     source_persona_id=request.source_persona_id,
                     peer_persona_id=request.peer_persona_id,
+                    prior_source_records=list(
+                        request.prior_source_records or []
+                    ),
+                    prior_peer_records=list(
+                        request.prior_peer_records or []
+                    ),
                 ),
                 _=True,
             )
@@ -3380,6 +3659,9 @@ class TestBehavioralAuthorizationEndpoint:
         )
         assert normalized_outer is not None
         assert normalized_outer.outcome["status"] == expected_verdict
+        assert normalized_outer.outcome["capture_freshness_ref"] == (
+            result["capture_freshness_ref"]
+        )
         assert len(traffic) == traffic_after_first_run
 
     def test_one_click_dispatches_generalized_owned_capture_without_manual_wiring(
@@ -3393,7 +3675,7 @@ class TestBehavioralAuthorizationEndpoint:
         from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
 
         request, capture_request, source_persona, peer_persona = (
-            self._one_click_request(graph_bound=True)
+            self._one_click_request()
         )
         monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
         monkeypatch.setenv(
@@ -3404,12 +3686,6 @@ class TestBehavioralAuthorizationEndpoint:
             "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
             "1",
         )
-        for name in (
-            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
-            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
-            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
-        ):
-            monkeypatch.setenv(name, "1")
 
         def records(persona_id, object_id, marker):
             return (

@@ -206,6 +206,9 @@ def _confirmed_graph_outcome() -> dict[str, Any]:
         "claim_contract_id": (
             f"graph_bound_execution_claim_contract:{'5' * 64}"
         ),
+        "capture_freshness_ref": (
+            f"graph_bound_capture_freshness:{'0' * 64}"
+        ),
         "plan_id": plan_id,
         "family": "omission",
         "provisioning_id": (

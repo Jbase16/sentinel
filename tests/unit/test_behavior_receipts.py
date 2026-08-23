@@ -62,6 +62,9 @@ def _graph_denial_evidence(graph_receipt_id: str):
         "claim_contract_id": (
             f"graph_bound_execution_claim_contract:{'3' * 64}"
         ),
+        "capture_freshness_ref": (
+            f"graph_bound_capture_freshness:{'5' * 64}"
+        ),
         "plan_id": f"graph_bound_prepared_request_plan:{'4' * 64}",
         "family": "omission",
         "cleanup": cleanup,

@@ -38,6 +38,9 @@ from core.behavior.receipts import (
     ReceiptStoreError,
     redacted_outcome,
 )
+from tests.unit.test_behavior_prerequisite_execution_claim import (
+    _capture_freshness,
+)
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.safety.ownership_registry import OwnershipRegistry
 from core.safety.proof_budget import ProofBudget
@@ -236,6 +239,7 @@ def _case(
         compilation=compilation,
         admission=admission,
         request_binding=binding,
+        capture_freshness=_capture_freshness(records),
         plan_id=plan.plan_id,
         config=GraphBoundExecutionClaimConfig(enabled=True),
         receipt_store=store,
@@ -299,6 +303,7 @@ async def test_one_click_dispatches_exact_graph_plan_and_builds_strict_finding(
         compilation=shadow.prerequisite_experiments,
         payout_goal_plan=shadow.payout_goal_plan,
         graph=shadow.graph,
+        capture_freshness=boundary.capture_freshness,
     )
 
     assert run.status == "completed"
@@ -347,6 +352,7 @@ async def test_one_click_refuted_graph_plan_never_builds_finding(tmp_path):
         compilation=shadow.prerequisite_experiments,
         payout_goal_plan=shadow.payout_goal_plan,
         graph=shadow.graph,
+        capture_freshness=boundary.capture_freshness,
     )
 
     assert run.status == "completed"
@@ -381,6 +387,7 @@ async def test_one_click_selected_graph_plan_is_default_off_without_traffic(tmp_
         compilation=shadow.prerequisite_experiments,
         payout_goal_plan=shadow.payout_goal_plan,
         graph=shadow.graph,
+        capture_freshness=boundary.capture_freshness,
     )
 
     assert run.status == "selected_execution_disabled"
@@ -408,6 +415,7 @@ async def test_one_click_selected_graph_plan_is_default_off_without_traffic(tmp_
         compilation=shadow.prerequisite_experiments,
         payout_goal_plan=shadow.payout_goal_plan,
         graph=shadow.graph,
+        capture_freshness=boundary.capture_freshness,
     )
 
     assert partial.disabled_gates == (
@@ -443,6 +451,7 @@ async def test_one_click_rejects_ambiguous_same_terminal_omission_plans(tmp_path
         compilation=shadow.prerequisite_experiments,
         payout_goal_plan=shadow.payout_goal_plan,
         graph=shadow.graph,
+        capture_freshness=boundary.capture_freshness,
     )
 
     assert run.status == "selected_plan_unavailable"
@@ -500,6 +509,7 @@ async def test_one_click_rejects_payout_graph_splice_before_traffic(tmp_path):
             compilation=shadow.prerequisite_experiments,
             payout_goal_plan=other_shadow.payout_goal_plan,
             graph=shadow.graph,
+            capture_freshness=boundary.capture_freshness,
         )
 
     assert calls == []
@@ -587,6 +597,7 @@ async def test_one_click_rejects_selected_candidate_missing_from_context(
             compilation=shadow.prerequisite_experiments,
             payout_goal_plan=mismatched_plan,
             graph=shadow.graph,
+            capture_freshness=boundary.capture_freshness,
         )
 
     assert calls == []
@@ -632,6 +643,7 @@ async def test_one_click_constructor_fault_aborts_claim_and_releases_budget(
             compilation=shadow.prerequisite_experiments,
             payout_goal_plan=shadow.payout_goal_plan,
             graph=shadow.graph,
+            capture_freshness=boundary.capture_freshness,
         )
 
     receipt, _path = _receipt(store)

@@ -10,9 +10,18 @@ from core.behavior.prerequisite_execution_claim import (
     GraphBoundExecutionClaimConfig,
     GraphBoundExecutionClaimDenied,
 )
+from core.behavior.prerequisite_capture_freshness import (
+    GraphBoundCaptureFreshnessBinding,
+)
 from core.behavior.receipts import BehavioralReceiptStore
 from tests.unit.test_behavior_prerequisite_admission import _authorization
-from tests.unit.test_behavior_prerequisite_experiments import ORIGIN
+from tests.unit.test_behavior_prerequisite_experiments import (
+    FIRST_TOKEN,
+    ORIGIN,
+    PRIVATE_MARKER,
+    SECOND_TOKEN,
+    WORKFLOW_ID,
+)
 from tests.unit.test_behavior_prerequisite_request_binding import (
     _context,
     _executor,
@@ -64,6 +73,22 @@ def _expected_actions(binding):
     )
 
 
+def _capture_freshness(records, *, current_records=None):
+    current = records if current_records is None else current_records
+    return GraphBoundCaptureFreshnessBinding.build(
+        prior_source_records=records,
+        prior_peer_records=records,
+        current_source_records=current,
+        current_peer_records=records,
+        target_origin=ORIGIN,
+        source_world_id="alice",
+        peer_world_id="bob",
+    ).bind_selection(
+        prior_selection={"family": "omission", "terminal": "export"},
+        current_selection={"family": "omission", "terminal": "export"},
+    )
+
+
 def _boundary(tmp_path, *, executor=None, receipt_store=None, config=None):
     executor = executor or _executor()[0]
     records, lifecycle, state, compilation, admission, binding = _context(
@@ -82,6 +107,7 @@ def _boundary(tmp_path, *, executor=None, receipt_store=None, config=None):
         compilation=compilation,
         admission=admission,
         request_binding=binding,
+        capture_freshness=_capture_freshness(records),
         plan_id=binding.plans[0].plan_id,
         config=config or GraphBoundExecutionClaimConfig(enabled=True),
         receipt_store=store,
@@ -207,13 +233,14 @@ def test_current_capture_authority_and_selected_plan_are_revalidated(tmp_path):
         compilation=boundary.compilation,
         admission=boundary.admission,
         request_binding=boundary.request_binding,
+        capture_freshness=boundary.capture_freshness,
         plan_id=boundary.plan_id,
         config=boundary.config,
         receipt_store=boundary.receipt_store,
     )
     with pytest.raises(
         GraphBoundExecutionClaimDenied,
-        match="request_binding_not_ready",
+        match="capture_freshness_binding_mismatch",
     ):
         changed_capture.validate_preflight()
 
@@ -231,6 +258,7 @@ def test_current_capture_authority_and_selected_plan_are_revalidated(tmp_path):
         compilation=boundary.compilation,
         admission=boundary.admission,
         request_binding=boundary.request_binding,
+        capture_freshness=boundary.capture_freshness,
         plan_id=boundary.plan_id,
         config=boundary.config,
         receipt_store=boundary.receipt_store,
@@ -253,6 +281,7 @@ def test_current_capture_authority_and_selected_plan_are_revalidated(tmp_path):
         compilation=boundary.compilation,
         admission=boundary.admission,
         request_binding=boundary.request_binding,
+        capture_freshness=boundary.capture_freshness,
         plan_id=("graph_bound_prepared_request_plan:" + "0" * 64),
         config=boundary.config,
         receipt_store=boundary.receipt_store,
@@ -263,6 +292,59 @@ def test_current_capture_authority_and_selected_plan_are_revalidated(tmp_path):
     ):
         unavailable_plan.validate_preflight()
     assert binding.plans
+    assert boundary.receipt_store.last_fingerprint is None
+
+
+def test_rotated_current_values_rebind_against_prior_topology(tmp_path):
+    boundary, _store, _executor_value, records, _binding = _boundary(tmp_path)
+    encoded = json.dumps(records)
+    for prior, current in (
+        (WORKFLOW_ID, "workflow_8fa9f13a2b4c5d6e"),
+        (FIRST_TOKEN, "first_5a5b6c7d8e9f0123"),
+        (SECOND_TOKEN, "second_5a5b6c7d8e9f0123"),
+        (PRIVATE_MARKER, "private_marker_7e7f8a9b0c1d2e3f"),
+    ):
+        encoded = encoded.replace(prior, current)
+    current_records = tuple(json.loads(encoded))
+    (
+        _current_records,
+        current_lifecycle,
+        current_state,
+        current_compilation,
+        current_admission,
+        current_binding,
+    ) = _context(
+        records=current_records,
+        executor=boundary.executor,
+    )
+    assert current_binding.status == "ready_for_single_use_execution_claim"
+
+    current = GraphBoundExecutionClaimAdmission(
+        current_records,
+        target_origin=boundary.target_origin,
+        world_id=boundary.world_id,
+        actor_persona_id=boundary.actor_persona_id,
+        authorization=boundary.authorization,
+        executor=boundary.executor,
+        lifecycle=current_lifecycle,
+        state_machine=current_state,
+        compilation=current_compilation,
+        admission=current_admission,
+        request_binding=current_binding,
+        capture_freshness=_capture_freshness(
+            records,
+            current_records=current_records,
+        ),
+        plan_id=current_binding.plans[0].plan_id,
+        config=boundary.config,
+        receipt_store=boundary.receipt_store,
+    )
+
+    preview = current.validate_preflight()
+    assert preview.capture_freshness_ref == (
+        current.capture_freshness.binding_id
+    )
+    assert preview.current_context_revalidated is True
     assert boundary.receipt_store.last_fingerprint is None
 
 
@@ -290,6 +372,7 @@ def test_budget_race_aborts_new_receipt_without_partial_reservation(tmp_path):
         compilation=compilation,
         admission=admission,
         request_binding=binding,
+        capture_freshness=_capture_freshness(records),
         plan_id=binding.plans[0].plan_id,
         config=GraphBoundExecutionClaimConfig(enabled=True),
         receipt_store=store,

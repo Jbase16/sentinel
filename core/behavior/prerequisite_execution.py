@@ -616,6 +616,7 @@ class GraphBoundExperimentCleanupResult:
 class GraphBoundPrerequisiteExecutionResult:
     receipt_id: str
     claim_contract_id: str
+    capture_freshness_ref: str
     plan_id: str
     family: str
     provisioning: GraphBoundFreshWorldProvisioningEvidence
@@ -660,6 +661,9 @@ class GraphBoundPrerequisiteExecutionResult:
             or not self.claim_contract_id.startswith(
                 "graph_bound_execution_claim_contract:"
             )
+            or not self.capture_freshness_ref.startswith(
+                "graph_bound_capture_freshness:"
+            )
             or not self.plan_id.startswith("graph_bound_prepared_request_plan:")
             or self.family not in {"omission", "reordering"}
             or self.provisioning.claim_contract_id != self.claim_contract_id
@@ -698,6 +702,7 @@ class GraphBoundPrerequisiteExecutionResult:
             "receipt_id": self.receipt_id,
             "receipt_state": self.receipt_state,
             "claim_contract_id": self.claim_contract_id,
+            "capture_freshness_ref": self.capture_freshness_ref,
             "plan_id": self.plan_id,
             "family": self.family,
             "provisioning": self.provisioning.to_dict(),
@@ -728,6 +733,7 @@ class GraphBoundPrerequisiteExecutionResult:
             "receipt_id": self.receipt_id,
             "receipt_state": self.receipt_state,
             "claim_contract_id": self.claim_contract_id,
+            "capture_freshness_ref": self.capture_freshness_ref,
             "plan_id": self.plan_id,
             "family": self.family,
             "provisioning_id": self.provisioning.provisioning_id,
@@ -1097,6 +1103,9 @@ def _execution_outcome(
         "status": oracle.verdict.value,
         "receipt_state": "completed",
         "claim_contract_id": claim.contract.contract_id,
+        "capture_freshness_ref": (
+            claim.contract.preview.capture_freshness_ref
+        ),
         "plan_id": authority.runtime_plan.plan.plan_id,
         "family": authority.runtime_plan.plan.family,
         "provisioning_id": provisioning.provisioning_id,
@@ -1202,6 +1211,9 @@ class GraphBoundPrerequisiteExperimentExecutor:
             "reason_code": denial_reason,
             "category": denial_category,
             "claim_contract_id": self.claim.contract.contract_id,
+            "capture_freshness_ref": (
+                self.claim.contract.preview.capture_freshness_ref
+            ),
             "plan_id": authority.runtime_plan.plan.plan_id,
             "family": authority.runtime_plan.plan.family,
             "cleanup": cleanup.to_dict(),
@@ -1635,6 +1647,9 @@ class GraphBoundPrerequisiteExperimentExecutor:
             return GraphBoundPrerequisiteExecutionResult(
                 receipt_id=receipt.receipt_id,
                 claim_contract_id=self.claim.contract.contract_id,
+                capture_freshness_ref=(
+                    self.claim.contract.preview.capture_freshness_ref
+                ),
                 plan_id=authority.runtime_plan.plan.plan_id,
                 family=authority.runtime_plan.plan.family,
                 provisioning=provisioning,

@@ -3080,6 +3080,7 @@ def redacted_graph_bound_prerequisite_execution_outcome(
     verdict = response.get("oracle_verdict")
     family = response.get("family")
     claim_contract_id = response.get("claim_contract_id")
+    capture_freshness_ref = response.get("capture_freshness_ref")
     plan_id = response.get("plan_id")
     provisioning_id = response.get("provisioning_id")
     oracle_requirement_id = response.get("oracle_requirement_id")
@@ -3135,6 +3136,10 @@ def redacted_graph_bound_prerequisite_execution_outcome(
         or not typed_ref(
             claim_contract_id,
             "graph_bound_execution_claim_contract",
+        )
+        or not typed_ref(
+            capture_freshness_ref,
+            "graph_bound_capture_freshness",
         )
         or not typed_ref(plan_id, "graph_bound_prepared_request_plan")
         or not typed_ref(
@@ -3271,6 +3276,7 @@ def redacted_graph_bound_prerequisite_execution_outcome(
         "status": status,
         "receipt_state": COMPLETED,
         "claim_contract_id": claim_contract_id,
+        "capture_freshness_ref": capture_freshness_ref,
         "plan_id": plan_id,
         "family": family,
         "provisioning_id": provisioning_id,
@@ -3311,6 +3317,7 @@ def redacted_graph_bound_prerequisite_denial_evidence(
         "reason_code",
         "category",
         "claim_contract_id",
+        "capture_freshness_ref",
         "plan_id",
         "family",
         "cleanup",
@@ -3400,6 +3407,7 @@ def redacted_graph_bound_prerequisite_denial_evidence(
         "reason_code": reason_code,
         "category": category,
         "claim_contract_id": value.get("claim_contract_id"),
+        "capture_freshness_ref": value.get("capture_freshness_ref"),
         "plan_id": value.get("plan_id"),
         "family": value.get("family"),
         "cleanup": normalized_cleanup,
@@ -3422,6 +3430,10 @@ def redacted_graph_bound_prerequisite_denial_evidence(
         or not typed_ref(
             value.get("claim_contract_id"),
             "graph_bound_execution_claim_contract",
+        )
+        or not typed_ref(
+            value.get("capture_freshness_ref"),
+            "graph_bound_capture_freshness",
         )
         or not typed_ref(
             value.get("plan_id"),

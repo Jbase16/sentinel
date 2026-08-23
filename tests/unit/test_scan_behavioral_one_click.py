@@ -89,7 +89,29 @@ class _RunnerEventBus:
         return None
 
 
-def _request() -> ScanRequest:
+def _request(*, with_prior_capture: bool = False) -> ScanRequest:
+    source_prior = (
+        [
+            {
+                "method": "GET",
+                "url": "https://example.test/app",
+                "response_status": 200,
+            }
+        ]
+        if with_prior_capture
+        else None
+    )
+    peer_prior = (
+        [
+            {
+                "method": "GET",
+                "url": "https://example.test/app",
+                "response_status": 403,
+            }
+        ]
+        if with_prior_capture
+        else None
+    )
     return ScanRequest(
         target="https://example.test/app",
         mode="bug_bounty",
@@ -97,6 +119,8 @@ def _request() -> ScanRequest:
             envelope_id=ENVELOPE_ID,
             source_persona_id=SOURCE_PERSONA_ID,
             peer_persona_id=PEER_PERSONA_ID,
+            prior_source_records=source_prior,
+            prior_peer_records=peer_prior,
         ),
     )
 
@@ -154,6 +178,24 @@ def test_paired_persona_profile_still_requires_both_identities():
         match="paired-persona one-click requires both persona identities",
     ):
         BehavioralOneClickProfile(envelope_id=ENVELOPE_ID)
+
+
+def test_paired_persona_prior_capture_requires_both_artifacts():
+    with pytest.raises(
+        ValidationError,
+        match="prior behavioral capture requires both personas",
+    ):
+        BehavioralOneClickProfile(
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+            prior_source_records=[
+                {
+                    "method": "GET",
+                    "url": "https://example.test/app",
+                }
+            ],
+        )
 
 
 def test_paired_persona_profile_can_stop_after_behavioral_phase():
@@ -236,6 +278,8 @@ async def test_behavioral_one_click_runs_exact_profile_and_adds_finding(
         assert request.envelope_id == ENVELOPE_ID
         assert request.source_persona_id == SOURCE_PERSONA_ID
         assert request.peer_persona_id == PEER_PERSONA_ID
+        assert request.prior_source_records is not None
+        assert request.prior_peer_records is not None
         assert _ is True
         return {"status": "completed", "finding": finding}
 
@@ -246,7 +290,7 @@ async def test_behavioral_one_click_runs_exact_profile_and_adds_finding(
     )
 
     result = await _run_behavioral_one_click_phase(
-        _request(),
+        _request(with_prior_capture=True),
         session=session,
     )
 
@@ -352,6 +396,9 @@ async def test_behavioral_one_click_restores_receipt_bound_graph_finding(
         "receipt_state": "completed",
         "claim_contract_id": (
             f"graph_bound_execution_claim_contract:{'5' * 64}"
+        ),
+        "capture_freshness_ref": (
+            f"graph_bound_capture_freshness:{'0' * 64}"
         ),
         "plan_id": plan_id,
         "family": "omission",

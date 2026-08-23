@@ -31,17 +31,39 @@ class BehavioralOneClickProfile(BaseModel):
     envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     peer_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    prior_source_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
+    prior_peer_records: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        min_length=1,
+        max_length=20_000,
+    )
 
     @model_validator(mode="after")
     def validate_profile_shape(self) -> "BehavioralOneClickProfile":
         if self.mode == "anonymous_passive":
-            if self.source_persona_id is not None or self.peer_persona_id is not None:
-                raise ValueError("anonymous passive one-click forbids persona identities")
+            if (
+                self.source_persona_id is not None
+                or self.peer_persona_id is not None
+                or self.prior_source_records is not None
+                or self.prior_peer_records is not None
+            ):
+                raise ValueError(
+                    "anonymous passive one-click forbids persona identities "
+                    "and paired capture artifacts"
+                )
             return self
         if self.source_persona_id is None or self.peer_persona_id is None:
             raise ValueError("paired-persona one-click requires both persona identities")
         if self.source_persona_id == self.peer_persona_id:
             raise ValueError("behavioral one-click personas must be distinct")
+        if (self.prior_source_records is None) != (
+            self.prior_peer_records is None
+        ):
+            raise ValueError("prior behavioral capture requires both personas")
         return self
 
     @property
@@ -681,6 +703,8 @@ async def _run_behavioral_one_click_phase(
                     envelope_id=profile.envelope_id,
                     source_persona_id=profile.source_persona_id,
                     peer_persona_id=profile.peer_persona_id,
+                    prior_source_records=profile.prior_source_records,
+                    prior_peer_records=profile.prior_peer_records,
                 ),
                 _=True,
             )

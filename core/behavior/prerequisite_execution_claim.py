@@ -23,6 +23,11 @@ from core.safety.proof_budget import ProofBudget
 
 from .lifecycle import LifecycleMiningResult
 from .normalize import stable_hash
+from .prerequisite_capture_freshness import (
+    GraphBoundCaptureFreshnessBinding,
+    GraphBoundCaptureFreshnessDenied,
+    graph_bound_capture_artifact_ref,
+)
 from .prerequisite_admission import (
     GraphBoundExperimentManifest,
     GraphBoundManifestAdmissionPlanner,
@@ -113,6 +118,7 @@ def _preview_payload(
     plan: GraphBoundPreparedRequestPlan,
     binding: GraphBoundRequestBindingResult,
     manifest: GraphBoundExperimentManifest,
+    capture_freshness_ref: str,
     receipt_fingerprint_ref: str,
     remaining_execution_blockers: Sequence[str],
 ) -> Dict[str, Any]:
@@ -128,6 +134,7 @@ def _preview_payload(
         "authorization_ref": manifest.authorization_ref,
         "authority_context_ref": manifest.authority_context_ref,
         "policy_ref": binding.policy_ref,
+        "capture_freshness_ref": capture_freshness_ref,
         "family": plan.family,
         "action_binding_ids": [item.binding_id for item in plan.request_bindings],
         "budget_binding_ids": [item.entry_id for item in plan.budget_bindings],
@@ -163,6 +170,7 @@ class GraphBoundExecutionClaimPreview:
     authorization_ref: str
     authority_context_ref: str
     policy_ref: str
+    capture_freshness_ref: str
     family: str
     action_binding_ids: Tuple[str, ...]
     budget_binding_ids: Tuple[str, ...]
@@ -190,6 +198,7 @@ class GraphBoundExecutionClaimPreview:
         plan: GraphBoundPreparedRequestPlan,
         binding: GraphBoundRequestBindingResult,
         manifest: GraphBoundExperimentManifest,
+        capture_freshness_ref: str,
         receipt_fingerprint_ref: str,
         remaining_execution_blockers: Sequence[str],
     ) -> "GraphBoundExecutionClaimPreview":
@@ -198,6 +207,7 @@ class GraphBoundExecutionClaimPreview:
             plan=plan,
             binding=binding,
             manifest=manifest,
+            capture_freshness_ref=capture_freshness_ref,
             receipt_fingerprint_ref=receipt_fingerprint_ref,
             remaining_execution_blockers=blockers,
         )
@@ -214,6 +224,7 @@ class GraphBoundExecutionClaimPreview:
             authorization_ref=manifest.authorization_ref,
             authority_context_ref=manifest.authority_context_ref,
             policy_ref=binding.policy_ref or "",
+            capture_freshness_ref=capture_freshness_ref,
             family=plan.family,
             action_binding_ids=tuple(item.binding_id for item in plan.request_bindings),
             budget_binding_ids=tuple(item.entry_id for item in plan.budget_bindings),
@@ -236,6 +247,7 @@ class GraphBoundExecutionClaimPreview:
             "authorization_ref": self.authorization_ref,
             "authority_context_ref": self.authority_context_ref,
             "policy_ref": self.policy_ref,
+            "capture_freshness_ref": self.capture_freshness_ref,
             "family": self.family,
             "action_binding_ids": list(self.action_binding_ids),
             "budget_binding_ids": list(self.budget_binding_ids),
@@ -273,6 +285,10 @@ class GraphBoundExecutionClaimPreview:
             (self.authorization_ref, "graph_bound_authorization"),
             (self.authority_context_ref, "experiment_authority_context"),
             (self.policy_ref, "graph_bound_experiment_policy"),
+            (
+                self.capture_freshness_ref,
+                "graph_bound_capture_freshness",
+            ),
             (self.budget_preview_ref, "graph_bound_budget_preview"),
             (
                 self.receipt_fingerprint_ref,
@@ -339,6 +355,7 @@ class GraphBoundExecutionClaimPreview:
             "authorization_ref": self.authorization_ref,
             "authority_context_ref": self.authority_context_ref,
             "policy_ref": self.policy_ref,
+            "capture_freshness_ref": self.capture_freshness_ref,
             "family": self.family,
             "action_binding_ids": list(self.action_binding_ids),
             "budget_binding_ids": list(self.budget_binding_ids),
@@ -962,6 +979,7 @@ class GraphBoundExecutionClaimAdmission:
         compilation: GraphBoundExperimentCompilationResult,
         admission: GraphBoundManifestAdmissionResult,
         request_binding: GraphBoundRequestBindingResult,
+        capture_freshness: GraphBoundCaptureFreshnessBinding,
         plan_id: str,
         config: Optional[GraphBoundExecutionClaimConfig] = None,
         receipt_store: Optional[BehavioralReceiptStore] = None,
@@ -991,6 +1009,10 @@ class GraphBoundExecutionClaimAdmission:
             raise TypeError("admission must be a GraphBoundManifestAdmissionResult")
         if not isinstance(request_binding, GraphBoundRequestBindingResult):
             raise TypeError("request_binding must be a GraphBoundRequestBindingResult")
+        if not isinstance(capture_freshness, GraphBoundCaptureFreshnessBinding):
+            raise TypeError(
+                "capture_freshness must be a GraphBoundCaptureFreshnessBinding"
+            )
         if not isinstance(plan_id, str) or not _hash_ref(
             plan_id,
             "graph_bound_prepared_request_plan",
@@ -1019,6 +1041,7 @@ class GraphBoundExecutionClaimAdmission:
         self.compilation = compilation
         self.admission = admission
         self.request_binding = request_binding
+        self.capture_freshness = capture_freshness
         self.plan_id = plan_id
         self.config = (
             config
@@ -1044,6 +1067,31 @@ class GraphBoundExecutionClaimAdmission:
                 "graph_bound_execution_authorization_not_copyable",
                 category="authority",
             ) from exc
+
+        try:
+            current_source_capture_ref = graph_bound_capture_artifact_ref(
+                self.records,
+                target_origin=self.target_origin,
+                world_id=self.world_id,
+            )
+        except GraphBoundCaptureFreshnessDenied as exc:
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_current_capture_invalid",
+                category="freshness",
+            ) from exc
+        if (
+            not self.capture_freshness.selection_revalidated
+            or self.capture_freshness.target_ref
+            != stable_hash("behavioral_capture_target", self.target_origin)
+            or self.capture_freshness.source_world_ref
+            != stable_hash("world", self.world_id)
+            or self.capture_freshness.current_source_capture_ref
+            != current_source_capture_ref
+        ):
+            raise GraphBoundExecutionClaimDenied(
+                "graph_bound_execution_capture_freshness_binding_mismatch",
+                category="freshness",
+            )
 
         target_ref = stable_hash(
             "security_obligation_target",
@@ -1168,6 +1216,7 @@ class GraphBoundExecutionClaimAdmission:
             "authorization_ref": manifest.authorization_ref,
             "authority_context_ref": manifest.authority_context_ref,
             "policy_ref": fresh_binding.policy_ref,
+            "capture_freshness_ref": self.capture_freshness.binding_id,
             "family": plan.family,
             "oracle_requirement_id": manifest.specification.oracle.oracle_id,
             "reference_state_id": (
@@ -1194,6 +1243,7 @@ class GraphBoundExecutionClaimAdmission:
             plan=plan,
             binding=fresh_binding,
             manifest=manifest,
+            capture_freshness_ref=self.capture_freshness.binding_id,
             receipt_fingerprint_ref=fingerprint_ref,
             remaining_execution_blockers=remaining_blockers,
         )
