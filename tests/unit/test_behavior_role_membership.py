@@ -17,8 +17,16 @@ from core.behavior.experiment_sdk import (
     ExperimentWorldManifest,
     MutationExpectation,
 )
+from core.behavior.experiment_admission import experiment_authority_context_ref
+from core.behavior.compiler import OperationContract
 from core.behavior.normalize import stable_hash
-from core.behavior.payout_goals import ProofTopology, WorldRequirement
+from core.behavior.payout_goals import (
+    PayoutSink,
+    ProofTopology,
+    SecurityProperty,
+    SecurityWitnessGoal,
+    WorldRequirement,
+)
 from core.behavior.role_membership import (
     ROLE_MEMBERSHIP_FIXTURE_MODE,
     OwnedMembershipFixture,
@@ -26,6 +34,18 @@ from core.behavior.role_membership import (
     RoleLatticePosition,
     owned_membership_ref,
 )
+from core.behavior.role_monotonicity import (
+    ROLE_MONOTONICITY_ADMISSION_MODE,
+    ROLE_MONOTONICITY_PROOF_MODE,
+    ROLE_MONOTONICITY_WORKFLOW,
+    RoleMonotonicityExperimentAdmission,
+    RoleMonotonicityExperimentCompiler,
+    RoleMonotonicityExperimentDenied,
+)
+from core.foundry.authorization import AuthorizationEnvelope
+
+
+ORIGIN = "https://roles.example.test"
 
 
 def _role_world(slot: str, suffix: str, role_label: str) -> ExperimentWorldBinding:
@@ -232,3 +252,298 @@ def test_cleanup_and_content_addressing_cannot_be_removed_or_forged():
             fixture,
             fixture_id=stable_hash("owned_membership_fixture", "forged"),
         )
+
+
+def _goal() -> SecurityWitnessGoal:
+    operation = OperationContract(
+        operation_id=stable_hash("action", "read-owned-admin-effect"),
+        label="read owned administrative effect",
+        requires=(),
+        produces=(),
+        observed_success=True,
+        source_refs=(stable_hash("source_ref", "r5c2-admin-effect"),),
+    )
+    return SecurityWitnessGoal.build(
+        operation=operation,
+        sink=PayoutSink.AUTHORITY,
+        security_property=SecurityProperty.AUTHORITY_MONOTONICITY,
+        evidence_refs=(stable_hash("provenance", "r5c2-goal"),),
+    )
+
+
+def _authorization(
+    *,
+    workflows: tuple[str, ...] = (ROLE_MONOTONICITY_WORKFLOW,),
+    sign: bool = True,
+) -> AuthorizationEnvelope:
+    envelope = AuthorizationEnvelope(
+        envelope_id="r5c2-role-monotonicity",
+        researcher_identity="researcher",
+        target_handle="owned-role-twin",
+        authorized_origins=[ORIGIN],
+        authorization_basis="owned role monotonicity contract test",
+        disclosure_attestation=True,
+        allowed_workflows=list(workflows),
+        created_at=1_780_000_000.0,
+        expires_at=1_900_000_000.0,
+    )
+    if sign:
+        envelope.sign()
+    return envelope
+
+
+def _monotonicity_action(
+    *,
+    fixture: OwnedMembershipFixture,
+    goal: SecurityWitnessGoal,
+    ordinal: int,
+    phase: ExperimentPhase,
+    operation_id: str,
+    endpoint_name: str,
+    action_class: ExperimentActionClass,
+    world_binding_id: str,
+    include_goal: bool = True,
+) -> ExperimentAction:
+    evidence_refs = [
+        fixture.fixture_id,
+        fixture.lattice.lattice_id,
+        fixture.membership_ref,
+    ]
+    if include_goal:
+        evidence_refs.append(goal.goal_id)
+    return ExperimentAction.build(
+        ordinal=ordinal,
+        phase=phase,
+        operation_id=operation_id,
+        world_binding_id=world_binding_id,
+        action_class=action_class,
+        endpoint_ref=stable_hash("experiment_endpoint", endpoint_name),
+        mutation=MutationExpectation.NONE,
+        evidence_refs=evidence_refs,
+    )
+
+
+def _proof_context(
+    *,
+    active_lower_on_higher: bool = False,
+    active_witness_endpoint: str = "authoritative-effect-witness",
+    revoked_ordinal: int = 6,
+    active_lower_includes_goal: bool = True,
+    authorization: AuthorizationEnvelope | None = None,
+):
+    fixture = _fixture()
+    goal = _goal()
+    envelope = authorization or _authorization()
+    higher = fixture.lattice.higher.world_binding_id
+    lower = fixture.lattice.lower.world_binding_id
+    actions = {
+        "higher_baseline": _monotonicity_action(
+            fixture=fixture,
+            goal=goal,
+            ordinal=1,
+            phase=ExperimentPhase.CONTROL,
+            operation_id="probe_admin_effect",
+            endpoint_name="admin-effect",
+            action_class=ExperimentActionClass.AUTHZ_PROBE,
+            world_binding_id=higher,
+        ),
+        "active_lower_probe": _monotonicity_action(
+            fixture=fixture,
+            goal=goal,
+            ordinal=2,
+            phase=ExperimentPhase.TREATMENT,
+            operation_id="probe_admin_effect",
+            endpoint_name="admin-effect",
+            action_class=ExperimentActionClass.AUTHZ_PROBE,
+            world_binding_id=(higher if active_lower_on_higher else lower),
+            include_goal=active_lower_includes_goal,
+        ),
+        "active_effect_witness": _monotonicity_action(
+            fixture=fixture,
+            goal=goal,
+            ordinal=3,
+            phase=ExperimentPhase.WITNESS,
+            operation_id="read_authoritative_effect",
+            endpoint_name=active_witness_endpoint,
+            action_class=ExperimentActionClass.SAFE_READ,
+            world_binding_id=higher,
+        ),
+        "revoked_lower_probe": _monotonicity_action(
+            fixture=fixture,
+            goal=goal,
+            ordinal=revoked_ordinal,
+            phase=ExperimentPhase.TREATMENT,
+            operation_id="probe_admin_effect",
+            endpoint_name="admin-effect",
+            action_class=ExperimentActionClass.AUTHZ_PROBE,
+            world_binding_id=lower,
+        ),
+        "revoked_effect_witness": _monotonicity_action(
+            fixture=fixture,
+            goal=goal,
+            ordinal=7,
+            phase=ExperimentPhase.WITNESS,
+            operation_id="read_authoritative_effect",
+            endpoint_name="authoritative-effect-witness",
+            action_class=ExperimentActionClass.SAFE_READ,
+            world_binding_id=higher,
+        ),
+    }
+    compiler = RoleMonotonicityExperimentCompiler()
+    proof = compiler.compile(
+        fixture=fixture,
+        goal=goal,
+        target_ref=stable_hash("security_obligation_target", ORIGIN),
+        authority_context_ref=experiment_authority_context_ref(
+            envelope,
+            ORIGIN,
+            (ROLE_MONOTONICITY_WORKFLOW,),
+        ),
+        **actions,
+    )
+    return {
+        "fixture": fixture,
+        "goal": goal,
+        "authorization": envelope,
+        "actions": actions,
+        "compiler": compiler,
+        "proof": proof,
+    }
+
+
+def test_monotonicity_compiler_seals_active_and_revoked_comparisons_without_authority():
+    first = _proof_context()
+    second = _proof_context()
+    proof = first["proof"]
+
+    assert proof == second["proof"]
+    assert proof.mode == ROLE_MONOTONICITY_PROOF_MODE
+    assert proof.oracle.goal.security_property is SecurityProperty.AUTHORITY_MONOTONICITY
+    assert proof.oracle.fixture_id == proof.fixture.fixture_id
+    assert proof.oracle.active_effect_requires_independent_witness is True
+    assert proof.oracle.revoked_effect_requires_independent_witness is True
+    assert "membership_revocation_verified" in proof.oracle.witness_requirements
+    assert "post_revocation_freshness" in proof.oracle.witness_requirements
+    assert proof.execution_blockers == (
+        "atomic_budget_reservation_required",
+        "durable_execution_receipt_required",
+        "effect_evaluation_required",
+        "runtime_request_binding_required",
+    )
+    assert proof.target_requests_sent == 0
+    assert proof.budget_reserved is False
+    assert proof.single_use_claim_available is False
+    assert proof.backend_dispatch_authority is False
+    assert proof.finding_authority is False
+    assert proof.executable is False
+
+
+def test_monotonicity_admission_revalidates_signed_workflow_without_claim_authority():
+    context = _proof_context()
+
+    contract = RoleMonotonicityExperimentAdmission(
+        proof=context["proof"],
+        target_origin=ORIGIN,
+        authorization=context["authorization"],
+    ).admit()
+
+    assert contract.mode == ROLE_MONOTONICITY_ADMISSION_MODE
+    assert contract.proof_id == context["proof"].proof_id
+    assert contract.fixture_id == context["fixture"].fixture_id
+    assert contract.oracle_id == context["proof"].oracle.oracle_id
+    assert contract.signed_authority_revalidated is True
+    assert contract.role_contract_revalidated is True
+    assert contract.revocation_contract_revalidated is True
+    assert contract.target_requests_sent == 0
+    assert contract.budget_reserved is False
+    assert contract.single_use_claim_available is False
+    assert contract.backend_dispatch_authority is False
+    assert contract.finding_authority is False
+    assert contract.executable is False
+
+
+@pytest.mark.parametrize(
+    "options,reason",
+    (
+        ({"active_lower_on_higher": True}, "action_shape_is_invalid"),
+        (
+            {"active_witness_endpoint": "admin-effect"},
+            "probe_or_witness_is_not_equivalent",
+        ),
+        ({"revoked_ordinal": 5}, "action_sequence_is_invalid"),
+        ({"active_lower_includes_goal": False}, "action_shape_is_invalid"),
+    ),
+)
+def test_monotonicity_compiler_rejects_world_witness_sequence_and_evidence_splices(
+    options,
+    reason,
+):
+    with pytest.raises(RoleMonotonicityExperimentDenied, match=reason):
+        _proof_context(**options)
+
+
+def test_monotonicity_proof_revalidates_semantics_without_trusting_its_hash():
+    context = _proof_context()
+    proof = context["proof"]
+    spliced = _monotonicity_action(
+        fixture=context["fixture"],
+        goal=context["goal"],
+        ordinal=2,
+        phase=ExperimentPhase.TREATMENT,
+        operation_id="probe_admin_effect",
+        endpoint_name="admin-effect",
+        action_class=ExperimentActionClass.AUTHZ_PROBE,
+        world_binding_id=context["fixture"].lattice.higher.world_binding_id,
+    )
+
+    with pytest.raises(RoleMonotonicityExperimentDenied, match="action_shape_is_invalid"):
+        replace(proof, active_lower_probe=spliced)
+
+
+def test_monotonicity_admission_rejects_unsigned_or_missing_workflow_before_traffic():
+    context = _proof_context()
+
+    with pytest.raises(RoleMonotonicityExperimentDenied, match="unsigned"):
+        RoleMonotonicityExperimentAdmission(
+            proof=context["proof"],
+            target_origin=ORIGIN,
+            authorization=_authorization(sign=False),
+        ).admit()
+    with pytest.raises(RoleMonotonicityExperimentDenied, match="authorization_denied"):
+        RoleMonotonicityExperimentAdmission(
+            proof=context["proof"],
+            target_origin=ORIGIN,
+            authorization=_authorization(workflows=()),
+        ).admit()
+
+
+def test_monotonicity_admission_rejects_origin_or_authority_context_substitution():
+    context = _proof_context()
+
+    with pytest.raises(RoleMonotonicityExperimentDenied, match="authorization_denied"):
+        RoleMonotonicityExperimentAdmission(
+            proof=context["proof"],
+            target_origin="https://outside.example.test",
+            authorization=context["authorization"],
+        ).admit()
+    changed = _authorization()
+    changed.target_handle = "changed-after-proof"
+    changed.sign()
+    with pytest.raises(
+        RoleMonotonicityExperimentDenied,
+        match="target_or_authority_context_mismatch",
+    ):
+        RoleMonotonicityExperimentAdmission(
+            proof=context["proof"],
+            target_origin=ORIGIN,
+            authorization=changed,
+        ).admit()
+
+
+def test_monotonicity_public_contract_contains_no_role_labels_or_origin():
+    context = _proof_context()
+    public = json.dumps(context["proof"].to_dict(), sort_keys=True)
+
+    assert "ordinary-looking-role" not in public
+    assert "admin-looking-role" not in public
+    assert ORIGIN not in public
