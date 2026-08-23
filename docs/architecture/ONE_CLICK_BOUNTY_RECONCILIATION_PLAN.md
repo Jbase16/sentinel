@@ -108,14 +108,14 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Latent capability-directed discovery | Passive and cataloged | Capability-linked JavaScript, source-map, and OpenAPI routes become published or specified semantic operations; unmatched and ambiguous routes remain coverage deficits. | Feed every source through ordinary acquisition and actively confirm only through separately admitted R4-R8 workflows. |
 | Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
-| State-machine prerequisite omission oracle | Production-wired and externally passed for one narrow graph-bound omission path | Exact same-world lineage preserves a content-addressed DAG; one unambiguous payout-selected terminal can execute sealed baseline, omission treatment, and independent control across three fresh owned worlds, compare canonical effects, require a cross-world rejection witness, verify cleanup, persist redacted denial/cleanup state, and revalidate a prior artifact against a distinct current capture before rebuilding the admitted plan. Full `OCB-S15` passed at Sentinel `23709f4` and lab `f9e8a76`. | Add a positive reordering effect oracle and production selection; define replay and stale-state capability/freshness semantics. |
+| State-machine prerequisite oracles | Production-wired and externally passed for bounded omission and adjacent reordering | Exact same-world lineage preserves a content-addressed DAG; one payout-selected terminal can execute sealed baseline, treatment, and independent control across three fresh owned worlds, compare canonical effects, verify family-specific evidence, clean up, persist redacted denial/completion state, and revalidate current capture before rebuilding the admitted plan. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Define replay and stale-state capability/freshness semantics before adding those counterfactuals. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
-| Ordinary one-click behavioral bridge | Implemented for family A and one narrow family-B omission path; external Scan seam passed | The native Scan UI can send paired-persona or anonymous-passive profiles; the backend can consume the exact payout-selected graph omission plan under separate signed workflow and execution gates, with no fallback to a broader executor. External `behavioral_phase_only` acceptance persisted one canonical finding. | Coordinate the remaining permitted property families without manufacturing authority. |
-| Proof topology selector | Implemented, bounded, and consumed by the narrow graph omission caller | `PayoutGoalTopologyPlanner` selects the minimum supported topology and now binds the graph backend to the exact compiled terminal before ordinary-click dispatch. Graph-absent v1 plan identities remain stable. | Add only separately admitted executable topologies, beginning with a defined positive reordering oracle. |
+| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B omission/reordering paths; external Scan seam passed | The native Scan UI can send paired-persona or anonymous-passive profiles; the backend can consume the exact payout-selected graph plan under separate signed workflow and execution gates, with no fallback to a broader executor. External `behavioral_phase_only` acceptance persisted one canonical omission finding; the separate reordering twin proved direct ordinary-click selection. | Coordinate the remaining permitted property families without manufacturing authority. |
+| Proof topology selector | Implemented and bounded for the closed Family-B scope | `PayoutGoalTopologyPlanner` binds the graph backend to the exact compiled terminal; ordinary click selects one unique omission or, when omission is not uniquely selectable, one unique adjacent reordering. Graph-absent v1 identities remain stable. | Add only separately admitted executable topologies. |
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
 | Deterministic replanning | Implemented, passive | `ConstraintReplanner` preserves payout-goal evidence, compiler policy and bounds, records disproved assumptions, and refuses fact regression, repetition, contradiction, cycles, and limit exhaustion. | R4 may execute only separately admitted replanned experiments under the original signed authority. |
-| Generalized counterexample/oracle SDK | Authorization and narrow graph-bound prerequisite omission are production-wired and externally passed | The sealed SDK and atomic admission still govern family A. R5B3b2c adds an exact-terminal graph claim, three fresh owned worlds, baseline/treatment/control execution, independent effect and cross-world rejection evidence, cleanup verification, durable completion/replay refusal, and receipt-derived candidate promotion. | Production reordering with a positive effect oracle, additional world topologies, and broader mutation semantics remain open. |
+| Generalized counterexample/oracle SDK | Authorization and bounded graph-bound omission/reordering are production-wired and externally passed | The sealed SDK and atomic admission still govern family A. R5B3b2c adds an exact-terminal graph claim, three fresh owned worlds, baseline/treatment/control execution, family-specific positive evidence, cleanup verification, durable completion/replay refusal, and receipt-derived candidate promotion. | Additional world topologies and broader mutation semantics remain open. |
 | Coverage-guided payout scheduler | Narrow | One highest-ranked supported obligation can be dispatched at a time. | Schedule by payout-relevant sink, reachability gain, information gain, proof cost, and remaining authority. |
 | Defensible stopping certificate | Narrow | Closure is honest about the current discovered frontier. | State exactly which high-value sinks were found, reached, proven, refuted, blocked, or never sufficiently observed. |
 | Submission-grade candidate assembly | Planned, not complete for the adaptive chain | Existing finding, provenance, triage, report, and operator submission components are available. | Assemble minimized behavioral proof lineage and impact into the existing report workflow automatically. |
@@ -679,7 +679,7 @@ per-endpoint traffic ceiling.
   durable non-renewable receipt and atomic ordered budget reservation.
 - [x] **R5B3b2b:** Claim-consuming fresh-world provisioning and exact runtime
   lineage substitution without experiment dispatch.
-- [ ] **R5B3b2c:** Separately admitted omission and reordering dispatch, effect
+- [x] **R5B3b2c:** Separately admitted omission and reordering dispatch, effect
   comparison, cleanup terminalization, and replay evidence.
   - [x] Production implementation checkpoint for one unambiguous graph-bound
     omission plan at Sentinel `88e893c`.
@@ -697,7 +697,8 @@ per-endpoint traffic ceiling.
     current records, while changed structure or lineage fails before experiment traffic.
   - [x] Full `OCB-S15`: external fresh/stale capture, ordinary-Scan persistence, and
     durable-denial acceptance passed at Sentinel `23709f4` and lab `f9e8a76`.
-  - [ ] Production reordering selection and a positive reordering effect oracle.
+  - [x] Production reordering selection and a positive reordering effect oracle,
+    externally passed at Sentinel `6a1895d` and lab `1e51d53`.
 - [ ] Replay and stale-state specifications after their capability-freshness and
   post-cleanup effect oracles are defined.
 - [ ] Zero-persona and one-persona workflows in addition to paired accounts.
@@ -993,7 +994,7 @@ leaves the claimed ticket available for explicit abort. Every completed provisio
 probe ends with a terminally aborted receipt, zero reserved units, and no retained live
 lease because no experiment was completed.
 
-##### R5B3b2c implementation-checkpoint technical explanation
+##### R5B3b2c implementation-complete technical explanation
 
 At Sentinel `88e893c`, `PayoutGoalTopologyPlanner` makes the
 `graph_bound_prerequisite` backend available only for a terminal operation that exactly
@@ -1003,6 +1004,16 @@ additionally require the signed graph workflow.
 authorization reference, exact terminal, static admission, private request binding, and
 one unambiguous omission plan before consuming the existing single-use claim. There is
 no generalized or legacy fallback after this graph plan is selected.
+
+At Sentinel `6a1895d`, the same dispatcher selects one unique adjacent-reordering plan
+when the terminal has no uniquely selectable omission plan. The positive reordering
+oracle requires all three fresh-world terminal observations to reproduce the captured
+reference effect and binds that evidence to the exact sealed swap, plan, and terminal
+evidence references. A target-side order rejection is refuted and cannot create a
+candidate. A positive result carries a typed reordering witness and no omission-only
+runtime-value inequality. Passive planning also preserves observed prerequisite order;
+it no longer lets an origin-derived action hash decide whether an otherwise identical
+capture is considered ambiguous.
 
 `GraphBoundPrerequisiteExperimentExecutor` then uses the claimed whole-sequence budget
 to create exactly three fresh owned worlds and dispatch the sealed baseline, treatment,
@@ -1060,13 +1071,18 @@ zero duplicate traffic. Finally, an ordinary `behavioral_phase_only` Scan comple
 persisted exactly one canonical finding. This closes full `OCB-S15` for the narrow
 omission slice.
 
-Reordering remains unfinished: current graph execution can only adjudicate it as
-refuted or inconclusive; the matching effect remains
-`reordering_security_effect_not_defined`, so it cannot produce a finding. Broader replay
-and stale-state specifications remain deferred until their capability-freshness and
-post-cleanup effect contracts are defined.
+The separate external run `s15-reordering-r5b3b2c-final-20260822` passed against
+Sentinel `6a1895d` with lab verifier `1e51d53`; its artifact SHA-256 is
+`7b23822e97cf7d1b9fc9a818f3e244e64d5874d2a86912d422f54f3666c2eac4`. The vulnerable
+twin was confirmed and the secure twin refuted. Each sent `18` graph requests,
+completed and verified cleanup for all three fresh worlds, left zero active objects,
+and replayed its completed receipt with zero target or bridge traffic. The full
+repository suite passed `2647` tests with `1` skip and `2` warnings. This closes the
+bounded Family-B omission and reordering scope. Broader replay and stale-state
+specifications remain deferred until their capability-freshness and post-cleanup effect
+contracts are defined.
 
-##### R5B3b2c implementation-checkpoint non-technical explanation
+##### R5B3b2c implementation-complete non-technical explanation
 
 Sentinel can now take one clearly identified workflow test, create three disposable
 objects that it owns, run the normal final action on one, omit exactly one prerequisite
@@ -1091,15 +1107,23 @@ Only the newly captured version is allowed to supply the executable plan. The se
 acceptance lab has observed both the permitted rotation case and the two fail-closed
 stale cases.
 
+Sentinel can also test one exact order claim: on three owned disposable objects it runs
+the normal prerequisite order, reverses one adjacent pair on the treatment object, and
+runs the normal order again on the control. If the reversed order preserves the same
+target effect, it can create a review-only reordering candidate; if the target rejects
+the swap, it records a refutation and creates no finding. The external lab observed both
+outcomes and zero residue.
+
 For example, in an owned lab workflow where an approval token is supposed to be
 required before export, Sentinel can prove that the normal approved export works, test
 the same export without the approved prerequisite on a fresh object, reject a token from
 a different fresh object, and clean up each object. The narrow omission path is
-externally accepted and full `OCB-S15` is closed. Sentinel still cannot prove a
-reordering flaw, infer permission on a public target, promise a payout, promote a report
-automatically, or submit anything externally.
+externally accepted and full omission `OCB-S15` is closed. The adjacent-reordering
+component is also externally accepted. Sentinel still cannot infer permission on a
+public target, promise a payout, promote a report automatically, or submit anything
+externally.
 
-##### R5B3b2c implementation-checkpoint target traffic and execution authority
+##### R5B3b2c implementation-complete target traffic and execution authority
 
 The graph experiment sends target traffic only when the signed
 `behavioral_graph_bound_prerequisite_experiment` workflow and all three separate
@@ -1128,6 +1152,12 @@ already-authorized ordinary-click URL capture that precedes direct graph selecti
 capture retains its existing scope and authority contract. This checkpoint adds no new
 public-target permission and no background, automatic, reporting, payout, or submission
 authority.
+
+The reordering path uses the same signed workflow, three default-off gates, exact
+origin, ownership registry, and pre-reserved `96`-request ceiling. Its accepted external
+manifest used `18` requests per twin because all three worlds execute both prerequisites,
+one terminal action, cleanup, and cleanup verification. It adds no method, endpoint,
+identity, origin, redirect, real-user-data, promotion, payout, or submission authority.
 
 #### R5C — Authority monotonicity and role enforcement
 

@@ -47,11 +47,11 @@ or a promise that every target produces a finding.
 In plain language: one click should carry an authorized assessment from discovery to a
 reviewable bounty draft when Sentinel can prove a real issue safely. Today, Sentinel can
 do that for a narrow controlled authorization path and can produce a receipt-bound
-finding candidate for one narrow graph-bound prerequisite-omission path. The full
-external `OCB-S15` gate now passes for that path against vulnerable and secure loopback
-twins, including capture freshness, durable denial replay, and ordinary-Scan
-persistence. Sentinel cannot yet search and prove the full planned family set or
-honestly certify that all valuable paths were exhausted.
+finding candidate for narrow graph-bound prerequisite omission and reordering paths.
+The external `OCB-S15` gates pass against vulnerable and secure loopback twins,
+including capture freshness, durable denial replay, ordinary-Scan persistence, and an
+exact adjacent-order counterfactual. Sentinel cannot yet search and prove the full
+planned family set or honestly certify that all valuable paths were exhausted.
 
 ## 3. Document authority and ownership
 
@@ -144,7 +144,7 @@ live-observed result, and a live loopback result is not payout proof.
 | OCB-R3 Constraint learning and replanning | Implemented, passive | Typed constraint ledger and deterministic replanning influence the selected frontier without granting authority | Feed real execution outcomes from additional proof families; retain `OCB-S13` denial/replan evidence |
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
-| OCB-R5 family B: state-machine safety | Production-wired narrow omission checkpoint; full `OCB-S15` passed | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, independent cross-world rejection witness, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. External run `s15-live-r5b3b2c-20260822` bound Sentinel `23709f4` to lab `f9e8a76` and passed the complete matrix. | Add production reordering selection with a positive effect oracle; define broader replay and stale-state capability/effect contracts |
+| OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
 | OCB-R5 family C: role and membership safety | Designed | Topology and goal vocabulary can describe role worlds | Implement role lattice, membership setup/teardown, monotonicity oracle, and `OCB-S16` |
 | OCB-R5 family D: capability safety | Designed | Topology vocabulary recognizes callback/capability worlds | Implement token/link/capability confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
@@ -213,10 +213,10 @@ Exit gates:
 
 This workstream changes no target traffic or authority.
 
-### Workstream 1 — Finish OCB-R5 family B before adding another family
+### Workstream 1 — Completed OCB-R5 family B
 
-The narrow omission implementation and its external acceptance are closed. This
-workstream remains open only for the separately scoped reordering obligation.
+The bounded omission and adjacent-reordering implementations and their separate
+external acceptance gates are closed.
 
 Required flow:
 
@@ -231,7 +231,9 @@ Required flow:
 8. the durable receipt records completed, denied, cleanup-failed, or orphan-risk state;
 9. only a completed positive receipt can enter the existing OCB-R7 promotion seam; and
 10. `OCB-S15` proves vulnerable and secure twins, replay denial, temporal stale-capture
-    refusal, cleanup, zero residue, and the ordinary Scan persistence seam.
+    refusal, cleanup, zero residue, and the ordinary Scan persistence seam; and
+11. the reordering component proves that one exact adjacent swap preserves the reference
+    effect only on the vulnerable twin and is independently refused by the secure twin.
 
 Items 1-9 are production-wired for one unambiguous graph-bound omission plan and are
 suite-proved at `9167d9a` (`2645 passed`, `1 skipped`, `3 warnings`). Item 10 passed in
@@ -244,15 +246,27 @@ and tokens; changed response structure and inconsistent prerequisite lineage eac
 returned HTTP `409` with zero graph traffic. Runtime schema drift exposed a durable,
 strictly redacted denial and truthful cleanup/orphan-risk evidence, then replayed with
 zero duplicate traffic. A normal `behavioral_phase_only` Scan completed and persisted
-one canonical finding. Production reordering selection and a positive reordering effect
-oracle remain the separate unfinished part of R5B3b2c.
+one canonical finding.
+
+The reordering component passed in external run
+`s15-reordering-r5b3b2c-final-20260822`, bound to Sentinel `6a1895d` and lab verifier
+`1e51d53` (artifact SHA-256
+`7b23822e97cf7d1b9fc9a818f3e244e64d5874d2a86912d422f54f3666c2eac4`). The
+vulnerable twin was confirmed and the secure twin refuted; each sent `18` graph
+requests, completed `3/3` cleanup and verification, left zero active objects, and
+returned its completed receipt on duplicate input without target or bridge traffic.
+The gate also exposed and closed an origin-hash ordering bug: independent prerequisite
+planning now preserves the captured sequence instead of sorting by an origin-derived
+operation identifier. The full suite passed `2647` tests with `1` skip and `2` warnings
+at that implementation checkpoint.
 
 Non-technical result: Sentinel can now create three disposable owned lab objects for one
-clearly selected omission test, use their real returned IDs, compare the normal and
-one-change effects with an independent control, verify cleanup, and emit only a
-review-only receipt-bound candidate. That exact omission slice is now externally
-accepted. It still cannot create arbitrary state, infer permission on a public target,
-prove reordering, or claim a payout.
+clearly selected prerequisite test, compare the normal behavior with either one omitted
+prerequisite or one reversed adjacent pair, verify the independent control and cleanup,
+and emit only a review-only receipt-bound candidate when the target reproduces the
+security-relevant effect. Both bounded paths are externally accepted. Sentinel still
+cannot create arbitrary state, infer permission on a public target, claim a payout, or
+submit a report.
 
 Traffic/authority: the graph experiment adds bounded owned-lab traffic only behind the
 signed graph workflow and three separate default-off claim, provisioning, and execution
@@ -368,16 +382,11 @@ Stop the slice rather than weakening a gate when completion appears to require:
 
 ## 11. Immediate next decision
 
-The recommended next work order is **finish R5B3b2c with one bounded positive
-reordering oracle and production selection path**. Full `OCB-S15` is closed at Sentinel
-`23709f4` and lab `f9e8a76`; no additional omission acceptance work is pending. The
-reordering slice must preserve the existing one-use claim, exact current-capture/plan
-binding, scope, ownership, budget, cleanup, receipt, and zero-fallback gates. It must
-define a target-observable security effect before it can confirm a finding.
-
-After that one Family-B slice passes its focused suite and external twin, begin OCB-R5
-Family C on a new branch. Do not broaden acquisition or start Family D in the
-reordering work order.
+Family B is closed for the bounded omission and adjacent-reordering scope. The next work
+order is **OCB-R5 Family C role and membership monotonicity** on a new branch, beginning
+with the smallest typed role lattice and reversible owned membership fixture needed for
+`OCB-S16`. Reuse the existing admission, fresh-world, receipt, cleanup, and promotion
+contracts; do not broaden acquisition or start Family D in the Family-C work order.
 The test skip and warning debt should be handled as a separate maintenance work order so
 it cannot distort the product-stage boundary.
 
@@ -385,10 +394,10 @@ it cannot distort the product-stage boundary.
 
 | Workstream | State | Next evidence |
 |---|---|---|
-| Baseline governance | Active | Track the current 1 skip and 3 warnings separately; keep this ledger current |
+| Baseline governance | Active | Track the current 1 skip and 2 warnings separately; keep this ledger current |
 | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
-| OCB-R5 family B lifecycle/state manufacture | Omission checkpoint and full `OCB-S15` closed; reordering remains | Implement and externally prove one positive reordering oracle, then close Family B |
-| OCB-R5 family C roles/membership | Queued | `OCB-S16` |
+| OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
+| OCB-R5 family C roles/membership | Next | Implement the minimum typed role/membership contract and prove `OCB-S16` |
 | OCB-R5 family D capabilities | Queued | `OCB-S17` |
 | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | OCB-R7 generalized candidate | Partial | `OCB-S19` |
