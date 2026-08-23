@@ -73,6 +73,13 @@ complete. Multiple commits are allowed when the slice has independently reviewab
 units, but unrelated OCB slices must not be collapsed into one commit. If a push is
 blocked, report the blocker and leave the slice explicitly incomplete.
 
+Start every OCB slice from the current synchronized `main` on one dedicated short-lived
+`codex/ocb-*` branch. A slice branch contains only that slice and its required tests,
+evidence, and documentation. Push the branch early for remote visibility, but do not
+merge it until the slice gates pass and the handoff is reviewed. After merge, resync
+`main` before creating the next slice branch. Direct slice development on `main` is not
+allowed.
+
 ## 4. Evidence vocabulary
 
 These labels are intentionally cumulative:
@@ -131,7 +138,7 @@ live-observed result, and a live loopback result is not payout proof.
 | OCB-R3 Constraint learning and replanning | Implemented, passive | Typed constraint ledger and deterministic replanning influence the selected frontier without granting authority | Feed real execution outcomes from additional proof families; retain `OCB-S13` denial/replan evidence |
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
-| OCB-R5 family B: state-machine safety | Partial; engine/runtime built, ordinary-click proof not closed | Lifecycle graphs, prerequisite compiler, lineage binding, static admission, request preflight, execution claims, owned create, runtime ID substitution, cleanup, and stale-capture denial | Connect topology selection to atomic provisioning, target operation, oracle, replay, cleanup, durable receipt, and one-click result; prove `OCB-S15` |
+| OCB-R5 family B: state-machine safety | Partial; claim-consuming fresh-world provisioning is built, terminal experiment proof is not closed | Lifecycle graphs, prerequisite compiler, lineage binding, static admission, request preflight, execution claims, three fresh owned worlds, exact runtime substitution, fail-closed cleanup, and stale-ID denial | Add separately admitted terminal dispatch, independent effect comparison, cleanup verification, receipt completion, one-click coordination, and `OCB-S15` |
 | OCB-R5 family C: role and membership safety | Designed | Topology and goal vocabulary can describe role worlds | Implement role lattice, membership setup/teardown, monotonicity oracle, and `OCB-S16` |
 | OCB-R5 family D: capability safety | Designed | Topology vocabulary recognizes callback/capability worlds | Implement token/link/capability confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
@@ -317,6 +324,7 @@ Every implementation work order must state and prove:
 - **Repository gate:** full suite at the work-order checkpoint.
 - **External gate:** a real-wire lab scenario when observable behavior changes.
 - **Documentation:** detailed plan plus this master ledger updated to the exact SHA.
+- **Branch:** one current-main-based `codex/ocb-*` branch containing only this slice.
 - **Delivery:** at least one focused slice commit pushed to the shared remote, with the
   pushed SHA recorded in the handoff.
 
@@ -336,10 +344,12 @@ Stop the slice rather than weakening a gate when completion appears to require:
 
 ## 11. Immediate next decision
 
-The recommended next work order is **OCB-R5 family B ordinary-click lifecycle closure** from
-Workstream 1. It completes an already substantial investment and exercises the most
-important unresolved seam: safely turning a compiled prerequisite graph into a cleaned,
-independently adjudicated, receipt-bound proof.
+The recommended next work order is **OCB-R5 family B separately admitted experiment
+closure (R5B3b2c)** from Workstream 1. R5B3b2b now proves claim-consuming fresh-world
+setup, exact runtime substitution, terminal-request materialization without dispatch,
+and fail-closed cleanup. The remaining seam is to dispatch the three sealed terminal
+actions behind its own gate, compare an independent target-side effect, verify cleanup,
+terminalize the receipt, and connect only a completed positive result to OCB-R7.
 
 Do not broaden acquisition or start OCB-R5 family C or D until that OCB-R5 family B vertical slice is complete.
 The test skip and warning debt should be handled as a separate maintenance work order so

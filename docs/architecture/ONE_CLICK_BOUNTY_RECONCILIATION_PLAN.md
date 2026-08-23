@@ -677,7 +677,7 @@ per-endpoint traffic ceiling.
   non-consuming reservation preview.
 - [x] **R5B3b2a:** Default-off, single-use graph-bound claim admission with a
   durable non-renewable receipt and atomic ordered budget reservation.
-- [ ] **R5B3b2b:** Claim-consuming fresh-world provisioning and exact runtime
+- [x] **R5B3b2b:** Claim-consuming fresh-world provisioning and exact runtime
   lineage substitution without experiment dispatch.
 - [ ] **R5B3b2c:** Separately admitted omission and reordering dispatch, effect
   comparison, cleanup terminalization, and replay evidence.
@@ -917,6 +917,64 @@ once. Raw receipt tokens and budget reservation IDs never enter public artifacts
 claim exposes no transport call, runtime world manager, provisioning method, policy
 execution method, effect oracle, cleanup sender, findings store, promotion path, or
 backend-dispatch authority; it remains `target_requests_sent=0` and `executable=false`.
+
+##### R5B3b2b technical explanation
+
+R5B3b2b adds `GraphBoundFreshWorldProvisioner` behind the separate default-off
+`SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING` gate. The request binder
+now orders one sealed plan as a provisioning prefix for all three world slots, exactly
+three terminal baseline/treatment/control actions, and a conditional cleanup suffix.
+Filtering by phase still yields the exact compiled baseline, treatment, and control
+operation order. Each private request retains its exact input and output
+`LineageBinding` objects while the public artifact retains only their content-addressed
+identities.
+
+The claim admission boundary carries only the freshly reconstructed private plan into
+its in-memory claim resources. A claimed handle can transition once through
+`claimed -> provisioning -> provisioned -> aborted`. The provisioner rechecks every
+request-template, endpoint-budget identity, and policy digest plus the signature,
+expiry, scope, and workflow of the retained authorization, then sends only non-terminal
+prerequisite actions. It extracts create IDs and prerequisite values from the declared response JSON
+locators, rejects a create ID equal to the captured ID or reused across world slots,
+registers exact ownership, substitutes values at the declared path/query/JSON/form
+locators, and rechecks endpoint-budget stability. Before cleanup it materializes all
+three terminal requests in memory to prove their remaining inputs are available, but it
+never passes those requests to `PolicyExecutor`.
+
+Success and failure both skip every reserved terminal slot, clean each successfully
+created world with the sealed cleanup request, remove the corresponding in-memory
+ownership grant after a successful cleanup, abort the non-renewable receipt, and release
+the unused reservation. It verifies the resulting conduct chain and returns only an
+opaque provenance reference. A successful R5B3b2b call therefore returns only a redacted
+provisioning-and-cleanup result; it never returns a live-world lease. Captured-ID reuse,
+policy refusal, transport failure, response-lineage failure, ambiguous ownership, and
+cleanup uncertainty fail closed and report possible orphaned state where applicable.
+
+R5B3b2b deliberately does not execute the baseline, treatment, or independent-control
+terminal action. It does not compare effects, independently verify cleanup at the
+target, complete a proof receipt, create a finding, or promote a submission candidate.
+Those blockers remain assigned to R5B3b2c.
+
+##### R5B3b2b non-technical explanation
+
+Sentinel can now rehearse the safe setup for a workflow test using three disposable lab
+objects. It creates each object, uses the new server-returned ID and tokens instead of
+the old recorded values, proves it could build each final test request, and then removes
+the objects without sending any final security-test request. If setup fails, Sentinel
+skips the final requests and cleans up whatever it safely can. This proves the lifecycle
+machinery, not a vulnerability: no workflow result is compared and no finding is made.
+
+##### R5B3b2b target traffic and execution authority
+
+R5B3b2b adds bounded owned-state traffic only when both the existing graph-bound claim
+gate and the new provisioning gate are explicitly enabled and invoked. Its authority is
+limited to the already reserved in-scope prerequisite prefix and conditional cleanup
+suffix. It cannot dispatch any terminal baseline, treatment, or control action; cannot
+increase the reserved action sequence; and cannot access a finding, promotion, report,
+or submission surface. With the provisioning gate disabled it sends zero requests and
+leaves the claimed ticket available for explicit abort. Every completed provisioning
+probe ends with a terminally aborted receipt, zero reserved units, and no retained live
+lease because no experiment was completed.
 
 #### R5C — Authority monotonicity and role enforcement
 

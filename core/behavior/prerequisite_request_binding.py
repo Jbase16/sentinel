@@ -3,7 +3,9 @@
 R5B3b1 reconstructs current captured request templates, applies the one declared
 counterfactual, classifies every action, evaluates the current policy, and previews
 the exact ordered budget reservation. Raw request material remains ephemeral and is
-excluded from every public artifact. This module cannot reserve budget or send traffic.
+excluded from every public artifact. The reservation order places all fresh-world
+prerequisites before the three terminal actions and cleanup suffix. This module cannot
+reserve budget or send traffic.
 """
 
 from __future__ import annotations
@@ -584,6 +586,14 @@ class _EphemeralBoundRequest:
     request: EphemeralRehydratedStep = field(repr=False, compare=False)
     endpoint_key_value: str = field(repr=False, compare=False)
     action: CandidateAction = field(repr=False, compare=False)
+    input_bindings: Tuple[LineageBinding, ...] = field(
+        repr=False,
+        compare=False,
+    )
+    output_bindings: Tuple[LineageBinding, ...] = field(
+        repr=False,
+        compare=False,
+    )
 
     def __repr__(self) -> str:
         return (
@@ -744,6 +754,24 @@ class GraphBoundPreparedRequestPlan:
                 )
                 != item.endpoint_key_ref
                 for item in self.request_bindings
+            )
+            or any(
+                tuple(
+                    sorted(binding.binding_id for binding in raw.input_bindings)
+                )
+                != item.input_binding_ids
+                or any(
+                    binding.consumer_operation_id != item.operation_id
+                    for binding in raw.input_bindings
+                )
+                or any(
+                    binding.producer_operation_id != item.operation_id
+                    for binding in raw.output_bindings
+                )
+                for item, raw in (
+                    (item, raw_by_id[item.binding_id])
+                    for item in self.request_bindings
+                )
             )
             or not _hash_ref(
                 self.budget_preview_ref,
@@ -1163,7 +1191,8 @@ class GraphBoundRequestBinder:
         phase: str,
         ordinal: int,
         request: EphemeralRehydratedStep,
-        input_binding_ids: Sequence[str],
+        input_bindings: Sequence[LineageBinding],
+        output_bindings: Sequence[LineageBinding],
         request_mutation_ref: Optional[str],
         action_class: str,
         expected_side_effect: str,
@@ -1176,6 +1205,15 @@ class GraphBoundRequestBinder:
         GraphBoundEndpointBudgetBinding,
         _EphemeralBoundRequest,
     ]:
+        input_binding_values = tuple(
+            sorted(input_bindings, key=lambda item: item.binding_id)
+        )
+        output_binding_values = tuple(
+            sorted(output_bindings, key=lambda item: item.binding_id)
+        )
+        input_binding_ids = tuple(
+            item.binding_id for item in input_binding_values
+        )
         if _request_origin(request.url) != target_origin:
             raise GraphBoundRequestBindingDenied(
                 "graph_bound_request_origin_changed"
@@ -1270,6 +1308,8 @@ class GraphBoundRequestBinder:
             request=request,
             endpoint_key_value=endpoint_value,
             action=action,
+            input_bindings=input_binding_values,
+            output_bindings=output_binding_values,
         )
         return request_binding, budget_binding, ephemeral
 
@@ -1300,6 +1340,13 @@ class GraphBoundRequestBinder:
             specification=specification,
             lifecycle=lifecycle,
         )
+        runtime_bindings = {item.binding_id: item for item in recipe.bindings}
+        runtime_bindings.update(
+            {
+                binding.binding_id: binding
+                for _candidate, binding, _request in cleanup_requests
+            }
+        )
         create_operation_ids = frozenset(
             item.create_operation_id for item, _binding, _request in cleanup_requests
         )
@@ -1313,7 +1360,7 @@ class GraphBoundRequestBinder:
             world_role: str,
             phase: str,
             request: EphemeralRehydratedStep,
-            input_binding_ids: Sequence[str],
+            input_bindings: Sequence[LineageBinding],
             mutation_ref: Optional[str] = None,
             cleanup: bool = False,
         ) -> None:
@@ -1329,7 +1376,12 @@ class GraphBoundRequestBinder:
                 phase=phase,
                 ordinal=len(request_bindings),
                 request=request,
-                input_binding_ids=input_binding_ids,
+                input_bindings=input_bindings,
+                output_bindings=tuple(
+                    item
+                    for item in runtime_bindings.values()
+                    if item.producer_operation_id == request.operation_id
+                ),
                 request_mutation_ref=mutation_ref,
                 action_class=action_class,
                 expected_side_effect=expected_effect,
@@ -1342,60 +1394,82 @@ class GraphBoundRequestBinder:
             budget_bindings.append(bound[1])
             ephemeral_requests.append(bound[2])
 
-        for phase in _PHASES:
-            world_role = _WORLD_ROLE_BY_PHASE[phase]
-            operation_ids = (
+        phase_operation_ids = {
+            phase: (
                 specification.delta.treatment_operation_ids
                 if phase == "treatment"
                 else specification.delta.baseline_operation_ids
             )
-            for operation_id in operation_ids:
-                request = requests[operation_id]
-                input_ids = tuple(
-                    sorted(
-                        item.binding_id
-                        for item in recipe.bindings
-                        if item.consumer_operation_id == operation_id
-                    )
-                )
-                mutation_ref = None
+            for phase in _PHASES
+        }
+
+        def append_phase_operation(*, phase: str, operation_id: str) -> None:
+            world_role = _WORLD_ROLE_BY_PHASE[phase]
+            request = requests[operation_id]
+            input_bindings = tuple(
+                item
+                for item in recipe.bindings
+                if item.consumer_operation_id == operation_id
+            )
+            mutation_ref = None
+            if (
+                phase == "treatment"
+                and specification.delta.family
+                is PrerequisiteCounterfactualFamily.OMISSION
+                and operation_id == specification.terminal_operation_id
+            ):
+                target_binding_id = specification.delta.target_binding_ids[0]
+                binding = recipe_bindings.get(target_binding_id)
                 if (
-                    phase == "treatment"
-                    and specification.delta.family
-                    is PrerequisiteCounterfactualFamily.OMISSION
-                    and operation_id == specification.terminal_operation_id
+                    binding is None
+                    or binding.consumer_operation_id != operation_id
+                    or binding.consumer_locator.kind.value
+                    != specification.delta.consumer_locator_kind
+                    or binding.consumer_locator.pointer
+                    != specification.delta.consumer_locator_pointer
                 ):
-                    target_binding_id = specification.delta.target_binding_ids[0]
-                    binding = recipe_bindings.get(target_binding_id)
-                    if (
-                        binding is None
-                        or binding.consumer_operation_id != operation_id
-                        or binding.consumer_locator.kind.value
-                        != specification.delta.consumer_locator_kind
-                        or binding.consumer_locator.pointer
-                        != specification.delta.consumer_locator_pointer
-                    ):
-                        raise GraphBoundRequestBindingDenied(
-                            "graph_bound_omission_binding_is_not_current"
-                        )
-                    request = _remove_omission_binding(request, binding)
-                    input_ids = tuple(
-                        item for item in input_ids if item != target_binding_id
+                    raise GraphBoundRequestBindingDenied(
+                        "graph_bound_omission_binding_is_not_current"
                     )
-                    mutation_ref = specification.delta.delta_id
-                append_request(
-                    world_role=world_role,
-                    phase=phase,
-                    request=request,
-                    input_binding_ids=input_ids,
-                    mutation_ref=mutation_ref,
+                request = _remove_omission_binding(request, binding)
+                input_bindings = tuple(
+                    item
+                    for item in input_bindings
+                    if item.binding_id != target_binding_id
                 )
+                mutation_ref = specification.delta.delta_id
+            append_request(
+                world_role=world_role,
+                phase=phase,
+                request=request,
+                input_bindings=input_bindings,
+                mutation_ref=mutation_ref,
+            )
+
+        # Provision all three fresh worlds before any terminal experiment action.
+        # The reserved sequence can therefore stop at a hard boundary without
+        # dispatching a baseline, treatment, or control observation.
+        for phase in _PHASES:
+            for operation_id in phase_operation_ids[phase]:
+                if operation_id != specification.terminal_operation_id:
+                    append_phase_operation(phase=phase, operation_id=operation_id)
+        for phase in _PHASES:
+            if specification.terminal_operation_id not in phase_operation_ids[phase]:
+                raise GraphBoundRequestBindingDenied(
+                    "graph_bound_terminal_operation_is_missing"
+                )
+            append_phase_operation(
+                phase=phase,
+                operation_id=specification.terminal_operation_id,
+            )
+        for phase in _PHASES:
+            world_role = _WORLD_ROLE_BY_PHASE[phase]
             for _candidate, cleanup_binding, cleanup_request in cleanup_requests:
                 append_request(
                     world_role=world_role,
                     phase="cleanup",
                     request=cleanup_request,
-                    input_binding_ids=(cleanup_binding.binding_id,),
+                    input_bindings=(cleanup_binding,),
                     cleanup=True,
                 )
 
