@@ -3070,6 +3070,25 @@ def redacted_graph_bound_prerequisite_execution_outcome(
     provenance_root = response.get("provenance_root")
     candidate_ref = response.get("finding_candidate_ref")
     finding_confirmed = response.get("finding_confirmed")
+    selection = {
+        key: response.get(key)
+        for key in (
+            "payout_goal_plan_id",
+            "payout_candidate_id",
+            "payout_goal_id",
+            "payout_terminal_operation_id",
+            "specification_id",
+            "plan_id",
+            "graph_target_ref",
+            "graph_digest",
+        )
+    }
+    selection_ref = response.get("selection_ref")
+    selection_present = selection_ref is not None or any(
+        value is not None
+        for key, value in selection.items()
+        if key != "plan_id"
+    )
     counts = {
         key: response.get(key)
         for key in (
@@ -3181,11 +3200,48 @@ def redacted_graph_bound_prerequisite_execution_outcome(
         or response.get("adversarial_triage_required") is not True
         or response.get("promotion_authority") is not False
         or response.get("finding_authority") is not False
+        or (
+            selection_present
+            and (
+                not typed_ref(selection_ref, "graph_bound_one_click_selection")
+                or not typed_ref(
+                    selection["payout_goal_plan_id"],
+                    "payout_goal_plan",
+                )
+                or not typed_ref(
+                    selection["payout_candidate_id"],
+                    "payout_goal_candidate",
+                )
+                or not typed_ref(
+                    selection["payout_goal_id"],
+                    "security_witness_goal",
+                )
+                or not typed_ref(
+                    selection["payout_terminal_operation_id"],
+                    "action",
+                )
+                or not typed_ref(
+                    selection["specification_id"],
+                    "graph_bound_prerequisite_experiment",
+                )
+                or selection["plan_id"] != plan_id
+                or not typed_ref(
+                    selection["graph_target_ref"],
+                    "security_obligation_target",
+                )
+                or not typed_ref(
+                    selection["graph_digest"],
+                    "security_obligation_graph",
+                )
+                or selection_ref
+                != stable_hash("graph_bound_one_click_selection", selection)
+            )
+        )
     ):
         raise ReceiptStoreError(
             "graph-bound prerequisite execution outcome is invalid"
         )
-    return {
+    outcome = {
         "kind": kind,
         "mode": mode,
         "status": status,
@@ -3212,6 +3268,9 @@ def redacted_graph_bound_prerequisite_execution_outcome(
         "promotion_authority": False,
         "finding_authority": False,
     }
+    if selection_present:
+        outcome.update({**selection, "selection_ref": selection_ref})
+    return outcome
 
 
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:

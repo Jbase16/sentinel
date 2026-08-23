@@ -18,6 +18,7 @@ from .compiler import OperationContract, OperationSafety, operation_contracts_fr
 from .normalize import stable_hash
 from .obligations import SecurityObligationGraph
 from .omission import OmissionCompilationResult
+from .prerequisite_contracts import GRAPH_BOUND_PREREQUISITE_WORKFLOW
 from .proposals import CROSS_OBJECT_READ, ProposalBatch
 from .state_machine import StateMachineLegalityResult
 
@@ -85,6 +86,7 @@ _SINK_WEIGHT = {
 
 _BACKEND_WORKFLOWS = {
     "object_authorization": ("behavioral_object_authorization",),
+    "graph_bound_prerequisite": (GRAPH_BOUND_PREREQUISITE_WORKFLOW,),
     "prerequisite_omission": (
         "behavioral_compiled_owned_sequence",
         "behavioral_state_machine_omission",
@@ -322,8 +324,9 @@ def _context_payload(
     lifecycle_available: bool,
     callback_receiver_available: bool,
     available_backends: Sequence[str],
+    graph_bound_prerequisite_terminal_ids: Sequence[str],
 ) -> Dict[str, Any]:
-    return {
+    payload = {
         "target_ref": target_ref,
         "selected_world_ref": selected_world_ref,
         "authorization_ref": authorization_ref,
@@ -338,6 +341,13 @@ def _context_payload(
         "callback_receiver_available": callback_receiver_available,
         "available_backends": list(available_backends),
     }
+    # Preserve the v1 identity of graph-absent planning contexts. The additive
+    # terminal binding participates in the content address only when present.
+    if graph_bound_prerequisite_terminal_ids:
+        payload["graph_bound_prerequisite_terminal_ids"] = list(
+            graph_bound_prerequisite_terminal_ids
+        )
+    return payload
 
 
 @dataclass(frozen=True)
@@ -356,6 +366,7 @@ class GoalPlanningContext:
     lifecycle_available: bool
     callback_receiver_available: bool
     available_backends: Tuple[str, ...]
+    graph_bound_prerequisite_terminal_ids: Tuple[str, ...]
     mode: str = PAYOUT_GOAL_PLANNER_MODE
     executable: bool = False
 
@@ -373,6 +384,7 @@ class GoalPlanningContext:
         lifecycle_available: bool = False,
         callback_receiver_available: bool = False,
         available_backends: Sequence[str] = (),
+        graph_bound_prerequisite_terminal_ids: Sequence[str] = (),
     ) -> "GoalPlanningContext":
         if selected_world_id is not None and (
             not isinstance(selected_world_id, str)
@@ -413,6 +425,9 @@ class GoalPlanningContext:
             sorted({stable_hash("world", value) for value in role_world_ids})
         )
         backends = tuple(sorted(set(available_backends)))
+        graph_terminal_ids = tuple(
+            sorted(set(graph_bound_prerequisite_terminal_ids))
+        )
         payload = _context_payload(
             target_ref=target_ref,
             selected_world_ref=selected_world_ref,
@@ -427,6 +442,7 @@ class GoalPlanningContext:
             lifecycle_available=lifecycle_available,
             callback_receiver_available=callback_receiver_available,
             available_backends=backends,
+            graph_bound_prerequisite_terminal_ids=graph_terminal_ids,
         )
         return cls(
             context_ref=stable_hash("payout_goal_context", payload),
@@ -443,6 +459,7 @@ class GoalPlanningContext:
             lifecycle_available=lifecycle_available,
             callback_receiver_available=callback_receiver_available,
             available_backends=backends,
+            graph_bound_prerequisite_terminal_ids=graph_terminal_ids,
         )
 
     def __post_init__(self) -> None:
@@ -460,6 +477,9 @@ class GoalPlanningContext:
             lifecycle_available=self.lifecycle_available,
             callback_receiver_available=self.callback_receiver_available,
             available_backends=self.available_backends,
+            graph_bound_prerequisite_terminal_ids=(
+                self.graph_bound_prerequisite_terminal_ids
+            ),
         )
         if (
             self.context_ref != stable_hash("payout_goal_context", payload)
@@ -489,11 +509,17 @@ class GoalPlanningContext:
             or not set(self.role_world_refs) <= set(self.owned_world_refs)
             or self.available_backends != tuple(sorted(set(self.available_backends)))
             or any(_SEMANTIC.fullmatch(item) is None for item in self.available_backends)
+            or self.graph_bound_prerequisite_terminal_ids
+            != tuple(sorted(set(self.graph_bound_prerequisite_terminal_ids)))
+            or any(
+                not _hash_ref(item, "action")
+                for item in self.graph_bound_prerequisite_terminal_ids
+            )
         ):
             raise ValueError("goal planning context contract is invalid")
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "context_ref": self.context_ref,
             "target_ref": self.target_ref,
             "selected_world_ref": self.selected_world_ref,
@@ -511,6 +537,11 @@ class GoalPlanningContext:
             "mode": self.mode,
             "executable": self.executable,
         }
+        if self.graph_bound_prerequisite_terminal_ids:
+            payload["graph_bound_prerequisite_terminal_ids"] = list(
+                self.graph_bound_prerequisite_terminal_ids
+            )
+        return payload
 
 
 @dataclass(frozen=True)
@@ -798,16 +829,33 @@ def _world_requirement(
     *,
     label: str,
     context: GoalPlanningContext,
+    terminal_operation_id: Optional[str] = None,
 ) -> Tuple[WorldRequirement, str]:
     if security_property is SecurityProperty.PREREQUISITE_ENFORCEMENT:
+        graph_backend = "graph_bound_prerequisite"
+        legacy_backend = "prerequisite_omission"
+        graph_available = (
+            graph_backend in context.available_backends
+            and terminal_operation_id
+            in context.graph_bound_prerequisite_terminal_ids
+        )
+        legacy_available = legacy_backend in context.available_backends
+        graph_authorized = set(_BACKEND_WORKFLOWS[graph_backend]).issubset(
+            context.allowed_workflows
+        )
+        backend = (
+            graph_backend
+            if graph_available and (graph_authorized or not legacy_available)
+            else legacy_backend
+        )
         return (
             WorldRequirement(
                 ProofTopology.CONTROLLED_LIFECYCLE,
                 1,
                 requires_controlled_lifecycle=True,
-                required_workflows=_BACKEND_WORKFLOWS["prerequisite_omission"],
+                required_workflows=_BACKEND_WORKFLOWS[backend],
             ),
-            "prerequisite_omission",
+            backend,
         )
     if security_property is SecurityProperty.AUTHORITY_MONOTONICITY:
         return (
@@ -1062,6 +1110,7 @@ class PayoutGoalTopologyPlanner:
                     security_property,
                     label=operation.label,
                     context=context,
+                    terminal_operation_id=operation.operation_id,
                 )
                 blockers = _candidate_blockers(
                     context=context,

@@ -277,6 +277,161 @@ async def test_behavioral_one_click_restores_cached_omission_finding(
 
 
 @pytest.mark.asyncio
+async def test_behavioral_one_click_restores_receipt_bound_graph_finding(
+    monkeypatch,
+):
+    from core.behavior.normalize import stable_hash
+    from core.server.routers import foundry, scans
+
+    session = _Session()
+    terminal_refs = [
+        f"graph_bound_terminal_observation:{digit * 64}"
+        for digit in ("1", "2", "3")
+    ]
+    cleanup_refs = [
+        f"graph_bound_cleanup_evidence:{digit * 64}"
+        for digit in ("4", "5", "6", "7", "8", "9")
+    ]
+    oracle_requirement_id = (
+        f"prerequisite_effect_oracle_requirement:{'a' * 64}"
+    )
+    plan_id = f"graph_bound_prepared_request_plan:{'b' * 64}"
+    effect_witness_ref = (
+        f"graph_bound_independent_effect_witness:{'c' * 64}"
+    )
+    finding_candidate_ref = stable_hash(
+        "graph_bound_prerequisite_candidate",
+        {
+            "oracle_requirement_id": oracle_requirement_id,
+            "plan_id": plan_id,
+            "family": "omission",
+            "terminal_evidence_refs": terminal_refs,
+            "effect_witness_ref": effect_witness_ref,
+            "verdict": "confirmed",
+        },
+    )
+    selection = {
+        "payout_goal_plan_id": f"payout_goal_plan:{'d' * 64}",
+        "payout_candidate_id": f"payout_goal_candidate:{'e' * 64}",
+        "payout_goal_id": f"security_witness_goal:{'f' * 64}",
+        "payout_terminal_operation_id": f"action:{'1' * 64}",
+        "specification_id": (
+            f"graph_bound_prerequisite_experiment:{'2' * 64}"
+        ),
+        "plan_id": plan_id,
+        "graph_target_ref": f"security_obligation_target:{'3' * 64}",
+        "graph_digest": f"security_obligation_graph:{'4' * 64}",
+    }
+    outcome = {
+        "schema_version": 1,
+        "kind": "graph_bound_prerequisite_execution",
+        "mode": "behavioral_graph_bound_prerequisite_execution_v1",
+        "status": "already_executed",
+        "receipt_state": "completed",
+        "claim_contract_id": (
+            f"graph_bound_execution_claim_contract:{'5' * 64}"
+        ),
+        "plan_id": plan_id,
+        "family": "omission",
+        "provisioning_id": (
+            f"graph_bound_fresh_world_provisioning:{'6' * 64}"
+        ),
+        "oracle_requirement_id": oracle_requirement_id,
+        "reference_state_id": f"state:{'7' * 64}",
+        "oracle_evaluation_id": (
+            f"graph_bound_prerequisite_oracle_evaluation:{'8' * 64}"
+        ),
+        "oracle_verdict": "confirmed",
+        "effect_witness_ref": effect_witness_ref,
+        "runtime_value_inequality_ref": (
+            "graph_bound_runtime_value_inequality_attestation:"
+            f"{'9' * 64}"
+        ),
+        "terminal_evidence_refs": terminal_refs,
+        "cleanup_evidence_refs": cleanup_refs,
+        "cleanup_status": "verified",
+        "cleanup_steps_attempted": 3,
+        "cleanup_steps_completed": 3,
+        "cleanup_verifications_attempted": 3,
+        "cleanup_verifications_completed": 3,
+        "ownership_grants_removed": 3,
+        "target_requests_sent": 14,
+        "orphaned_owned_state_possible": False,
+        "provenance_root": "a" * 64,
+        "finding_candidate_ref": finding_candidate_ref,
+        "finding_confirmed": True,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+        **selection,
+        "selection_ref": stable_hash(
+            "graph_bound_one_click_selection",
+            selection,
+        ),
+        "orchestration_receipt": {
+            "receipt_id": f"behavioral-{'b' * 64}",
+            "state": "completed",
+            "reused": True,
+        },
+    }
+
+    async def execute(_request, _):
+        return dict(outcome)
+
+    async def route(_req, *, session, result, finding):
+        assert result["selection_ref"] == outcome["selection_ref"]
+        return finding
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        execute,
+    )
+    monkeypatch.setattr(scans, "_route_completed_behavioral_finding", route)
+
+    await _run_behavioral_one_click_phase(_request(), session=session)
+
+    restored, persist = session.findings.added[0]
+    assert restored["id"] == finding_candidate_ref
+    assert restored["tool"] == "behavioral_graph_bound_prerequisite"
+    assert restored["metadata"]["selection_ref"] == outcome["selection_ref"]
+    assert persist is True
+
+
+@pytest.mark.asyncio
+async def test_graph_finding_without_durable_receipt_is_not_persisted(
+    monkeypatch,
+):
+    from core.server.routers import foundry
+
+    session = _Session()
+
+    async def execute(_request, _):
+        return {
+            "status": "confirmed",
+            "kind": "graph_bound_prerequisite_execution",
+            "finding": {
+                "id": f"graph_bound_prerequisite_candidate:{'a' * 64}",
+                "type": "State-machine prerequisite enforcement failure",
+            },
+        }
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        execute,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="graph-bound finding requires a durable orchestration receipt",
+    ):
+        await _run_behavioral_one_click_phase(_request(), session=session)
+
+    assert session.findings.added == []
+
+
+@pytest.mark.asyncio
 async def test_behavioral_one_click_denial_fails_before_scan_traffic(
     monkeypatch,
 ):

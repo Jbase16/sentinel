@@ -20,7 +20,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from core.cortex.execution_policy import CandidateAction, DENIED_STATUS
 from core.safety.action_classifier import OWNED_CREATE
 
-from .normalize import _body_hash, stable_hash
+from .normalize import _body_hash, _parse_body, stable_hash
 from .prerequisite_execution_claim import (
     GraphBoundExecutionClaim,
     GraphBoundExecutionClaimDenied,
@@ -130,7 +130,7 @@ class GraphBoundTerminalObservation:
         reference_body_hash: str,
         runtime_value_inequality_ref: Optional[str],
     ) -> "GraphBoundTerminalObservation":
-        body_hash = _body_hash(response)
+        body_hash = _body_hash(_parse_body(response, None))
         reference_match = (
             status == reference_status and body_hash == reference_body_hash
         )

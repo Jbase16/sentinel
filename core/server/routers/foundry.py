@@ -696,6 +696,9 @@ async def run_behavioral_authorization_endpoint(
     ``SENTINELFORGE_BEHAVIOR_PRIMARY`` defaults off. In that state this endpoint
     returns the behavioral plan but cannot reach the SND replay transport.
     """
+    import asyncio
+    import os
+
     from core.behavior.active import (
         BoundedResponseText,
         CONTROLLED_WORKFLOW,
@@ -812,6 +815,30 @@ async def run_behavioral_authorization_endpoint(
     from core.behavior.generalized_authorization_one_click import (
         GeneralizedAuthorizationOneClickDenied,
         GeneralizedAuthorizationOneClickDispatcher,
+    )
+    from core.behavior.prerequisite_admission import (
+        GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+        GraphBoundManifestAdmissionDenied,
+    )
+    from core.behavior.prerequisite_execution import (
+        GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV,
+        GraphBoundPrerequisiteExecutionConfig,
+        GraphBoundPrerequisiteExecutionDenied,
+    )
+    from core.behavior.prerequisite_execution_claim import (
+        GRAPH_BOUND_EXECUTION_CLAIM_ENV,
+        GraphBoundExecutionClaimConfig,
+        GraphBoundExecutionClaimDenied,
+    )
+    from core.behavior.prerequisite_one_click import (
+        GraphBoundPrerequisiteOneClickDenied,
+        GraphBoundPrerequisiteOneClickDispatcher,
+    )
+    from core.behavior.prerequisite_provisioning import (
+        GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV,
+    )
+    from core.behavior.prerequisite_request_binding import (
+        GraphBoundRequestBindingDenied,
     )
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
@@ -1002,6 +1029,50 @@ async def run_behavioral_authorization_endpoint(
     generalized_authorization_execution_config = (
         GeneralizedAuthorizationExecutionConfig.from_environment()
     )
+    graph_bound_claim_config = GraphBoundExecutionClaimConfig.from_environment()
+    graph_bound_execution_config = (
+        GraphBoundPrerequisiteExecutionConfig.from_environment()
+    )
+    graph_bound_claim_gate_enabled = (
+        os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    graph_bound_provisioning_gate_enabled = (
+        os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    graph_bound_execution_gate_enabled = (
+        os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    if (
+        continuation_config.enabled
+        and GRAPH_BOUND_PREREQUISITE_WORKFLOW in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "bounded continuation and graph-bound prerequisite execution "
+                "are mutually exclusive"
+            ),
+        )
+    if (
+        graph_bound_claim_config.enabled
+        and graph_bound_execution_config.enabled
+        and GRAPH_BOUND_PREREQUISITE_WORKFLOW
+        not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "graph-bound prerequisite authorization denied; missing "
+                f"signed workflow: {GRAPH_BOUND_PREREQUISITE_WORKFLOW}"
+            ),
+        )
     if omission_confirmation_config.enabled:
         missing_workflows = sorted(
             {
@@ -1034,6 +1105,7 @@ async def run_behavioral_authorization_endpoint(
     shadow_artifacts = []
     controlled_executor = None
     generalized_authorization_executor = None
+    graph_bound_prerequisite_executor = None
     fresh_boundary_executor = None
     omission_confirmation_admission = None
     executors = None
@@ -1041,6 +1113,23 @@ async def run_behavioral_authorization_endpoint(
     receipt_store = None
     receipt_fingerprint = None
     receipt_reservation_token = None
+
+    def abort_reserved_root_receipt(reason: str) -> None:
+        if (
+            receipt_store is None
+            or receipt_fingerprint is None
+            or receipt_reservation_token is None
+        ):
+            return
+        try:
+            receipt_store.abort(
+                receipt_fingerprint,
+                reservation_token=receipt_reservation_token,
+                reason=reason,
+            )
+        except (OSError, ReceiptStoreError):
+            logger.exception("failed to terminate reserved behavioral receipt")
+
     read_exploration = {
         "status": "disabled",
         "pairs_attempted": 0,
@@ -1199,6 +1288,31 @@ async def run_behavioral_authorization_endpoint(
                 boundary_provenance,
             ),
         }
+        graph_bound_policy = ExecutionPolicy(
+            "bounty_safe",
+            scope_filter=scope_filter,
+            budget=ProofBudget(
+                max_total_requests=96,
+                max_requests_per_endpoint=24,
+                max_cross_object_reads=0,
+                max_privilege_mutations=0,
+                max_creates=3,
+                allow_delete=False,
+                allow_real_user_data_access=False,
+            ),
+            ownership_registry=OwnershipRegistry(),
+        )
+        graph_bound_provenance = ProvenanceSink()
+        graph_bound_provenance.record_context(
+            target=target_origin,
+            proof_mode="bounty_safe_graph_bound_prerequisite",
+            policy_digest=graph_bound_policy.digest(),
+        )
+        graph_bound_prerequisite_executor = make_executor(
+            source_persona.persona_id,
+            graph_bound_policy,
+            graph_bound_provenance,
+        )
         controlled_executor = ControlledAuthorizationExecutor(
             target_origin=target_origin,
             authorization=envelope,
@@ -1288,6 +1402,15 @@ async def run_behavioral_authorization_endpoint(
                     "generalized_authorization_execution": (
                         generalized_authorization_execution_config.enabled
                     ),
+                    "graph_bound_execution_claim": (
+                        graph_bound_claim_gate_enabled
+                    ),
+                    "graph_bound_fresh_world_provisioning": (
+                        graph_bound_provisioning_gate_enabled
+                    ),
+                    "graph_bound_prerequisite_execution": (
+                        graph_bound_execution_gate_enabled
+                    ),
                 },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
@@ -1358,6 +1481,9 @@ async def run_behavioral_authorization_endpoint(
                     proof_goal="resolve_persisted_graphql_operation",
                     _max_response_chars=catalog.limits.max_artifact_bytes,
                 )
+            except asyncio.CancelledError:
+                abort_reserved_root_receipt("behavioral_execution_cancelled")
+                raise
             except Exception:
                 asset_resolution["failed"] += 1
                 continue
@@ -1411,6 +1537,9 @@ async def run_behavioral_authorization_endpoint(
                         is not None
                     ),
                 )
+            except asyncio.CancelledError:
+                abort_reserved_root_receipt("behavioral_execution_cancelled")
+                raise
             except Exception as exc:
                 logger.exception("behavioral read exploration failed")
                 if (
@@ -1485,6 +1614,7 @@ async def run_behavioral_authorization_endpoint(
         actor_persona_id=source_persona.persona_id,
         executor=shadow_executor,
         peer_persona_id=peer_persona.persona_id,
+        prerequisite_executor=graph_bound_prerequisite_executor,
     )
     shadow_run = None
     adaptive_result = None
@@ -2366,6 +2496,9 @@ async def run_behavioral_authorization_endpoint(
                         "error_code": "state_transition_analysis_failed",
                         "executable": False,
                     }
+        except asyncio.CancelledError:
+            abort_reserved_root_receipt("behavioral_execution_cancelled")
+            raise
         except InteractionAcquisitionDenied as exc:
             interaction_acquisition = {
                 "schema_version": 1,
@@ -2849,6 +2982,15 @@ async def run_behavioral_authorization_endpoint(
                     break
             else:
                 stop_reason = "round_limit_reached"
+        except asyncio.CancelledError:
+            if round_fingerprint is not None and round_token is not None:
+                abort_continuation_receipt(
+                    round_fingerprint,
+                    round_token,
+                    "behavioral_execution_cancelled",
+                )
+            abort_reserved_root_receipt("behavioral_execution_cancelled")
+            raise
         except (
             ControlledExecutionDenied,
             ControlledSequenceDenied,
@@ -2966,13 +3108,48 @@ async def run_behavioral_authorization_endpoint(
         return response
 
     adaptive_proof_handoff = None
+    graph_bound_one_click_run = None
     generalized_one_click_run = None
     try:
         if (
             cross_persona_proof_run is None
             and shadow_run is not None
+            and graph_bound_prerequisite_executor is not None
+            and receipt_store is not None
+        ):
+            graph_bound_one_click_run = await (
+                GraphBoundPrerequisiteOneClickDispatcher(
+                    target_origin=target_origin,
+                    world_id=source_persona.persona_id,
+                    actor_persona_id=source_persona.persona_id,
+                    authorization=envelope,
+                    executor=graph_bound_prerequisite_executor,
+                    receipt_store=receipt_store,
+                    claim_config=graph_bound_claim_config,
+                    execution_config=graph_bound_execution_config,
+                    claim_gate_enabled=graph_bound_claim_gate_enabled,
+                    provisioning_gate_enabled=(
+                        graph_bound_provisioning_gate_enabled
+                    ),
+                    execution_gate_enabled=graph_bound_execution_gate_enabled,
+                ).run(
+                    source_records,
+                    lifecycle=shadow_run.lifecycle,
+                    state_machine=shadow_run.state_machine,
+                    compilation=shadow_run.prerequisite_experiments,
+                    payout_goal_plan=shadow_run.payout_goal_plan,
+                    graph=shadow_run.graph,
+                )
+            )
+        if (
+            cross_persona_proof_run is None
+            and shadow_run is not None
             and controlled_executor is not None
             and receipt_store is not None
+            and not (
+                graph_bound_one_click_run is not None
+                and graph_bound_one_click_run.selected
+            )
         ):
             generalized_one_click_run = await (
                 GeneralizedAuthorizationOneClickDispatcher(
@@ -2997,10 +3174,21 @@ async def run_behavioral_authorization_endpoint(
                     ),
                 )
             )
-        if generalized_one_click_run is not None and (
+        if graph_bound_one_click_run is not None and (
+            graph_bound_one_click_run.dispatched
+        ):
+            response = graph_bound_one_click_run.execution_response()
+        elif generalized_one_click_run is not None and (
             generalized_one_click_run.dispatched
         ):
             response = generalized_one_click_run.execution_response()
+        elif (
+            graph_bound_one_click_run is not None
+            and graph_bound_one_click_run.selected
+        ):
+            # Selection is an authority boundary. A disabled or unavailable
+            # graph plan must not fall through to a broader legacy executor.
+            run = shadow_run
         elif cross_persona_proof_run is not None:
             run = cross_persona_proof_run
         elif shadow_run is None:
@@ -3039,12 +3227,20 @@ async def run_behavioral_authorization_endpoint(
                 ),
                 expected_plan=sealed_plan,
             )
+    except asyncio.CancelledError:
+        abort_reserved_root_receipt("behavioral_execution_cancelled")
+        raise
     except (
         ControlledExecutionDenied,
         ControlledSequenceDenied,
         FreshOwnedBoundaryDenied,
         FreshOmissionDenied,
         GeneralizedAuthorizationOneClickDenied,
+        GraphBoundManifestAdmissionDenied,
+        GraphBoundRequestBindingDenied,
+        GraphBoundExecutionClaimDenied,
+        GraphBoundPrerequisiteExecutionDenied,
+        GraphBoundPrerequisiteOneClickDenied,
     ) as exc:
         if (
             receipt_store is not None
@@ -3078,11 +3274,67 @@ async def run_behavioral_authorization_endpoint(
             except (OSError, ReceiptStoreError):
                 logger.exception("failed to terminate errored behavioral receipt")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except HTTPException:
+        if (
+            receipt_store is not None
+            and receipt_fingerprint is not None
+            and receipt_reservation_token is not None
+        ):
+            try:
+                receipt_store.abort(
+                    receipt_fingerprint,
+                    reservation_token=receipt_reservation_token,
+                    reason="behavioral_run_rejected",
+                )
+            except (OSError, ReceiptStoreError):
+                logger.exception("failed to terminate rejected behavioral receipt")
+        raise
+    except Exception as exc:
+        if (
+            receipt_store is not None
+            and receipt_fingerprint is not None
+            and receipt_reservation_token is not None
+        ):
+            try:
+                receipt_store.abort(
+                    receipt_fingerprint,
+                    reservation_token=receipt_reservation_token,
+                    reason="unexpected_behavioral_execution_failure",
+                )
+            except (OSError, ReceiptStoreError):
+                logger.exception("failed to terminate failed behavioral receipt")
+        logger.exception("unexpected behavioral execution failure")
+        raise HTTPException(
+            status_code=500,
+            detail="behavioral execution failed closed",
+        ) from exc
     if not (
-        generalized_one_click_run is not None
-        and generalized_one_click_run.dispatched
+        (
+            graph_bound_one_click_run is not None
+            and graph_bound_one_click_run.dispatched
+        )
+        or (
+            generalized_one_click_run is not None
+            and generalized_one_click_run.dispatched
+        )
     ):
-        response = run.to_dict()
+        if (
+            graph_bound_one_click_run is not None
+            and graph_bound_one_click_run.selected
+        ):
+            response = {
+                "status": "no_executable_candidate",
+                "plan": {"selected_proposal_id": None},
+                "execution": None,
+                "finding": None,
+                "finding_confirmed": False,
+            }
+        else:
+            response = run.to_dict()
+        if graph_bound_one_click_run is not None:
+            response["graph_bound_prerequisite_one_click"] = (
+                graph_bound_one_click_run.to_dict()
+            )
         if generalized_one_click_run is not None:
             response["generalized_authorization_one_click"] = (
                 generalized_one_click_run.to_dict()
@@ -3155,6 +3407,13 @@ async def run_behavioral_authorization_endpoint(
         if effective_shadow_run is not None:
             shadow_response = effective_shadow_run.to_dict()
             try:
+                if (
+                    response.get("kind")
+                    == "graph_bound_prerequisite_execution"
+                ):
+                    raise GraphBoundPrerequisiteOneClickDenied(
+                        "graph_bound_receipt_obligation_binding_unavailable"
+                    )
                 feedback = ReceiptDispositionAdapter().adapt(
                     effective_shadow_run.graph,
                     (completed_receipt,),
@@ -3203,14 +3462,25 @@ async def run_behavioral_authorization_endpoint(
                 # A feedback failure cannot erase or falsify the already finalized
                 # proof receipt.  Keep the pre-execution frontier and expose the
                 # failed accounting step explicitly.
-                logger.exception("behavioral receipt feedback failed")
-                shadow_response["receipt_feedback"] = {
-                    "schema_version": 1,
-                    "mode": "behavioral_receipt_feedback_v1",
-                    "executable": False,
-                    "status": "error",
-                    "error_code": "receipt_feedback_failed",
-                }
+                if response.get("kind") == "graph_bound_prerequisite_execution":
+                    shadow_response["receipt_feedback"] = {
+                        "schema_version": 1,
+                        "mode": "behavioral_receipt_feedback_v1",
+                        "executable": False,
+                        "status": "unsupported",
+                        "error_code": (
+                            "graph_bound_receipt_obligation_binding_unavailable"
+                        ),
+                    }
+                else:
+                    logger.exception("behavioral receipt feedback failed")
+                    shadow_response["receipt_feedback"] = {
+                        "schema_version": 1,
+                        "mode": "behavioral_receipt_feedback_v1",
+                        "executable": False,
+                        "status": "error",
+                        "error_code": "receipt_feedback_failed",
+                    }
             response["behavioral_shadow"] = shadow_response
     return response
 
@@ -3227,6 +3497,9 @@ async def run_behavioral_authorization_from_url_endpoint(
     Once capture begins, the durable receipt prevents an identical click from
     silently repeating target traffic after any terminal outcome.
     """
+    import asyncio
+    import os
+
     from core.behavior.active import (
         ControlledExecutionDenied,
         validate_controlled_capture_context,
@@ -3272,6 +3545,20 @@ async def run_behavioral_authorization_from_url_endpoint(
     )
     from core.behavior.experiment_generalized_authorization import (
         GeneralizedAuthorizationExecutionConfig,
+    )
+    from core.behavior.prerequisite_admission import (
+        GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+    )
+    from core.behavior.prerequisite_execution import (
+        GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV,
+        GraphBoundPrerequisiteExecutionConfig,
+    )
+    from core.behavior.prerequisite_execution_claim import (
+        GRAPH_BOUND_EXECUTION_CLAIM_ENV,
+        GraphBoundExecutionClaimConfig,
+    )
+    from core.behavior.prerequisite_provisioning import (
+        GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV,
     )
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
@@ -3331,6 +3618,37 @@ async def run_behavioral_authorization_from_url_endpoint(
     generalized_authorization_execution_config = (
         GeneralizedAuthorizationExecutionConfig.from_environment()
     )
+    graph_bound_claim_config = GraphBoundExecutionClaimConfig.from_environment()
+    graph_bound_execution_config = (
+        GraphBoundPrerequisiteExecutionConfig.from_environment()
+    )
+    graph_bound_claim_gate_enabled = (
+        os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    graph_bound_provisioning_gate_enabled = (
+        os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    graph_bound_execution_gate_enabled = (
+        os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+    if (
+        continuation_config.enabled
+        and GRAPH_BOUND_PREREQUISITE_WORKFLOW in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "bounded continuation and graph-bound prerequisite execution "
+                "are mutually exclusive"
+            ),
+        )
     interaction_acquisition_config = (
         InteractionAcquisitionConfig.from_environment()
     )
@@ -3445,6 +3763,19 @@ async def run_behavioral_authorization_from_url_endpoint(
                     f"missing signed workflows: {', '.join(missing_workflows)}"
                 ),
             )
+    if (
+        graph_bound_claim_config.enabled
+        and graph_bound_execution_config.enabled
+        and GRAPH_BOUND_PREREQUISITE_WORKFLOW
+        not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click graph-bound prerequisite authorization denied; "
+                f"missing signed workflow: {GRAPH_BOUND_PREREQUISITE_WORKFLOW}"
+            ),
+        )
 
     try:
         fingerprint = request_fingerprint({
@@ -3474,6 +3805,13 @@ async def run_behavioral_authorization_from_url_endpoint(
                 ),
                 "generalized_authorization_execution": (
                     generalized_authorization_execution_config.enabled
+                ),
+                "graph_bound_execution_claim": graph_bound_claim_gate_enabled,
+                "graph_bound_fresh_world_provisioning": (
+                    graph_bound_provisioning_gate_enabled
+                ),
+                "graph_bound_prerequisite_execution": (
+                    graph_bound_execution_gate_enabled
                 ),
             },
             "target_url": target_url,
@@ -3585,6 +3923,9 @@ async def run_behavioral_authorization_from_url_endpoint(
             ),
             _=True,
         )
+    except asyncio.CancelledError:
+        abort_receipt("capture_orchestration_cancelled")
+        raise
     except HTTPException:
         abort_receipt("behavioral_run_rejected")
         raise
@@ -3627,6 +3968,16 @@ async def run_behavioral_authorization_from_url_endpoint(
                     else "aborted"
                 )
             )
+        elif (
+            execution is None
+            and receiptable_response.get("kind")
+            == "graph_bound_prerequisite_execution"
+            and receiptable_response.get("oracle_verdict")
+            in {"confirmed", "refuted", "inconclusive"}
+        ):
+            receiptable_response["status"] = receiptable_response[
+                "oracle_verdict"
+            ]
         elif execution is None:
             receiptable_response["status"] = "no_executable_candidate"
     try:

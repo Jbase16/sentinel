@@ -11,6 +11,12 @@ from core.base import config as config_module
 from core.base.config import SentinelConfig, StorageConfig, set_config
 from core.base.task_router import TaskRouter
 from core.behavior.normalize import stable_hash
+from core.behavior.prerequisite_contracts import (
+    GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+)
+from core.behavior.prerequisite_one_click import (
+    GraphBoundPrerequisiteFindingCandidate,
+)
 from core.behavior.receipts import (
     COMPLETED,
     BehavioralReceiptStore,
@@ -152,6 +158,92 @@ def _confirmed_outcome() -> dict[str, Any]:
     }
 
 
+def _confirmed_graph_outcome() -> dict[str, Any]:
+    terminal_refs = tuple(
+        f"graph_bound_terminal_observation:{digit * 64}"
+        for digit in ("1", "2", "3")
+    )
+    cleanup_refs = tuple(
+        f"graph_bound_cleanup_evidence:{digit * 64}"
+        for digit in ("4", "5", "6", "7", "8", "9")
+    )
+    oracle_requirement_id = (
+        f"prerequisite_effect_oracle_requirement:{'a' * 64}"
+    )
+    plan_id = f"graph_bound_prepared_request_plan:{'b' * 64}"
+    effect_witness_ref = (
+        f"graph_bound_independent_effect_witness:{'c' * 64}"
+    )
+    selection = {
+        "payout_goal_plan_id": f"payout_goal_plan:{'d' * 64}",
+        "payout_candidate_id": f"payout_goal_candidate:{'e' * 64}",
+        "payout_goal_id": f"security_witness_goal:{'f' * 64}",
+        "payout_terminal_operation_id": f"action:{'1' * 64}",
+        "specification_id": (
+            f"graph_bound_prerequisite_experiment:{'2' * 64}"
+        ),
+        "plan_id": plan_id,
+        "graph_target_ref": f"security_obligation_target:{'3' * 64}",
+        "graph_digest": f"security_obligation_graph:{'4' * 64}",
+    }
+    candidate_ref = stable_hash(
+        "graph_bound_prerequisite_candidate",
+        {
+            "oracle_requirement_id": oracle_requirement_id,
+            "plan_id": plan_id,
+            "family": "omission",
+            "terminal_evidence_refs": list(terminal_refs),
+            "effect_witness_ref": effect_witness_ref,
+            "verdict": "confirmed",
+        },
+    )
+    return {
+        "schema_version": 1,
+        "kind": "graph_bound_prerequisite_execution",
+        "mode": "behavioral_graph_bound_prerequisite_execution_v1",
+        "status": "confirmed",
+        "receipt_state": "completed",
+        "claim_contract_id": (
+            f"graph_bound_execution_claim_contract:{'5' * 64}"
+        ),
+        "plan_id": plan_id,
+        "family": "omission",
+        "provisioning_id": (
+            f"graph_bound_fresh_world_provisioning:{'6' * 64}"
+        ),
+        "oracle_requirement_id": oracle_requirement_id,
+        "reference_state_id": f"state:{'7' * 64}",
+        "oracle_evaluation_id": (
+            f"graph_bound_prerequisite_oracle_evaluation:{'8' * 64}"
+        ),
+        "oracle_verdict": "confirmed",
+        "effect_witness_ref": effect_witness_ref,
+        "runtime_value_inequality_ref": (
+            "graph_bound_runtime_value_inequality_attestation:"
+            f"{'9' * 64}"
+        ),
+        "terminal_evidence_refs": list(terminal_refs),
+        "cleanup_evidence_refs": list(cleanup_refs),
+        "cleanup_status": "verified",
+        "cleanup_steps_attempted": 3,
+        "cleanup_steps_completed": 3,
+        "cleanup_verifications_attempted": 3,
+        "cleanup_verifications_completed": 3,
+        "ownership_grants_removed": 3,
+        "target_requests_sent": 14,
+        "orphaned_owned_state_possible": False,
+        "provenance_root": PROVENANCE_ROOT,
+        "finding_candidate_ref": candidate_ref,
+        "finding_confirmed": True,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+        **selection,
+        "selection_ref": stable_hash(
+            "graph_bound_one_click_selection",
+            selection,
+        ),
+    }
 def _identity(session_id: str, *, target_origin: str = ORIGIN) -> AssessmentIdentityContext:
     return AssessmentIdentityContext(
         session_id=session_id,
@@ -316,6 +408,288 @@ async def test_completed_behavioral_receipt_promotes_once_and_opens_verify(
     )
     assert response.status_code == 200, response.text
     assert response.json()["finding_id"] == finding.id
+
+
+@pytest.mark.asyncio
+async def test_graph_bound_receipt_promotes_only_its_exact_finding(
+    isolated_runtime: SentinelConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    envelope = create_envelope(
+        researcher_identity="graph-proof-operator",
+        target_handle="owned-graph-proof-target",
+        authorized_origins=[ORIGIN],
+        authorization_basis="operator-owned graph proof target",
+        allowed_workflows=[GRAPH_BOUND_PREREQUISITE_WORKFLOW],
+        disclosure_attestation=True,
+    )
+    vault = PersonaVault()
+    source = vault.add_persona(label="Alice", email="alice@example.test")
+    peer = vault.add_persona(label="Bob", email="bob@example.test")
+    outcome = _confirmed_graph_outcome()
+    expected_finding = (
+        GraphBoundPrerequisiteFindingCandidate.from_completed_outcome(
+            outcome
+        ).to_finding()
+    )
+    receipt_store = BehavioralReceiptStore()
+    fingerprint = request_fingerprint(
+        {"session_id": "session-graph-proof", "selection": outcome["selection_ref"]}
+    )
+    reservation = receipt_store.reserve(
+        fingerprint,
+        context=redacted_receipt_context(
+            target_origin=ORIGIN,
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source.persona_id,
+            peer_persona_id=peer.persona_id,
+        ),
+    )
+    completed = receipt_store.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token or "",
+        outcome=outcome,
+    )
+    behavioral_response = dict(completed.outcome or {})
+    behavioral_response["finding"] = expected_finding
+    behavioral_response["orchestration_receipt"] = {
+        "receipt_id": completed.receipt_id,
+        "state": completed.state,
+        "reused": False,
+    }
+
+    async def completed_endpoint(_request: Any, _: bool) -> dict[str, Any]:
+        assert _ is True
+        return dict(behavioral_response)
+
+    from core.server.routers import foundry
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        completed_endpoint,
+    )
+    ledger = EvidenceLedger(isolated_runtime, receipt_store=receipt_store)
+    TaskRouter._instance = TaskRouter(ai=_NoopAI(), ledger=ledger)
+    session = _ScanSession("session-graph-proof")
+    request = ScanRequest(
+        target=f"{ORIGIN}/workflows/owned/export",
+        mode="bug_bounty",
+        behavioral_one_click=BehavioralOneClickProfile(
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source.persona_id,
+            peer_persona_id=peer.persona_id,
+        ),
+    )
+
+    result = await _run_behavioral_one_click_phase(request, session=session)
+    read_model = ledger.session_read_model(session.id)
+
+    assert result is not None
+    assert len(read_model.observations) == 1
+    assert len(read_model.findings) == 1
+    finding = read_model.findings[0]
+    assert finding.active_proof == [
+        ActiveProofCitation(
+            observation_id=read_model.observations[0].id,
+            receipt_id=completed.receipt_id,
+            provenance_root=PROVENANCE_ROOT,
+        )
+    ]
+    assert result["finding"]["id"] == finding.id
+    assert result["finding"]["metadata"]["adversarial_triage_required"] is True
+    assert result["finding"]["metadata"]["promotion_authority"] is False
+    assert result["finding"]["metadata"]["submission_authority"] is False
+    assert session.findings.added == [(result["finding"], True)]
+
+
+@pytest.mark.asyncio
+async def test_graph_bound_receipt_refuses_tampered_finding_before_promotion(
+    isolated_runtime: SentinelConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    envelope = create_envelope(
+        researcher_identity="graph-proof-operator",
+        target_handle="owned-graph-proof-target",
+        authorized_origins=[ORIGIN],
+        authorization_basis="operator-owned graph proof target",
+        allowed_workflows=[GRAPH_BOUND_PREREQUISITE_WORKFLOW],
+        disclosure_attestation=True,
+    )
+    vault = PersonaVault()
+    source = vault.add_persona(label="Alice", email="alice@example.test")
+    peer = vault.add_persona(label="Bob", email="bob@example.test")
+    outcome = _confirmed_graph_outcome()
+    receipt_store = BehavioralReceiptStore()
+    fingerprint = request_fingerprint(
+        {"session_id": "session-graph-tamper", "selection": outcome["selection_ref"]}
+    )
+    reservation = receipt_store.reserve(
+        fingerprint,
+        context=redacted_receipt_context(
+            target_origin=ORIGIN,
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source.persona_id,
+            peer_persona_id=peer.persona_id,
+        ),
+    )
+    completed = receipt_store.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token or "",
+        outcome=outcome,
+    )
+    expected_finding = (
+        GraphBoundPrerequisiteFindingCandidate.from_completed_outcome(
+            completed.outcome or {}
+        ).to_finding()
+    )
+    tampered_finding = {
+        **expected_finding,
+        "message": "tampered graph-bound claim",
+    }
+    behavioral_response = dict(completed.outcome or {})
+    behavioral_response["finding"] = tampered_finding
+    behavioral_response["orchestration_receipt"] = {
+        "receipt_id": completed.receipt_id,
+        "state": completed.state,
+        "reused": False,
+    }
+
+    async def completed_endpoint(_request: Any, _: bool) -> dict[str, Any]:
+        assert _ is True
+        return dict(behavioral_response)
+
+    from core.server.routers import foundry
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        completed_endpoint,
+    )
+    ledger = EvidenceLedger(isolated_runtime, receipt_store=receipt_store)
+    TaskRouter._instance = TaskRouter(ai=_NoopAI(), ledger=ledger)
+    session = _ScanSession("session-graph-tamper")
+    request = ScanRequest(
+        target=f"{ORIGIN}/workflows/owned/export",
+        mode="bug_bounty",
+        behavioral_one_click=BehavioralOneClickProfile(
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source.persona_id,
+            peer_persona_id=peer.persona_id,
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="graph-bound finding does not match its completed receipt",
+    ):
+        await _run_behavioral_one_click_phase(request, session=session)
+
+    read_model = ledger.session_read_model(session.id)
+    assert not read_model.observations
+    assert not read_model.findings
+    assert session.findings.added == []
+
+
+@pytest.mark.parametrize(
+    ("splice", "expected_error"),
+    (
+        (
+            "legacy_kind",
+            "behavioral finding result kind does not match completed receipt",
+        ),
+        (
+            "peer_context",
+            "behavioral finding receipt context does not match exact scan request",
+        ),
+    ),
+)
+@pytest.mark.asyncio
+async def test_graph_bound_receipt_refuses_kind_or_peer_context_splice(
+    isolated_runtime: SentinelConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    splice: str,
+    expected_error: str,
+) -> None:
+    envelope = create_envelope(
+        researcher_identity="graph-splice-operator",
+        target_handle="owned-graph-splice-target",
+        authorized_origins=[ORIGIN],
+        authorization_basis="operator-owned graph proof target",
+        allowed_workflows=[GRAPH_BOUND_PREREQUISITE_WORKFLOW],
+        disclosure_attestation=True,
+    )
+    vault = PersonaVault()
+    source = vault.add_persona(label="Alice", email="alice@example.test")
+    peer = vault.add_persona(label="Bob", email="bob@example.test")
+    other_peer = vault.add_persona(label="Carol", email="carol@example.test")
+    graph_outcome = _confirmed_graph_outcome()
+    expected_finding = (
+        GraphBoundPrerequisiteFindingCandidate.from_completed_outcome(
+            graph_outcome
+        ).to_finding()
+    )
+    receipt_store = BehavioralReceiptStore()
+    fingerprint = request_fingerprint(
+        {"session_id": f"session-graph-{splice}", "splice": splice}
+    )
+    reservation = receipt_store.reserve(
+        fingerprint,
+        context=redacted_receipt_context(
+            target_origin=ORIGIN,
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source.persona_id,
+            peer_persona_id=(
+                other_peer.persona_id if splice == "peer_context" else peer.persona_id
+            ),
+        ),
+    )
+    completed = receipt_store.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token or "",
+        outcome=(
+            _confirmed_outcome() if splice == "legacy_kind" else graph_outcome
+        ),
+    )
+    behavioral_response = dict(graph_outcome)
+    behavioral_response["finding"] = expected_finding
+    behavioral_response["orchestration_receipt"] = {
+        "receipt_id": completed.receipt_id,
+        "state": completed.state,
+        "reused": False,
+    }
+
+    async def completed_endpoint(_request: Any, _: bool) -> dict[str, Any]:
+        assert _ is True
+        return dict(behavioral_response)
+
+    from core.server.routers import foundry
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        completed_endpoint,
+    )
+    ledger = EvidenceLedger(isolated_runtime, receipt_store=receipt_store)
+    TaskRouter._instance = TaskRouter(ai=_NoopAI(), ledger=ledger)
+    session = _ScanSession(f"session-graph-{splice}")
+    request = ScanRequest(
+        target=f"{ORIGIN}/workflows/owned/export",
+        mode="bug_bounty",
+        behavioral_one_click=BehavioralOneClickProfile(
+            envelope_id=envelope.envelope_id,
+            source_persona_id=source.persona_id,
+            peer_persona_id=peer.persona_id,
+        ),
+    )
+
+    with pytest.raises(ValueError, match=expected_error):
+        await _run_behavioral_one_click_phase(request, session=session)
+
+    read_model = ledger.session_read_model(session.id)
+    assert not read_model.observations
+    assert not read_model.findings
+    assert session.findings.added == []
 
 
 @pytest.mark.asyncio

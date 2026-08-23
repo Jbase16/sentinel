@@ -171,11 +171,20 @@ class OwnedExperimentShadowContext:
     actor_persona_id: str = field(repr=False)
     executor: PolicyExecutor = field(repr=False, compare=False)
     peer_persona_id: Optional[str] = field(default=None, repr=False)
+    prerequisite_executor: Optional[PolicyExecutor] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if (
             not isinstance(self.authorization, AuthorizationEnvelope)
             or not isinstance(self.executor, PolicyExecutor)
+            or (
+                self.prerequisite_executor is not None
+                and not isinstance(self.prerequisite_executor, PolicyExecutor)
+            )
             or not isinstance(self.actor_persona_id, str)
             or not self.actor_persona_id
             or (
@@ -907,6 +916,16 @@ class BehavioralShadowOrchestrator:
             interactions=interactions,
             interaction_source_world_ref=stable_hash("world", world_id),
         )
+        prerequisite_executor = (
+            experiment_context.prerequisite_executor
+            if experiment_context is not None
+            and experiment_context.prerequisite_executor is not None
+            else (
+                experiment_context.executor
+                if experiment_context is not None
+                else None
+            )
+        )
         prerequisite_admission = self.prerequisite_admission_planner.plan(
             compilation=prerequisite_experiments,
             target_origin=target_origin,
@@ -917,11 +936,7 @@ class BehavioralShadowOrchestrator:
                 if experiment_context is not None
                 else None
             ),
-            executor=(
-                experiment_context.executor
-                if experiment_context is not None
-                else None
-            ),
+            executor=prerequisite_executor,
             actor_persona_id=(
                 experiment_context.actor_persona_id
                 if experiment_context is not None
@@ -936,11 +951,7 @@ class BehavioralShadowOrchestrator:
             state_machine=state_machine,
             compilation=prerequisite_experiments,
             admission=prerequisite_admission,
-            executor=(
-                experiment_context.executor
-                if experiment_context is not None
-                else None
-            ),
+            executor=prerequisite_executor,
         )
         semantic_catalog = self.semantic_catalog_builder.build(
             primary_records,
@@ -977,6 +988,11 @@ class BehavioralShadowOrchestrator:
             )
         )
         available_backends = []
+        graph_bound_omission_plans = tuple(
+            item
+            for item in prerequisite_requests.plans
+            if item.family == "omission"
+        )
         # The generalized locator-bound authorization adapter can validate
         # paired captures that the narrower legacy proposal compiler cannot
         # represent (for example form and GraphQL locator shapes).  Declaring
@@ -984,6 +1000,8 @@ class BehavioralShadowOrchestrator:
         # PolicyExecutor admission remain mandatory downstream.
         if secondary_records:
             available_backends.append("object_authorization")
+        if graph_bound_omission_plans:
+            available_backends.append("graph_bound_prerequisite")
         if omissions.experiments:
             available_backends.append("prerequisite_omission")
         owned_world_ids = ()
@@ -1001,6 +1019,14 @@ class BehavioralShadowOrchestrator:
             owned_world_ids=owned_world_ids,
             lifecycle_available=bool(state_machine.candidates),
             available_backends=available_backends,
+            graph_bound_prerequisite_terminal_ids=tuple(
+                sorted(
+                    {
+                        item.baseline_operation_ids[-1]
+                        for item in graph_bound_omission_plans
+                    }
+                )
+            ),
         )
         payout_goal_plan = self.payout_goal_planner.plan(
             semantic_catalog.planner_operations(

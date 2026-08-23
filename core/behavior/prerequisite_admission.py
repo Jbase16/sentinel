@@ -25,10 +25,8 @@ from .prerequisite_experiments import (
     GraphBoundPrerequisiteExperimentSpec,
     PrerequisiteCounterfactualFamily,
 )
+from .prerequisite_contracts import GRAPH_BOUND_PREREQUISITE_WORKFLOW
 
-GRAPH_BOUND_PREREQUISITE_WORKFLOW = (
-    "behavioral_graph_bound_prerequisite_experiment"
-)
 GRAPH_BOUND_MANIFEST_ADMISSION_MODE = (
     "behavioral_graph_bound_prerequisite_manifest_admission"
 )

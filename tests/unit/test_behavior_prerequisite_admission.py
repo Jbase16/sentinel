@@ -10,6 +10,11 @@ from core.behavior.orchestrator import (
     BehavioralShadowOrchestrator,
     OwnedExperimentShadowContext,
 )
+from core.behavior.payout_goals import (
+    GoalPlanningContext,
+    SecurityProperty,
+    _world_requirement,
+)
 from core.behavior.prerequisite_admission import (
     GRAPH_BOUND_PREREQUISITE_WORKFLOW,
     GraphBoundManifestAdmissionPlanner,
@@ -330,7 +335,104 @@ def test_ordinary_shadow_run_carries_static_admission_without_executing_it():
     )
     assert admitted.prerequisite_admission.dispatch_authority is False
     assert admitted.prerequisite_admission.target_requests_sent == 0
+    assert "graph_bound_prerequisite" in (
+        admitted.payout_goal_plan.context.available_backends
+    )
+    assert admitted.payout_goal_plan.selected is not None
+    assert admitted.payout_goal_plan.selected.backend == "graph_bound_prerequisite"
+    assert (
+        admitted.payout_goal_plan.selected.world_requirement.required_workflows
+        == (GRAPH_BOUND_PREREQUISITE_WORKFLOW,)
+    )
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("workflows", "expected_backend"),
+    (
+        (
+            (
+                "behavioral_compiled_owned_sequence",
+                "behavioral_state_machine_omission",
+                "behavioral_state_machine_omission_confirmation",
+            ),
+            "prerequisite_omission",
+        ),
+        (
+            (
+                GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+                "behavioral_compiled_owned_sequence",
+                "behavioral_state_machine_omission",
+                "behavioral_state_machine_omission_confirmation",
+            ),
+            "graph_bound_prerequisite",
+        ),
+    ),
+)
+def test_payout_backend_preserves_legacy_authority_and_prefers_graph_when_signed(
+    workflows,
+    expected_backend,
+):
+    context = GoalPlanningContext.build(
+        target_ref=stable_hash("security_obligation_target", ORIGIN),
+        target_origin=ORIGIN,
+        authorization=_authorization(workflows=workflows),
+        selected_world_id="alice",
+        owned_world_ids=("alice",),
+        lifecycle_available=True,
+        available_backends=(
+            "graph_bound_prerequisite",
+            "prerequisite_omission",
+        ),
+        graph_bound_prerequisite_terminal_ids=(f"action:{'a' * 64}",),
+    )
+    requirement, backend = _world_requirement(
+        SecurityProperty.PREREQUISITE_ENFORCEMENT,
+        label="export",
+        context=context,
+        terminal_operation_id=f"action:{'a' * 64}",
+    )
+
+    assert backend == expected_backend
+    assert requirement.required_workflows == (
+        (GRAPH_BOUND_PREREQUISITE_WORKFLOW,)
+        if expected_backend == "graph_bound_prerequisite"
+        else workflows
+    )
+
+
+def test_graph_backend_is_bound_to_the_exact_compiled_terminal():
+    graph_terminal_id = f"action:{'a' * 64}"
+    other_terminal_id = f"action:{'b' * 64}"
+    context = GoalPlanningContext.build(
+        target_ref=stable_hash("security_obligation_target", ORIGIN),
+        target_origin=ORIGIN,
+        authorization=_authorization(
+            workflows=(
+                GRAPH_BOUND_PREREQUISITE_WORKFLOW,
+                "behavioral_compiled_owned_sequence",
+                "behavioral_state_machine_omission",
+                "behavioral_state_machine_omission_confirmation",
+            )
+        ),
+        selected_world_id="alice",
+        owned_world_ids=("alice",),
+        lifecycle_available=True,
+        available_backends=(
+            "graph_bound_prerequisite",
+            "prerequisite_omission",
+        ),
+        graph_bound_prerequisite_terminal_ids=(graph_terminal_id,),
+    )
+
+    _requirement, backend = _world_requirement(
+        SecurityProperty.PREREQUISITE_ENFORCEMENT,
+        label="export",
+        context=context,
+        terminal_operation_id=other_terminal_id,
+    )
+
+    assert backend == "prerequisite_omission"
 
 
 def test_static_admission_module_has_no_async_or_transport_surface():
