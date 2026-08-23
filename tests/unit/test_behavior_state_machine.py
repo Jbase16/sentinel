@@ -81,7 +81,7 @@ def _joining_records():
             "response_body": json.dumps({"addressId": ADDRESS_ID}),
         },
     )
-    ordered = tuple(
+    observed = tuple(
         sorted(
             prerequisites,
             key=lambda record: normalize_exchange(
@@ -89,10 +89,11 @@ def _joining_records():
                 source_id=record["id"],
                 world_id="alice",
             ).action_id,
+            reverse=True,
         )
     )
     return (
-        *ordered,
+        *observed,
         {
             "id": "export-order",
             "persona_id": "alice",
@@ -108,7 +109,8 @@ def _joining_records():
 
 
 def test_miner_derives_exact_same_world_ordered_prerequisite_relation():
-    result = StateMachineLegalityMiner().mine(_records(), world_id="alice")
+    records = _records()
+    result = StateMachineLegalityMiner().mine(records, world_id="alice")
 
     assert result.status == "ready"
     assert result.mode == STATE_MACHINE_LEGALITY_MODE
@@ -144,8 +146,9 @@ def test_miner_derives_exact_same_world_ordered_prerequisite_relation():
 
 
 def test_independent_prerequisites_are_preserved_as_one_joining_topology():
+    records = _joining_records()
     result = StateMachineLegalityMiner().mine(
-        _joining_records(),
+        records,
         world_id="alice",
     )
 
@@ -156,6 +159,14 @@ def test_independent_prerequisites_are_preserved_as_one_joining_topology():
         if len(item.prerequisite_operation_ids) == 2
     )
     graph = candidate.prerequisite_graph
+    assert candidate.prerequisite_operation_ids == tuple(
+        normalize_exchange(
+            record,
+            source_id=record["id"],
+            world_id="alice",
+        ).action_id
+        for record in records[:-1]
+    )
     assert graph.shape == "joining"
     assert len(graph.root_operation_ids) == 2
     assert len(graph.direct_terminal_prerequisite_operation_ids) == 2
