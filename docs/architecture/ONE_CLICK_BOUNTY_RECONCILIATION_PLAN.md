@@ -1,6 +1,8 @@
 # Sentinel One-Click Bounty Reconciliation Plan
 
-Status: authoritative forward implementation plan
+Status: detailed capability contract and staged backlog; current program status and
+execution order are authoritative in
+[`ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md`](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md)
 
 Baseline: `f9d3607950885953ab620b973723044d342e7925`
 

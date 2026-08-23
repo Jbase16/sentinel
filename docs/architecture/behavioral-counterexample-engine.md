@@ -1,7 +1,11 @@
 # Behavioral Counterexample Engine
 
-Forward implementation plan:
-[Sentinel One-Click Bounty Roadmap](ONE_CLICK_BOUNTY_ROADMAP.md).
+Program status and forward execution order are maintained in
+[`ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md`](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md).
+This document remains the detailed implementation record for the behavioral engine.
+
+Detailed forward capability contract:
+[Sentinel One-Click Bounty Reconciliation Plan](ONE_CLICK_BOUNTY_RECONCILIATION_PLAN.md).
 
 ## Objective
 

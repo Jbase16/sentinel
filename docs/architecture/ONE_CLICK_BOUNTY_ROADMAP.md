@@ -1,5 +1,9 @@
 # Sentinel One-Click Bounty Roadmap
 
+Program status and forward execution order are maintained in
+[`ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md`](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md).
+This roadmap remains historical context for the original milestones and phases.
+
 Status: historical implementation record through the adaptive-proof handoff
 Starting point: `4d2d6cd` (`feat(scans): bridge behavioral one-click execution`)
 
