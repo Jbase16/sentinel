@@ -34,6 +34,11 @@ if TYPE_CHECKING:
     from core.cortex.execution_policy import PolicyExecutor
     from core.foundry.vault import PersonaVault
 
+    from .receipts import BehavioralReceiptStore
+    from .role_execution_claim import (
+        RoleMonotonicityExecutionClaimConfig,
+        RoleMonotonicityExecutionClaimLease,
+    )
     from .role_request_binding import (
         RoleMonotonicityRequestBinder,
         RoleMonotonicityRequestBindingContract,
@@ -766,6 +771,36 @@ class RoleMonotonicityExperimentAdmission:
             runtime=runtime,
             authority_validator=authority_validator,
         )
+
+    def reserve_execution_claim(
+        self,
+        *,
+        request_binding: "RoleMonotonicityRequestBindingContract",
+        executor: "PolicyExecutor",
+        persona_vault: "PersonaVault",
+        runtime: "RoleMonotonicityRuntimeContext",
+        authority_validator: "RoleRuntimeAuthorityValidator",
+        config: Optional["RoleMonotonicityExecutionClaimConfig"] = None,
+        receipt_store: Optional["BehavioralReceiptStore"] = None,
+    ) -> "RoleMonotonicityExecutionClaimLease":
+        """Revalidate R5C3 and reserve one transport-free R5C4 claim."""
+
+        from .role_execution_claim import (
+            RoleMonotonicityExecutionClaimAdmission,
+        )
+
+        return RoleMonotonicityExecutionClaimAdmission(
+            proof=self.proof,
+            request_binding=request_binding,
+            target_origin=self.target_origin,
+            authorization=self.authorization,
+            executor=executor,
+            persona_vault=persona_vault,
+            runtime=runtime,
+            authority_validator=authority_validator,
+            config=config,
+            receipt_store=receipt_store,
+        ).admit()
 
 
 __all__ = [
