@@ -206,7 +206,7 @@ Additional documentation:
 - [Chain Arbiter](docs/CHAIN_ARBITER.md)
 - [Persona Foundry](docs/PHASE_7_PERSONA_FOUNDRY.md)
 - [Authentication](docs/AUTHENTICATION.md)
-- [Development guide](docs/DEVELOPMENT_GUIDE.md)
+- [Agent & contribution guide](AGENTS.md)
 
 ## Responsible use
 

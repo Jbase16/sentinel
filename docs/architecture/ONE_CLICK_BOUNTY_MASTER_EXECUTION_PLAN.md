@@ -2,10 +2,10 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Repository snapshot: `ocb/r5b3b2c-experiment-closure` at `88e893c`, based on
-`main` at `a6d667d`
+Repository snapshot: `ocb/r5c5-role-membership-lifecycle` at `0de4e1a`, based on
+`main` at `fc1e997`
 
-Last verified: 2026-08-22
+Last verified: 2026-08-24
 
 ## 1. Purpose
 
@@ -48,6 +48,10 @@ In plain language: one click should carry an authorized assessment from discover
 reviewable bounty draft when Sentinel can prove a real issue safely. Today, Sentinel can
 do that for a narrow controlled authorization path and can produce a receipt-bound
 finding candidate for narrow graph-bound prerequisite omission and reordering paths.
+Family C now has suite-proved role/membership contracts, exact runtime binding, an
+atomic execution claim, and a default-off owned setup/revocation lifecycle, but it has
+not run the protected-effect comparison or reached ordinary-click or external
+acceptance.
 The external `OCB-S15` gates pass against vulnerable and secure loopback twins,
 including capture freshness, durable denial replay, ordinary-Scan persistence, and an
 exact adjacent-order counterfactual. Sentinel cannot yet search and prove the full
@@ -78,6 +82,23 @@ complete. Multiple commits are allowed when the slice has independently reviewab
 units, but unrelated OCB slices must not be collapsed into one commit. If a push is
 blocked, report the blocker and leave the slice explicitly incomplete.
 
+### Living checklist convention
+
+The forward workstreams and dashboard are also the program's visual to-do list:
+
+- `[x]` means the named bounded item is implemented and its cited checkpoint exists;
+- `[ ]` means required work or evidence remains, including partially implemented items;
+- a checked implementation slice does not check off its parent stage, external gate, or
+  higher evidence label;
+- each completed slice adds its pushed commit and concise proof note beneath the owning
+  workstream before the next slice begins; and
+- dependencies discovered from current code may be added as indented sub-items, but
+  closed items are not silently renamed or rewritten to make the sequence look cleaner.
+
+At each slice closeout, update the repository snapshot, relevant ledger row, owning
+workstream checklist, immediate-next decision, dashboard, and any changed gate result.
+Keep unresolved security, native, live, and external evidence visibly unchecked.
+
 Start every OCB slice from the current synchronized `main` on one dedicated short-lived
 `ocb/<slice-slug>` branch. A slice branch contains only that slice and its required tests,
 evidence, and documentation. Push the branch early for remote visibility, but do not
@@ -106,20 +127,30 @@ live-observed result, and a live loopback result is not payout proof.
 
 ### Sentinel repository
 
-- Slice branch: `ocb/r5b3b2c-experiment-closure`, pushed and aligned with its
-  remote at code checkpoint `88e893c`.
-- Base: `main` and `origin/main` at `a6d667d` when the slice branch was created.
+- Slice branch: `ocb/r5c5-role-membership-lifecycle`, pushed and aligned with its
+  remote at code checkpoint `0de4e1a`.
+- Base: `main` and `origin/main` at `fc1e997` when the Family-C branch chain was
+  created.
 - Python: declared 3.12 environment; the verification run used Python 3.12.12.
-- Full suite on 2026-08-22:
-  `2627 passed, 1 skipped, 3 warnings in 33.73s`.
+- Full suite on 2026-08-24:
+  `2713 passed, 1 skipped, 4 warnings in 35.55s`.
 - The former 17-skip backlog has been reduced to one remaining conditional skip:
   `tests/verification/test_websocket_terminal_bidirectional.py` skips because
   `/ws/terminal` is absent.
 - The full run is logic-green, but not warning-clean. It emitted closed-event-loop
-  `aiosqlite` thread cleanup plus two upstream `ldap3`/`pyasn1` deprecations.
-- The merged Xcode scheme update is present at `ccd5dbc`.
+  `aiosqlite` thread cleanup warnings plus two upstream `ldap3`/`pyasn1`
+  deprecations.
+- `scripts/local-security-check.sh` remains red on repository-wide matcher and Ruff
+  debt outside the Family-C diff. Targeted Ruff and prohibited-pattern checks passed
+  for the R5C5 files.
+- The ordinary Xcode build is blocked on this machine by the missing Apple Metal
+  Toolchain. A bounded build excluding only the two Metal shader sources compiled the
+  Swift application successfully; this is not the complete native gate.
 
 ### External visual acceptance lab
+
+This evidence was last inspected on 2026-08-22. No Family-C external run was added or
+reverified at the current Sentinel SHA.
 
 - Lab snapshot inspected: branch `db-r1-s15-twin` at `529ec4e`.
 - LAB-S01 through LAB-S10 each have at least one passing `operator_attested` artifact. These are lab-side
@@ -129,7 +160,7 @@ live-observed result, and a live loopback result is not payout proof.
 - DB-S15 has a live external `pass` artifact bound to Sentinel `375137f`. It proves
   persona continuity, stale-credential refusal, canonical finding production, Verify
   binding, and zero cleanup residue for that exact run.
-- DB-S15 is valid historical live evidence, but it is not a current-`88e893c` artifact.
+- DB-S15 is valid historical live evidence, but it is not a current-`0de4e1a` artifact.
 - No inspected artifact establishes a real public bug-bounty acceptance or payout.
 
 ## 6. Where the program is now
@@ -145,7 +176,7 @@ live-observed result, and a live loopback result is not payout proof.
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
-| OCB-R5 family C: role and membership safety | Designed | Topology and goal vocabulary can describe role worlds | Implement role lattice, membership setup/teardown, monotonicity oracle, and `OCB-S16` |
+| OCB-R5 family C: role and membership safety | Implemented and suite-proved through owned membership lifecycle; not ordinary-click wired | Typed role/membership fixture, monotonicity proof and admission, exact runtime request binding, atomic receipt/budget claim, exact-session native replay, target-side active/revoked observations, verified cleanup, redacted terminal evidence, and replay refusal | Execute and independently evaluate the protected-effect probes, add an ordinary Scan caller, promote only completed positive proof, and prove `OCB-S16` on vulnerable and secure twins |
 | OCB-R5 family D: capability safety | Designed | Topology vocabulary recognizes callback/capability worlds | Implement token/link/capability confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
@@ -180,7 +211,7 @@ orchestration, or OCB-R9 payout proof.
 | Roadmap Phase 2 acquisition controller | OCB-R2, OCB-R3, and OCB-R8 | Bounded safe-read acquisition and obligation-directed replanning exist; broad authenticated/navigation acquisition remains demand-driven |
 | Roadmap Phase 3 semantic reconstruction | OCB-R2 | Implemented as a bounded passive catalog |
 | Roadmap Phase 4 experiment/oracle SDK | OCB-R4 | Core SDK/admission/backends exist; topology-general production coordination remains |
-| Roadmap Phase 5 proof families | OCB-R5 families A-F | A is closed narrowly, B is partially built, C-F remain forward work |
+| Roadmap Phase 5 proof families | OCB-R5 families A-F | A is closed narrowly, B is closed for its bounded scope, C is active through its owned membership lifecycle, and D-F remain forward work |
 | Roadmap Phase 6 adaptive search | OCB-R3 and OCB-R6 | Replanning exists; coverage economics and stopping do not |
 | Roadmap Phase 7 promotion/report | OCB-R7 | Canonical promotion/candidate/report seams exist; generalized assembly remains |
 | Roadmap Phase 8 operational UI | OCB-R8 | Profile and status are present; full family coordinator is not |
@@ -279,6 +310,55 @@ experiment cannot broaden origins, identities, action classes, or budgets.
 Build the smallest role lattice and reversible owned membership fixture needed to test
 whether authority improperly increases or survives revocation. Reuse OCB-R4 admission
 and the completed OCB-R5 family B lifecycle path; do not create a second provisioning system.
+
+Checklist status records bounded implementation checkpoints, not Family-C stage
+closure:
+
+- [x] **R5C1 — typed role and membership fixture.** Commit `c28ce43` defines the
+  content-addressed lattice, owned-world persona references, reversible membership
+  fixture, and cleanup contract without target traffic.
+- [x] **R5C2 — monotonicity proof, oracle contract, and admission.** Commit `8081a4a`
+  binds the active/revoked experiment and signed authority while remaining
+  transport-free.
+- [x] **R5C3 — exact runtime request binding.** Commit `db570b3` binds sessions,
+  generations, request material, policy, ownership, cleanup, and receipt lineage
+  without dispatch.
+- [x] **R5C4 — atomic single-use execution claim.** Commit `7813316` reserves the
+  durable receipt and complete ordered request budget as one rollback-safe,
+  transport-free lifecycle.
+- [x] **R5C5 — owned membership setup, revocation, and verification.** Commit
+  `0de4e1a` consumes one claim behind separate default-off gates, sends only the three
+  already-bound membership requests through exact-session native replay, observes
+  target-side active/revoked generations, always attempts cleanup, and terminates with
+  redacted evidence because protected effects were not evaluated.
+    - [x] Refuse a changed retained session before native `fetch` and recheck the echoed
+      session attestation in Python.
+    - [x] Skip all five protected-effect probe/witness units without transport.
+    - [x] Preserve cleanup failure, uncertain dispatch, and orphan-risk truth in the
+      durable terminal receipt.
+    - [ ] Restore the ordinary Metal-enabled Xcode gate on this machine.
+    - [ ] Resolve or explicitly baseline the repository-wide local security-check debt.
+- [ ] **R5C6 — protected-effect execution and independent evaluation.** Revalidate the
+  exact work order against current callers, then use a fresh single-use lifecycle to
+  execute the already-bound baseline, active-role, and revoked-role probe/witness
+  units without broadening origin, identity, method, redirect, or budget authority.
+    - [ ] Adjudicate the comparison through the bound independent oracle rather than a
+      target label, model score, or HTTP status alone.
+    - [ ] Complete or abort the receipt truthfully on positive, negative, denial,
+      cancellation, transport, oracle, and cleanup paths.
+    - [ ] Expose no finding or promotion authority unless completed positive proof is
+      stored under the existing canonical gates.
+- [ ] Add the bounded Family-C coordinator to the ordinary Scan production path under
+  explicit default-off gates, restart/deduplication behavior, and truthful status.
+- [ ] Prove `OCB-S16` against vulnerable and secure twins, including negative
+  pre-traffic denial, cross-session refusal, revocation freshness, deterministic
+  receipts, cleanup, and zero residue.
+- [ ] Record current-SHA native and external acceptance evidence before applying
+  `lab-attested` or `live-observed` labels.
+
+R5C5's Python checkpoint is `2713 passed, 1 skipped, 4 warnings` at `0de4e1a`.
+The open native and repository-security items above prevent treating that checkpoint as
+complete release evidence, and no Family-C external acceptance claim is made.
 
 Exit gate: `OCB-S16` proves vulnerable and secure twins, negative pre-traffic denial,
 revocation freshness, cleanup, and deterministic receipts.
@@ -382,25 +462,32 @@ Stop the slice rather than weakening a gate when completion appears to require:
 
 ## 11. Immediate next decision
 
-Family B is closed for the bounded omission and adjacent-reordering scope. The next work
-order is **OCB-R5 Family C role and membership monotonicity** on a new branch, beginning
-with the smallest typed role lattice and reversible owned membership fixture needed for
-`OCB-S16`. Reuse the existing admission, fresh-world, receipt, cleanup, and promotion
-contracts; do not broaden acquisition or start Family D in the Family-C work order.
-The test skip and warning debt should be handled as a separate maintenance work order so
-it cannot distort the product-stage boundary.
+Family B remains closed for the bounded omission and adjacent-reordering scope. Family C
+is active through the R5C5 owned membership lifecycle. The next implementation work
+order is **R5C6 protected-effect execution and independent evaluation**, with its exact
+boundary revalidated against current production callers before editing. It should
+consume the already-bound Family-C actions in one fresh receipt/claim/cleanup lifecycle;
+it must not bolt effect probes onto the already terminated R5C5 receipt, broaden
+acquisition, or start Family D.
+
+The Metal Toolchain gap, repository security-check baseline, remaining skip, and warning
+debt stay as explicit maintenance/evidence items. They must not be hidden inside R5C6 or
+used to advance the Family-C stage label.
 
 ## 12. Program dashboard
 
-| Workstream | State | Next evidence |
-|---|---|---|
-| Baseline governance | Active | Track the current 1 skip and 2 warnings separately; keep this ledger current |
-| OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
-| OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| OCB-R5 family C roles/membership | Next | Implement the minimum typed role/membership contract and prove `OCB-S16` |
-| OCB-R5 family D capabilities | Queued | `OCB-S17` |
-| OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
-| OCB-R7 generalized candidate | Partial | `OCB-S19` |
-| OCB-R8 full ordinary click | Partial | `OCB-S20` |
-| OCB-R5 families E and F expansion | Deferred | New registered scenarios after OCB-R8 |
-| OCB-R9 release/payout evidence | Evidence in progress | Current-SHA native streak, then separately authorized real-program result |
+The checkbox marks closure of the bounded row as named; unchecked rows may still contain
+implemented sub-slices.
+
+| Done | Workstream | State | Next evidence |
+|---|---|---|---|
+| [ ] | Baseline governance | Active | Track the current skip, four warnings, security baseline, and native-toolchain gap separately; keep this ledger current |
+| [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
+| [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
+| [ ] | OCB-R5 family C roles/membership | Active through R5C5 | R5C6 effect evaluation, ordinary Scan wiring, then `OCB-S16` |
+| [ ] | OCB-R5 family D capabilities | Queued | `OCB-S17` |
+| [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
+| [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
+| [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |
+| [ ] | OCB-R5 families E and F expansion | Deferred | New registered scenarios after OCB-R8 |
+| [ ] | OCB-R9 release/payout evidence | Evidence in progress | Current-SHA native streak, then separately authorized real-program result |
