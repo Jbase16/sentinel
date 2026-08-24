@@ -24,6 +24,7 @@ from core.behavior.role_execution_claim import (
     RoleMonotonicityExecutionClaimContract,
     RoleMonotonicityExecutionClaimDenied,
 )
+from core.behavior.role_request_binding import RoleMembershipObservationBinding
 from tests.unit.test_behavior_role_request_binding import (
     ACTIVE_LOW_SESSION,
     BODY_SECRET,
@@ -494,6 +495,7 @@ def test_receipt_abort_failure_still_releases_budget_and_closes_lease(
         "policy",
         "request",
         "membership_generation",
+        "observation",
         "cleanup",
         "run",
         "tenant",
@@ -515,6 +517,20 @@ def test_changed_bound_state_fails_closed_before_receipt_or_transport(
         runtime = _mutated_runtime(context, "query_substitution")
     elif case == "membership_generation":
         runtime = _mutated_runtime(context, "stale_revocation_generation")
+    elif case == "observation":
+        runtime = replace(
+            runtime,
+            membership_observation_binding=(
+                RoleMembershipObservationBinding.build(
+                    proof=context.proof,
+                    tenant_pointer="/tenant",
+                    subject_pointer="/subject",
+                    role_pointer="/role",
+                    state_pointer="/membership_state",
+                    generation_pointer="/membership_generation",
+                )
+            ),
+        )
     elif case == "cleanup":
         binding = copy.deepcopy(binding)
         object.__setattr__(

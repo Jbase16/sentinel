@@ -295,6 +295,25 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     await executeReplay(reqId: reqId, args: args)
                     // executeReplay handles sending its own response/error, so we return early
                     return
+                case "session_replay":
+                    guard let sessionId = args["session_id"] as? String,
+                          !sessionId.isEmpty else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "session_id is required"
+                            ]
+                        )
+                    }
+                    await executeReplay(
+                        reqId: reqId,
+                        args: args,
+                        requiredSessionId: sessionId
+                    )
+                    // executeReplay handles sending its own response/error.
+                    return
                 default:
                     throw NSError(domain: "SND", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unknown command \(command)"])
                 }
@@ -563,10 +582,22 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     }
     
     @MainActor
-    private func executeReplay(reqId: String, args: [String: Any]) async {
+    private func executeReplay(
+        reqId: String,
+        args: [String: Any],
+        requiredSessionId: String? = nil
+    ) async {
         guard let persona = args["persona"] as? String,
               let window = personaWindows[persona] else {
             sendError(reqId: reqId, error: "no authenticated window for persona '\(args["persona"] ?? "?")'")
+            return
+        }
+        if let requiredSessionId,
+           window.eventSessionId != requiredSessionId {
+            sendError(
+                reqId: reqId,
+                error: "session-bound replay refused before target dispatch"
+            )
             return
         }
         guard let requestedURL = args["url"] as? String,
@@ -641,7 +672,11 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         
         do {
             let result = try await window.callAsyncJavaScript(js, arguments: ["args": params], in: .page)
-            sendResponse(reqId: reqId, result: (result as? [String: Any]) ?? [:])
+            var response = (result as? [String: Any]) ?? [:]
+            if requiredSessionId != nil {
+                response["session_id"] = window.eventSessionId
+            }
+            sendResponse(reqId: reqId, result: response)
         } catch {
             sendError(reqId: reqId, error: "\(error)")
         }

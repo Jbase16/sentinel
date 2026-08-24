@@ -34,6 +34,7 @@ protection); tests inject a mock. This module never places traffic itself.
 from __future__ import annotations
 
 import json as _json
+import hmac
 import logging
 import re
 from dataclasses import dataclass, field
@@ -87,6 +88,30 @@ class ReplayResponse:
     body_truncated: bool = False
 
 
+@dataclass(frozen=True)
+class SessionBoundReplayResponse:
+    """Replay result whose native window matched one exact launch session."""
+
+    response: ReplayResponse
+    persona: str = field(repr=False)
+    session_id: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.response, ReplayResponse):
+            raise TypeError("session-bound replay response is invalid")
+        for name, value in (
+            ("persona", self.persona),
+            ("session_id", self.session_id),
+        ):
+            if (
+                not isinstance(value, str)
+                or not value
+                or len(value) > 512
+                or any(ord(character) < 32 for character in value)
+            ):
+                raise ValueError(f"session-bound replay {name} is invalid")
+
+
 @dataclass
 class ObjectScopedOp:
     """An attacker request that carries an owned id and is therefore a swap
@@ -106,6 +131,17 @@ class ReplayTransport(Protocol):
     """Places a request as a given persona and returns the response. The impl owns
     the authenticated session (a browser window per persona, an httpx client, …)."""
     async def send(self, persona: str, req: ReplayRequest) -> ReplayResponse: ...
+
+
+class SessionBoundReplayTransport(Protocol):
+    """Places a replay only through one exact retained native-window session."""
+
+    async def send_bound(
+        self,
+        persona: str,
+        session_id: str,
+        req: ReplayRequest,
+    ) -> SessionBoundReplayResponse: ...
 
 
 # ─────────────────────────── parsing ───────────────────────────
@@ -610,4 +646,69 @@ class SNDReplayTransport:
             body=result.get("body", "") or "",
             headers=result.get("headers", {}) or {},
             body_truncated=bool(result.get("body_truncated")),
+        )
+
+    async def send_bound(
+        self,
+        persona: str,
+        session_id: str,
+        req: ReplayRequest,
+    ) -> SessionBoundReplayResponse:
+        """Replay only if the retained persona window has this exact session."""
+
+        import uuid
+        from core.net.egress import admit_egress
+        from core.server.routers.driver import (
+            DriverCommandError,
+            node_manager,
+        )
+
+        for name, value in (("persona", persona), ("session_id", session_id)):
+            if (
+                not isinstance(value, str)
+                or not value
+                or len(value) > 512
+                or any(ord(character) < 32 for character in value)
+            ):
+                raise ValueError(f"native replay {name} is invalid")
+        admit_egress(req.url, self.scope_filter)
+        if req.redirect_mode != "manual":
+            raise ValueError(
+                "native replay cannot follow redirects without per-hop admission"
+            )
+
+        result = await node_manager.send_command(
+            {
+                "request_id": uuid.uuid4().hex,
+                "command": "session_replay",
+                "args": {
+                    "persona": persona,
+                    "session_id": session_id,
+                    "method": req.method,
+                    "url": req.url,
+                    "headers": req.headers,
+                    "body": req.body,
+                    "max_response_chars": req.max_response_chars,
+                    "redirect_mode": "manual",
+                },
+            },
+            timeout=self.timeout,
+        ) or {}
+        actual_session_id = result.get("session_id")
+        if (
+            not isinstance(actual_session_id, str)
+            or not hmac.compare_digest(actual_session_id, session_id)
+        ):
+            raise DriverCommandError(
+                "native session-bound replay attestation mismatch"
+            )
+        return SessionBoundReplayResponse(
+            response=ReplayResponse(
+                status=int(result.get("status", 0) or 0),
+                body=result.get("body", "") or "",
+                headers=result.get("headers", {}) or {},
+                body_truncated=bool(result.get("body_truncated")),
+            ),
+            persona=persona,
+            session_id=actual_session_id,
         )

@@ -48,6 +48,7 @@ from core.behavior.role_monotonicity import (
 )
 from core.behavior.role_request_binding import (
     ROLE_MONOTONICITY_REQUEST_BINDING_MODE,
+    RoleMembershipObservationBinding,
     RoleMonotonicityRequestBindingDenied,
     RoleMonotonicityRuntimeContext,
     role_tenant_ownership_ref,
@@ -405,6 +406,14 @@ def _context(tmp_path, monkeypatch) -> SimpleNamespace:
             target_owner_persona_id=higher.persona_id,
         ),
     }
+    observation_binding = RoleMembershipObservationBinding.build(
+        proof=proof,
+        tenant_pointer="/tenant_id",
+        subject_pointer="/member_id",
+        role_pointer="/role_assignment",
+        state_pointer="/state",
+        generation_pointer="/generation",
+    )
     runtime = RoleMonotonicityRuntimeContext.build(
         proof=proof,
         authorization=authorization,
@@ -417,6 +426,7 @@ def _context(tmp_path, monkeypatch) -> SimpleNamespace:
         revoked_lower_session_id=REVOKED_LOW_SESSION,
         active_membership_generation=41,
         revoked_membership_generation=42,
+        membership_observation_binding=observation_binding,
         runtime_actions=runtime_actions,
     )
 
@@ -580,6 +590,8 @@ def test_binding_is_deterministic_content_addressed_and_publicly_redacted(
         assert secret not in public
     assert "request_material_fingerprint" in public
     assert "endpoint_key_ref" in public
+    assert "membership_observation_binding" in public
+    assert first.target_membership_observation_bound is True
     assert "runtime_actions" not in public
     assert context.calls == []
     with pytest.raises(ValueError, match="request binding is invalid"):
@@ -588,6 +600,14 @@ def test_binding_is_deterministic_content_addressed_and_publicly_redacted(
         replace(
             first.action_bindings[0],
             session_ref=stable_hash("role_runtime_session", "forged"),
+        )
+    with pytest.raises(
+        ValueError,
+        match="membership observation binding is invalid",
+    ):
+        replace(
+            first.membership_observation_binding,
+            state_pointer="/membership_state",
         )
 
 

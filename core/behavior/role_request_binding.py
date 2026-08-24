@@ -48,6 +48,7 @@ _REMAINING_EXECUTION_BLOCKERS = (
     "effect_evaluation_required",
 )
 _MEMBERSHIP_STATES = frozenset({"active", "revoking", "revoked"})
+_JSON_POINTER = re.compile(r"^(?:/(?:[^~/]|~[01])*)+$")
 
 
 class RoleMonotonicityRequestBindingDenied(RuntimeError):
@@ -269,6 +270,163 @@ def _revocation_verification_ref(
     )
 
 
+def _membership_observation_payload(
+    *,
+    setup_action_id: str,
+    revocation_verification_action_id: str,
+    tenant_pointer: str,
+    subject_pointer: str,
+    role_pointer: str,
+    state_pointer: str,
+    generation_pointer: str,
+) -> Dict[str, Any]:
+    return {
+        "setup_action_id": setup_action_id,
+        "revocation_verification_action_id": (
+            revocation_verification_action_id
+        ),
+        "response_format": "json",
+        "tenant_pointer": tenant_pointer,
+        "subject_pointer": subject_pointer,
+        "role_pointer": role_pointer,
+        "state_pointer": state_pointer,
+        "generation_pointer": generation_pointer,
+    }
+
+
+@dataclass(frozen=True)
+class RoleMembershipObservationBinding:
+    """Exact target-response projection required by a future active lifecycle.
+
+    The binding contains JSON pointers only. Runtime tenant, persona, role, state,
+    and generation values remain private and are compared only after transport.
+    """
+
+    binding_id: str
+    setup_action_id: str
+    revocation_verification_action_id: str
+    tenant_pointer: str
+    subject_pointer: str
+    role_pointer: str
+    state_pointer: str
+    generation_pointer: str
+    response_format: str = "json"
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        proof: RoleMonotonicityExperimentProof,
+        tenant_pointer: str,
+        subject_pointer: str,
+        role_pointer: str,
+        state_pointer: str,
+        generation_pointer: str,
+    ) -> "RoleMembershipObservationBinding":
+        if not isinstance(proof, RoleMonotonicityExperimentProof):
+            raise TypeError("proof must be a RoleMonotonicityExperimentProof")
+        pointers = tuple(
+            str(value or "")
+            for value in (
+                tenant_pointer,
+                subject_pointer,
+                role_pointer,
+                state_pointer,
+                generation_pointer,
+            )
+        )
+        payload = _membership_observation_payload(
+            setup_action_id=proof.fixture.setup_action.action_id,
+            revocation_verification_action_id=(
+                proof.fixture.revocation_verification_action.action_id
+            ),
+            tenant_pointer=pointers[0],
+            subject_pointer=pointers[1],
+            role_pointer=pointers[2],
+            state_pointer=pointers[3],
+            generation_pointer=pointers[4],
+        )
+        return cls(
+            binding_id=stable_hash(
+                "role_membership_observation_binding",
+                payload,
+            ),
+            setup_action_id=proof.fixture.setup_action.action_id,
+            revocation_verification_action_id=(
+                proof.fixture.revocation_verification_action.action_id
+            ),
+            tenant_pointer=pointers[0],
+            subject_pointer=pointers[1],
+            role_pointer=pointers[2],
+            state_pointer=pointers[3],
+            generation_pointer=pointers[4],
+        )
+
+    def __post_init__(self) -> None:
+        pointers = (
+            self.tenant_pointer,
+            self.subject_pointer,
+            self.role_pointer,
+            self.state_pointer,
+            self.generation_pointer,
+        )
+        payload = _membership_observation_payload(
+            setup_action_id=self.setup_action_id,
+            revocation_verification_action_id=(
+                self.revocation_verification_action_id
+            ),
+            tenant_pointer=self.tenant_pointer,
+            subject_pointer=self.subject_pointer,
+            role_pointer=self.role_pointer,
+            state_pointer=self.state_pointer,
+            generation_pointer=self.generation_pointer,
+        )
+        if (
+            self.binding_id
+            != stable_hash("role_membership_observation_binding", payload)
+            or not _hash_ref(
+                self.binding_id,
+                "role_membership_observation_binding",
+            )
+            or not _hash_ref(
+                self.setup_action_id,
+                "proof_experiment_action",
+            )
+            or not _hash_ref(
+                self.revocation_verification_action_id,
+                "proof_experiment_action",
+            )
+            or self.setup_action_id
+            == self.revocation_verification_action_id
+            or self.response_format != "json"
+            or len(set(pointers)) != len(pointers)
+            or any(
+                not isinstance(pointer, str)
+                or len(pointer) > 256
+                or any(ord(character) < 32 for character in pointer)
+                or _JSON_POINTER.fullmatch(pointer) is None
+                for pointer in pointers
+            )
+        ):
+            raise ValueError("role membership observation binding is invalid")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "binding_id": self.binding_id,
+            **_membership_observation_payload(
+                setup_action_id=self.setup_action_id,
+                revocation_verification_action_id=(
+                    self.revocation_verification_action_id
+                ),
+                tenant_pointer=self.tenant_pointer,
+                subject_pointer=self.subject_pointer,
+                role_pointer=self.role_pointer,
+                state_pointer=self.state_pointer,
+                generation_pointer=self.generation_pointer,
+            ),
+        }
+
+
 @dataclass(frozen=True)
 class RoleMonotonicityRuntimeContext:
     """Sensitive owned runtime values supplied to the admission boundary."""
@@ -298,6 +456,7 @@ class RoleMonotonicityRuntimeContext:
     active_membership_evidence_ref: str
     revocation_evidence_ref: str
     revocation_verification_ref: str
+    membership_observation_binding: RoleMembershipObservationBinding
     request_intent_refs: Mapping[str, str]
     runtime_actions: Mapping[str, CandidateAction] = field(
         repr=False,
@@ -319,12 +478,30 @@ class RoleMonotonicityRuntimeContext:
         revoked_lower_session_id: str,
         active_membership_generation: int,
         revoked_membership_generation: int,
+        membership_observation_binding: RoleMembershipObservationBinding,
         runtime_actions: Mapping[str, CandidateAction],
     ) -> "RoleMonotonicityRuntimeContext":
         if not isinstance(proof, RoleMonotonicityExperimentProof):
             raise TypeError("proof must be a RoleMonotonicityExperimentProof")
         if not isinstance(authorization, AuthorizationEnvelope):
             raise TypeError("authorization must be an AuthorizationEnvelope")
+        if not isinstance(
+            membership_observation_binding,
+            RoleMembershipObservationBinding,
+        ):
+            raise TypeError(
+                "membership_observation_binding must be a "
+                "RoleMembershipObservationBinding"
+            )
+        if (
+            membership_observation_binding.setup_action_id
+            != proof.fixture.setup_action.action_id
+            or membership_observation_binding.revocation_verification_action_id
+            != proof.fixture.revocation_verification_action.action_id
+        ):
+            raise ValueError(
+                "membership observation binding does not match the proof"
+            )
         run_value = _runtime_value(run_id, field_name="runtime run id")
         tenant_value = _runtime_value(tenant_id, field_name="runtime tenant id")
         higher_persona = _runtime_value(
@@ -463,6 +640,7 @@ class RoleMonotonicityRuntimeContext:
             active_membership_evidence_ref=active_membership_ref,
             revocation_evidence_ref=revocation_ref,
             revocation_verification_ref=verification_ref,
+            membership_observation_binding=membership_observation_binding,
             request_intent_refs=request_refs,
             runtime_actions=action_values,
         )
@@ -510,6 +688,13 @@ class RoleMonotonicityRuntimeContext:
             for field_name, prefix in ref_prefixes.items()
         ):
             raise ValueError("role runtime context contains an invalid reference")
+        if not isinstance(
+            self.membership_observation_binding,
+            RoleMembershipObservationBinding,
+        ):
+            raise ValueError(
+                "role runtime membership observation binding is invalid"
+            )
         if any(
             not isinstance(key, str)
             or not _hash_ref(value, "role_runtime_request_intent")
@@ -730,6 +915,7 @@ def _binding_payload(
     tenant_ownership_ref: str,
     active_generation_ref: str,
     revoked_generation_ref: str,
+    membership_observation_binding: RoleMembershipObservationBinding,
     world_bindings: Sequence[ExperimentRuntimeWorldBinding],
     action_bindings: Sequence[RoleRuntimeActionAuthorityBinding],
     cleanup_lineage_ref: str,
@@ -751,6 +937,9 @@ def _binding_payload(
         "tenant_ownership_ref": tenant_ownership_ref,
         "active_generation_ref": active_generation_ref,
         "revoked_generation_ref": revoked_generation_ref,
+        "membership_observation_binding": (
+            membership_observation_binding.to_dict()
+        ),
         "world_bindings": [item.to_dict() for item in world_bindings],
         "action_bindings": [item.to_dict() for item in action_bindings],
         "cleanup_lineage_ref": cleanup_lineage_ref,
@@ -761,6 +950,7 @@ def _binding_payload(
         "owned_runtime_state_attested": True,
         "request_bindings_complete": True,
         "revocation_freshness_bound": True,
+        "target_membership_observation_bound": True,
         "cleanup_lineage_bound": True,
         "receipt_lineage_bound": True,
         "policy_preflight_complete": True,
@@ -790,6 +980,7 @@ class RoleMonotonicityRequestBindingContract:
     tenant_ownership_ref: str
     active_generation_ref: str
     revoked_generation_ref: str
+    membership_observation_binding: RoleMembershipObservationBinding
     world_bindings: Tuple[ExperimentRuntimeWorldBinding, ...]
     action_bindings: Tuple[RoleRuntimeActionAuthorityBinding, ...]
     cleanup_lineage_ref: str
@@ -802,6 +993,7 @@ class RoleMonotonicityRequestBindingContract:
     owned_runtime_state_attested: bool = True
     request_bindings_complete: bool = True
     revocation_freshness_bound: bool = True
+    target_membership_observation_bound: bool = True
     cleanup_lineage_bound: bool = True
     receipt_lineage_bound: bool = True
     policy_preflight_complete: bool = True
@@ -824,6 +1016,13 @@ class RoleMonotonicityRequestBindingContract:
             for item in self.action_bindings
         ):
             raise TypeError("role request binding contains invalid bindings")
+        if not isinstance(
+            self.membership_observation_binding,
+            RoleMembershipObservationBinding,
+        ):
+            raise TypeError(
+                "role request binding observation contract is invalid"
+            )
         ordered_actions = tuple(
             sorted(
                 self.action_bindings,
@@ -981,6 +1180,9 @@ class RoleMonotonicityRequestBindingContract:
             tenant_ownership_ref=self.tenant_ownership_ref,
             active_generation_ref=self.active_generation_ref,
             revoked_generation_ref=self.revoked_generation_ref,
+            membership_observation_binding=(
+                self.membership_observation_binding
+            ),
             world_bindings=self.world_bindings,
             action_bindings=self.action_bindings,
             cleanup_lineage_ref=self.cleanup_lineage_ref,
@@ -1014,6 +1216,11 @@ class RoleMonotonicityRequestBindingContract:
                 self.revoked_generation_ref,
                 "role_membership_generation",
             )
+            or len(ordered_actions) != 8
+            or self.membership_observation_binding.setup_action_id
+            != ordered_actions[0].request_binding.action_id
+            or self.membership_observation_binding.revocation_verification_action_id
+            != ordered_actions[5].request_binding.action_id
             or tuple(item.slot for item in self.world_bindings)
             != ("high_role", "low_role")
             or len({item.runtime_binding_id for item in self.world_bindings}) != 2
@@ -1043,6 +1250,7 @@ class RoleMonotonicityRequestBindingContract:
             or not self.owned_runtime_state_attested
             or not self.request_bindings_complete
             or not self.revocation_freshness_bound
+            or not self.target_membership_observation_bound
             or not self.cleanup_lineage_bound
             or not self.receipt_lineage_bound
             or not self.policy_preflight_complete
@@ -1074,6 +1282,9 @@ class RoleMonotonicityRequestBindingContract:
                 tenant_ownership_ref=self.tenant_ownership_ref,
                 active_generation_ref=self.active_generation_ref,
                 revoked_generation_ref=self.revoked_generation_ref,
+                membership_observation_binding=(
+                    self.membership_observation_binding
+                ),
                 world_bindings=self.world_bindings,
                 action_bindings=self.action_bindings,
                 cleanup_lineage_ref=self.cleanup_lineage_ref,
@@ -1585,6 +1796,9 @@ class RoleMonotonicityRequestBinder:
             tenant_ownership_ref=runtime.tenant_ownership_ref,
             active_generation_ref=runtime.active_generation_ref,
             revoked_generation_ref=runtime.revoked_generation_ref,
+            membership_observation_binding=(
+                runtime.membership_observation_binding
+            ),
             world_bindings=world_bindings,
             action_bindings=ordered_actions,
             cleanup_lineage_ref=cleanup_lineage_ref,
@@ -1605,6 +1819,9 @@ class RoleMonotonicityRequestBinder:
             tenant_ownership_ref=runtime.tenant_ownership_ref,
             active_generation_ref=runtime.active_generation_ref,
             revoked_generation_ref=runtime.revoked_generation_ref,
+            membership_observation_binding=(
+                runtime.membership_observation_binding
+            ),
             world_bindings=world_bindings,
             action_bindings=ordered_actions,
             cleanup_lineage_ref=cleanup_lineage_ref,
@@ -1620,6 +1837,7 @@ __all__ = [
     "RoleMonotonicityRequestBindingContract",
     "RoleMonotonicityRequestBindingDenied",
     "RoleMonotonicityRuntimeContext",
+    "RoleMembershipObservationBinding",
     "RoleRuntimeActionAuthorityBinding",
     "RoleRuntimeAuthorityValidator",
     "role_tenant_ownership_ref",

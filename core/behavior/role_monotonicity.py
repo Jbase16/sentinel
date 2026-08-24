@@ -39,6 +39,10 @@ if TYPE_CHECKING:
         RoleMonotonicityExecutionClaimConfig,
         RoleMonotonicityExecutionClaimLease,
     )
+    from .role_membership_lifecycle import (
+        RoleMembershipLifecycleConfig,
+        RoleMembershipLifecycleResult,
+    )
     from .role_request_binding import (
         RoleMonotonicityRequestBinder,
         RoleMonotonicityRequestBindingContract,
@@ -801,6 +805,62 @@ class RoleMonotonicityExperimentAdmission:
             config=config,
             receipt_store=receipt_store,
         ).admit()
+
+    async def run_membership_lifecycle_probe(
+        self,
+        *,
+        request_binding: "RoleMonotonicityRequestBindingContract",
+        executor: "PolicyExecutor",
+        persona_vault: "PersonaVault",
+        runtime: "RoleMonotonicityRuntimeContext",
+        authority_validator: "RoleRuntimeAuthorityValidator",
+        claim_config: Optional[
+            "RoleMonotonicityExecutionClaimConfig"
+        ] = None,
+        lifecycle_config: Optional[
+            "RoleMembershipLifecycleConfig"
+        ] = None,
+        receipt_store: Optional["BehavioralReceiptStore"] = None,
+    ) -> "RoleMembershipLifecycleResult":
+        """Consume R5C4 for the default-off R5C5 setup/cleanup probe."""
+
+        from .role_membership_lifecycle import (
+            RoleMembershipLifecycleConfig,
+            RoleMembershipLifecycleDenied,
+            RoleMembershipLifecycleExecutor,
+        )
+
+        if lifecycle_config is not None and not isinstance(
+            lifecycle_config,
+            RoleMembershipLifecycleConfig,
+        ):
+            raise TypeError(
+                "lifecycle_config must be a RoleMembershipLifecycleConfig"
+            )
+        active_lifecycle_config = (
+            lifecycle_config
+            if lifecycle_config is not None
+            else RoleMembershipLifecycleConfig.from_environment()
+        )
+        if not active_lifecycle_config.enabled:
+            raise RoleMembershipLifecycleDenied(
+                "role_membership_lifecycle_is_disabled",
+                category="configuration",
+            )
+        lease = self.reserve_execution_claim(
+            request_binding=request_binding,
+            executor=executor,
+            persona_vault=persona_vault,
+            runtime=runtime,
+            authority_validator=authority_validator,
+            config=claim_config,
+            receipt_store=receipt_store,
+        )
+        claim = lease.claim()
+        return await RoleMembershipLifecycleExecutor(
+            claim,
+            config=active_lifecycle_config,
+        ).execute()
 
 
 __all__ = [

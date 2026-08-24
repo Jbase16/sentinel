@@ -15,7 +15,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from core.cortex.execution_policy import PolicyExecutor
@@ -572,12 +572,49 @@ class RoleMonotonicityExecutionClaimContract:
         }
 
 
+@dataclass(frozen=True, repr=False)
+class _RoleClaimRuntimePlan:
+    request_binding: RoleMonotonicityRequestBindingContract
+    runtime: RoleMonotonicityRuntimeContext = field(repr=False, compare=False)
+    executor: PolicyExecutor = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(
+                self.request_binding,
+                RoleMonotonicityRequestBindingContract,
+            )
+            or not isinstance(self.runtime, RoleMonotonicityRuntimeContext)
+            or not isinstance(self.executor, PolicyExecutor)
+        ):
+            raise ValueError("role execution claim runtime plan is invalid")
+        action_ids = {
+            item.request_binding.action_id
+            for item in self.request_binding.action_bindings
+        }
+        if (
+            self.runtime.run_ref != self.request_binding.run_ref
+            or self.runtime.tenant_ref != self.request_binding.tenant_ref
+            or self.runtime.active_generation_ref
+            != self.request_binding.active_generation_ref
+            or self.runtime.revoked_generation_ref
+            != self.request_binding.revoked_generation_ref
+            or self.runtime.membership_observation_binding
+            != self.request_binding.membership_observation_binding
+            or set(self.runtime.runtime_actions) != action_ids
+            or self.executor.policy.digest()
+            != self.request_binding.execution_policy_digest
+        ):
+            raise ValueError("role execution claim runtime plan is invalid")
+
+
 @dataclass(frozen=True)
 class _PreparedRoleClaim:
     preview: RoleMonotonicityExecutionClaimPreview
     fingerprint: str
     receipt_context: BehavioralReceiptContext
     actions: Tuple[Tuple[str, str], ...] = field(repr=False, compare=False)
+    runtime_plan: _RoleClaimRuntimePlan = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -598,8 +635,53 @@ class _PreparedRoleClaim:
                 self.fingerprint,
             )
             != self.preview.receipt_fingerprint_ref
+            or self.runtime_plan.request_binding.binding_id
+            != self.preview.request_binding.binding_id
         ):
             raise ValueError("prepared role execution claim is invalid")
+
+
+class _RoleMembershipLifecycleAuthority:
+    """Private handoff from one claimed lease to the bounded R5C5 probe."""
+
+    def __init__(self, resources: "_RoleMonotonicityClaimResources") -> None:
+        self._resources = resources
+        self.runtime_plan = resources.runtime_plan
+
+    @property
+    def budget_reservation_id(self) -> str:
+        return self._resources.budget_reservation_id
+
+    @property
+    def remaining_units(self) -> int:
+        return self._resources.reserved_units
+
+    @property
+    def state(self) -> str:
+        return self._resources.state
+
+    @property
+    def receipt_id(self) -> str:
+        return self._resources.receipt_id
+
+    @property
+    def terminal_receipt(self) -> Optional[BehavioralExecutionReceipt]:
+        return self._resources.terminal_receipt
+
+    def note_budget_units(self, count: int) -> None:
+        self._resources.note_budget_units(count)
+
+    def abort(
+        self,
+        *,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
+        return self._resources.abort(
+            expected_state="membership_lifecycle",
+            reason=reason,
+            terminal_evidence=terminal_evidence,
+        )
 
 
 class _RoleMonotonicityClaimResources:
@@ -612,11 +694,13 @@ class _RoleMonotonicityClaimResources:
         receipt_fingerprint: str,
         receipt_reservation_token: str,
         expected_units: int,
+        runtime_plan: _RoleClaimRuntimePlan,
     ) -> None:
         if (
             not isinstance(expected_units, int)
             or isinstance(expected_units, bool)
             or expected_units <= 0
+            or not isinstance(runtime_plan, _RoleClaimRuntimePlan)
             or budget.reservation_remaining(budget_reservation_id)
             != expected_units
         ):
@@ -625,8 +709,12 @@ class _RoleMonotonicityClaimResources:
         self.budget_reservation_id = budget_reservation_id
         self.receipt_store = receipt_store
         self.receipt_fingerprint = receipt_fingerprint
-        self.receipt_reservation_token = receipt_reservation_token
+        self._receipt_reservation_token: Optional[str] = (
+            receipt_reservation_token
+        )
         self.expected_units = expected_units
+        self.runtime_plan = runtime_plan
+        self._authorized_budget_units = 0
         self._lock = threading.RLock()
         self._state = "active"
         self._terminal_receipt: Optional[BehavioralExecutionReceipt] = None
@@ -648,6 +736,10 @@ class _RoleMonotonicityClaimResources:
         with self._lock:
             return self._terminal_receipt
 
+    @property
+    def receipt_id(self) -> str:
+        return f"behavioral-{self.receipt_fingerprint}"
+
     def claim(self) -> None:
         with self._lock:
             if self._state != "active":
@@ -657,7 +749,46 @@ class _RoleMonotonicityClaimResources:
                 )
             self._state = "claimed"
 
-    def abort(self, *, expected_state: str, reason: str) -> int:
+    def begin_membership_lifecycle(self) -> _RoleMembershipLifecycleAuthority:
+        with self._lock:
+            if self._state != "claimed":
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_claim_is_not_available_for_membership_lifecycle",
+                    category="lifecycle",
+                )
+            self._state = "membership_lifecycle"
+            return _RoleMembershipLifecycleAuthority(self)
+
+    def note_budget_units(self, count: int) -> None:
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise ValueError("role execution budget unit count is invalid")
+        with self._lock:
+            if self._state != "membership_lifecycle":
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_budget_accounting_state_mismatch",
+                    category="lifecycle",
+                )
+            expected = self.expected_units - self._authorized_budget_units - count
+            if (
+                expected < 0
+                or self.budget.reservation_remaining(
+                    self.budget_reservation_id
+                )
+                != expected
+            ):
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_budget_accounting_mismatch",
+                    category="budget",
+                )
+            self._authorized_budget_units += count
+
+    def abort(
+        self,
+        *,
+        expected_state: str,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
         if _SEMANTIC.fullmatch(str(reason or "")) is None:
             raise ValueError("role execution abort reason is invalid")
         with self._lock:
@@ -666,19 +797,34 @@ class _RoleMonotonicityClaimResources:
                     "role_execution_claim_state_mismatch",
                     category="lifecycle",
                 )
+            token = self._receipt_reservation_token
+            if token is None:
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_receipt_token_unavailable",
+                    category="receipt",
+                )
             receipt_error: Optional[BaseException] = None
             terminal_receipt: Optional[BehavioralExecutionReceipt] = None
             try:
+                abort_kwargs: Dict[str, Any] = {
+                    "reservation_token": token,
+                    "reason": reason,
+                }
+                if terminal_evidence is not None:
+                    abort_kwargs["terminal_evidence"] = terminal_evidence
                 terminal_receipt = self.receipt_store.abort(
                     self.receipt_fingerprint,
-                    reservation_token=self.receipt_reservation_token,
-                    reason=reason,
+                    **abort_kwargs,
                 )
             except Exception as exc:
                 receipt_error = exc
+            expected_release = (
+                self.expected_units - self._authorized_budget_units
+            )
             released = self.budget.release_reservation(
                 self.budget_reservation_id
             )
+            self._receipt_reservation_token = None
             self._terminal_receipt = terminal_receipt
             self._state = "aborted"
             if receipt_error is not None:
@@ -686,7 +832,7 @@ class _RoleMonotonicityClaimResources:
                     "role_execution_budget_released_but_receipt_abort_failed",
                     category="receipt",
                 ) from receipt_error
-            if released != self.expected_units:
+            if released != expected_release:
                 raise RoleMonotonicityExecutionClaimDenied(
                     "role_execution_budget_release_mismatch",
                     category="budget",
@@ -720,6 +866,11 @@ class RoleMonotonicityExecutionClaim:
 
     def abort(self, reason: str = "role_execution_claim_aborted") -> int:
         return self._resources.abort(expected_state="claimed", reason=reason)
+
+    def _begin_membership_lifecycle(
+        self,
+    ) -> _RoleMembershipLifecycleAuthority:
+        return self._resources.begin_membership_lifecycle()
 
     def to_dict(self) -> Dict[str, Any]:
         live = self.state == "claimed"
@@ -972,6 +1123,11 @@ class RoleMonotonicityExecutionClaimAdmission:
             fingerprint=fingerprint,
             receipt_context=context,
             actions=actions,
+            runtime_plan=_RoleClaimRuntimePlan(
+                request_binding=fresh_binding,
+                runtime=copy.deepcopy(self.runtime),
+                executor=self.executor,
+            ),
         )
 
     def validate_preflight(self) -> RoleMonotonicityExecutionClaimPreview:
@@ -1128,6 +1284,7 @@ class RoleMonotonicityExecutionClaimAdmission:
                 receipt_fingerprint=prepared.fingerprint,
                 receipt_reservation_token=receipt_token,
                 expected_units=prepared.preview.total_request_units,
+                runtime_plan=prepared.runtime_plan,
             )
         except Exception as exc:
             terminal = self._rollback_budget_and_receipt(

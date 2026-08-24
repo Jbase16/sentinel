@@ -427,10 +427,8 @@ class BehavioralExecutionReceipt:
                     raise ReceiptStoreError(
                         "behavioral terminal evidence is invalid"
                     )
-                normalized_terminal_evidence = (
-                    redacted_graph_bound_prerequisite_denial_evidence(
-                        terminal_evidence
-                    )
+                normalized_terminal_evidence = redacted_terminal_evidence(
+                    terminal_evidence
                 )
                 if normalized_terminal_evidence != dict(terminal_evidence):
                     raise ReceiptStoreError(
@@ -3468,6 +3466,181 @@ def redacted_graph_bound_prerequisite_denial_evidence(
     }
 
 
+def redacted_role_membership_lifecycle_terminal_evidence(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate redacted R5C5 cleanup evidence retained on an abort."""
+
+    required_fields = {
+        "schema_version",
+        "terminal_evidence_ref",
+        "kind",
+        "status",
+        "reason_code",
+        "category",
+        "claim_contract_id",
+        "active_observation_ref",
+        "revoked_observation_ref",
+        "cleanup",
+        "target_requests_sent",
+        "remaining_execution_blockers",
+        "finding_confirmed",
+        "promotion_authority",
+        "finding_authority",
+        "retry_authority",
+    }
+    if set(value) != required_fields:
+        raise ReceiptStoreError(
+            "role membership terminal evidence fields are invalid"
+        )
+
+    def typed_ref(item: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(item, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", item)
+        )
+
+    cleanup = value.get("cleanup")
+    cleanup_fields = {
+        "status",
+        "revocation_attempted",
+        "revocation_completed",
+        "verification_attempted",
+        "verification_completed",
+        "revoked_observation_ref",
+        "target_requests_sent",
+        "target_request_may_have_been_sent",
+        "orphaned_owned_state_possible",
+    }
+    if not isinstance(cleanup, Mapping) or set(cleanup) != cleanup_fields:
+        raise ReceiptStoreError(
+            "role membership terminal cleanup evidence is invalid"
+        )
+    counts = {
+        key: cleanup.get(key)
+        for key in (
+            "revocation_attempted",
+            "revocation_completed",
+            "verification_attempted",
+            "verification_completed",
+            "target_requests_sent",
+        )
+    }
+    cleanup_status = cleanup.get("status")
+    cleanup_revoked_ref = cleanup.get("revoked_observation_ref")
+    uncertain = cleanup.get("target_request_may_have_been_sent")
+    orphaned = cleanup.get("orphaned_owned_state_possible")
+    verified = (
+        counts["revocation_attempted"]
+        == counts["revocation_completed"]
+        == counts["verification_attempted"]
+        == counts["verification_completed"]
+        == 1
+        and typed_ref(
+            cleanup_revoked_ref,
+            "role_membership_state_observation",
+        )
+        and orphaned is False
+    )
+    if (
+        cleanup_status not in {"verified", "failed", "uncertain"}
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in counts.values()
+        )
+        or counts["revocation_attempted"] > 1
+        or counts["verification_attempted"] > 1
+        or counts["revocation_completed"] > counts["revocation_attempted"]
+        or counts["verification_completed"] > counts["verification_attempted"]
+        or counts["target_requests_sent"] > 3
+        or not isinstance(uncertain, bool)
+        or not isinstance(orphaned, bool)
+        or (cleanup_status == "verified") != verified
+        or (cleanup_status == "verified") == orphaned
+    ):
+        raise ReceiptStoreError(
+            "role membership terminal cleanup evidence is inconsistent"
+        )
+
+    payload = {
+        "kind": "role_membership_lifecycle_terminal",
+        "status": value.get("status"),
+        "reason_code": value.get("reason_code"),
+        "category": value.get("category"),
+        "claim_contract_id": value.get("claim_contract_id"),
+        "active_observation_ref": value.get("active_observation_ref"),
+        "revoked_observation_ref": value.get("revoked_observation_ref"),
+        "cleanup": dict(cleanup),
+        "target_requests_sent": value.get("target_requests_sent"),
+        "remaining_execution_blockers": value.get(
+            "remaining_execution_blockers"
+        ),
+        "finding_confirmed": False,
+        "promotion_authority": False,
+        "finding_authority": False,
+        "retry_authority": False,
+    }
+    active_ref = payload["active_observation_ref"]
+    revoked_ref = payload["revoked_observation_ref"]
+    if (
+        value.get("schema_version") != 1
+        or payload["status"] not in {"cleaned", "cleanup_failed"}
+        or (payload["status"] == "cleaned") != verified
+        or not isinstance(payload["reason_code"], str)
+        or _ABORT_REASON.fullmatch(payload["reason_code"]) is None
+        or not isinstance(payload["category"], str)
+        or _ABORT_REASON.fullmatch(payload["category"]) is None
+        or not typed_ref(
+            payload["claim_contract_id"],
+            "role_monotonicity_execution_claim_contract",
+        )
+        or (
+            active_ref is not None
+            and not typed_ref(
+                active_ref,
+                "role_membership_state_observation",
+            )
+        )
+        or (
+            revoked_ref is not None
+            and not typed_ref(
+                revoked_ref,
+                "role_membership_state_observation",
+            )
+        )
+        or revoked_ref != cleanup_revoked_ref
+        or payload["target_requests_sent"]
+        != counts["target_requests_sent"]
+        or payload["remaining_execution_blockers"]
+        != ["effect_evaluation_required"]
+        or value.get("finding_confirmed") is not False
+        or value.get("promotion_authority") is not False
+        or value.get("finding_authority") is not False
+        or value.get("retry_authority") is not False
+        or value.get("terminal_evidence_ref")
+        != stable_hash(
+            "role_membership_lifecycle_terminal_evidence",
+            payload,
+        )
+    ):
+        raise ReceiptStoreError("role membership terminal evidence is invalid")
+    return {
+        "schema_version": 1,
+        "terminal_evidence_ref": value.get("terminal_evidence_ref"),
+        **payload,
+    }
+
+
+def redacted_terminal_evidence(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Route one terminal receipt payload to its strict family schema."""
+
+    if value.get("kind") == "role_membership_lifecycle_terminal":
+        return redacted_role_membership_lifecycle_terminal_evidence(value)
+    return redacted_graph_bound_prerequisite_denial_evidence(value)
+
+
 def redacted_graph_bound_prerequisite_denial_response(
     receipt: BehavioralExecutionReceipt,
     *,
@@ -3839,9 +4012,7 @@ class BehavioralReceiptStore:
             )
             normalized_reason = abort_reason
             normalized_terminal_evidence = (
-                redacted_graph_bound_prerequisite_denial_evidence(
-                    terminal_evidence
-                )
+                redacted_terminal_evidence(terminal_evidence)
                 if terminal_evidence is not None
                 else None
             )
