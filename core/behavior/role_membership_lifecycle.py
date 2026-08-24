@@ -522,7 +522,7 @@ class RoleMembershipCleanupResult:
             or self.verification_attempted > 1
             or self.revocation_completed > self.revocation_attempted
             or self.verification_completed > self.verification_attempted
-            or self.target_requests_sent > 3
+            or self.target_requests_sent > 8
             or not isinstance(
                 self.target_request_may_have_been_sent,
                 bool,
@@ -621,6 +621,7 @@ class RoleMembershipLifecycleResult:
             or self.active_observation.membership_ref
             != self.revoked_observation.membership_ref
             or self.cleanup.status != "verified"
+            or self.cleanup.target_requests_sent != 3
             or self.cleanup.revoked_observation_ref
             != self.revoked_observation.observation_id
             or not _hash_ref(
@@ -720,23 +721,35 @@ def _validate_runtime_plan(authority, entries) -> None:
     runtime = plan.runtime
     executor = plan.executor
     observation = runtime.membership_observation_binding
+    effect_observation = runtime.effect_observation_binding
+    expected_sessions = {
+        **{index: runtime.higher_session_ref for index in (0, 1, 3, 4, 5, 7)},
+        2: runtime.active_lower_session_ref,
+        6: runtime.revoked_lower_session_ref,
+    }
+    expected_personas = {
+        **{index: runtime.higher_persona_id for index in (0, 1, 3, 4, 5, 7)},
+        2: runtime.lower_persona_id,
+        6: runtime.lower_persona_id,
+    }
     if (
         not _session_executor_is_sealed(executor, binding)
         or observation != binding.membership_observation_binding
+        or effect_observation != binding.effect_observation_binding
         or observation.setup_action_id
         != entries[0].request_binding.action_id
         or observation.revocation_verification_action_id
         != entries[5].request_binding.action_id
         or any(
-            entries[index].session_ref != runtime.higher_session_ref
-            for index in (0, 4, 5)
+            entries[index].session_ref != expected_sessions[index]
+            for index in range(8)
         )
         or any(
             runtime.runtime_actions[
                 entries[index].request_binding.action_id
             ].actor_persona_id
-            != runtime.higher_persona_id
-            for index in (0, 4, 5)
+            != expected_personas[index]
+            for index in range(8)
         )
         or not executor.policy.budget.reservation_matches(
             authority.budget_reservation_id,
@@ -841,14 +854,36 @@ async def _dispatch(authority, entries, state, ordinal):
             "role_membership_lifecycle_candidate_invalid",
             category="plan",
         )
+    if entry.session_ref == runtime.higher_session_ref:
+        persona_id = runtime.higher_persona_id
+        session_id = runtime.higher_session_id
+    elif entry.session_ref == runtime.active_lower_session_ref:
+        persona_id = runtime.lower_persona_id
+        session_id = runtime.active_lower_session_id
+    elif entry.session_ref == runtime.revoked_lower_session_ref:
+        persona_id = runtime.lower_persona_id
+        session_id = runtime.revoked_lower_session_id
+    else:
+        raise RoleMembershipLifecycleDenied(
+            "role_membership_runtime_session_is_not_bound",
+            category="session",
+        )
+    if (
+        not isinstance(candidate.actor_persona_id, str)
+        or not hmac.compare_digest(candidate.actor_persona_id, persona_id)
+    ):
+        raise RoleMembershipLifecycleDenied(
+            "role_membership_runtime_actor_is_not_bound",
+            category="session",
+        )
     candidate.budget_reservation_id = authority.budget_reservation_id
     budget = executor.policy.budget
     before = budget.reservation_remaining(authority.budget_reservation_id)
     try:
         status, response = await executor.send_action(
             candidate,
-            _role_persona_id=runtime.higher_persona_id,
-            _role_session_id=runtime.higher_session_id,
+            _role_persona_id=persona_id,
+            _role_session_id=session_id,
             _max_response_chars=_MAX_RESPONSE_CHARS,
             _redirect_mode="manual",
         )
@@ -881,11 +916,11 @@ async def _dispatch(authority, entries, state, ordinal):
         or not isinstance(response, RoleSessionResponseText)
         or not hmac.compare_digest(
             response.persona_id,
-            runtime.higher_persona_id,
+            persona_id,
         )
         or not hmac.compare_digest(
             response.session_id,
-            runtime.higher_session_id,
+            session_id,
         )
     ):
         raise RoleMembershipLifecycleDenied(
@@ -896,7 +931,15 @@ async def _dispatch(authority, entries, state, ordinal):
     return status, response
 
 
-async def _cleanup(authority, entries, state):
+async def _cleanup(
+    authority,
+    entries,
+    state,
+    *,
+    release_post_revocation_units: bool = True,
+):
+    if not isinstance(release_post_revocation_units, bool):
+        raise TypeError("release_post_revocation_units must be boolean")
     runtime = authority.runtime_plan.runtime
     revocation_attempted = 0
     revocation_completed = 0
@@ -947,10 +990,11 @@ async def _cleanup(authority, entries, state):
             verification_completed = 1
         except BaseException as exc:
             errors.append(exc)
-    try:
-        _skip_to(authority, entries, state, 8)
-    except BaseException as exc:
-        errors.append(exc)
+    if release_post_revocation_units:
+        try:
+            _skip_to(authority, entries, state, 8)
+        except BaseException as exc:
+            errors.append(exc)
 
     verified = (
         revocation_completed == 1

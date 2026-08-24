@@ -27,6 +27,7 @@ from .experiment_sdk import ExperimentActionClass
 from .normalize import stable_hash
 from .receipts import (
     ABORTED,
+    COMPLETED,
     BehavioralExecutionReceipt,
     BehavioralReceiptContext,
     BehavioralReceiptStore,
@@ -575,6 +576,7 @@ class RoleMonotonicityExecutionClaimContract:
 @dataclass(frozen=True, repr=False)
 class _RoleClaimRuntimePlan:
     request_binding: RoleMonotonicityRequestBindingContract
+    proof: RoleMonotonicityExperimentProof
     runtime: RoleMonotonicityRuntimeContext = field(repr=False, compare=False)
     executor: PolicyExecutor = field(repr=False, compare=False)
 
@@ -584,6 +586,7 @@ class _RoleClaimRuntimePlan:
                 self.request_binding,
                 RoleMonotonicityRequestBindingContract,
             )
+            or not isinstance(self.proof, RoleMonotonicityExperimentProof)
             or not isinstance(self.runtime, RoleMonotonicityRuntimeContext)
             or not isinstance(self.executor, PolicyExecutor)
         ):
@@ -593,7 +596,9 @@ class _RoleClaimRuntimePlan:
             for item in self.request_binding.action_bindings
         }
         if (
-            self.runtime.run_ref != self.request_binding.run_ref
+            self.proof.proof_id != self.request_binding.proof_id
+            or self.proof.oracle.oracle_id != self.request_binding.oracle_id
+            or self.runtime.run_ref != self.request_binding.run_ref
             or self.runtime.tenant_ref != self.request_binding.tenant_ref
             or self.runtime.active_generation_ref
             != self.request_binding.active_generation_ref
@@ -601,6 +606,8 @@ class _RoleClaimRuntimePlan:
             != self.request_binding.revoked_generation_ref
             or self.runtime.membership_observation_binding
             != self.request_binding.membership_observation_binding
+            or self.runtime.effect_observation_binding
+            != self.request_binding.effect_observation_binding
             or set(self.runtime.runtime_actions) != action_ids
             or self.executor.policy.digest()
             != self.request_binding.execution_policy_digest
@@ -684,6 +691,59 @@ class _RoleMembershipLifecycleAuthority:
         )
 
 
+class _RoleEffectEvaluationAuthority:
+    """Private handoff from one fresh R5C4 claim to the bounded R5C6 run."""
+
+    def __init__(self, resources: "_RoleMonotonicityClaimResources") -> None:
+        self._resources = resources
+        self.runtime_plan = resources.runtime_plan
+
+    @property
+    def budget_reservation_id(self) -> str:
+        return self._resources.budget_reservation_id
+
+    @property
+    def remaining_units(self) -> int:
+        return self._resources.reserved_units
+
+    @property
+    def state(self) -> str:
+        return self._resources.state
+
+    @property
+    def receipt_id(self) -> str:
+        return self._resources.receipt_id
+
+    @property
+    def terminal_receipt(self) -> Optional[BehavioralExecutionReceipt]:
+        return self._resources.terminal_receipt
+
+    def note_budget_units(self, count: int) -> None:
+        self._resources.note_budget_units(count)
+
+    def abort(
+        self,
+        *,
+        reason: str,
+        terminal_evidence: Optional[Mapping[str, Any]] = None,
+    ) -> int:
+        return self._resources.abort(
+            expected_state="effect_evaluation",
+            reason=reason,
+            terminal_evidence=terminal_evidence,
+        )
+
+    def finish(
+        self,
+        *,
+        outcome: Mapping[str, Any],
+    ) -> BehavioralExecutionReceipt:
+        return self._resources.finish(
+            expected_state="effect_evaluation",
+            outcome=outcome,
+        )
+
+
 class _RoleMonotonicityClaimResources:
     def __init__(
         self,
@@ -759,11 +819,24 @@ class _RoleMonotonicityClaimResources:
             self._state = "membership_lifecycle"
             return _RoleMembershipLifecycleAuthority(self)
 
+    def begin_effect_evaluation(self) -> _RoleEffectEvaluationAuthority:
+        with self._lock:
+            if self._state != "claimed":
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_claim_is_not_available_for_effect_evaluation",
+                    category="lifecycle",
+                )
+            self._state = "effect_evaluation"
+            return _RoleEffectEvaluationAuthority(self)
+
     def note_budget_units(self, count: int) -> None:
         if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
             raise ValueError("role execution budget unit count is invalid")
         with self._lock:
-            if self._state != "membership_lifecycle":
+            if self._state not in {
+                "membership_lifecycle",
+                "effect_evaluation",
+            }:
                 raise RoleMonotonicityExecutionClaimDenied(
                     "role_execution_budget_accounting_state_mismatch",
                     category="lifecycle",
@@ -781,6 +854,62 @@ class _RoleMonotonicityClaimResources:
                     category="budget",
                 )
             self._authorized_budget_units += count
+
+    def finish(
+        self,
+        *,
+        expected_state: str,
+        outcome: Mapping[str, Any],
+    ) -> BehavioralExecutionReceipt:
+        if not isinstance(outcome, Mapping):
+            raise TypeError("role execution outcome must be a mapping")
+        with self._lock:
+            if self._state != expected_state:
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_claim_state_mismatch",
+                    category="lifecycle",
+                )
+            if (
+                self._authorized_budget_units != self.expected_units
+                or self.budget.reservation_remaining(
+                    self.budget_reservation_id
+                )
+                != 0
+            ):
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_budget_not_fully_consumed",
+                    category="budget",
+                )
+            token = self._receipt_reservation_token
+            if token is None:
+                raise RoleMonotonicityExecutionClaimDenied(
+                    "role_execution_receipt_token_unavailable",
+                    category="receipt",
+                )
+            try:
+                terminal = self.receipt_store.complete(
+                    self.receipt_fingerprint,
+                    reservation_token=token,
+                    outcome=outcome,
+                )
+            except Exception as exc:
+                try:
+                    current = self.receipt_store.load(self.receipt_fingerprint)
+                except Exception as load_exc:
+                    raise RoleMonotonicityExecutionClaimDenied(
+                        "role_execution_receipt_completion_failed",
+                        category="receipt",
+                    ) from load_exc
+                if current is None or current.state != COMPLETED:
+                    raise RoleMonotonicityExecutionClaimDenied(
+                        "role_execution_receipt_completion_failed",
+                        category="receipt",
+                    ) from exc
+                terminal = current
+            self._receipt_reservation_token = None
+            self._terminal_receipt = terminal
+            self._state = "completed"
+            return terminal
 
     def abort(
         self,
@@ -871,6 +1000,11 @@ class RoleMonotonicityExecutionClaim:
         self,
     ) -> _RoleMembershipLifecycleAuthority:
         return self._resources.begin_membership_lifecycle()
+
+    def _begin_effect_evaluation(
+        self,
+    ) -> _RoleEffectEvaluationAuthority:
+        return self._resources.begin_effect_evaluation()
 
     def to_dict(self) -> Dict[str, Any]:
         live = self.state == "claimed"
@@ -1125,6 +1259,7 @@ class RoleMonotonicityExecutionClaimAdmission:
             actions=actions,
             runtime_plan=_RoleClaimRuntimePlan(
                 request_binding=fresh_binding,
+                proof=self.proof,
                 runtime=copy.deepcopy(self.runtime),
                 executor=self.executor,
             ),

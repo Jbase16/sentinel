@@ -24,7 +24,10 @@ from core.behavior.role_execution_claim import (
     RoleMonotonicityExecutionClaimContract,
     RoleMonotonicityExecutionClaimDenied,
 )
-from core.behavior.role_request_binding import RoleMembershipObservationBinding
+from core.behavior.role_request_binding import (
+    RoleMembershipObservationBinding,
+    RoleProtectedEffectObservationBinding,
+)
 from tests.unit.test_behavior_role_request_binding import (
     ACTIVE_LOW_SESSION,
     BODY_SECRET,
@@ -496,6 +499,7 @@ def test_receipt_abort_failure_still_releases_budget_and_closes_lease(
         "request",
         "membership_generation",
         "observation",
+        "effect_observation",
         "cleanup",
         "run",
         "tenant",
@@ -528,6 +532,18 @@ def test_changed_bound_state_fails_closed_before_receipt_or_transport(
                     role_pointer="/role",
                     state_pointer="/membership_state",
                     generation_pointer="/membership_generation",
+                )
+            ),
+        )
+    elif case == "effect_observation":
+        runtime = replace(
+            runtime,
+            effect_observation_binding=(
+                RoleProtectedEffectObservationBinding.build(
+                    proof=context.proof,
+                    probe_authorized_pointer="/decision/authorized",
+                    probe_effect_pointer="/decision/effect",
+                    witness_effect_pointer="/witness/effect",
                 )
             ),
         )

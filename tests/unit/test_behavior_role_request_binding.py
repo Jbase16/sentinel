@@ -51,6 +51,7 @@ from core.behavior.role_request_binding import (
     RoleMembershipObservationBinding,
     RoleMonotonicityRequestBindingDenied,
     RoleMonotonicityRuntimeContext,
+    RoleProtectedEffectObservationBinding,
     role_tenant_ownership_ref,
 )
 from core.cortex.execution_policy import (
@@ -414,6 +415,12 @@ def _context(tmp_path, monkeypatch) -> SimpleNamespace:
         state_pointer="/state",
         generation_pointer="/generation",
     )
+    effect_observation_binding = RoleProtectedEffectObservationBinding.build(
+        proof=proof,
+        probe_authorized_pointer="/authorized",
+        probe_effect_pointer="/effect",
+        witness_effect_pointer="/effect",
+    )
     runtime = RoleMonotonicityRuntimeContext.build(
         proof=proof,
         authorization=authorization,
@@ -427,6 +434,7 @@ def _context(tmp_path, monkeypatch) -> SimpleNamespace:
         active_membership_generation=41,
         revoked_membership_generation=42,
         membership_observation_binding=observation_binding,
+        effect_observation_binding=effect_observation_binding,
         runtime_actions=runtime_actions,
     )
 
@@ -591,7 +599,9 @@ def test_binding_is_deterministic_content_addressed_and_publicly_redacted(
     assert "request_material_fingerprint" in public
     assert "endpoint_key_ref" in public
     assert "membership_observation_binding" in public
+    assert "effect_observation_binding" in public
     assert first.target_membership_observation_bound is True
+    assert first.target_effect_observation_bound is True
     assert "runtime_actions" not in public
     assert context.calls == []
     with pytest.raises(ValueError, match="request binding is invalid"):
@@ -608,6 +618,14 @@ def test_binding_is_deterministic_content_addressed_and_publicly_redacted(
         replace(
             first.membership_observation_binding,
             state_pointer="/membership_state",
+        )
+    with pytest.raises(
+        ValueError,
+        match="protected effect observation binding is invalid",
+    ):
+        replace(
+            first.effect_observation_binding,
+            probe_effect_pointer="/other_effect",
         )
 
 

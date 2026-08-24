@@ -3314,6 +3314,155 @@ def redacted_graph_bound_prerequisite_execution_outcome(
     return outcome
 
 
+def redacted_role_protected_effect_execution_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate the conclusive, redacted R5C6 outcome allowed at rest."""
+
+    required_fields = {
+        "kind",
+        "mode",
+        "status",
+        "receipt_state",
+        "claim_contract_id",
+        "oracle_id",
+        "oracle_evaluation_id",
+        "oracle_verdict",
+        "active_membership_observation_ref",
+        "revoked_membership_observation_ref",
+        "effect_observation_refs",
+        "active_effect_witness_ref",
+        "revoked_effect_witness_ref",
+        "cleanup_status",
+        "target_requests_sent",
+        "target_request_may_have_been_sent",
+        "orphaned_owned_state_possible",
+        "provenance_root",
+        "finding_candidate_ref",
+        "finding_confirmed",
+        "adversarial_triage_required",
+        "promotion_authority",
+        "finding_authority",
+    }
+    if set(response) != required_fields:
+        raise ReceiptStoreError(
+            "role protected effect execution outcome fields are invalid"
+        )
+
+    def typed_ref(item: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(item, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", item)
+        )
+
+    status = response.get("status")
+    refs = response.get("effect_observation_refs")
+    candidate_ref = response.get("finding_candidate_ref")
+    confirmed = status in {
+        "confirmed_active_escalation",
+        "confirmed_revocation_survival",
+    }
+    if (
+        response.get("kind") != "role_protected_effect_execution"
+        or response.get("mode")
+        != "behavioral_role_protected_effect_execution_v1"
+        or status
+        not in {
+            "confirmed_active_escalation",
+            "confirmed_revocation_survival",
+            "refuted",
+        }
+        or response.get("oracle_verdict") != status
+        or response.get("receipt_state") != COMPLETED
+        or not typed_ref(
+            response.get("claim_contract_id"),
+            "role_monotonicity_execution_claim_contract",
+        )
+        or not typed_ref(
+            response.get("oracle_id"),
+            "role_monotonicity_oracle",
+        )
+        or not typed_ref(
+            response.get("oracle_evaluation_id"),
+            "role_protected_effect_oracle_evaluation",
+        )
+        or not typed_ref(
+            response.get("active_membership_observation_ref"),
+            "role_membership_state_observation",
+        )
+        or not typed_ref(
+            response.get("revoked_membership_observation_ref"),
+            "role_membership_state_observation",
+        )
+        or not isinstance(refs, (list, tuple))
+        or len(refs) != 5
+        or len(set(refs)) != 5
+        or any(
+            not typed_ref(item, "role_protected_effect_observation")
+            for item in refs
+        )
+        or not typed_ref(
+            response.get("active_effect_witness_ref"),
+            "role_active_effect_witness",
+        )
+        or not typed_ref(
+            response.get("revoked_effect_witness_ref"),
+            "role_revoked_effect_witness",
+        )
+        or response.get("cleanup_status") != "verified"
+        or response.get("target_requests_sent") != 8
+        or response.get("target_request_may_have_been_sent") is not False
+        or response.get("orphaned_owned_state_possible") is not False
+        or not isinstance(response.get("provenance_root"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", response["provenance_root"])
+        is None
+        or response.get("finding_confirmed") is not confirmed
+        or (candidate_ref is not None) != confirmed
+        or (
+            candidate_ref is not None
+            and not typed_ref(
+                candidate_ref,
+                "role_monotonicity_finding_candidate",
+            )
+        )
+        or response.get("adversarial_triage_required") is not True
+        or response.get("promotion_authority") is not False
+        or response.get("finding_authority") is not False
+    ):
+        raise ReceiptStoreError(
+            "role protected effect execution outcome is invalid"
+        )
+    return {
+        "kind": "role_protected_effect_execution",
+        "mode": "behavioral_role_protected_effect_execution_v1",
+        "status": status,
+        "receipt_state": COMPLETED,
+        "claim_contract_id": response["claim_contract_id"],
+        "oracle_id": response["oracle_id"],
+        "oracle_evaluation_id": response["oracle_evaluation_id"],
+        "oracle_verdict": status,
+        "active_membership_observation_ref": response[
+            "active_membership_observation_ref"
+        ],
+        "revoked_membership_observation_ref": response[
+            "revoked_membership_observation_ref"
+        ],
+        "effect_observation_refs": list(refs),
+        "active_effect_witness_ref": response["active_effect_witness_ref"],
+        "revoked_effect_witness_ref": response["revoked_effect_witness_ref"],
+        "cleanup_status": "verified",
+        "target_requests_sent": 8,
+        "target_request_may_have_been_sent": False,
+        "orphaned_owned_state_possible": False,
+        "provenance_root": response["provenance_root"],
+        "finding_candidate_ref": candidate_ref,
+        "finding_confirmed": confirmed,
+        "adversarial_triage_required": True,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+
+
 def redacted_graph_bound_prerequisite_denial_evidence(
     value: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -3631,6 +3780,206 @@ def redacted_role_membership_lifecycle_terminal_evidence(
     }
 
 
+def redacted_role_protected_effect_terminal_evidence(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Validate redacted R5C6 evidence retained on every aborted path."""
+
+    required_fields = {
+        "schema_version",
+        "terminal_evidence_ref",
+        "kind",
+        "status",
+        "reason_code",
+        "category",
+        "claim_contract_id",
+        "oracle_id",
+        "oracle_evaluation_id",
+        "active_membership_observation_ref",
+        "revoked_membership_observation_ref",
+        "effect_observation_refs",
+        "cleanup",
+        "target_requests_sent",
+        "target_request_may_have_been_sent",
+        "orphaned_owned_state_possible",
+        "oracle_verdict",
+        "finding_candidate_ref",
+        "finding_confirmed",
+        "promotion_authority",
+        "finding_authority",
+        "retry_authority",
+    }
+    if set(value) != required_fields:
+        raise ReceiptStoreError(
+            "role protected effect terminal evidence fields are invalid"
+        )
+
+    def typed_ref(item: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(item, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", item)
+        )
+
+    cleanup = value.get("cleanup")
+    cleanup_fields = {
+        "status",
+        "revocation_attempted",
+        "revocation_completed",
+        "verification_attempted",
+        "verification_completed",
+        "revoked_observation_ref",
+        "target_requests_sent",
+        "target_request_may_have_been_sent",
+        "orphaned_owned_state_possible",
+    }
+    if not isinstance(cleanup, Mapping) or set(cleanup) != cleanup_fields:
+        raise ReceiptStoreError(
+            "role protected effect terminal cleanup evidence is invalid"
+        )
+    count_keys = (
+        "revocation_attempted",
+        "revocation_completed",
+        "verification_attempted",
+        "verification_completed",
+        "target_requests_sent",
+    )
+    counts = {key: cleanup.get(key) for key in count_keys}
+    cleanup_revoked_ref = cleanup.get("revoked_observation_ref")
+    uncertain = cleanup.get("target_request_may_have_been_sent")
+    orphaned = cleanup.get("orphaned_owned_state_possible")
+    verified = (
+        counts["revocation_attempted"]
+        == counts["revocation_completed"]
+        == counts["verification_attempted"]
+        == counts["verification_completed"]
+        == 1
+        and typed_ref(
+            cleanup_revoked_ref,
+            "role_membership_state_observation",
+        )
+        and orphaned is False
+    )
+    effect_refs = value.get("effect_observation_refs")
+    if (
+        cleanup.get("status") not in {"verified", "failed", "uncertain"}
+        or any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in counts.values()
+        )
+        or counts["revocation_attempted"] > 1
+        or counts["verification_attempted"] > 1
+        or counts["revocation_completed"] > counts["revocation_attempted"]
+        or counts["verification_completed"] > counts["verification_attempted"]
+        or counts["target_requests_sent"] > 8
+        or not isinstance(uncertain, bool)
+        or not isinstance(orphaned, bool)
+        or (cleanup.get("status") == "verified") != verified
+        or (cleanup.get("status") == "verified") == orphaned
+        or not isinstance(effect_refs, (list, tuple))
+        or len(effect_refs) > 5
+        or len(set(effect_refs)) != len(effect_refs)
+        or any(
+            not typed_ref(item, "role_protected_effect_observation")
+            for item in effect_refs
+        )
+    ):
+        raise ReceiptStoreError(
+            "role protected effect terminal cleanup evidence is inconsistent"
+        )
+
+    payload = {
+        "kind": "role_protected_effect_execution_terminal",
+        "status": value.get("status"),
+        "reason_code": value.get("reason_code"),
+        "category": value.get("category"),
+        "claim_contract_id": value.get("claim_contract_id"),
+        "oracle_id": value.get("oracle_id"),
+        "oracle_evaluation_id": value.get("oracle_evaluation_id"),
+        "active_membership_observation_ref": value.get(
+            "active_membership_observation_ref"
+        ),
+        "revoked_membership_observation_ref": value.get(
+            "revoked_membership_observation_ref"
+        ),
+        "effect_observation_refs": list(effect_refs),
+        "cleanup": dict(cleanup),
+        "target_requests_sent": value.get("target_requests_sent"),
+        "target_request_may_have_been_sent": value.get(
+            "target_request_may_have_been_sent"
+        ),
+        "orphaned_owned_state_possible": value.get(
+            "orphaned_owned_state_possible"
+        ),
+        "oracle_verdict": value.get("oracle_verdict"),
+        "finding_candidate_ref": None,
+        "finding_confirmed": False,
+        "promotion_authority": False,
+        "finding_authority": False,
+        "retry_authority": False,
+    }
+    active_ref = payload["active_membership_observation_ref"]
+    revoked_ref = payload["revoked_membership_observation_ref"]
+    evaluation_id = payload["oracle_evaluation_id"]
+    if (
+        value.get("schema_version") != 1
+        or payload["status"] not in {"cleaned", "cleanup_failed"}
+        or (payload["status"] == "cleaned") != verified
+        or not isinstance(payload["reason_code"], str)
+        or _ABORT_REASON.fullmatch(payload["reason_code"]) is None
+        or not isinstance(payload["category"], str)
+        or _ABORT_REASON.fullmatch(payload["category"]) is None
+        or not typed_ref(
+            payload["claim_contract_id"],
+            "role_monotonicity_execution_claim_contract",
+        )
+        or not typed_ref(payload["oracle_id"], "role_monotonicity_oracle")
+        or (
+            evaluation_id is not None
+            and not typed_ref(
+                evaluation_id,
+                "role_protected_effect_oracle_evaluation",
+            )
+        )
+        or (
+            active_ref is not None
+            and not typed_ref(
+                active_ref,
+                "role_membership_state_observation",
+            )
+        )
+        or (
+            revoked_ref is not None
+            and not typed_ref(
+                revoked_ref,
+                "role_membership_state_observation",
+            )
+        )
+        or revoked_ref != cleanup_revoked_ref
+        or payload["target_requests_sent"] != counts["target_requests_sent"]
+        or payload["target_request_may_have_been_sent"] != uncertain
+        or payload["orphaned_owned_state_possible"] != orphaned
+        or payload["oracle_verdict"] != "inconclusive"
+        or value.get("finding_candidate_ref") is not None
+        or value.get("finding_confirmed") is not False
+        or value.get("promotion_authority") is not False
+        or value.get("finding_authority") is not False
+        or value.get("retry_authority") is not False
+        or value.get("terminal_evidence_ref")
+        != stable_hash(
+            "role_protected_effect_execution_terminal_evidence",
+            payload,
+        )
+    ):
+        raise ReceiptStoreError(
+            "role protected effect terminal evidence is invalid"
+        )
+    return {
+        "schema_version": 1,
+        "terminal_evidence_ref": value.get("terminal_evidence_ref"),
+        **payload,
+    }
+
+
 def redacted_terminal_evidence(
     value: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -3638,6 +3987,8 @@ def redacted_terminal_evidence(
 
     if value.get("kind") == "role_membership_lifecycle_terminal":
         return redacted_role_membership_lifecycle_terminal_evidence(value)
+    if value.get("kind") == "role_protected_effect_execution_terminal":
+        return redacted_role_protected_effect_terminal_evidence(value)
     return redacted_graph_bound_prerequisite_denial_evidence(value)
 
 
@@ -3678,6 +4029,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
     if response.get("kind") == "graph_bound_prerequisite_execution":
         return redacted_graph_bound_prerequisite_execution_outcome(response)
+    if response.get("kind") == "role_protected_effect_execution":
+        return redacted_role_protected_effect_execution_outcome(response)
     if response.get("kind") == "proof_experiment_generalized_authorization":
         return redacted_proof_experiment_generalized_authorization_outcome(
             response
@@ -3749,6 +4102,8 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
     if value.get("kind") == "graph_bound_prerequisite_execution":
         return redacted_graph_bound_prerequisite_execution_outcome(value)
+    if value.get("kind") == "role_protected_effect_execution":
+        return redacted_role_protected_effect_execution_outcome(value)
     if value.get("kind") == "proof_experiment_generalized_authorization":
         return redacted_proof_experiment_generalized_authorization_outcome(
             value

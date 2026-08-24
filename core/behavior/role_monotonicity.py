@@ -35,6 +35,10 @@ if TYPE_CHECKING:
     from core.foundry.vault import PersonaVault
 
     from .receipts import BehavioralReceiptStore
+    from .role_effect_evaluation import (
+        RoleProtectedEffectExecutionConfig,
+        RoleProtectedEffectExecutionResult,
+    )
     from .role_execution_claim import (
         RoleMonotonicityExecutionClaimConfig,
         RoleMonotonicityExecutionClaimLease,
@@ -860,6 +864,63 @@ class RoleMonotonicityExperimentAdmission:
         return await RoleMembershipLifecycleExecutor(
             claim,
             config=active_lifecycle_config,
+        ).execute()
+
+    async def run_protected_effect_evaluation(
+        self,
+        *,
+        request_binding: "RoleMonotonicityRequestBindingContract",
+        executor: "PolicyExecutor",
+        persona_vault: "PersonaVault",
+        runtime: "RoleMonotonicityRuntimeContext",
+        authority_validator: "RoleRuntimeAuthorityValidator",
+        claim_config: Optional[
+            "RoleMonotonicityExecutionClaimConfig"
+        ] = None,
+        execution_config: Optional[
+            "RoleProtectedEffectExecutionConfig"
+        ] = None,
+        receipt_store: Optional["BehavioralReceiptStore"] = None,
+    ) -> "RoleProtectedEffectExecutionResult":
+        """Consume a fresh R5C4 claim for one default-off R5C6 lifecycle."""
+
+        from .role_effect_evaluation import (
+            RoleProtectedEffectExecutionConfig,
+            RoleProtectedEffectExecutionDenied,
+            RoleProtectedEffectExperimentExecutor,
+        )
+
+        if execution_config is not None and not isinstance(
+            execution_config,
+            RoleProtectedEffectExecutionConfig,
+        ):
+            raise TypeError(
+                "execution_config must be a "
+                "RoleProtectedEffectExecutionConfig"
+            )
+        active_execution_config = (
+            execution_config
+            if execution_config is not None
+            else RoleProtectedEffectExecutionConfig.from_environment()
+        )
+        if not active_execution_config.enabled:
+            raise RoleProtectedEffectExecutionDenied(
+                "role_protected_effect_execution_is_disabled",
+                category="configuration",
+            )
+        lease = self.reserve_execution_claim(
+            request_binding=request_binding,
+            executor=executor,
+            persona_vault=persona_vault,
+            runtime=runtime,
+            authority_validator=authority_validator,
+            config=claim_config,
+            receipt_store=receipt_store,
+        )
+        claim = lease.claim()
+        return await RoleProtectedEffectExperimentExecutor(
+            claim,
+            config=active_execution_config,
         ).execute()
 
 

@@ -427,6 +427,184 @@ class RoleMembershipObservationBinding:
         }
 
 
+def _protected_effect_observation_payload(
+    *,
+    higher_baseline_action_id: str,
+    active_lower_probe_action_id: str,
+    active_effect_witness_action_id: str,
+    revoked_lower_probe_action_id: str,
+    revoked_effect_witness_action_id: str,
+    probe_authorized_pointer: str,
+    probe_effect_pointer: str,
+    witness_effect_pointer: str,
+) -> Dict[str, Any]:
+    return {
+        "higher_baseline_action_id": higher_baseline_action_id,
+        "active_lower_probe_action_id": active_lower_probe_action_id,
+        "active_effect_witness_action_id": active_effect_witness_action_id,
+        "revoked_lower_probe_action_id": revoked_lower_probe_action_id,
+        "revoked_effect_witness_action_id": revoked_effect_witness_action_id,
+        "response_format": "json",
+        "probe_authorized_pointer": probe_authorized_pointer,
+        "probe_effect_pointer": probe_effect_pointer,
+        "witness_effect_pointer": witness_effect_pointer,
+        "allowed_value": True,
+        "denied_value": False,
+        "denied_effect_must_be_null": True,
+    }
+
+
+@dataclass(frozen=True)
+class RoleProtectedEffectObservationBinding:
+    """Exact response projection used by the independent R5C6 oracle.
+
+    Only JSON pointers and already-content-addressed action identities are public.
+    Runtime effect values remain private and are reduced to content hashes after
+    exact-session transport.
+    """
+
+    binding_id: str
+    higher_baseline_action_id: str
+    active_lower_probe_action_id: str
+    active_effect_witness_action_id: str
+    revoked_lower_probe_action_id: str
+    revoked_effect_witness_action_id: str
+    probe_authorized_pointer: str
+    probe_effect_pointer: str
+    witness_effect_pointer: str
+    response_format: str = "json"
+    allowed_value: bool = True
+    denied_value: bool = False
+    denied_effect_must_be_null: bool = True
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        proof: RoleMonotonicityExperimentProof,
+        probe_authorized_pointer: str,
+        probe_effect_pointer: str,
+        witness_effect_pointer: str,
+    ) -> "RoleProtectedEffectObservationBinding":
+        if not isinstance(proof, RoleMonotonicityExperimentProof):
+            raise TypeError("proof must be a RoleMonotonicityExperimentProof")
+        pointers = tuple(
+            str(value or "")
+            for value in (
+                probe_authorized_pointer,
+                probe_effect_pointer,
+                witness_effect_pointer,
+            )
+        )
+        payload = _protected_effect_observation_payload(
+            higher_baseline_action_id=proof.higher_baseline.action_id,
+            active_lower_probe_action_id=proof.active_lower_probe.action_id,
+            active_effect_witness_action_id=(
+                proof.active_effect_witness.action_id
+            ),
+            revoked_lower_probe_action_id=proof.revoked_lower_probe.action_id,
+            revoked_effect_witness_action_id=(
+                proof.revoked_effect_witness.action_id
+            ),
+            probe_authorized_pointer=pointers[0],
+            probe_effect_pointer=pointers[1],
+            witness_effect_pointer=pointers[2],
+        )
+        return cls(
+            binding_id=stable_hash(
+                "role_protected_effect_observation_binding",
+                payload,
+            ),
+            higher_baseline_action_id=proof.higher_baseline.action_id,
+            active_lower_probe_action_id=proof.active_lower_probe.action_id,
+            active_effect_witness_action_id=(
+                proof.active_effect_witness.action_id
+            ),
+            revoked_lower_probe_action_id=proof.revoked_lower_probe.action_id,
+            revoked_effect_witness_action_id=(
+                proof.revoked_effect_witness.action_id
+            ),
+            probe_authorized_pointer=pointers[0],
+            probe_effect_pointer=pointers[1],
+            witness_effect_pointer=pointers[2],
+        )
+
+    def __post_init__(self) -> None:
+        action_ids = (
+            self.higher_baseline_action_id,
+            self.active_lower_probe_action_id,
+            self.active_effect_witness_action_id,
+            self.revoked_lower_probe_action_id,
+            self.revoked_effect_witness_action_id,
+        )
+        pointers = (
+            self.probe_authorized_pointer,
+            self.probe_effect_pointer,
+            self.witness_effect_pointer,
+        )
+        payload = _protected_effect_observation_payload(
+            higher_baseline_action_id=self.higher_baseline_action_id,
+            active_lower_probe_action_id=self.active_lower_probe_action_id,
+            active_effect_witness_action_id=self.active_effect_witness_action_id,
+            revoked_lower_probe_action_id=self.revoked_lower_probe_action_id,
+            revoked_effect_witness_action_id=(
+                self.revoked_effect_witness_action_id
+            ),
+            probe_authorized_pointer=self.probe_authorized_pointer,
+            probe_effect_pointer=self.probe_effect_pointer,
+            witness_effect_pointer=self.witness_effect_pointer,
+        )
+        if (
+            self.binding_id
+            != stable_hash("role_protected_effect_observation_binding", payload)
+            or not _hash_ref(
+                self.binding_id,
+                "role_protected_effect_observation_binding",
+            )
+            or any(
+                not _hash_ref(action_id, "proof_experiment_action")
+                for action_id in action_ids
+            )
+            or len(set(action_ids)) != len(action_ids)
+            or self.response_format != "json"
+            or self.allowed_value is not True
+            or self.denied_value is not False
+            or self.denied_effect_must_be_null is not True
+            or self.probe_authorized_pointer == self.probe_effect_pointer
+            or any(
+                not isinstance(pointer, str)
+                or len(pointer) > 256
+                or any(ord(character) < 32 for character in pointer)
+                or _JSON_POINTER.fullmatch(pointer) is None
+                for pointer in pointers
+            )
+        ):
+            raise ValueError(
+                "role protected effect observation binding is invalid"
+            )
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "binding_id": self.binding_id,
+            **_protected_effect_observation_payload(
+                higher_baseline_action_id=self.higher_baseline_action_id,
+                active_lower_probe_action_id=self.active_lower_probe_action_id,
+                active_effect_witness_action_id=(
+                    self.active_effect_witness_action_id
+                ),
+                revoked_lower_probe_action_id=(
+                    self.revoked_lower_probe_action_id
+                ),
+                revoked_effect_witness_action_id=(
+                    self.revoked_effect_witness_action_id
+                ),
+                probe_authorized_pointer=self.probe_authorized_pointer,
+                probe_effect_pointer=self.probe_effect_pointer,
+                witness_effect_pointer=self.witness_effect_pointer,
+            ),
+        }
+
+
 @dataclass(frozen=True)
 class RoleMonotonicityRuntimeContext:
     """Sensitive owned runtime values supplied to the admission boundary."""
@@ -457,6 +635,7 @@ class RoleMonotonicityRuntimeContext:
     revocation_evidence_ref: str
     revocation_verification_ref: str
     membership_observation_binding: RoleMembershipObservationBinding
+    effect_observation_binding: RoleProtectedEffectObservationBinding
     request_intent_refs: Mapping[str, str]
     runtime_actions: Mapping[str, CandidateAction] = field(
         repr=False,
@@ -479,6 +658,7 @@ class RoleMonotonicityRuntimeContext:
         active_membership_generation: int,
         revoked_membership_generation: int,
         membership_observation_binding: RoleMembershipObservationBinding,
+        effect_observation_binding: RoleProtectedEffectObservationBinding,
         runtime_actions: Mapping[str, CandidateAction],
     ) -> "RoleMonotonicityRuntimeContext":
         if not isinstance(proof, RoleMonotonicityExperimentProof):
@@ -501,6 +681,32 @@ class RoleMonotonicityRuntimeContext:
         ):
             raise ValueError(
                 "membership observation binding does not match the proof"
+            )
+        if not isinstance(
+            effect_observation_binding,
+            RoleProtectedEffectObservationBinding,
+        ):
+            raise TypeError(
+                "effect_observation_binding must be a "
+                "RoleProtectedEffectObservationBinding"
+            )
+        expected_effect_actions = (
+            proof.higher_baseline.action_id,
+            proof.active_lower_probe.action_id,
+            proof.active_effect_witness.action_id,
+            proof.revoked_lower_probe.action_id,
+            proof.revoked_effect_witness.action_id,
+        )
+        bound_effect_actions = (
+            effect_observation_binding.higher_baseline_action_id,
+            effect_observation_binding.active_lower_probe_action_id,
+            effect_observation_binding.active_effect_witness_action_id,
+            effect_observation_binding.revoked_lower_probe_action_id,
+            effect_observation_binding.revoked_effect_witness_action_id,
+        )
+        if bound_effect_actions != expected_effect_actions:
+            raise ValueError(
+                "effect observation binding does not match the proof"
             )
         run_value = _runtime_value(run_id, field_name="runtime run id")
         tenant_value = _runtime_value(tenant_id, field_name="runtime tenant id")
@@ -641,6 +847,7 @@ class RoleMonotonicityRuntimeContext:
             revocation_evidence_ref=revocation_ref,
             revocation_verification_ref=verification_ref,
             membership_observation_binding=membership_observation_binding,
+            effect_observation_binding=effect_observation_binding,
             request_intent_refs=request_refs,
             runtime_actions=action_values,
         )
@@ -694,6 +901,13 @@ class RoleMonotonicityRuntimeContext:
         ):
             raise ValueError(
                 "role runtime membership observation binding is invalid"
+            )
+        if not isinstance(
+            self.effect_observation_binding,
+            RoleProtectedEffectObservationBinding,
+        ):
+            raise ValueError(
+                "role runtime effect observation binding is invalid"
             )
         if any(
             not isinstance(key, str)
@@ -916,6 +1130,7 @@ def _binding_payload(
     active_generation_ref: str,
     revoked_generation_ref: str,
     membership_observation_binding: RoleMembershipObservationBinding,
+    effect_observation_binding: RoleProtectedEffectObservationBinding,
     world_bindings: Sequence[ExperimentRuntimeWorldBinding],
     action_bindings: Sequence[RoleRuntimeActionAuthorityBinding],
     cleanup_lineage_ref: str,
@@ -940,6 +1155,7 @@ def _binding_payload(
         "membership_observation_binding": (
             membership_observation_binding.to_dict()
         ),
+        "effect_observation_binding": effect_observation_binding.to_dict(),
         "world_bindings": [item.to_dict() for item in world_bindings],
         "action_bindings": [item.to_dict() for item in action_bindings],
         "cleanup_lineage_ref": cleanup_lineage_ref,
@@ -951,6 +1167,7 @@ def _binding_payload(
         "request_bindings_complete": True,
         "revocation_freshness_bound": True,
         "target_membership_observation_bound": True,
+        "target_effect_observation_bound": True,
         "cleanup_lineage_bound": True,
         "receipt_lineage_bound": True,
         "policy_preflight_complete": True,
@@ -981,6 +1198,7 @@ class RoleMonotonicityRequestBindingContract:
     active_generation_ref: str
     revoked_generation_ref: str
     membership_observation_binding: RoleMembershipObservationBinding
+    effect_observation_binding: RoleProtectedEffectObservationBinding
     world_bindings: Tuple[ExperimentRuntimeWorldBinding, ...]
     action_bindings: Tuple[RoleRuntimeActionAuthorityBinding, ...]
     cleanup_lineage_ref: str
@@ -994,6 +1212,7 @@ class RoleMonotonicityRequestBindingContract:
     request_bindings_complete: bool = True
     revocation_freshness_bound: bool = True
     target_membership_observation_bound: bool = True
+    target_effect_observation_bound: bool = True
     cleanup_lineage_bound: bool = True
     receipt_lineage_bound: bool = True
     policy_preflight_complete: bool = True
@@ -1022,6 +1241,13 @@ class RoleMonotonicityRequestBindingContract:
         ):
             raise TypeError(
                 "role request binding observation contract is invalid"
+            )
+        if not isinstance(
+            self.effect_observation_binding,
+            RoleProtectedEffectObservationBinding,
+        ):
+            raise TypeError(
+                "role request binding effect observation contract is invalid"
             )
         ordered_actions = tuple(
             sorted(
@@ -1183,6 +1409,7 @@ class RoleMonotonicityRequestBindingContract:
             membership_observation_binding=(
                 self.membership_observation_binding
             ),
+            effect_observation_binding=self.effect_observation_binding,
             world_bindings=self.world_bindings,
             action_bindings=self.action_bindings,
             cleanup_lineage_ref=self.cleanup_lineage_ref,
@@ -1221,6 +1448,17 @@ class RoleMonotonicityRequestBindingContract:
             != ordered_actions[0].request_binding.action_id
             or self.membership_observation_binding.revocation_verification_action_id
             != ordered_actions[5].request_binding.action_id
+            or (
+                self.effect_observation_binding.higher_baseline_action_id,
+                self.effect_observation_binding.active_lower_probe_action_id,
+                self.effect_observation_binding.active_effect_witness_action_id,
+                self.effect_observation_binding.revoked_lower_probe_action_id,
+                self.effect_observation_binding.revoked_effect_witness_action_id,
+            )
+            != tuple(
+                ordered_actions[index].request_binding.action_id
+                for index in (1, 2, 3, 6, 7)
+            )
             or tuple(item.slot for item in self.world_bindings)
             != ("high_role", "low_role")
             or len({item.runtime_binding_id for item in self.world_bindings}) != 2
@@ -1251,6 +1489,7 @@ class RoleMonotonicityRequestBindingContract:
             or not self.request_bindings_complete
             or not self.revocation_freshness_bound
             or not self.target_membership_observation_bound
+            or not self.target_effect_observation_bound
             or not self.cleanup_lineage_bound
             or not self.receipt_lineage_bound
             or not self.policy_preflight_complete
@@ -1285,6 +1524,7 @@ class RoleMonotonicityRequestBindingContract:
                 membership_observation_binding=(
                     self.membership_observation_binding
                 ),
+                effect_observation_binding=self.effect_observation_binding,
                 world_bindings=self.world_bindings,
                 action_bindings=self.action_bindings,
                 cleanup_lineage_ref=self.cleanup_lineage_ref,
@@ -1799,6 +2039,7 @@ class RoleMonotonicityRequestBinder:
             membership_observation_binding=(
                 runtime.membership_observation_binding
             ),
+            effect_observation_binding=runtime.effect_observation_binding,
             world_bindings=world_bindings,
             action_bindings=ordered_actions,
             cleanup_lineage_ref=cleanup_lineage_ref,
@@ -1822,6 +2063,7 @@ class RoleMonotonicityRequestBinder:
             membership_observation_binding=(
                 runtime.membership_observation_binding
             ),
+            effect_observation_binding=runtime.effect_observation_binding,
             world_bindings=world_bindings,
             action_bindings=ordered_actions,
             cleanup_lineage_ref=cleanup_lineage_ref,
@@ -1838,6 +2080,7 @@ __all__ = [
     "RoleMonotonicityRequestBindingDenied",
     "RoleMonotonicityRuntimeContext",
     "RoleMembershipObservationBinding",
+    "RoleProtectedEffectObservationBinding",
     "RoleRuntimeActionAuthorityBinding",
     "RoleRuntimeAuthorityValidator",
     "role_tenant_ownership_ref",
