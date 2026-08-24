@@ -41,6 +41,7 @@ class BehavioralOneClickProfile(BaseModel):
         min_length=1,
         max_length=20_000,
     )
+    role_monotonicity: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_profile_shape(self) -> "BehavioralOneClickProfile":
@@ -50,6 +51,7 @@ class BehavioralOneClickProfile(BaseModel):
                 or self.peer_persona_id is not None
                 or self.prior_source_records is not None
                 or self.prior_peer_records is not None
+                or self.role_monotonicity is not None
             ):
                 raise ValueError(
                     "anonymous passive one-click forbids persona identities "
@@ -517,9 +519,13 @@ async def _route_completed_behavioral_finding(
 
     receipt_summary = result.get("orchestration_receipt")
     if not isinstance(receipt_summary, dict):
-        if result.get("kind") == "graph_bound_prerequisite_execution":
+        if result.get("kind") in {
+            "graph_bound_prerequisite_execution",
+            "role_protected_effect_execution",
+        }:
             raise ValueError(
-                "graph-bound finding requires a durable orchestration receipt"
+                "specialized behavioral finding requires a durable "
+                "orchestration receipt"
             )
         return None
 
@@ -579,6 +585,21 @@ async def _route_completed_behavioral_finding(
         if finding != expected_finding:
             raise ValueError(
                 "graph-bound finding does not match its completed receipt"
+            )
+        finding = expected_finding
+    if receipt.outcome.get("kind") == "role_protected_effect_execution":
+        from core.behavior.role_monotonicity_one_click import (
+            RoleMonotonicityFindingCandidate,
+        )
+
+        expected_finding = (
+            RoleMonotonicityFindingCandidate.from_completed_outcome(
+                receipt.outcome
+            ).to_finding()
+        )
+        if finding != expected_finding:
+            raise ValueError(
+                "role monotonicity finding does not match its completed receipt"
             )
         finding = expected_finding
     proof = CompletedBehavioralProof(
@@ -705,6 +726,7 @@ async def _run_behavioral_one_click_phase(
                     peer_persona_id=profile.peer_persona_id,
                     prior_source_records=profile.prior_source_records,
                     prior_peer_records=profile.prior_peer_records,
+                    role_monotonicity=profile.role_monotonicity,
                 ),
                 _=True,
             )
@@ -812,6 +834,27 @@ async def _run_behavioral_one_click_phase(
             raise SentinelError(
                 ErrorCode.SCAN_INITIALIZATION_ERROR,
                 "Cached graph-bound behavioral finding failed validation",
+                details={"phase": "behavioral_one_click"},
+            ) from exc
+    if (
+        not isinstance(finding, dict)
+        and result.get("kind") == "role_protected_effect_execution"
+        and result.get("finding_confirmed") is True
+    ):
+        from core.behavior.role_monotonicity_one_click import (
+            RoleMonotonicityFindingCandidate,
+        )
+
+        try:
+            finding = (
+                RoleMonotonicityFindingCandidate.from_completed_outcome(
+                    result
+                ).to_finding()
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise SentinelError(
+                ErrorCode.SCAN_INITIALIZATION_ERROR,
+                "Cached role-monotonicity finding failed validation",
                 details={"phase": "behavioral_one_click"},
             ) from exc
 

@@ -171,6 +171,16 @@ def test_anonymous_passive_profile_forbids_persona_identities():
             source_persona_id=SOURCE_PERSONA_ID,
         )
 
+    with pytest.raises(
+        ValidationError,
+        match="anonymous passive one-click forbids persona identities",
+    ):
+        BehavioralOneClickProfile(
+            mode="anonymous_passive",
+            envelope_id=ENVELOPE_ID,
+            role_monotonicity={"schema_version": 1},
+        )
+
 
 def test_paired_persona_profile_still_requires_both_identities():
     with pytest.raises(
@@ -468,6 +478,219 @@ async def test_behavioral_one_click_restores_receipt_bound_graph_finding(
 
 
 @pytest.mark.asyncio
+async def test_behavioral_one_click_routes_receipt_bound_role_finding(
+    monkeypatch,
+    tmp_path,
+):
+    from core.base.task_router import TaskRouter
+    from core.behavior.active import CONTROLLED_WORKFLOW
+    from core.behavior.normalize import stable_hash
+    from core.behavior.receipts import (
+        BehavioralReceiptStore,
+        redacted_receipt_context,
+        redacted_role_protected_effect_execution_outcome,
+        request_fingerprint,
+    )
+    from core.behavior.role_monotonicity import ROLE_MONOTONICITY_WORKFLOW
+    from core.behavior.role_monotonicity_one_click import (
+        RoleMonotonicityFindingCandidate,
+    )
+    from core.foundry.authorization import create_envelope
+    from core.foundry.vault import PersonaVault
+    from core.server.routers import foundry
+
+    monkeypatch.setenv(
+        "SENTINELFORGE_PERSONA_VAULT",
+        str(tmp_path / "personas"),
+    )
+    monkeypatch.setenv(
+        "SENTINELFORGE_AUTHZ_STORE",
+        str(tmp_path / "authorizations"),
+    )
+    monkeypatch.setenv(
+        "SENTINELFORGE_BEHAVIOR_RECEIPTS",
+        str(tmp_path / "receipts"),
+    )
+    vault = PersonaVault()
+    higher = vault.add_persona(
+        label="role-higher",
+        email="role-higher@research.example",
+    )
+    lower = vault.add_persona(
+        label="role-lower",
+        email="role-lower@research.example",
+    )
+    envelope = create_envelope(
+        researcher_identity="researcher",
+        target_handle="example",
+        authorized_origins=["https://example.test"],
+        authorization_basis="owned role monotonicity test",
+        allowed_workflows=[CONTROLLED_WORKFLOW, ROLE_MONOTONICITY_WORKFLOW],
+        disclosure_attestation=True,
+    )
+    role_specification = {"schema_version": 1, "test_ref": "exact-role-spec"}
+    request = ScanRequest(
+        target="https://example.test/app",
+        mode="bug_bounty",
+        behavioral_one_click=BehavioralOneClickProfile(
+            envelope_id=envelope.envelope_id,
+            source_persona_id=higher.persona_id,
+            peer_persona_id=lower.persona_id,
+            role_monotonicity=role_specification,
+        ),
+    )
+    selection = {
+        "payout_goal_plan_id": f"payout_goal_plan:{'0' * 64}",
+        "payout_candidate_id": f"payout_goal_candidate:{'1' * 64}",
+        "payout_goal_id": f"security_witness_goal:{'2' * 64}",
+        "payout_terminal_operation_id": f"action:{'3' * 64}",
+        "specification_id": (
+            f"role_monotonicity_one_click_specification:{'4' * 64}"
+        ),
+        "proof_id": f"role_monotonicity_proof:{'5' * 64}",
+        "request_binding_id": (
+            f"role_monotonicity_request_binding:{'6' * 64}"
+        ),
+        "effect_observation_binding_id": (
+            f"role_protected_effect_observation_binding:{'7' * 64}"
+        ),
+        "graph_target_ref": f"security_obligation_target:{'8' * 64}",
+        "graph_digest": f"security_obligation_graph:{'9' * 64}",
+        "role_receipt_id": f"behavioral-{'a' * 64}",
+    }
+    effect_refs = [
+        f"role_protected_effect_observation:{digit * 64}"
+        for digit in ("0", "1", "2", "3", "4")
+    ]
+    oracle_id = f"role_monotonicity_oracle:{'b' * 64}"
+    active_witness = f"role_active_effect_witness:{'c' * 64}"
+    revoked_witness = f"role_revoked_effect_witness:{'d' * 64}"
+    candidate_payload = {
+        "oracle_id": oracle_id,
+        "observation_binding_id": selection[
+            "effect_observation_binding_id"
+        ],
+        "verdict": "confirmed_active_escalation",
+        "observation_refs": effect_refs,
+        "active_effect_witness_ref": active_witness,
+        "revoked_effect_witness_ref": revoked_witness,
+    }
+    outcome = redacted_role_protected_effect_execution_outcome(
+        {
+            "kind": "role_protected_effect_execution",
+            "mode": "behavioral_role_protected_effect_execution_v1",
+            "status": "confirmed_active_escalation",
+            "receipt_state": "completed",
+            "claim_contract_id": (
+                "role_monotonicity_execution_claim_contract:"
+                f"{'e' * 64}"
+            ),
+            "oracle_id": oracle_id,
+            "oracle_evaluation_id": (
+                "role_protected_effect_oracle_evaluation:"
+                f"{'f' * 64}"
+            ),
+            "oracle_verdict": "confirmed_active_escalation",
+            "active_membership_observation_ref": (
+                f"role_membership_state_observation:{'a' * 64}"
+            ),
+            "revoked_membership_observation_ref": (
+                f"role_membership_state_observation:{'b' * 64}"
+            ),
+            "effect_observation_refs": effect_refs,
+            "active_effect_witness_ref": active_witness,
+            "revoked_effect_witness_ref": revoked_witness,
+            "cleanup_status": "verified",
+            "target_requests_sent": 8,
+            "target_request_may_have_been_sent": False,
+            "orphaned_owned_state_possible": False,
+            "provenance_root": "c" * 64,
+            "finding_candidate_ref": stable_hash(
+                "role_monotonicity_finding_candidate",
+                candidate_payload,
+            ),
+            "finding_confirmed": True,
+            "adversarial_triage_required": True,
+            "promotion_authority": False,
+            "finding_authority": False,
+            **selection,
+            "selection_ref": stable_hash(
+                "role_monotonicity_one_click_selection",
+                selection,
+            ),
+        }
+    )
+    store = BehavioralReceiptStore()
+    fingerprint = request_fingerprint(
+        {"test": "scan-role-receipt", "selection_ref": outcome["selection_ref"]}
+    )
+    reservation = store.reserve(
+        fingerprint,
+        context=redacted_receipt_context(
+            target_origin="https://example.test",
+            envelope_id=envelope.envelope_id,
+            source_persona_id=higher.persona_id,
+            peer_persona_id=lower.persona_id,
+        ),
+    )
+    receipt = store.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token,
+        outcome=outcome,
+    )
+    cached = {
+        **outcome,
+        "status": "already_executed",
+        "orchestration_receipt": {
+            "receipt_id": receipt.receipt_id,
+            "state": receipt.state,
+            "reused": True,
+        },
+    }
+    expected_finding = (
+        RoleMonotonicityFindingCandidate.from_completed_outcome(cached)
+        .to_finding()
+    )
+
+    async def execute(foundry_request, _):
+        assert foundry_request.role_monotonicity == role_specification
+        assert _ is True
+        return dict(cached)
+
+    class RecordingRouter:
+        async def handle_tool_output(self, **kwargs):
+            proof = kwargs["completed_behavioral_proof"]
+            assert proof.receipt_id == receipt.receipt_id
+            assert proof.provenance_root == outcome["provenance_root"]
+            assert kwargs["scanner_findings"] == (expected_finding,)
+            canonical = dict(expected_finding)
+            canonical["metadata"] = {
+                **expected_finding["metadata"],
+                "canonical_route": True,
+            }
+            return {"findings": [canonical]}
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        execute,
+    )
+    monkeypatch.setattr(
+        TaskRouter,
+        "instance",
+        staticmethod(lambda: RecordingRouter()),
+    )
+    session = _Session()
+
+    result = await _run_behavioral_one_click_phase(request, session=session)
+
+    assert result["finding"]["metadata"]["canonical_route"] is True
+    restored, persist = session.findings.added[0]
+    assert restored == result["finding"]
+    assert persist is True
+
+
+@pytest.mark.asyncio
 async def test_graph_finding_without_durable_receipt_is_not_persisted(
     monkeypatch,
 ):
@@ -493,7 +716,7 @@ async def test_graph_finding_without_durable_receipt_is_not_persisted(
 
     with pytest.raises(
         ValueError,
-        match="graph-bound finding requires a durable orchestration receipt",
+        match="specialized behavioral finding requires a durable orchestration receipt",
     ):
         await _run_behavioral_one_click_phase(_request(), session=session)
 

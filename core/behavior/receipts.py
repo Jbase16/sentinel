@@ -3344,7 +3344,26 @@ def redacted_role_protected_effect_execution_outcome(
         "promotion_authority",
         "finding_authority",
     }
-    if set(response) != required_fields:
+    selection_fields = {
+        "payout_goal_plan_id",
+        "payout_candidate_id",
+        "payout_goal_id",
+        "payout_terminal_operation_id",
+        "specification_id",
+        "proof_id",
+        "request_binding_id",
+        "effect_observation_binding_id",
+        "graph_target_ref",
+        "graph_digest",
+        "role_receipt_id",
+        "selection_ref",
+    }
+    response_fields = set(response)
+    selection_present = bool(response_fields & selection_fields)
+    if (
+        not required_fields <= response_fields
+        or (selection_present and not selection_fields <= response_fields)
+    ):
         raise ReceiptStoreError(
             "role protected effect execution outcome fields are invalid"
         )
@@ -3428,11 +3447,75 @@ def redacted_role_protected_effect_execution_outcome(
         or response.get("adversarial_triage_required") is not True
         or response.get("promotion_authority") is not False
         or response.get("finding_authority") is not False
+        or (
+            selection_present
+            and (
+                not typed_ref(
+                    response.get("payout_goal_plan_id"),
+                    "payout_goal_plan",
+                )
+                or not typed_ref(
+                    response.get("payout_candidate_id"),
+                    "payout_goal_candidate",
+                )
+                or not typed_ref(
+                    response.get("payout_goal_id"),
+                    "security_witness_goal",
+                )
+                or not typed_ref(
+                    response.get("payout_terminal_operation_id"),
+                    "action",
+                )
+                or not typed_ref(
+                    response.get("specification_id"),
+                    "role_monotonicity_one_click_specification",
+                )
+                or not typed_ref(
+                    response.get("proof_id"),
+                    "role_monotonicity_proof",
+                )
+                or not typed_ref(
+                    response.get("request_binding_id"),
+                    "role_monotonicity_request_binding",
+                )
+                or not typed_ref(
+                    response.get("effect_observation_binding_id"),
+                    "role_protected_effect_observation_binding",
+                )
+                or not typed_ref(
+                    response.get("graph_target_ref"),
+                    "security_obligation_target",
+                )
+                or not typed_ref(
+                    response.get("graph_digest"),
+                    "security_obligation_graph",
+                )
+                or not isinstance(response.get("role_receipt_id"), str)
+                or re.fullmatch(
+                    r"behavioral-[0-9a-f]{64}",
+                    response["role_receipt_id"],
+                )
+                is None
+                or not typed_ref(
+                    response.get("selection_ref"),
+                    "role_monotonicity_one_click_selection",
+                )
+                or response.get("selection_ref")
+                != stable_hash(
+                    "role_monotonicity_one_click_selection",
+                    {
+                        key: response.get(key)
+                        for key in selection_fields
+                        if key != "selection_ref"
+                    },
+                )
+            )
+        )
     ):
         raise ReceiptStoreError(
             "role protected effect execution outcome is invalid"
         )
-    return {
+    outcome = {
         "kind": "role_protected_effect_execution",
         "mode": "behavioral_role_protected_effect_execution_v1",
         "status": status,
@@ -3460,6 +3543,153 @@ def redacted_role_protected_effect_execution_outcome(
         "adversarial_triage_required": True,
         "promotion_authority": False,
         "finding_authority": False,
+    }
+    if selection_present:
+        outcome.update(
+            {
+                key: response[key]
+                for key in selection_fields
+            }
+        )
+    return outcome
+
+
+def redacted_role_monotonicity_one_click_summary(
+    value: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Retain truthful, non-authoritative status for a selected role run."""
+
+    fields = {
+        "schema_version",
+        "mode",
+        "status",
+        "payout_candidate_id",
+        "specification_id",
+        "payout_goal_plan_id",
+        "payout_goal_id",
+        "payout_terminal_operation_id",
+        "proof_id",
+        "request_binding_id",
+        "effect_observation_binding_id",
+        "graph_target_ref",
+        "graph_digest",
+        "role_receipt_id",
+        "selection_ref",
+        "disabled_gates",
+        "dispatched",
+        "finding_candidate_ref",
+        "promotion_authority",
+        "finding_authority",
+    }
+    if not isinstance(value, Mapping) or set(value) != fields:
+        raise ReceiptStoreError("role one-click status fields are invalid")
+
+    def typed_ref(item: Any, prefix: str) -> bool:
+        return bool(
+            isinstance(item, str)
+            and re.fullmatch(rf"{re.escape(prefix)}:[0-9a-f]{{64}}", item)
+        )
+
+    status = value.get("status")
+    refs = {
+        "payout_candidate_id": "payout_goal_candidate",
+        "specification_id": "role_monotonicity_one_click_specification",
+        "payout_goal_plan_id": "payout_goal_plan",
+        "payout_goal_id": "security_witness_goal",
+        "payout_terminal_operation_id": "action",
+        "proof_id": "role_monotonicity_proof",
+        "request_binding_id": "role_monotonicity_request_binding",
+        "effect_observation_binding_id": (
+            "role_protected_effect_observation_binding"
+        ),
+        "graph_target_ref": "security_obligation_target",
+        "graph_digest": "security_obligation_graph",
+        "selection_ref": "role_monotonicity_one_click_selection",
+    }
+    first_refs = ("payout_candidate_id", "specification_id")
+    remaining_refs = tuple(key for key in refs if key not in first_refs)
+    disabled = value.get("disabled_gates")
+    allowed_gates = {
+        "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
+        "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
+        "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
+        "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
+    }
+    if (
+        value.get("schema_version") != 1
+        or value.get("mode") != "behavioral_role_monotonicity_one_click_v1"
+        or status
+        not in {
+            "no_eligible_candidate",
+            "selected_execution_disabled",
+            "completed",
+        }
+        or not isinstance(disabled, (list, tuple))
+        or len(disabled) != len(set(disabled))
+        or any(item not in allowed_gates for item in disabled)
+        or value.get("promotion_authority") is not False
+        or value.get("finding_authority") is not False
+        or not isinstance(value.get("dispatched"), bool)
+    ):
+        raise ReceiptStoreError("role one-click status is invalid")
+    candidate_ref = value.get("finding_candidate_ref")
+    role_receipt_id = value.get("role_receipt_id")
+    if status == "no_eligible_candidate":
+        if (
+            any(value.get(key) is not None for key in refs)
+            or role_receipt_id is not None
+            or candidate_ref is not None
+            or disabled
+            or value.get("dispatched") is not False
+        ):
+            raise ReceiptStoreError("inactive role one-click status is invalid")
+    elif status == "selected_execution_disabled":
+        if (
+            any(not typed_ref(value.get(key), refs[key]) for key in first_refs)
+            or any(value.get(key) is not None for key in remaining_refs)
+            or role_receipt_id is not None
+            or candidate_ref is not None
+            or not disabled
+            or value.get("dispatched") is not False
+        ):
+            raise ReceiptStoreError("disabled role one-click status is invalid")
+    else:
+        selection = {
+            key: value.get(key)
+            for key in (
+                "payout_goal_plan_id",
+                "payout_candidate_id",
+                "payout_goal_id",
+                "payout_terminal_operation_id",
+                "specification_id",
+                "proof_id",
+                "request_binding_id",
+                "effect_observation_binding_id",
+                "graph_target_ref",
+                "graph_digest",
+                "role_receipt_id",
+            )
+        }
+        if (
+            any(not typed_ref(value.get(key), prefix) for key, prefix in refs.items())
+            or not isinstance(role_receipt_id, str)
+            or re.fullmatch(r"behavioral-[0-9a-f]{64}", role_receipt_id) is None
+            or value.get("selection_ref")
+            != stable_hash("role_monotonicity_one_click_selection", selection)
+            or (
+                candidate_ref is not None
+                and not typed_ref(
+                    candidate_ref,
+                    "role_monotonicity_finding_candidate",
+                )
+            )
+            or disabled
+            or value.get("dispatched") is not True
+        ):
+            raise ReceiptStoreError("completed role one-click status is invalid")
+    return {
+        key: (list(value[key]) if key == "disabled_gates" else value[key])
+        for key in fields
     }
 
 
@@ -4025,6 +4255,56 @@ def redacted_graph_bound_prerequisite_denial_response(
     }
 
 
+def redacted_role_protected_effect_denial_response(
+    receipt: BehavioralExecutionReceipt,
+    *,
+    reused: bool,
+) -> Dict[str, Any]:
+    """Build one public role denial solely from a durably aborted receipt."""
+
+    if not isinstance(receipt, BehavioralExecutionReceipt):
+        raise TypeError("receipt must be a BehavioralExecutionReceipt")
+    if not isinstance(reused, bool):
+        raise TypeError("reused must be boolean")
+    if receipt.state != ABORTED or receipt.terminal_evidence is None:
+        raise ReceiptStoreError("role denial receipt is not terminal")
+    evidence = redacted_role_protected_effect_terminal_evidence(
+        receipt.terminal_evidence
+    )
+    return {
+        "schema_version": 1,
+        "kind": "role_protected_effect_execution_denial",
+        "status": "denied",
+        "reused": reused,
+        "orchestration_receipt": {
+            "receipt_id": receipt.receipt_id,
+            "state": ABORTED,
+        },
+        "denial": evidence,
+    }
+
+
+def redacted_behavioral_execution_denial_response(
+    receipt: BehavioralExecutionReceipt,
+    *,
+    reused: bool,
+) -> Dict[str, Any]:
+    """Render the exact family schema selected by terminal evidence."""
+
+    evidence = receipt.terminal_evidence
+    if isinstance(evidence, Mapping) and evidence.get("kind") == (
+        "role_protected_effect_execution_terminal"
+    ):
+        return redacted_role_protected_effect_denial_response(
+            receipt,
+            reused=reused,
+        )
+    return redacted_graph_bound_prerequisite_denial_response(
+        receipt,
+        reused=reused,
+    )
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
     if response.get("kind") == "graph_bound_prerequisite_execution":
@@ -4094,6 +4374,12 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
         output["interaction_acquisition"] = (
             _redacted_interaction_acquisition_summary(
                 response.get("interaction_acquisition")
+            )
+        )
+    if "role_monotonicity_one_click" in response:
+        output["role_monotonicity_one_click"] = (
+            redacted_role_monotonicity_one_click_summary(
+                response.get("role_monotonicity_one_click")
             )
         )
     return _attach_adaptive_proof_handoff(output, response)

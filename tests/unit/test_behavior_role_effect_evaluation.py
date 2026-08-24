@@ -13,6 +13,7 @@ from core.behavior.receipts import (
     COMPLETED,
     BehavioralReceiptStore,
     ReceiptStoreError,
+    redacted_behavioral_execution_denial_response,
 )
 from core.behavior.role_effect_evaluation import (
     ROLE_PROTECTED_EFFECT_EXECUTION_MODE,
@@ -352,6 +353,21 @@ def test_mismatched_effect_is_inconclusive_and_aborts_after_verified_cleanup(
     assert len(evidence["effect_observation_refs"]) == 5
     assert evidence["finding_candidate_ref"] is None
     assert evidence["retry_authority"] is False
+    denial_response = redacted_behavioral_execution_denial_response(
+        denied.value.terminal_receipt,
+        reused=False,
+    )
+    assert denial_response == {
+        "schema_version": 1,
+        "kind": "role_protected_effect_execution_denial",
+        "status": "denied",
+        "reused": False,
+        "orchestration_receipt": {
+            "receipt_id": denied.value.terminal_receipt.receipt_id,
+            "state": ABORTED,
+        },
+        "denial": evidence,
+    }
 
 
 def test_witness_mismatch_cannot_become_positive_or_negative_proof(
