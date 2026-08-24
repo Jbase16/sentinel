@@ -2,7 +2,7 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Repository snapshot: `ocb/r5c6-role-effect-evaluation` at `fdd7d1c`, based on
+Repository snapshot: `ocb/family-c-ordinary-scan` at `157b5b5`, based on
 `main` at `fc1e997`
 
 Last verified: 2026-08-24
@@ -50,8 +50,8 @@ do that for a narrow controlled authorization path and can produce a receipt-bou
 finding candidate for narrow graph-bound prerequisite omission and reordering paths.
 Family C now has suite-proved role/membership contracts, exact runtime binding, an
 atomic execution claim, and a default-off owned setup/revocation/protected-effect
-lifecycle with an independent oracle. It has not reached ordinary-click or external
-acceptance.
+lifecycle with an independent oracle. Its bounded coordinator is production-wired to
+the ordinary Scan path, but it has not earned external acceptance.
 The external `OCB-S15` gates pass against vulnerable and secure loopback twins,
 including capture freshness, durable denial replay, ordinary-Scan persistence, and an
 exact adjacent-order counterfactual. Sentinel cannot yet search and prove the full
@@ -127,25 +127,23 @@ live-observed result, and a live loopback result is not payout proof.
 
 ### Sentinel repository
 
-- Slice branch: `ocb/r5c5-role-membership-lifecycle`, pushed and aligned with its
-  remote at code checkpoint `0de4e1a`.
+- Slice branch: `ocb/family-c-ordinary-scan` at code checkpoint `157b5b5`; this
+  ledger update is layered on that checkpoint.
 - Base: `main` and `origin/main` at `fc1e997` when the Family-C branch chain was
   created.
 - Python: declared 3.12 environment; the verification run used Python 3.12.12.
 - Full suite on 2026-08-24:
-  `2713 passed, 1 skipped, 4 warnings in 35.55s`.
+  `2737 passed, 1 skipped, 2 warnings in 34.94s`.
 - The former 17-skip backlog has been reduced to one remaining conditional skip:
   `tests/verification/test_websocket_terminal_bidirectional.py` skips because
   `/ws/terminal` is absent.
-- The full run is logic-green, but not warning-clean. It emitted closed-event-loop
-  `aiosqlite` thread cleanup warnings plus two upstream `ldap3`/`pyasn1`
-  deprecations.
+- The full run is logic-green, but not warning-clean. It emitted two upstream
+  `ldap3`/`pyasn1` deprecations.
 - `scripts/local-security-check.sh` remains red on repository-wide matcher and Ruff
   debt outside the Family-C diff. Targeted Ruff and prohibited-pattern checks passed
-  for the R5C5 files.
-- The ordinary Xcode build is blocked on this machine by the missing Apple Metal
-  Toolchain. A bounded build excluding only the two Metal shader sources compiled the
-  Swift application successfully; this is not the complete native gate.
+  for the Family-C coordinator files.
+- The ordinary Metal-enabled macOS Debug build succeeded on 2026-08-24 with both
+  shader sources enabled.
 
 ### External visual acceptance lab
 
@@ -160,7 +158,7 @@ reverified at the current Sentinel SHA.
 - DB-S15 has a live external `pass` artifact bound to Sentinel `375137f`. It proves
   persona continuity, stale-credential refusal, canonical finding production, Verify
   binding, and zero cleanup residue for that exact run.
-- DB-S15 is valid historical live evidence, but it is not a current-`0de4e1a` artifact.
+- DB-S15 is valid historical live evidence, but it is not a current-`157b5b5` artifact.
 - No inspected artifact establishes a real public bug-bounty acceptance or payout.
 
 ## 6. Where the program is now
@@ -176,13 +174,13 @@ reverified at the current Sentinel SHA.
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
-| OCB-R5 family C: role and membership safety | Implemented and suite-proved through protected-effect evaluation; not ordinary-click wired | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, non-promoting positive candidates, and replay refusal | Add an ordinary Scan caller, route only completed positive proof through the existing canonical promotion gates, and prove `OCB-S16` on vulnerable and secure twins |
+| OCB-R5 family C: role and membership safety | Production-wired through the bounded ordinary Scan coordinator; external acceptance open | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, and canonical routing of completed positive proof | Prove `OCB-S16` on vulnerable and secure twins, including denial, session, freshness, receipt, cleanup, and residue evidence at the exact Sentinel SHA |
 | OCB-R5 family D: capability safety | Designed | Topology vocabulary recognizes callback/capability worlds | Implement token/link/capability confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Partial and narrow | Ranked obligations, payout-guided frontier choice, continuation receipts, and deterministic replanning exist | Build the high-value sink ledger, marginal-value scheduler, family-aware coverage, and honest stop certificate; prove `OCB-S18` |
 | OCB-R7 Submission-grade candidate assembly | Partial but production-wired for completed proofs | Completed positive receipt to canonical finding, Verify workbench, deterministic receipt-bound `SubmissionCandidate`, and candidate-only report routes | Generalize minimization/replay, impact binding, sanitized reproduction, invalidation behavior, and end-to-end `OCB-S19` across supported families |
-| OCB-R8 Operational one-click completion | Partial for OCB-R5 family A and the narrow family-B omission path | The ordinary Scan UI and API carry the behavioral profile; exact payout-selected family-A and narrow graph-bound omission proofs can dispatch under separate gates and promote only receipt-bound completed proof | Coordinate the remaining OCB-R5 families, acquisition, replanning, stop status, restart/deduplication, and report handoff as one bounded run; prove `OCB-S20` |
+| OCB-R8 Operational one-click completion | Partial for OCB-R5 families A-C | The ordinary Scan UI and API carry the behavioral profile; exact payout-selected family-A, narrow graph-bound family-B, and bounded Family-C role proofs can dispatch under separate gates and route only receipt-bound completed positive proof | Coordinate the remaining OCB-R5 families, acquisition, replanning, stop status, and report handoff as one bounded run; prove `OCB-S20` |
 | OCB-R9 Real-target validation and payout acceptance | Evidence in progress | Full local suite is green; LAB-S01 through LAB-S10 have operator-attested passes; DB-S15 is live-observed on loopback at Sentinel `375137f` | Re-run release gates at the release SHA, then conduct separately authorized real-program validation; only an accepted or paid finding earns payout-proven status |
 
 ### What DB-R1 actually changed in this map
@@ -354,18 +352,31 @@ closure:
       all eight bound actions, with manual redirects and the original request budget.
     - [x] Persist only redacted, content-addressed observations and a non-promoting
       candidate reference; raw protected-effect values remain private.
-- [ ] Add the bounded Family-C coordinator to the ordinary Scan production path under
+- [x] Add the bounded Family-C coordinator to the ordinary Scan production path under
   explicit default-off gates, restart/deduplication behavior, and truthful status.
+    - [x] Require an exact operator-supplied role specification for typed role order,
+      retained sessions, membership generations, in-origin actions, and response
+      pointers; ordinary capture does not infer or broaden any of them.
+    - [x] Advertise the role backend only with two explicit role worlds, require the
+      signed role workflow and four independent default-off Family-C gates, and retain
+      the exact eight-request, two-privilege-mutation native-session policy.
+    - [x] Bind both capture orchestration and protected-effect execution to durable
+      fingerprints/claims so identical outer and inner retries reuse receipts without
+      repeating role traffic; persist truthful disabled, completed, and denial status.
+    - [x] Reconstruct and route a role finding through `CompletedBehavioralProof` and
+      `TaskRouter` only when the completed outer receipt exactly matches positive R5C6
+      evidence; refuted proof remains a no-finding result.
 - [ ] Prove `OCB-S16` against vulnerable and secure twins, including negative
   pre-traffic denial, cross-session refusal, revocation freshness, deterministic
   receipts, cleanup, and zero residue.
 - [ ] Record current-SHA native and external acceptance evidence before applying
   `lab-attested` or `live-observed` labels.
 
-R5C6's Python checkpoint is `2726 passed, 1 skipped, 3 warnings` at `fdd7d1c`.
-The ordinary macOS Debug build also succeeds with both Metal shaders. The open
-repository-security and generated web-schema drift baselines prevent treating these
-checks as complete release evidence, and no Family-C external acceptance claim is made.
+The Family-C ordinary-Scan code checkpoint is `2737 passed, 1 skipped, 2 warnings`
+at `157b5b5`. The ordinary macOS Debug build also succeeds with both Metal shaders.
+The open repository-security and generated web-schema drift baselines prevent treating
+these checks as complete release evidence, and no Family-C external acceptance claim
+is made.
 
 Exit gate: `OCB-S16` proves vulnerable and secure twins, negative pre-traffic denial,
 revocation freshness, cleanup, and deterministic receipts.
@@ -470,12 +481,12 @@ Stop the slice rather than weakening a gate when completion appears to require:
 ## 11. Immediate next decision
 
 Family B remains closed for the bounded omission and adjacent-reordering scope. Family C
-is active through the R5C6 protected-effect lifecycle and independent oracle. The next
-implementation work order is the **bounded Family-C ordinary Scan coordinator** under
-separate default-off gates, restart/deduplication behavior, and truthful status. It must
-reserve a fresh claim, preserve the exact R5C6 action/session/budget binding, and route
-only completed positive proof through the existing canonical promotion gates; it must
-not broaden acquisition, claim external acceptance, or start Family D.
+is production-wired through its bounded ordinary Scan coordinator at `157b5b5`. The
+planned next slice is **`OCB-S16` vulnerable/secure twin acceptance**: prove negative
+pre-traffic denial, exact-session refusal, revocation freshness, deterministic receipt
+reuse, verified cleanup, zero residue, and the truthful secure-twin no-finding stop at
+the exact Sentinel SHA. It must not broaden acquisition, claim public-target or payout
+acceptance, or start Family D.
 
 The repository security-check baseline, six generated web-schema drift snapshots,
 remaining skip, and warning debt stay as explicit maintenance/evidence items. They must
@@ -488,10 +499,10 @@ implemented sub-slices.
 
 | Done | Workstream | State | Next evidence |
 |---|---|---|---|
-| [ ] | Baseline governance | Active | Track the current skip, three warnings, security baseline, and six web-schema drift snapshots separately; preserve the restored native build |
+| [ ] | Baseline governance | Active | Track the current skip, two warnings, security baseline, and six web-schema drift snapshots separately; preserve the restored native build |
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| [ ] | OCB-R5 family C roles/membership | Active through R5C6 | Ordinary Scan wiring, then `OCB-S16` |
+| [ ] | OCB-R5 family C roles/membership | Production-wired; external gate open | `OCB-S16` vulnerable/secure twin evidence at the exact Sentinel SHA |
 | [ ] | OCB-R5 family D capabilities | Queued | `OCB-S17` |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
