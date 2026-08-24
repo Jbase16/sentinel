@@ -14,7 +14,7 @@ import copy
 import hmac
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Tuple
 from urllib.parse import urlsplit
 
 from core.foundry.authorization import AuthorizationEnvelope
@@ -29,6 +29,17 @@ from .experiment_sdk import (
 from .normalize import stable_hash
 from .payout_goals import SecurityProperty, SecurityWitnessGoal
 from .role_membership import OwnedMembershipFixture
+
+if TYPE_CHECKING:
+    from core.cortex.execution_policy import PolicyExecutor
+    from core.foundry.vault import PersonaVault
+
+    from .role_request_binding import (
+        RoleMonotonicityRequestBinder,
+        RoleMonotonicityRequestBindingContract,
+        RoleMonotonicityRuntimeContext,
+        RoleRuntimeAuthorityValidator,
+    )
 
 
 ROLE_MONOTONICITY_PROOF_MODE = "behavioral_role_monotonicity_proof_v1"
@@ -728,6 +739,32 @@ class RoleMonotonicityExperimentAdmission:
             oracle_id=self.proof.oracle.oracle_id,
             target_ref=self.proof.target_ref,
             authority_context_ref=self.proof.authority_context_ref,
+        )
+
+    def bind_requests(
+        self,
+        *,
+        executor: "PolicyExecutor",
+        persona_vault: "PersonaVault",
+        runtime: "RoleMonotonicityRuntimeContext",
+        authority_validator: "RoleRuntimeAuthorityValidator",
+        binder: Optional["RoleMonotonicityRequestBinder"] = None,
+    ) -> "RoleMonotonicityRequestBindingContract":
+        """Revalidate R5C2, then bind exact R5C3 intent without dispatch."""
+
+        from .role_request_binding import RoleMonotonicityRequestBinder
+
+        admission = self.admit()
+        request_binder = binder or RoleMonotonicityRequestBinder()
+        return request_binder.bind(
+            proof=self.proof,
+            admission=admission,
+            target_origin=self.target_origin,
+            authorization=self.authorization,
+            executor=executor,
+            persona_vault=persona_vault,
+            runtime=runtime,
+            authority_validator=authority_validator,
         )
 
 
