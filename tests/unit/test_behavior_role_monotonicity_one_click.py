@@ -248,6 +248,10 @@ def test_selected_role_candidate_reports_each_default_off_gate_without_traffic(
     )
 
     assert shadow.payout_goal_plan.selected.backend == "authority_monotonicity"
+    assert shadow.payout_goal_plan.context.available_backends == (
+        "authority_monotonicity",
+    )
+    assert shadow.payout_goal_plan.context.graph_bound_prerequisite_terminal_ids == ()
     assert result.status == "selected_execution_disabled"
     assert result.disabled_gates == (disabled_gate,)
     assert result.selected is True

@@ -251,6 +251,38 @@ def test_role_monotonicity_profile_requires_exact_specification():
     assert profile.is_behavioral_phase_only is True
 
 
+def test_role_monotonicity_profile_requires_phase_only_completion():
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "role-monotonicity one-click requires behavioral_phase_only "
+            "completion"
+        ),
+    ):
+        BehavioralOneClickProfile(
+            mode="role_monotonicity",
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+            role_monotonicity={"schema_version": 1},
+        )
+
+
+def test_paired_persona_profile_rejects_role_specification():
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "role-monotonicity specification requires role_monotonicity mode"
+        ),
+    ):
+        BehavioralOneClickProfile(
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+            role_monotonicity={"schema_version": 1},
+        )
+
+
 def test_behavioral_phase_summary_is_bounded_and_redacted():
     summary = _bounded_behavioral_phase_summary(
         phase_status="confirmed_finding",
@@ -558,6 +590,8 @@ async def test_behavioral_one_click_routes_receipt_bound_role_finding(
         target="https://example.test/app",
         mode="bug_bounty",
         behavioral_one_click=BehavioralOneClickProfile(
+            mode="role_monotonicity",
+            completion="behavioral_phase_only",
             envelope_id=envelope.envelope_id,
             source_persona_id=higher.persona_id,
             peer_persona_id=lower.persona_id,

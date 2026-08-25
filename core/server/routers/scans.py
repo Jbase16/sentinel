@@ -70,9 +70,19 @@ class BehavioralOneClickProfile(BaseModel):
             self.prior_peer_records is None
         ):
             raise ValueError("prior behavioral capture requires both personas")
-        if self.mode == "role_monotonicity" and self.role_monotonicity is None:
+        if self.mode == "role_monotonicity":
+            if self.role_monotonicity is None:
+                raise ValueError(
+                    "role-monotonicity one-click requires an exact role specification"
+                )
+            if self.completion != "behavioral_phase_only":
+                raise ValueError(
+                    "role-monotonicity one-click requires behavioral_phase_only "
+                    "completion"
+                )
+        elif self.role_monotonicity is not None:
             raise ValueError(
-                "role-monotonicity one-click requires an exact role specification"
+                "role-monotonicity specification requires role_monotonicity mode"
             )
         return self
 
