@@ -1187,8 +1187,8 @@ checkpoint.
 
 `OCB-S16` native run `val-s16-native-family-c-20260824-r5` then passed at Sentinel
 `5f03c35789e555a22e284806b05771d6b070d4e5` and verifier
-`3511bf6c83d314cb3c675df62c89b1a8704f7086`. Artifact SHA-256
-`ee5988e45980016bfd7cae96b5d97cf3a3a9a5e801a4ff9c5d2624b938b18a13` binds the
+`3511bf6ec450f184a8ba300bfa251be70116be59`. Artifact SHA-256
+`ec758a046f8fe911148413d7baa2ffee67f8ad0ffaf59c9920bc58134c5c224b` binds the
 exact acceptance executable, three fresh state roots, six vulnerable/secure cases,
 12 native Scans, six process-changing receipt-reuse retries, 48 ordered role actions,
 zero retry traffic, exact opaque native-session references, verified cleanup, and zero

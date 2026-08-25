@@ -153,11 +153,13 @@ live-observed result, and a live loopback result is not payout proof.
 
 Family-C external and native evidence was generated and inspected on 2026-08-24.
 
-- Native verifier checkpoint: pushed branch `ocb/s16-native-acceptance` at
-  `3511bf6c83d314cb3c675df62c89b1a8704f7086`; evidence commit `464dd05`.
+- Native verifier code checkpoint: `3511bf6ec450f184a8ba300bfa251be70116be59`;
+  corrected evidence commit `25a81e0` on pushed branch
+  `ocb/s16-native-acceptance`. The correction expands the verifier commit to its
+  actual full SHA; the journey payload is unchanged.
 - Artifact `val-s16-native-family-c-20260824-r5` passed against Sentinel
   `5f03c35789e555a22e284806b05771d6b070d4e5`. SHA-256
-  `ee5988e45980016bfd7cae96b5d97cf3a3a9a5e801a4ff9c5d2624b938b18a13`
+  `ec758a046f8fe911148413d7baa2ffee67f8ad0ffaf59c9920bc58134c5c224b`
   binds three fresh-state vulnerable/secure pairs, 12 native Scans, six real app
   restart retries, 48 exact role actions, zero retry traffic, exact session order,
   verified cleanup, and zero residue.
@@ -420,8 +422,8 @@ records `native_app_exercised: false`.
 
 Native run `val-s16-native-family-c-20260824-r5` passed against Sentinel
 `5f03c35789e555a22e284806b05771d6b070d4e5` using verifier
-`3511bf6c83d314cb3c675df62c89b1a8704f7086`; its artifact SHA-256 is
-`ee5988e45980016bfd7cae96b5d97cf3a3a9a5e801a4ff9c5d2624b938b18a13`.
+`3511bf6ec450f184a8ba300bfa251be70116be59`; its artifact SHA-256 is
+`ec758a046f8fe911148413d7baa2ffee67f8ad0ffaf59c9920bc58134c5c224b`.
 It records the actual SwiftUI/WKWebView journey, three clean state roots, three
 vulnerable findings and three secure no-finding results, six receipt-reusing app
 restart retries with zero added target traffic, exact target ledgers and native-session
