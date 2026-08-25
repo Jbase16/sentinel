@@ -1227,8 +1227,24 @@ does not close broader R5C shapes or establish public-target or payout evidence.
     SHA-256 `15c46893...`, manifest SHA-256 `d07bee9c...`, and executable SHA-256
     `6250ab27...`. Package and seven app-file checksums pass; no app launch, acceptance,
     target traffic, or lab access occurred.
+  - [x] Independent package preflight and fail-closed stop: the separately scoped task
+    reported matching every supplied app-package identity from clean accepted lab
+    `main` at `0bf1767`, then stopped before execution because the seven-file app had no
+    isolated backend/runtime. No lab source, commit, push, retained artifact, or
+    acceptance result was produced; the Sentinel task did not inspect the lab.
+  - [x] Sentinel isolated runtime handoff: the producer script creates a detached,
+    one-commit shallow exact-`87057b8` checkout with no reachable prior history, Git
+    remote, object alternate, editable producer path, or active filesystem symlink; a
+    locked Python 3.12.12 environment; and relocation-safe authenticated loopback
+    helpers. Sidecar archive `sentinelforge-r5c9-runtime-87057b8.tar.gz` has SHA-256
+    `5caf6bae...`, manifest SHA-256 `aa93ecef...`, and 38,289-entry payload inventory
+    SHA-256 `63e655b7...`. A separately extracted copy passed identity, authenticated
+    health, same-data restart, working-directory and checkout isolation, zero source-
+    bytecode writes, and clean-shutdown smoke checks. This is producer-attested
+    readiness, not acceptance evidence.
   - [ ] The separately scoped lab task independently verifies the package and runs the
-    unchanged accepted verifier. Any verifier or lab-source change is a blocker.
+    unchanged accepted verifier against the immutable app and sidecar handoffs. Any
+    verifier or lab-source change is a blocker.
 
 #### R5D — Capability confinement, freshness, and replay
 

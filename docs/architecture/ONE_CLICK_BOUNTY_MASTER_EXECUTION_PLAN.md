@@ -2,15 +2,16 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Accepted merged implementation checkpoint: `main` at `87057b8`, containing the
-corrected Sentinel-only R5C8 project/generated-scheme parity and repository-boundary
-record. Current R5C9 candidate record: `ocb/r5c9-candidate-handoff` at `580080a`, with
-the build sourced from that exact merged commit and tree. No R5C9 lab, native, or
-live-evidence claim has been earned. The lab-side work formerly cited for R5C8 remains
-quarantined and is not an accepted checkpoint. The accepted native evidence remains
-separately bound to `ocb/s16-native-journey` at Sentinel `5f03c35`.
+Accepted merged implementation checkpoint: `main` at `85b0755`, containing the
+corrected Sentinel-only R5C8 project/generated-scheme parity, repository-boundary
+record, and immutable R5C9 app-candidate handoff. Current R5C9 producer branch:
+`ocb/r5c9-runtime-handoff`, which answers the receiving task's pre-gate runtime blocker
+with an exact-`87057b8` isolated sidecar. No R5C9 protocol, native, or live-evidence
+claim has been earned. The lab-side work formerly cited for R5C8 remains quarantined
+and is not an accepted checkpoint. The accepted native evidence remains separately
+bound to `ocb/s16-native-journey` at Sentinel `5f03c35`.
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 ## 1. Purpose
 
@@ -153,10 +154,11 @@ or live loopback result is not public-target or payout proof.
 
 ### Sentinel repository
 
-- Current evidence-preparation branch: `ocb/r5c9-candidate-handoff` at candidate-record
-  commit `580080a`, based on merged `main` at `87057b8`. The candidate source is exactly
-  commit `87057b8b0313b6aa1fe9b9036db98e040208bfc3`, tree
-  `449902cf6095f552074ebdeefde24c2d7a17dd3f`.
+- Current evidence-preparation branch: `ocb/r5c9-runtime-handoff`, based on merged
+  `main` at `85b0755`. The immutable app candidate remains sourced from exactly commit
+  `87057b8b0313b6aa1fe9b9036db98e040208bfc3`, tree
+  `449902cf6095f552074ebdeefde24c2d7a17dd3f`; the sidecar contains a detached,
+  one-commit shallow checkout of that same identity with no reachable prior history.
 - Accepted native evidence remains bound to `ocb/s16-native-journey` at Sentinel
   `5f03c35`; the native-journey implementation began at `fd57721` and its original
   Family-C branch chain was created from `main` at `fc1e997`.
@@ -188,6 +190,35 @@ or live loopback result is not public-target or payout proof.
   all seven app files passed the included checksum list. This is producer-attested
   build-candidate proof only: the app was not launched, no acceptance ran, no target
   traffic was sent, and the lab repository was not accessed.
+- The separately scoped receiving task reported on 2026-08-25 that it started from
+  accepted lab `main` at `0bf1767085323c1350f9f063ca93506e6a7cec24`, independently
+  matched the candidate archive, manifest, checksum-list, seven app files, executable,
+  commit, and tree identities, then stopped before gate execution. The seven-file app
+  contained neither backend source nor a Python runtime; external-backend mode had no
+  isolated service to attach to, while automatic source discovery would have crossed
+  the prohibited repository boundary. The clean lab branch had no change, commit,
+  push, or retained acceptance artifact. This is a reported pre-gate package check and
+  blocker, not protocol or native evidence; this Sentinel task did not inspect the lab.
+- Producer script `scripts/build_r5c9_runtime_handoff.py` creates a detached,
+  one-commit shallow exact-`87057b8` Git checkout with no reachable prior history,
+  remote, or object alternate; installs the locked dependency set into its own Python
+  3.12.12 environment without an editable link to the producer checkout; materializes
+  tracked Git symlinks as inert blob files; and emits relocation-safe identity and
+  authenticated loopback-start helpers. The final sidecar archive
+  `sentinelforge-r5c9-runtime-87057b8.tar.gz` is 278,343,537 bytes with SHA-256
+  `5caf6bae90907547deb68fbdf18feb31f8ba0255922854d249bb6b15c2296146`.
+  Its manifest SHA-256 is
+  `aa93ecef7b342a830e35bf3a1f65542eaa24354eb633c97af58193769c04235d`;
+  its 38,289-entry payload inventory has SHA-256
+  `63e655b7cdaaf6821525a4a6c4b72bd21b6b57fda0a1542020e28fae149f6aa0`.
+  A separately extracted copy passed the identity helper, started only on
+  authenticated `127.0.0.1:8766`, reported its module from the extracted exact-SHA
+  checkout with that checkout as its working directory, created a mode-`0600` token
+  under the supplied data root, held no open file in the producer checkout, wrote no
+  source bytecode, reused the same data root across a clean restart, and shut down with
+  no listener remaining. The archive contains zero active filesystem symlinks. This is
+  producer-attested runtime readiness only; the unchanged verifier and acceptance
+  matrices have not run.
 - The exact `5f03c35` SentinelForge-Acceptance Debug build succeeded on 2026-08-24.
   Its executable SHA-256 is
   `186b243a6ec8e19c76dd9421381264f7f1996b414c617883cae27ecc31bea518`.
@@ -502,10 +533,22 @@ closure:
         manifest SHA-256 `d07bee9c...`, and executable SHA-256 `6250ab27...`. The
         package checksum and all seven app-file checksums pass. This did not launch the
         app, run acceptance, send target traffic, or access the lab.
+      - [x] **Independent package preflight and fail-closed stop.** The separately
+        scoped receiving task reported matching every supplied app-package identity
+        from clean accepted lab `main` at `0bf1767`, then stopped before execution
+        because the app-only package supplied no isolated backend/runtime. It changed
+        no lab source and produced no commit, retained artifact, or acceptance result.
+      - [x] **Sentinel isolated runtime handoff.** The producer emits exact-`87057b8`
+        sidecar archive `sentinelforge-r5c9-runtime-87057b8.tar.gz` at SHA-256
+        `5caf6bae...`, manifest SHA-256 `aa93ecef...`, and payload-inventory SHA-256
+        `63e655b7...`. Relocated producer smoke proof covers a detached one-commit
+        shallow Git identity with no reachable prior history, authenticated loopback
+        health, same-data restart, checkout isolation, zero active symlinks, and clean
+        shutdown; it is not verifier or candidate-behavior evidence.
       - [ ] **Independent unchanged-verifier run.** The receiving lab task must verify
-        the package, manifest, checksum list, app bundle, and executable before running
-        the negative protocol and native matrices. Any required verifier/source change
-        is a blocker.
+        the app and sidecar packages, start the sidecar through the established
+        unchanged process, and run the negative protocol and native matrices. Any
+        required verifier/source change remains a blocker.
 
 The accepted native SUT was `2743 passed, 1 skipped, 2 warnings` when reverified at
 checkout `5f03c35`. The exact acceptance Debug build succeeds and its executable
@@ -662,11 +705,17 @@ scheme and `ui/project.yml` carry the same bounded behavior-gate environment, wh
 standard scheme grants none. The attempted lab extension at `64297dc` remains
 quarantined and supplies no accepted evidence or completion credit.
 
-The Sentinel-side R5C9 candidate handoff is recorded at `580080a` for exact merged
-source `87057b8`. The planned next evidence slice is the remaining **R5C9
-unchanged-verifier acceptance run** in a separately scoped lab task. The receiver must
-verify candidate archive `15c46893...`, manifest `d07bee9c...`, and executable
-`6250ab27...` before running.
+The Sentinel-side R5C9 app candidate remains bound to exact merged source `87057b8`.
+The first separately scoped receiving task matched its identities and correctly stopped
+before gate execution because the app-only package had no isolated backend/runtime.
+The producer-side correction now supplies exact-source sidecar archive `5caf6bae...`,
+manifest `aa93ecef...`, and payload inventory `63e655b7...` without changing the app
+candidate or the lab.
+
+The planned next evidence slice remains the **R5C9 unchanged-verifier acceptance
+continuation** in the separately scoped lab task. The receiver must independently
+verify both immutable handoffs, use the sidecar without accessing the SentinelForge
+checkout, and run the existing negative protocol gate plus three-pair native matrix.
 R5C9 may retain only resulting run evidence; any required verifier or lab-source
 modification is a blocker, not an implicit repair. Only after that unchecked evidence
 passes should R5D1 begin.
@@ -685,7 +734,7 @@ implemented sub-slices.
 | [ ] | Baseline governance | Active | Track the current skip, current warning set, security baseline, and six web-schema drift snapshots separately; preserve the exact native build |
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; immutable current-SHA candidate built; acceptance gate open | R5C9 unchanged-verifier protocol and native run against candidate `15c46893...` |
+| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; immutable current-SHA app and exact-source isolated runtime handoffs built; acceptance gate open | R5C9 unchanged-verifier protocol and native run against app `15c46893...` plus sidecar `5caf6bae...` |
 | [ ] | OCB-R5 family D capabilities | Blocked on the Family-C repair gate | R5D1 transport-free issued-capability contract, then `OCB-S17` |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
