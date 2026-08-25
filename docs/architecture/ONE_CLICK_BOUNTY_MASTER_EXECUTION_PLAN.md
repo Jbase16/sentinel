@@ -2,15 +2,15 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Accepted merged implementation checkpoint: `main` at `87057b8`, containing the
-corrected Sentinel-only R5C8 project/generated-scheme parity and repository-boundary
-record. Current R5C9 candidate record: `ocb/r5c9-candidate-handoff` at `580080a`, with
-the build sourced from that exact merged commit and tree. No R5C9 lab, native, or
-live-evidence claim has been earned. The lab-side work formerly cited for R5C8 remains
-quarantined and is not an accepted checkpoint. The accepted native evidence remains
-separately bound to `ocb/s16-native-journey` at Sentinel `5f03c35`.
+Reset baseline: clean `main` at `85b0755`. The accepted merged implementation
+checkpoint remains Sentinel-only R5C8 at `87057b8`. The later R5C9 candidate-build
+records at `580080a` and `85b0755` are historical producer notes, not an acceptance
+prerequisite or R5C9 completion credit; the unmerged runtime-handoff sidecar is
+abandoned. No renewed R5C9 lab, native, or live-evidence claim has been earned.
+The accepted native evidence remains separately bound to `ocb/s16-native-journey` at
+Sentinel `5f03c35`.
 
-Last verified: 2026-08-24
+Last verified: 2026-08-25
 
 ## 1. Purpose
 
@@ -116,10 +116,13 @@ Keep unresolved security, native, live, and external evidence visibly unchecked.
 Repository boundaries are part of the evidence contract. A SentinelForge task may cite
 an already accepted immutable lab artifact recorded here, but it must not inspect,
 modify, test, commit, push, merge, delete, or otherwise administer the sibling visual
-acceptance repository. A future lab run starts only in a separately scoped lab task
-after Sentinel provides an immutable candidate. Cross-repository work produced outside
-that boundary is quarantined, cannot satisfy a checkbox, and must be recorded as such
-rather than normalized into the plan after the fact.
+acceptance repository. In a separately scoped native run, the operator starts the
+complete real SentinelForge app and its own loopback backend; the observe-only lab
+starts its website, reads the authenticated public API plus target ledger, and attests
+the Sentinel SHA. No app, ZIP, backend package, sidecar, or source import crosses the
+repository boundary. Cross-repository work produced outside that boundary is
+quarantined, cannot satisfy a checkbox, and must be recorded as such rather than
+normalized into the plan after the fact.
 
 Start every OCB slice from the current synchronized `main` on one dedicated short-lived
 `ocb/<slice-slug>` branch. A slice branch contains only that slice and its required tests,
@@ -127,6 +130,11 @@ evidence, and documentation. Push the branch early for remote visibility, but do
 merge it until the slice gates pass and the handoff is reviewed. After merge, resync
 `main` before creating the next slice branch. Direct slice development on `main` is not
 allowed.
+
+Keep SentinelForge tasks in `workspace-write`. When protected `.git` metadata blocks an
+otherwise authorized branch, commit, fetch, or push, approve only that exact Git
+command outside the sandbox; never remove the repository fence to solve Git
+writability.
 
 ## 4. Evidence vocabulary
 
@@ -153,10 +161,12 @@ or live loopback result is not public-target or payout proof.
 
 ### Sentinel repository
 
-- Current evidence-preparation branch: `ocb/r5c9-candidate-handoff` at candidate-record
-  commit `580080a`, based on merged `main` at `87057b8`. The candidate source is exactly
-  commit `87057b8b0313b6aa1fe9b9036db98e040208bfc3`, tree
-  `449902cf6095f552074ebdeefde24c2d7a17dd3f`.
+- Reset source baseline: clean `main` at `85b0755`; Sentinel-only R5C8 implementation
+  remains merged at `87057b8`.
+- Commits `580080a` and `85b0755` retain the historical fact that a producer built and
+  documented an app candidate. That package is not required by the acceptance topology,
+  satisfies no R5C9 checkbox, and is not the basis for forward work. The unmerged
+  `ocb/r5c9-runtime-handoff` sidecar branch is abandoned and nothing from it lands.
 - Accepted native evidence remains bound to `ocb/s16-native-journey` at Sentinel
   `5f03c35`; the native-journey implementation began at `fd57721` and its original
   Family-C branch chain was created from `main` at `fc1e997`.
@@ -175,19 +185,6 @@ or live loopback result is not public-target or payout proof.
   `ui/project.yml`, regenerates the committed schemes, and makes
   `tests/unit/test_acceptance_scheme.py` require exact project-spec/scheme environment
   parity while preserving a behavior-gate-free standard scheme.
-- The R5C9 producer build used Xcode 27.0 build `27A5209h`, the committed
-  `SentinelForge-Acceptance` scheme, a fresh DerivedData root, a generic macOS
-  destination, and disabled requested code signing; the product carries only the
-  toolchain's ad-hoc linker signature. It produced a universal `arm64`/`x86_64` Debug
-  app with executable SHA-256
-  `6250ab27dc92ffdc6e2ff2186f9498473861bcd3a832994a4551ba1588d7ff35`.
-- Candidate archive `sentinelforge-r5c9-candidate-87057b8.zip` is 8,277,841 bytes and
-  has SHA-256 `15c468936890145ce616d217ad2f0b875ad24e84d76e96bd1f2b51765f474435`.
-  Its manifest SHA-256 is
-  `d07bee9ce0fb5e1ed35fb39aae570f15a5308070f1a71b6ef9985ae9372c3f32`;
-  all seven app files passed the included checksum list. This is producer-attested
-  build-candidate proof only: the app was not launched, no acceptance ran, no target
-  traffic was sent, and the lab repository was not accessed.
 - The exact `5f03c35` SentinelForge-Acceptance Debug build succeeded on 2026-08-24.
   Its executable SHA-256 is
   `186b243a6ec8e19c76dd9421381264f7f1996b414c617883cae27ecc31bea518`.
@@ -217,13 +214,11 @@ verifier change is accepted by this plan.
 - The reconciled SUT, verifier, and executable hashes match the retained checkouts and
   binary. The verifier accepted those identities as operator inputs; it did not itself
   prove clean checkouts, source-to-build provenance, or PID-to-executable identity.
-- Quarantined boundary violation: unmerged lab branch `ocb/r5c8-provenance` at
-  `64297dce58bec28dc2bd5121bbfd69c3388dea19`, its schema `3.0.0` verifier changes,
-  lab-suite result, and `source_build_manifest:43a67895...` were produced from a
-  Sentinel-scoped task. They are not accepted verifier, provenance, build, native, or
-  live evidence; they satisfy no R5C8 or R5C9 checkbox. This record preserves the audit
-  trail but grants no authority to inspect, merge, delete, or otherwise touch that lab
-  branch from SentinelForge.
+- Quarantined boundary violation: R5C8 lab residue was produced from a Sentinel-scoped
+  task and therefore supplies no Sentinel verifier, provenance, build, native, or live
+  evidence and satisfies no R5C8 or R5C9 checkbox. Its legitimacy and disposition
+  belong to a separate lab-side task. SentinelForge does not cite the residue's lab SHAs
+  as its own work or grant authority to inspect or administer it here.
 
 - Prior protocol-bridge Family-C checkpoint: pushed branch `ocb/s16-live-acceptance` at
   `fb142925afc5304fab39940dec69f261826b0e59`.
@@ -257,8 +252,8 @@ verifier change is accepted by this plan.
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
-| OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; current-SHA evidence is open | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, generated Acceptance parity, and three prior pair-level fresh vulnerable/secure Swift/WKWebView cycles | Review and merge the Sentinel-only R5C8 repair, then run current-SHA negative protocol and native acceptance from the unchanged accepted lab baseline before Family D; invitation and broader administrative shapes stay open |
-| OCB-R5 family D: capability safety | Designed | The planner recognizes the capability-confinement property and callback-receiver topology; no executable capability backend exists | After the Family-C repair gate, implement the transport-free issued-capability contract, then confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
+| OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; current-SHA acceptance remains open, while broader membership-creation, role-assignment, and administrative-boundary shapes are open and deferred | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, generated Acceptance parity, and three prior pair-level fresh vulnerable/secure Swift/WKWebView cycles | Renew the current-SHA negative protocol gate and native vulnerable/secure matrix against the unchanged verifier baseline through the operator-driven observe-only topology before Family D; the broader Family-C shapes remain open and deferred and are not part of R5C9 |
+| OCB-R5 family D: capability safety | Designed | The planner recognizes the capability-confinement property and callback-receiver topology; no executable capability backend exists | After the R5C9 acceptance gate, implement the transport-free issued-capability contract, then confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Partial and narrow | Ranked obligations, payout-guided frontier choice, continuation receipts, and deterministic replanning exist | Build the high-value sink ledger, marginal-value scheduler, family-aware coverage, and honest stop certificate; prove `OCB-S18` |
@@ -485,27 +480,23 @@ closure:
       (corrected scope).** Sentinel `8329be8` restores exact
       `ui/project.yml`/generated-scheme environment parity, preserves a
       behavior-gate-free standard scheme, and is covered by focused tests plus the
-      `2745 passed, 1 skipped, 3 warnings` Sentinel suite. Boundary correction: the
-      former completion record improperly included lab `64297dc`, its `435 passed`
-      suite, manifest, process binding, and request-ledger changes. Those lab-derived
-      results are quarantined, satisfy no checkbox, and are not R5C8 evidence. R5C8
+      `2745 passed, 1 skipped, 3 warnings` Sentinel suite. Wrong-actor lab residue is
+      quarantined, satisfies no checkbox, and is not cited as SentinelForge work. R5C8
       introduces no lab-source or verifier-change requirement.
-    - [ ] **R5C9 — renew current-SHA acceptance.** Use a separately scoped lab task to
-      rerun the negative protocol gate and native vulnerable/secure matrix from the
-      unchanged accepted verifier baseline. R5C9 may retain the resulting run evidence
-      under the established lab process, but it must not change verifier or lab source.
-      If the existing verifier cannot run the candidate, stop and report the blocker
-      rather than modifying the lab under this workstream.
-      - [x] **Sentinel candidate handoff.** Record commit `580080a` binds clean merged
-        source `87057b8` / tree `449902cf` to universal Debug candidate
-        `sentinelforge-r5c9-candidate-87057b8.zip`, archive SHA-256 `15c46893...`,
-        manifest SHA-256 `d07bee9c...`, and executable SHA-256 `6250ab27...`. The
-        package checksum and all seven app-file checksums pass. This did not launch the
-        app, run acceptance, send target traffic, or access the lab.
-      - [ ] **Independent unchanged-verifier run.** The receiving lab task must verify
-        the package, manifest, checksum list, app bundle, and executable before running
-        the negative protocol and native matrices. Any required verifier/source change
-        is a blocker.
+    - [ ] **R5C9 — renew current-SHA acceptance.** Re-earn the negative protocol gate
+      and native vulnerable/secure matrix at the current SHA against the **unchanged**
+      accepted verifier baseline, in a **separately scoped lab task**. The operator runs
+      the complete real SentinelForge app and its own `:8766` backend; the observe-only
+      lab runs its website, observes the authenticated public API plus target ledger,
+      and attests the observed Sentinel SHA. No app, ZIP, backend package, sidecar, or
+      source import crosses the boundary, and no native pass exists without a real
+      attestation file. R5C9 must not change verifier or lab source; if the unchanged
+      verifier cannot run against the current app, **stop and report the blocker**
+      rather than modifying the lab. The accepted native proof predates R5C7
+      (`f91f5cb`), which changed the server role profile, so R5C9 re-proves the native
+      matrix against the code as it now stands. Broader membership-creation,
+      role-assignment, and administrative-boundary shapes stay **open and deferred**;
+      invitation-token/link confinement remains Family D. None is part of R5C9.
 
 The accepted native SUT was `2743 passed, 1 skipped, 2 warnings` when reverified at
 checkout `5f03c35`. The exact acceptance Debug build succeeds and its executable
@@ -536,10 +527,12 @@ web-schema drift baselines still prevent treating this as complete release evide
 Exit gate: the accepted `OCB-S16` revocation-survival scenario remains native-proven at
 its cited SUT. R5C7 sealed the server profile and R5C8 repaired only Sentinel's
 Acceptance project/scheme parity. It did not upgrade the accepted verifier or repair
-its documented operator-supplied provenance limitations. Family-C advancement remains
-open until R5C9 renews the prior-SHA negative and native evidence from the unchanged
-accepted lab baseline. The existing artifacts remain exact-SHA evidence and are not
-public-target or payout proof.
+its documented operator-supplied provenance limitations. The gate to Family D remains
+open until R5C9 re-earns the negative protocol gate and native vulnerable/secure matrix
+at the current SHA against the unchanged accepted verifier baseline, with the observed
+Sentinel SHA operator-attested by the separately scoped observe-only lab. The broader
+Family-C shapes remain open and deferred rather than becoming part of R5C9. The
+existing artifacts remain exact-SHA evidence and are not public-target or payout proof.
 
 ### Workstream 3 — Implement OCB-R5 family D capability confinement and freshness
 
@@ -659,17 +652,20 @@ unrelated behavioral backends from role-profile selection at commit `f91f5cb`.
 
 The corrected R5C8 checkpoint is merged at Sentinel `87057b8`: the committed Acceptance
 scheme and `ui/project.yml` carry the same bounded behavior-gate environment, while the
-standard scheme grants none. The attempted lab extension at `64297dc` remains
-quarantined and supplies no accepted evidence or completion credit.
+standard scheme grants none. Wrong-actor lab residue remains quarantined and supplies no
+accepted evidence or completion credit; its disposition is a separate lab-side task.
 
-The Sentinel-side R5C9 candidate handoff is recorded at `580080a` for exact merged
-source `87057b8`. The planned next evidence slice is the remaining **R5C9
-unchanged-verifier acceptance run** in a separately scoped lab task. The receiver must
-verify candidate archive `15c46893...`, manifest `d07bee9c...`, and executable
-`6250ab27...` before running.
-R5C9 may retain only resulting run evidence; any required verifier or lab-source
-modification is a blocker, not an implicit repair. Only after that unchecked evidence
-passes should R5D1 begin.
+The 2026-08-25 reset voids the R5C9 candidate-package and runtime-handoff premises. The
+planned next slice is **R5C9 current-SHA acceptance renewal**. The accepted native proof
+predates R5C7 (`f91f5cb`), which changed the server role profile, so the operator next
+runs the complete real SentinelForge app and its own `:8766` backend while the
+separately scoped, unchanged observe-only lab runs its website, observes the
+authenticated public API plus target ledger, and attests the observed Sentinel SHA.
+The run is neither packaged nor automated, and no native pass exists without a real
+attestation. Broader membership-creation, role-assignment, and administrative-boundary
+shapes remain open and deferred; invitation-token/link confinement remains Family D,
+and none is part of R5C9. Only after the R5C9 acceptance renewal passes and is verified
+should R5D1 begin.
 
 The repository security-check baseline, six generated web-schema drift snapshots,
 remaining skip, and warning debt stay as explicit maintenance/evidence items. They must
@@ -685,8 +681,8 @@ implemented sub-slices.
 | [ ] | Baseline governance | Active | Track the current skip, current warning set, security baseline, and six web-schema drift snapshots separately; preserve the exact native build |
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; immutable current-SHA candidate built; acceptance gate open | R5C9 unchanged-verifier protocol and native run against candidate `15c46893...` |
-| [ ] | OCB-R5 family D capabilities | Blocked on the Family-C repair gate | R5D1 transport-free issued-capability contract, then `OCB-S17` |
+| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; current-SHA acceptance remains open, while broader Family-C shapes are open and deferred | Renew current-SHA acceptance against the unchanged verifier baseline through the operator-driven observe-only topology; the broader shapes are not part of R5C9 |
+| [ ] | OCB-R5 family D capabilities | Blocked on the R5C9 acceptance gate | R5D1 transport-free issued-capability contract, then `OCB-S17` |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |

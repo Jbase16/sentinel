@@ -109,9 +109,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
 | State-machine prerequisite oracles | Production-wired and externally passed for bounded omission and adjacent reordering | Exact same-world lineage preserves a content-addressed DAG; one payout-selected terminal can execute sealed baseline, treatment, and independent control across three fresh owned worlds, compare canonical effects, verify family-specific evidence, clean up, persist redacted denial/completion state, and revalidate current capture before rebuilding the admitted plan. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Define replay and stale-state capability/freshness semantics before adding those counterfactuals. |
-| Role/membership monotonicity oracle | Accepted revocation-survival scenario is native-proven; R5C7 profile isolation and R5C8 Sentinel Acceptance parity are suite-proved; current-SHA evidence remains open | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three pair-level fresh vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero additional governed role actions on retry. | Review and merge the Sentinel-only R5C8 repair, then provide its immutable candidate to a separately scoped lab task and renew current-SHA evidence with the unchanged accepted verifier before Family D; invitation and broader administrative shapes remain open. |
+| Role/membership monotonicity oracle | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel Acceptance parity are suite-proved; current-SHA acceptance remains open, while broader membership-creation, role-assignment, and administrative-boundary shapes are open and deferred | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three pair-level fresh vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero additional governed role actions on retry. | Renew the current-SHA negative protocol gate and native vulnerable/secure matrix against the unchanged verifier baseline through the operator-driven observe-only topology before Family D; the broader Family-C shapes remain open and deferred and are not part of R5C9. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
-| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B and family-C paths; accepted Family-C native UI seam passed, server profile isolation is suite-proved, and current-SHA acceptance remains open | The native Scan UI emits the exact phase-only role profile. R5C7 makes the server require that phase-only completion for role mode, reject role specifications under other modes, and exclude ambient graph or generalized backends from a role-profile request. The accepted native run predates that repair. | Renew current-SHA acceptance from the unchanged accepted verifier baseline before coordinating another property family; preserve every existing signed workflow and execution gate. |
+| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B and family-C paths; accepted Family-C native UI seam passed, server profile isolation is suite-proved, and current-SHA acceptance remains open while broader Family-C shapes are open and deferred | The native Scan UI emits the exact phase-only role profile. R5C7 makes the server require that phase-only completion for role mode, reject role specifications under other modes, and exclude ambient graph or generalized backends from a role-profile request. The accepted native run predates that repair. | Renew R5C9 current-SHA acceptance against the unchanged verifier baseline through the operator-attested observe-only topology before coordinating Family D; broader membership-creation, role-assignment, and administrative-boundary shapes are not part of R5C9. |
 | Proof topology selector | Implemented and bounded for the closed Family-B scope | `PayoutGoalTopologyPlanner` binds the graph backend to the exact compiled terminal; ordinary click selects one unique omission or, when omission is not uniquely selectable, one unique adjacent reordering. Graph-absent v1 identities remain stable. | Add only separately admitted executable topologies. |
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
@@ -1214,27 +1214,28 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   `ui/project.yml`/generated-scheme environment parity, preserves a
   behavior-gate-free standard scheme, and is covered by focused tests plus the
   `2745 passed, 1 skipped, 3 warnings` Sentinel suite. This is the corrected R5C8 scope.
-  The attempted lab extension at `64297dc`, its `435 passed` result, manifest,
-  process-binding changes, and request-ledger changes are quarantined boundary-violation
-  records, not accepted evidence, and satisfy no checklist item.
-- [ ] R5C9 uses a separately scoped lab task to rerun the negative protocol and native
-  matrices from the unchanged accepted verifier baseline and retain the resulting run
-  evidence. If the verifier cannot run the candidate without source changes, stop and
-  report the blocker instead of changing the lab under R5C9.
-  - [x] Sentinel candidate handoff: record commit `580080a` binds clean merged source
-    `87057b8` / tree `449902cf` to universal Debug archive
-    `sentinelforge-r5c9-candidate-87057b8.zip`, archive
-    SHA-256 `15c46893...`, manifest SHA-256 `d07bee9c...`, and executable SHA-256
-    `6250ab27...`. Package and seven app-file checksums pass; no app launch, acceptance,
-    target traffic, or lab access occurred.
-  - [ ] The separately scoped lab task independently verifies the package and runs the
-    unchanged accepted verifier. Any verifier or lab-source change is a blocker.
+  Wrong-actor lab residue is quarantined, supplies no SentinelForge evidence, and
+  satisfies no checklist item; its disposition belongs to a separate lab-side task.
+- [ ] **R5C9 — renew current-SHA acceptance.** Re-earn the negative protocol gate and
+  native vulnerable/secure matrix at the current SHA against the **unchanged** accepted
+  verifier baseline, in a **separately scoped lab task**. The operator runs the complete
+  real SentinelForge app and its own `:8766` backend; the observe-only lab runs its
+  website, observes the authenticated public API plus target ledger, and attests the
+  observed Sentinel SHA. No app, ZIP, backend package, sidecar, or source import crosses
+  the boundary, and no native pass exists without a real attestation file. R5C9 must not
+  change verifier or lab source; if the unchanged verifier cannot run against the
+  current app, **stop and report the blocker** rather than modifying the lab. The
+  accepted native proof predates R5C7 (`f91f5cb`), which changed the server role profile,
+  so R5C9 re-proves the native matrix against the code as it now stands. Broader
+  membership-creation, role-assignment, and administrative-boundary shapes stay
+  **open and deferred**; invitation-token/link confinement remains Family D. None is
+  part of R5C9.
 
 #### R5D — Capability confinement, freshness, and replay
 
-- [ ] R5D starts only after the remaining R5C9 acceptance gate. Invitation token/link
+- [ ] R5D starts only after the remaining R5C9 **acceptance gate**. Invitation token/link
   confinement belongs here; membership creation, role assignment, and resulting
-  authority remain Family-C obligations.
+  authority remain **open, deferred** Family-C obligations.
 - [ ] R5D1 defines a transport-free, content-addressed issued-capability contract and
   controlled single-owned-account fixture before any executable backend exists.
 - [ ] Object-bound, account-bound, tenant-bound, single-use, and expiry properties.

@@ -12,6 +12,14 @@ Use the lab repository's operator documentation for current run procedures and
 for Sentinel's detailed forward capability contract. This document remains the
 design record for why the lab exists and what its evidence is allowed to claim.
 
+Current integration correction (2026-08-25): the operator starts and drives the
+complete real SentinelForge app, including Sentinel's own loopback backend on `:8766`.
+The lab starts its target website and observes Sentinel's authenticated public API plus
+the target-side ledger; it does not import Sentinel source or launch a substitute
+subject. Only the observed Sentinel SHA is attested. No `.app`, ZIP, backend package, or
+sidecar is handed to the lab. Historical orchestrator wording below records the original
+design, not the current run topology.
+
 ## Decision summary
 
 Build a deterministic, entirely local website lab that Sentinel can see and use
