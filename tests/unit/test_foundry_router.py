@@ -3105,7 +3105,7 @@ class TestBehavioralAuthorizationEndpoint:
         ):
             assert private_value not in stored_text
 
-    def test_role_one_click_default_off_stops_without_role_replay(
+    def test_role_one_click_isolates_unrelated_ambient_profiles_without_replay(
         self,
         monkeypatch,
     ):
@@ -3123,7 +3123,19 @@ class TestBehavioralAuthorizationEndpoint:
             lower,
             _role_specification,
         ) = self._role_one_click_request()
-        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_CONTINUATION",
+            "SENTINELFORGE_BEHAVIOR_COMPILED_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_OMISSION_CONFIRMATION",
+            "SENTINELFORGE_BEHAVIOR_PROOF_EXPERIMENT_ADMISSION",
+            "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_FRESH_WORLD_PROVISIONING",
+            "SENTINELFORGE_BEHAVIOR_GRAPH_BOUND_PREREQUISITE_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
 
         async def validate_windows(persona_ids):
             assert tuple(persona_ids) == (higher.persona_id, lower.persona_id)
@@ -3168,6 +3180,11 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["role_monotonicity_one_click"]["status"] == (
             "selected_execution_disabled"
         )
+        assert result["behavioral_shadow"]["payout_goal_plan"]["context"][
+            "available_backends"
+        ] == ["authority_monotonicity"]
+        assert "graph_bound_prerequisite_one_click" not in result
+        assert "generalized_authorization_one_click" not in result
         assert set(
             result["role_monotonicity_one_click"]["disabled_gates"]
         ) == {

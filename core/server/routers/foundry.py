@@ -1034,6 +1034,7 @@ async def run_behavioral_authorization_endpoint(
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    role_profile_selected = role_specification is not None
     source_controls = tuple(req.source_controls)
     peer_controls = tuple(req.peer_controls)
     try:
@@ -1070,22 +1071,22 @@ async def run_behavioral_authorization_endpoint(
     # role-session contract.
     interaction_acquisition_config = (
         InteractionAcquisitionConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionAcquisitionConfig.from_environment()
     )
     interaction_render_config = (
         InteractionRenderConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionRenderConfig.from_environment()
     )
     interaction_second_config = (
         InteractionSecondTransitionConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionSecondTransitionConfig.from_environment()
     )
     interaction_adaptive_config = (
         InteractionAdaptiveConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionAdaptiveConfig.from_environment()
     )
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
@@ -1182,37 +1183,67 @@ async def run_behavioral_authorization_endpoint(
                 f"{INTERACTION_ADAPTIVE_WORKFLOW!r}"
             ),
         )
-    continuation_config = BoundedContinuationConfig.from_environment()
+    # The exact role profile is mutually exclusive with every other active
+    # behavioral backend. Keep passive reconstruction available, but do not let
+    # ambient process configuration add prerequisites, selection candidates, or
+    # dispatch authority to this request.
+    continuation_config = (
+        BoundedContinuationConfig()
+        if role_profile_selected
+        else BoundedContinuationConfig.from_environment()
+    )
     try:
         continuation_config.authorize(envelope, target_origin=target_origin)
     except BoundedContinuationDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    fresh_boundary_config = FreshOwnedBoundaryConfig.from_environment()
+    fresh_boundary_config = (
+        FreshOwnedBoundaryConfig()
+        if role_profile_selected
+        else FreshOwnedBoundaryConfig.from_environment()
+    )
     omission_confirmation_config = (
-        FreshOmissionConfirmationConfig.from_environment()
+        FreshOmissionConfirmationConfig()
+        if role_profile_selected
+        else FreshOmissionConfirmationConfig.from_environment()
     )
     proof_experiment_admission_config = (
-        ProofExperimentAdmissionConfig.from_environment()
+        ProofExperimentAdmissionConfig()
+        if role_profile_selected
+        else ProofExperimentAdmissionConfig.from_environment()
     )
     generalized_authorization_execution_config = (
-        GeneralizedAuthorizationExecutionConfig.from_environment()
+        GeneralizedAuthorizationExecutionConfig()
+        if role_profile_selected
+        else GeneralizedAuthorizationExecutionConfig.from_environment()
     )
-    graph_bound_claim_config = GraphBoundExecutionClaimConfig.from_environment()
+    graph_bound_claim_config = (
+        GraphBoundExecutionClaimConfig()
+        if role_profile_selected
+        else GraphBoundExecutionClaimConfig.from_environment()
+    )
     graph_bound_execution_config = (
-        GraphBoundPrerequisiteExecutionConfig.from_environment()
+        GraphBoundPrerequisiteExecutionConfig()
+        if role_profile_selected
+        else GraphBoundPrerequisiteExecutionConfig.from_environment()
     )
     graph_bound_claim_gate_enabled = (
-        os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
+        False
+        if role_profile_selected
+        else os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     graph_bound_provisioning_gate_enabled = (
-        os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
+        False
+        if role_profile_selected
+        else os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
         .strip()
         .lower()
         in {"1", "true", "yes", "on"}
     )
     graph_bound_execution_gate_enabled = (
-        os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
+        False
+        if role_profile_selected
+        else os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
         .strip()
         .lower()
         in {"1", "true", "yes", "on"}
@@ -1519,32 +1550,33 @@ async def run_behavioral_authorization_endpoint(
                 boundary_provenance,
             ),
         }
-        graph_bound_policy = ExecutionPolicy(
-            "bounty_safe",
-            scope_filter=scope_filter,
-            budget=ProofBudget(
-                max_total_requests=96,
-                max_requests_per_endpoint=24,
-                max_cross_object_reads=0,
-                max_privilege_mutations=0,
-                max_creates=3,
-                allow_delete=False,
-                allow_real_user_data_access=False,
-            ),
-            ownership_registry=OwnershipRegistry(),
-        )
-        graph_bound_provenance = ProvenanceSink()
-        graph_bound_provenance.record_context(
-            target=target_origin,
-            proof_mode="bounty_safe_graph_bound_prerequisite",
-            policy_digest=graph_bound_policy.digest(),
-        )
-        graph_bound_prerequisite_executor = make_executor(
-            source_persona.persona_id,
-            graph_bound_policy,
-            graph_bound_provenance,
-        )
-        if role_specification is not None:
+        if not role_profile_selected:
+            graph_bound_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=96,
+                    max_requests_per_endpoint=24,
+                    max_cross_object_reads=0,
+                    max_privilege_mutations=0,
+                    max_creates=3,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+                ownership_registry=OwnershipRegistry(),
+            )
+            graph_bound_provenance = ProvenanceSink()
+            graph_bound_provenance.record_context(
+                target=target_origin,
+                proof_mode="bounty_safe_graph_bound_prerequisite",
+                policy_digest=graph_bound_policy.digest(),
+            )
+            graph_bound_prerequisite_executor = make_executor(
+                source_persona.persona_id,
+                graph_bound_policy,
+                graph_bound_provenance,
+            )
+        if role_profile_selected:
             role_policy = ExecutionPolicy(
                 "bounty_safe",
                 scope_filter=scope_filter,
@@ -4064,6 +4096,7 @@ async def run_behavioral_authorization_from_url_endpoint(
             )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    role_profile_selected = role_specification is not None
 
     if not PrimaryPlannerConfig.from_environment().enabled:
         raise HTTPException(
@@ -4091,36 +4124,66 @@ async def run_behavioral_authorization_from_url_endpoint(
         )
     except ControlledExecutionDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    continuation_config = BoundedContinuationConfig.from_environment()
+    # A supplied role specification selects one mutually exclusive active
+    # profile before any window access. Ambient Family-B/generalized settings
+    # cannot become prerequisites or authority for the role capture.
+    continuation_config = (
+        BoundedContinuationConfig()
+        if role_profile_selected
+        else BoundedContinuationConfig.from_environment()
+    )
     try:
         continuation_config.authorize(envelope, target_origin=target_origin)
     except BoundedContinuationDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    fresh_boundary_config = (
+        FreshOwnedBoundaryConfig()
+        if role_profile_selected
+        else FreshOwnedBoundaryConfig.from_environment()
+    )
     omission_confirmation_config = (
-        FreshOmissionConfirmationConfig.from_environment()
+        FreshOmissionConfirmationConfig()
+        if role_profile_selected
+        else FreshOmissionConfirmationConfig.from_environment()
     )
     proof_experiment_admission_config = (
-        ProofExperimentAdmissionConfig.from_environment()
+        ProofExperimentAdmissionConfig()
+        if role_profile_selected
+        else ProofExperimentAdmissionConfig.from_environment()
     )
     generalized_authorization_execution_config = (
-        GeneralizedAuthorizationExecutionConfig.from_environment()
+        GeneralizedAuthorizationExecutionConfig()
+        if role_profile_selected
+        else GeneralizedAuthorizationExecutionConfig.from_environment()
     )
-    graph_bound_claim_config = GraphBoundExecutionClaimConfig.from_environment()
+    graph_bound_claim_config = (
+        GraphBoundExecutionClaimConfig()
+        if role_profile_selected
+        else GraphBoundExecutionClaimConfig.from_environment()
+    )
     graph_bound_execution_config = (
-        GraphBoundPrerequisiteExecutionConfig.from_environment()
+        GraphBoundPrerequisiteExecutionConfig()
+        if role_profile_selected
+        else GraphBoundPrerequisiteExecutionConfig.from_environment()
     )
     graph_bound_claim_gate_enabled = (
-        os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
+        False
+        if role_profile_selected
+        else os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     graph_bound_provisioning_gate_enabled = (
-        os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
+        False
+        if role_profile_selected
+        else os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
         .strip()
         .lower()
         in {"1", "true", "yes", "on"}
     )
     graph_bound_execution_gate_enabled = (
-        os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
+        False
+        if role_profile_selected
+        else os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
         .strip()
         .lower()
         in {"1", "true", "yes", "on"}
@@ -4177,22 +4240,22 @@ async def run_behavioral_authorization_from_url_endpoint(
     # so its unrelated workflows cannot become accidental prerequisites.
     interaction_acquisition_config = (
         InteractionAcquisitionConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionAcquisitionConfig.from_environment()
     )
     interaction_render_config = (
         InteractionRenderConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionRenderConfig.from_environment()
     )
     interaction_second_config = (
         InteractionSecondTransitionConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionSecondTransitionConfig.from_environment()
     )
     interaction_adaptive_config = (
         InteractionAdaptiveConfig()
-        if role_specification is not None
+        if role_profile_selected
         else InteractionAdaptiveConfig.from_environment()
     )
     if (
@@ -4373,9 +4436,7 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "interaction_adaptive": (
                     interaction_adaptive_config.enabled
                 ),
-                "fresh_owned_boundary": (
-                    FreshOwnedBoundaryConfig.from_environment().enabled
-                ),
+                "fresh_owned_boundary": fresh_boundary_config.enabled,
                 "fresh_omission_confirmation": (
                     omission_confirmation_config.enabled
                 ),

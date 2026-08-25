@@ -1029,7 +1029,23 @@ class BehavioralShadowOrchestrator:
                 owned_world_ids = (*owned_world_ids, experiment_context.peer_persona_id)
             role_world_ids = experiment_context.role_world_ids
             if role_world_ids:
-                available_backends.append("authority_monotonicity")
+                # Role worlds are an explicit, mutually exclusive execution
+                # profile. Passive reconstruction can still describe other
+                # properties, but those backends must not influence the payout
+                # selection consumed by the role dispatcher.
+                available_backends = ["authority_monotonicity"]
+        graph_bound_terminal_ids = (
+            ()
+            if role_world_ids
+            else tuple(
+                sorted(
+                    {
+                        item.baseline_operation_ids[-1]
+                        for item in graph_bound_omission_plans
+                    }
+                )
+            )
+        )
         payout_context = GoalPlanningContext.build(
             target_ref=graph.target_ref,
             target_origin=target_origin,
@@ -1039,14 +1055,7 @@ class BehavioralShadowOrchestrator:
             role_world_ids=role_world_ids,
             lifecycle_available=bool(state_machine.candidates),
             available_backends=available_backends,
-            graph_bound_prerequisite_terminal_ids=tuple(
-                sorted(
-                    {
-                        item.baseline_operation_ids[-1]
-                        for item in graph_bound_omission_plans
-                    }
-                )
-            ),
+            graph_bound_prerequisite_terminal_ids=graph_bound_terminal_ids,
         )
         payout_goal_plan = self.payout_goal_planner.plan(
             semantic_catalog.planner_operations(
