@@ -4,10 +4,11 @@ Status: authoritative program index, current-state ledger, and forward execution
 
 Accepted merged implementation checkpoint: `main` at `87057b8`, containing the
 corrected Sentinel-only R5C8 project/generated-scheme parity and repository-boundary
-record. The R5C9 build candidate is sourced from that exact commit and tree; no R5C9
-lab, native, or live-evidence claim has been earned. The lab-side work formerly cited
-for R5C8 remains quarantined and is not an accepted checkpoint. The accepted native
-evidence remains separately bound to `ocb/s16-native-journey` at Sentinel `5f03c35`.
+record. Current R5C9 candidate record: `ocb/r5c9-candidate-handoff` at `580080a`, with
+the build sourced from that exact merged commit and tree. No R5C9 lab, native, or
+live-evidence claim has been earned. The lab-side work formerly cited for R5C8 remains
+quarantined and is not an accepted checkpoint. The accepted native evidence remains
+separately bound to `ocb/s16-native-journey` at Sentinel `5f03c35`.
 
 Last verified: 2026-08-24
 
@@ -152,9 +153,9 @@ or live loopback result is not public-target or payout proof.
 
 ### Sentinel repository
 
-- Current evidence-preparation branch: `ocb/r5c9-candidate-handoff`, based on merged
-  `main` at `87057b8`. The candidate source is exactly commit
-  `87057b8b0313b6aa1fe9b9036db98e040208bfc3`, tree
+- Current evidence-preparation branch: `ocb/r5c9-candidate-handoff` at candidate-record
+  commit `580080a`, based on merged `main` at `87057b8`. The candidate source is exactly
+  commit `87057b8b0313b6aa1fe9b9036db98e040208bfc3`, tree
   `449902cf6095f552074ebdeefde24c2d7a17dd3f`.
 - Accepted native evidence remains bound to `ocb/s16-native-journey` at Sentinel
   `5f03c35`; the native-journey implementation began at `fd57721` and its original
@@ -495,8 +496,8 @@ closure:
       under the established lab process, but it must not change verifier or lab source.
       If the existing verifier cannot run the candidate, stop and report the blocker
       rather than modifying the lab under this workstream.
-      - [x] **Sentinel candidate handoff.** Clean merged source `87057b8` / tree
-        `449902cf` produced universal Debug candidate
+      - [x] **Sentinel candidate handoff.** Record commit `580080a` binds clean merged
+        source `87057b8` / tree `449902cf` to universal Debug candidate
         `sentinelforge-r5c9-candidate-87057b8.zip`, archive SHA-256 `15c46893...`,
         manifest SHA-256 `d07bee9c...`, and executable SHA-256 `6250ab27...`. The
         package checksum and all seven app-file checksums pass. This did not launch the
@@ -661,10 +662,11 @@ scheme and `ui/project.yml` carry the same bounded behavior-gate environment, wh
 standard scheme grants none. The attempted lab extension at `64297dc` remains
 quarantined and supplies no accepted evidence or completion credit.
 
-The Sentinel-side R5C9 candidate handoff is complete for exact merged source `87057b8`.
-The planned next evidence slice is the remaining **R5C9 unchanged-verifier acceptance
-run** in a separately scoped lab task. The receiver must verify candidate archive
-`15c46893...`, manifest `d07bee9c...`, and executable `6250ab27...` before running.
+The Sentinel-side R5C9 candidate handoff is recorded at `580080a` for exact merged
+source `87057b8`. The planned next evidence slice is the remaining **R5C9
+unchanged-verifier acceptance run** in a separately scoped lab task. The receiver must
+verify candidate archive `15c46893...`, manifest `d07bee9c...`, and executable
+`6250ab27...` before running.
 R5C9 may retain only resulting run evidence; any required verifier or lab-source
 modification is a blocker, not an implicit repair. Only after that unchecked evidence
 passes should R5D1 begin.

@@ -1221,8 +1221,9 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   matrices from the unchanged accepted verifier baseline and retain the resulting run
   evidence. If the verifier cannot run the candidate without source changes, stop and
   report the blocker instead of changing the lab under R5C9.
-  - [x] Sentinel candidate handoff: clean merged source `87057b8` / tree `449902cf`
-    produced universal Debug archive `sentinelforge-r5c9-candidate-87057b8.zip`, archive
+  - [x] Sentinel candidate handoff: record commit `580080a` binds clean merged source
+    `87057b8` / tree `449902cf` to universal Debug archive
+    `sentinelforge-r5c9-candidate-87057b8.zip`, archive
     SHA-256 `15c46893...`, manifest SHA-256 `d07bee9c...`, and executable SHA-256
     `6250ab27...`. Package and seven app-file checksums pass; no app launch, acceptance,
     target traffic, or lab access occurred.
