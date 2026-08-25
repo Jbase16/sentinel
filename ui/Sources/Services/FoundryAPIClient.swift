@@ -351,6 +351,7 @@ public struct FoundrySignupJob: Codable, Identifiable {
     public let serviceHandle: String
     public let state: String
     public let error: String?
+    public let nativeSessionId: String?
 
     public var id: String { jobId }
 
@@ -360,6 +361,7 @@ public struct FoundrySignupJob: Codable, Identifiable {
         case personaId = "persona_id"
         case serviceHandle = "service_handle"
         case state, error
+        case nativeSessionId = "native_session_id"
     }
 }
 

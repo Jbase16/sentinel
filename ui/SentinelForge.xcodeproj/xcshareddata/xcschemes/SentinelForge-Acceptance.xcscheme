@@ -86,6 +86,26 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "SENTINEL_API_PORT"
             value = "8766"
             isEnabled = "YES">

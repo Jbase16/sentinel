@@ -9,6 +9,7 @@ import Foundation
 
 public enum BehavioralOneClickMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case pairedPersona = "paired_persona"
+    case roleMonotonicity = "role_monotonicity"
     case anonymousPassive = "anonymous_passive"
 
     public var id: String { rawValue }
@@ -16,34 +17,42 @@ public enum BehavioralOneClickMode: String, Codable, CaseIterable, Identifiable,
     public var displayName: String {
         switch self {
         case .pairedPersona: return "Paired personas"
+        case .roleMonotonicity: return "Role lifecycle"
         case .anonymousPassive: return "Anonymous passive"
         }
     }
 }
 
-public struct BehavioralOneClickProfile: Codable, Equatable, Sendable {
+public enum BehavioralOneClickCompletion: String, Codable, Sendable {
+    case continueScan = "continue_scan"
+    case behavioralPhaseOnly = "behavioral_phase_only"
+}
+
+public struct BehavioralOneClickProfile: Equatable, Sendable {
     public let mode: BehavioralOneClickMode
+    public let completion: BehavioralOneClickCompletion
     public let envelopeId: String
     public let sourcePersonaId: String?
     public let peerPersonaId: String?
+    /// Canonical JSON object supplied by the operator for the existing strict
+    /// backend role contract. It stays as text in the UI model so arbitrary
+    /// JSON never becomes an untyped Sendable value in Swift.
+    public let roleMonotonicityJSON: String?
 
     public init(
         mode: BehavioralOneClickMode = .pairedPersona,
+        completion: BehavioralOneClickCompletion = .continueScan,
         envelopeId: String,
         sourcePersonaId: String? = nil,
-        peerPersonaId: String? = nil
+        peerPersonaId: String? = nil,
+        roleMonotonicityJSON: String? = nil
     ) {
         self.mode = mode
+        self.completion = completion
         self.envelopeId = envelopeId
         self.sourcePersonaId = sourcePersonaId
         self.peerPersonaId = peerPersonaId
-    }
-
-    enum CodingKeys: String, CodingKey {
-        case mode
-        case envelopeId = "envelope_id"
-        case sourcePersonaId = "source_persona_id"
-        case peerPersonaId = "peer_persona_id"
+        self.roleMonotonicityJSON = roleMonotonicityJSON
     }
 }
 

@@ -219,6 +219,8 @@ class TestBackgroundRun:
         events = []
 
         class RetainingDriver(MockDriver):
+            session_id = "native-session-owned-1"
+
             async def retain_for_persona(self, persona_id):
                 events.append(("retain", persona_id))
 
@@ -250,6 +252,7 @@ class TestBackgroundRun:
         job = _run(scenario())
         assert job.state is SignupJobState.COMPLETED
         assert events == [("retain", persona.persona_id)]
+        assert job.to_dict()["native_session_id"] == "native-session-owned-1"
 
     def test_no_challenge_recipe_completes(self):
         recipe = _make_recipe(with_extract=True)

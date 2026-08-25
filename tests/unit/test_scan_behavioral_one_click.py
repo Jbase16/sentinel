@@ -226,6 +226,31 @@ def test_paired_persona_profile_can_stop_after_behavioral_phase():
     assert bounded.is_behavioral_phase_only is True
 
 
+def test_role_monotonicity_profile_requires_exact_specification():
+    with pytest.raises(
+        ValidationError,
+        match="role-monotonicity one-click requires an exact role specification",
+    ):
+        BehavioralOneClickProfile(
+            mode="role_monotonicity",
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+        )
+
+    profile = BehavioralOneClickProfile(
+        mode="role_monotonicity",
+        completion="behavioral_phase_only",
+        envelope_id=ENVELOPE_ID,
+        source_persona_id=SOURCE_PERSONA_ID,
+        peer_persona_id=PEER_PERSONA_ID,
+        role_monotonicity={"schema_version": 1},
+    )
+
+    assert profile.role_monotonicity == {"schema_version": 1}
+    assert profile.is_behavioral_phase_only is True
+
+
 def test_behavioral_phase_summary_is_bounded_and_redacted():
     summary = _bounded_behavioral_phase_summary(
         phase_status="confirmed_finding",

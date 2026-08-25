@@ -178,6 +178,7 @@ public struct SentinelAPIClient: Sendable {
         if let behavioralOneClick {
             var profile: [String: Any] = [
                 "mode": behavioralOneClick.mode.rawValue,
+                "completion": behavioralOneClick.completion.rawValue,
                 "envelope_id": behavioralOneClick.envelopeId,
             ]
             if let source = behavioralOneClick.sourcePersonaId {
@@ -185,6 +186,17 @@ public struct SentinelAPIClient: Sendable {
             }
             if let peer = behavioralOneClick.peerPersonaId {
                 profile["peer_persona_id"] = peer
+            }
+            if let rawRole = behavioralOneClick.roleMonotonicityJSON {
+                guard let data = rawRole.data(using: .utf8),
+                      let role = try? JSONSerialization.jsonObject(with: data),
+                      let roleObject = role as? [String: Any] else {
+                    throw APIError.serverError(
+                        code: "BEHAVIORAL_PROFILE_INVALID",
+                        message: "Role lifecycle specification must be a JSON object."
+                    )
+                }
+                profile["role_monotonicity"] = roleObject
             }
             body["behavioral_one_click"] = profile
         }

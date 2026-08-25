@@ -26,7 +26,11 @@ router = APIRouter(prefix="/scans", tags=["scans"])
 class BehavioralOneClickProfile(BaseModel):
     """Exact pre-authorized profile for one behavioral URL phase."""
 
-    mode: Literal["paired_persona", "anonymous_passive"] = "paired_persona"
+    mode: Literal[
+        "paired_persona",
+        "role_monotonicity",
+        "anonymous_passive",
+    ] = "paired_persona"
     completion: Literal["continue_scan", "behavioral_phase_only"] = "continue_scan"
     envelope_id: str = Field(..., pattern=r"^[0-9a-f]{32}$")
     source_persona_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
@@ -66,6 +70,10 @@ class BehavioralOneClickProfile(BaseModel):
             self.prior_peer_records is None
         ):
             raise ValueError("prior behavioral capture requires both personas")
+        if self.mode == "role_monotonicity" and self.role_monotonicity is None:
+            raise ValueError(
+                "role-monotonicity one-click requires an exact role specification"
+            )
         return self
 
     @property

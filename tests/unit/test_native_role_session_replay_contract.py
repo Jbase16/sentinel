@@ -122,13 +122,51 @@ def test_swift_session_check_precedes_fetch_and_echoes_actual_session():
         "window.eventSessionId != requiredSessionId",
         handler,
     )
-    fetch = source.index("await fetch(p.url", identity_check)
+    target_session_ref = source.index(
+        'requestHeaders["X-Sentinel-Native-Session-Ref"]',
+        identity_check,
+    )
+    fetch = source.index("await fetch(p.url", target_session_ref)
     attestation = source.index(
         'response["session_id"] = window.eventSessionId',
         fetch,
     )
 
-    assert command < handler < identity_check < fetch < attestation
+    assert (
+        command
+        < handler
+        < identity_check
+        < target_session_ref
+        < fetch
+        < attestation
+    )
     assert "session-bound replay refused before target dispatch" in source[
         identity_check:fetch
     ]
+    assert '"native_session:\\(digest)"' in source[identity_check:fetch]
+
+
+def test_swift_registry_preserves_distinct_sessions_for_one_persona():
+    source = DRIVER_BRIDGE.read_text(encoding="utf-8")
+    registry = source.index(
+        "private var personaSessionWindows: [String: [String: GhostBrowserWindow]]"
+    )
+    retain = source.index("private func retainBrowser(for personaId: String)")
+    register = source.index(
+        "personaSessionWindows[personaId, default: [:]][sessionId] = window",
+        retain,
+    )
+    replay = source.index("private func executeReplay(", register)
+    exact_lookup = source.index(
+        "personaSessionWindows[persona]?[$0]",
+        replay,
+    )
+    identity_check = source.index(
+        "window.eventSessionId != requiredSessionId",
+        exact_lookup,
+    )
+    fetch = source.index("await fetch(p.url", identity_check)
+
+    assert registry < retain < register < replay < exact_lookup < identity_check < fetch
+    retain_body = source[retain:replay]
+    assert "existing.eventSessionId.isEmpty || window.eventSessionId.isEmpty" in retain_body
