@@ -2,9 +2,10 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Accepted implementation checkpoint: `ocb/r5c7-role-profile-isolation` at `f91f5cb`,
-based on merged `main` at `c19752b`. The accepted native evidence remains separately
-bound to `ocb/s16-native-journey` at Sentinel `5f03c35`; R5C7 has no renewed native or
+Accepted implementation checkpoint: `ocb/r5c8-acceptance-provenance` at `8329be8`,
+based on merged `main` at `7c2053b`; its independent verifier checkpoint is lab
+`64297dc`. The accepted native evidence remains separately bound to
+`ocb/s16-native-journey` at Sentinel `5f03c35`; R5C8 has no renewed native or
 live-evidence claim.
 
 Last verified: 2026-08-24
@@ -59,8 +60,10 @@ receipt reuse across real app restarts, cleanup, ordinary Scan persistence, and 
 fresh-state cycles. The accepted revocation-survival scenario is native-proven;
 production also admits an active-role escalation verdict that is suite-proved but not
 covered by that native artifact. R5C7 now seals the server-side role profile against
-mixed modes and ambient backend composition. Broader Family-C shapes, acceptance
-provenance repairs, current-SHA acceptance, and payout evidence remain open.
+mixed modes and ambient backend composition. R5C8 restores generated-project parity
+and adds independently derived clean-checkout, source-build, process, and all-route
+request provenance for future runs. Broader Family-C shapes, current-SHA acceptance,
+and payout evidence remain open.
 The external `OCB-S15` gates pass against vulnerable and secure loopback twins,
 including capture freshness, durable denial replay, ordinary-Scan persistence, and an
 exact adjacent-order counterfactual. Sentinel cannot yet search and prove the full
@@ -140,22 +143,26 @@ or live loopback result is not public-target or payout proof.
 
 ### Sentinel repository
 
-- Current repair branch: `ocb/r5c7-role-profile-isolation` at implementation commit
-  `f91f5cb`, based on merged `main` at `c19752b`.
+- Current repair branch: `ocb/r5c8-acceptance-provenance` at implementation commit
+  `8329be8`, based on merged `main` at `7c2053b`.
 - Accepted native evidence remains bound to `ocb/s16-native-journey` at Sentinel
   `5f03c35`; the native-journey implementation began at `fd57721` and its original
   Family-C branch chain was created from `main` at `fc1e997`.
 - Python: declared 3.12 environment; the verification run used Python 3.12.12.
-- Full suite at R5C7 on 2026-08-24:
-  `2745 passed, 1 skipped, 4 warnings in 35.84s`.
+- Full suite at R5C8 on 2026-08-24:
+  `2745 passed, 1 skipped, 3 warnings in 36.01s`.
 - The former 17-skip backlog has been reduced to one remaining conditional skip:
   `tests/verification/test_websocket_terminal_bidirectional.py` skips because
   `/ws/terminal` is absent.
 - The full run is logic-green, but not warning-clean: two dependency deprecations and
-  two pre-existing `aiosqlite` closed-event-loop thread warnings were reported.
+  one pre-existing `aiosqlite` closed-event-loop thread warning were reported.
 - `scripts/local-security-check.sh` remains red on repository-wide matcher and Ruff
-  debt outside the Family-C diff. Targeted Ruff and prohibited-pattern checks passed
-  for all R5C7 files.
+  debt outside the Family-C diff. Targeted Ruff and diff checks passed for the R5C8
+  Sentinel files.
+- The R5C8 clean-source preflight regenerated `ui/SentinelForge.xcodeproj` from
+  `ui/project.yml`; the generated project and Acceptance scheme hashes exactly match
+  the committed files. Its unsigned Acceptance Debug executable SHA-256 is
+  `7fbab17798198c301e31babdbefe04921a7d3f0c3d9db1c671dbd7f09ba8486c`.
 - The exact `5f03c35` SentinelForge-Acceptance Debug build succeeded on 2026-08-24.
   Its executable SHA-256 is
   `186b243a6ec8e19c76dd9421381264f7f1996b414c617883cae27ecc31bea518`.
@@ -183,6 +190,19 @@ Family-C external and native evidence was generated and inspected on 2026-08-24.
 - The reconciled SUT, verifier, and executable hashes match the retained checkouts and
   binary. The verifier accepted those identities as operator inputs; it did not itself
   prove clean checkouts, source-to-build provenance, or PID-to-executable identity.
+- R5C8 verifier checkpoint `64297dce58bec28dc2bd5121bbfd69c3388dea19` on
+  `ocb/r5c8-provenance` now derives both clean checkout commit/tree identities, archives
+  the exact subject commit, safely records excluded external model links, regenerates
+  the Xcode project, builds the Acceptance scheme, and binds every source/build input
+  plus the initial and replacement process identities. It also records a redacted
+  all-route target ledger separately from governed role actions in schema `3.0.0`.
+- Preflight manifest
+  `source_build_manifest:43a67895aa296e8a2df6df704b70df346210b6917b5bdbab062df11d9756e2a3`
+  (file SHA-256 `097f209e6ef0c8893b0cf776e5b313fef2f7b97f1cd44784eafaa02ceb04075b`)
+  passed against clean Sentinel `8329be85b37adf8cfce3b61f6962cda98f41f9fc` and
+  lab `64297dce58bec28dc2bd5121bbfd69c3388dea19` using XcodeGen 2.46.0 and
+  Xcode 27.0. This is local source/build provenance only; no app, protocol gate, native
+  matrix, or target request ran, and the prior native artifact is not upgraded.
 
 - Prior protocol-bridge Family-C checkpoint: pushed branch `ocb/s16-live-acceptance` at
   `fb142925afc5304fab39940dec69f261826b0e59`.
@@ -216,7 +236,7 @@ Family-C external and native evidence was generated and inspected on 2026-08-24.
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
-| OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is native-proven; R5C7 profile isolation is suite-proved; evidence repairs are open | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, and three pair-level fresh vulnerable/secure Swift/WKWebView cycles | Restore generated-project source parity, harden exact-SHA/process/request evidence, then rerun current-SHA acceptance before Family D; invitation and broader administrative shapes stay open |
+| OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is native-proven; R5C7 profile isolation and R5C8 provenance repair are suite/build-proved; current-SHA evidence is open | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, generated Acceptance parity, clean source-build/process provenance, all-route accounting, and three prior pair-level fresh vulnerable/secure Swift/WKWebView cycles | Rerun current-SHA negative protocol and native acceptance before Family D; invitation and broader administrative shapes stay open |
 | OCB-R5 family D: capability safety | Designed | The planner recognizes the capability-confinement property and callback-receiver topology; no executable capability backend exists | After the Family-C repair gate, implement the transport-free issued-capability contract, then confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
@@ -440,20 +460,24 @@ closure:
       ambient graph or generalized backends from influencing a role-profile request.
       Focused positive and negative API/Foundry tests pass without adding traffic or
       authority; the full suite is `2745 passed, 1 skipped, 4 warnings`.
-    - [ ] **R5C8 — restore reproducible acceptance configuration and provenance.**
-      Bring `ui/project.yml` into parity with the generated Acceptance scheme and its
-      tests; make the verifier independently bind clean checkout identities, the
-      source-to-build manifest, running PID/executable identity, and an all-route
-      target request ledger.
+    - [x] **R5C8 — restore reproducible acceptance configuration and provenance.**
+      Sentinel `8329be8` restores exact `ui/project.yml`/generated-scheme parity; lab
+      `64297dc` derives clean checkout/tree identities, exact archived source, a
+      content-addressed regenerated Acceptance build, initial/replacement PID identity,
+      and separate governed-action/all-route request ledgers. The final focused tests
+      pass, the lab suite is `435 passed`, the Sentinel suite is
+      `2745 passed, 1 skipped, 3 warnings`, and manifest `43a67895...` binds the clean
+      preflight build. No acceptance run or prior-artifact upgrade is claimed.
     - [ ] **R5C9 — renew current-SHA acceptance.** Rerun the negative protocol gate and
       the native vulnerable/secure matrix at the repaired SUT, retain remotely durable
       artifacts, and distinguish network-wide request counts from governed actions.
 
 The accepted native SUT was `2743 passed, 1 skipped, 2 warnings` when reverified at
 checkout `5f03c35`. The exact acceptance Debug build succeeds and its executable
-remains content-stable across the native matrix. The later R5C7 server repair at
-`f91f5cb` is `2745 passed, 1 skipped, 4 warnings`; that result is suite proof, not a
-replacement native artifact.
+remains content-stable across the native matrix. The later R5C8 Sentinel checkpoint at
+`8329be8` is `2745 passed, 1 skipped, 3 warnings`; its regenerated Acceptance build is
+source-bound, but those results are suite/build proof, not a replacement native
+artifact.
 External run `val-s16-live-family-c-20260824` passed against Sentinel
 `ff799a7eee735836a8ec1acfcc1cc61d992c2318` using verifier
 `fb142925afc5304fab39940dec69f261826b0e59`; its artifact SHA-256 is
@@ -472,13 +496,13 @@ It records the actual SwiftUI/WKWebView journey, three pair-level clean state ro
 vulnerable findings and three secure no-finding results, six receipt-reusing app
 restart retries with zero additional governed role actions, exact governed target
 ledgers and native-session references, verified cleanup, and zero residue. The open
-evidence-provenance, current-SHA acceptance, repository-security, and generated
+current-SHA acceptance, repository-security, and generated
 web-schema drift baselines still prevent treating this as complete release evidence.
 
 Exit gate: the accepted `OCB-S16` revocation-survival scenario remains native-proven at
-its cited SUT. R5C7 has sealed the server profile with suite proof. Family-C advancement
-remains open until R5C8-R5C9 repair acceptance reproducibility/provenance and renew the
-prior-SHA negative and native evidence. The existing artifacts remain exact-SHA
+its cited SUT. R5C7 sealed the server profile and R5C8 repaired future-run provenance.
+Family-C advancement remains open until R5C9 renews the prior-SHA negative and native
+evidence. The existing artifacts remain exact-SHA
 evidence and are not public-target or payout proof.
 
 ### Workstream 3 — Implement OCB-R5 family D capability confinement and freshness
@@ -597,12 +621,15 @@ complete**. R5C7 preserves the accepted `5f03c35` native revocation-survival pro
 requiring an exact phase-only role mode, rejecting mixed profiles, and excluding
 unrelated behavioral backends from role-profile selection at commit `f91f5cb`.
 
-The planned next slice is **R5C8 — restore reproducible acceptance configuration and
-provenance**. Bring `ui/project.yml` into parity with the generated Acceptance scheme and
-its tests, then make the external verifier independently bind clean checkout identities,
-the source-to-build manifest, running PID/executable identity, and an all-route target
-request ledger. R5C9 then renews current-SHA negative and native evidence. Only after
-those unchecked items pass should R5D1 begin.
+R5C8 is complete at Sentinel `8329be8` and lab `64297dc`: the committed Acceptance
+scheme regenerates from `ui/project.yml`, and the verifier now binds clean checkouts,
+source/build/process identity, and all target routes without upgrading the old native
+artifact.
+
+The planned next slice is **R5C9 — renew current-SHA acceptance**. Rerun the negative
+protocol gate and the native vulnerable/secure matrix against the manifest-bound current
+SUT, retain remotely durable artifacts, and verify the separate network-wide request and
+governed-action counts. Only after that unchecked evidence passes should R5D1 begin.
 
 The repository security-check baseline, six generated web-schema drift snapshots,
 remaining skip, and warning debt stay as explicit maintenance/evidence items. They must
@@ -618,7 +645,7 @@ implemented sub-slices.
 | [ ] | Baseline governance | Active | Track the current skip, current warning set, security baseline, and six web-schema drift snapshots separately; preserve the exact native build |
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is exact-SHA native-proven; R5C7 profile isolation suite-proved; evidence gate open | R5C8 reproducibility/provenance and R5C9 current-SHA acceptance |
+| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 provenance repair are suite/build-proved; evidence gate open | R5C9 current-SHA protocol and native acceptance |
 | [ ] | OCB-R5 family D capabilities | Blocked on the Family-C repair gate | R5D1 transport-free issued-capability contract, then `OCB-S17` |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |

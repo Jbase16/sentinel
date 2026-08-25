@@ -1210,14 +1210,19 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   influence role-profile selection. Focused API/Foundry and adjacent role/native
   contracts pass, and the full suite is `2745 passed, 1 skipped, 4 warnings`; no target
   traffic or additional execution authority was introduced.
-- [ ] R5C8 restores `ui/project.yml`/generated-scheme parity and independently binds
-  clean checkouts, build/process identity, and all-route request accounting.
+- [x] R5C8 at Sentinel `8329be8` and lab `64297dc` restores exact
+  `ui/project.yml`/generated-scheme parity; derives clean checkout/tree and archived
+  source identity; content-addresses the regenerated build; binds every app PID to the
+  exact executable; and separates redacted all-route requests from governed actions.
+  Sentinel is `2745 passed, 1 skipped, 3 warnings`, the lab is `435 passed`, and the
+  clean preflight manifest is `source_build_manifest:43a67895...`. No native or
+  live-observed evidence was renewed.
 - [ ] R5C9 reruns the negative protocol and native matrices at the repaired current SUT
   and retains remotely durable artifacts.
 
 #### R5D — Capability confinement, freshness, and replay
 
-- [ ] R5D starts only after the remaining R5C8-R5C9 repair gate. Invitation token/link
+- [ ] R5D starts only after the remaining R5C9 acceptance gate. Invitation token/link
   confinement belongs here; membership creation, role assignment, and resulting
   authority remain Family-C obligations.
 - [ ] R5D1 defines a transport-free, content-addressed issued-capability contract and
