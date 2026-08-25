@@ -2,8 +2,9 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Repository snapshot: `ocb/s16-native-journey` at `5f03c35`, based on
-`main` at `fc1e997`
+Accepted implementation/evidence snapshot: `ocb/s16-native-journey` at `5f03c35`,
+based on `main` at `fc1e997`. Closure-review documentation continues at the branch
+head; no production or test code changed after the accepted SUT.
 
 Last verified: 2026-08-24
 
@@ -54,8 +55,10 @@ lifecycle with an independent oracle. Its bounded coordinator is production-wire
 the ordinary Scan path. `OCB-S16` now has exact-SHA external and actual
 Swift/WKWebView loopback evidence covering both twins, exact retained native sessions,
 receipt reuse across real app restarts, cleanup, ordinary Scan persistence, and three
-fresh-state cycles. The bounded revocation-survival slice is native-proven; broader
-Family-C shapes and payout evidence remain open.
+fresh-state cycles. The accepted revocation-survival scenario is native-proven;
+production also admits an active-role escalation verdict that is suite-proved but not
+covered by that native artifact. Broader Family-C shapes, profile-isolation repairs,
+and payout evidence remain open.
 The external `OCB-S15` gates pass against vulnerable and secure loopback twins,
 including capture freshness, durable denial replay, ordinary-Scan persistence, and an
 exact adjacent-order counterfactual. Sentinel cannot yet search and prove the full
@@ -112,7 +115,9 @@ allowed.
 
 ## 4. Evidence vocabulary
 
-These labels are intentionally cumulative:
+These labels are intentionally non-substitutable. The implementation labels are
+progressive. `Lab-attested`, `Native-proven`, and `Live-observed` are acceptance
+dimensions that may overlap; neither native nor live evidence implies the other.
 
 | Label | Meaning |
 |---|---|
@@ -121,11 +126,13 @@ These labels are intentionally cumulative:
 | Production-wired | A real API, scheduler, scan, or UI caller can reach it under its gates. |
 | Suite-proved | The complete repository suite passes at the stated SHA. |
 | Lab-attested | The external lab recorded the operator journey and supporting evidence. |
+| Native-proven | The external verifier exercised the actual product UI/runtime path and bound the result to the stated build; loopback evidence is permitted and remains loopback-only. |
 | Live-observed | An external driver exercised a running Sentinel build and bound the artifact to its SHA. |
 | Payout-proven | A real authorized program accepted the finding or paid it. |
 
-No lower label implies a higher one. In particular, a green test suite is not a
-live-observed result, and a live loopback result is not payout proof.
+No label silently substitutes for another. In particular, a green test suite is not a
+live-observed result, a protocol-driver run is not automatically native, and a native
+or live loopback result is not public-target or payout proof.
 
 ## 5. Verified baseline
 
@@ -160,12 +167,18 @@ Family-C external and native evidence was generated and inspected on 2026-08-24.
 - Artifact `val-s16-native-family-c-20260824-r5` passed against Sentinel
   `5f03c35789e555a22e284806b05771d6b070d4e5`. SHA-256
   `ec758a046f8fe911148413d7baa2ffee67f8ad0ffaf59c9920bc58134c5c224b`
-  binds three fresh-state vulnerable/secure pairs, 12 native Scans, six real app
-  restart retries, 48 exact role actions, zero retry traffic, exact session order,
-  verified cleanup, and zero residue.
+  binds three pair-level fresh-state vulnerable/secure cycles, 12 native Scans, six
+  real app restart retries, 48 exact governed role actions, zero additional governed
+  role actions on retry, exact session order, verified cleanup, and zero residue.
 - The artifact records `native_app_exercised: true`, `loopback_only: true`, no open
   obligations, and the bounded evidence label `native_proven`. It does not establish
   public-target acceptance or payout.
+- The 48-action and retry-delta counters cover the governed role-action ledger, not all
+  HTTP routes served by the loopback target. Login, app-shell, control, and cleanup
+  traffic is not included in those two counters.
+- The reconciled SUT, verifier, and executable hashes match the retained checkouts and
+  binary. The verifier accepted those identities as operator inputs; it did not itself
+  prove clean checkouts, source-to-build provenance, or PID-to-executable identity.
 
 - Prior protocol-bridge Family-C checkpoint: pushed branch `ocb/s16-live-acceptance` at
   `fb142925afc5304fab39940dec69f261826b0e59`.
@@ -199,8 +212,8 @@ Family-C external and native evidence was generated and inspected on 2026-08-24.
 | OCB-R4 Generalized experiment kernel | Substantially implemented; topology-general wiring incomplete | Sealed SDK, atomic admission, authorization and omission backends, owned lifecycle manifest compiler, runtime substitution, one-use claims, budgets, provenance, and cleanup | Unify provisioning, proof, oracle, cleanup, and receipt completion under one production coordinator for every supported topology |
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
-| OCB-R5 family C: role and membership safety | Closed and native-proven for the bounded revocation-survival slice | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, and three fresh vulnerable/secure Swift/WKWebView cycles | Preserve the accepted regressions and evidence; review the closure checkpoint before starting Family D, while keeping invitation and broader administrative shapes open |
-| OCB-R5 family D: capability safety | Designed | Topology vocabulary recognizes callback/capability worlds | Implement token/link/capability confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
+| OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is native-proven; closure repairs are open | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, and three pair-level fresh vulnerable/secure Swift/WKWebView cycles | Seal the server-side role profile, restore generated-project source parity, harden exact-SHA/process/request evidence, then rerun current-SHA acceptance before Family D; invitation and broader administrative shapes stay open |
+| OCB-R5 family D: capability safety | Designed | The planner recognizes the capability-confinement property and callback-receiver topology; no executable capability backend exists | After the Family-C repair gate, implement the transport-free issued-capability contract, then confinement, freshness, replay, expiry, cleanup, and `OCB-S17` |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Partial and narrow | Ranked obligations, payout-guided frontier choice, continuation receipts, and deterministic replanning exist | Build the high-value sink ledger, marginal-value scheduler, family-aware coverage, and honest stop certificate; prove `OCB-S18` |
@@ -394,8 +407,10 @@ closure:
 - [x] Prove `OCB-S16` against vulnerable and secure twins, including negative
   pre-traffic denial, cross-session refusal, revocation freshness, deterministic
   receipts, cleanup, and zero residue.
-- [x] Record current-SHA external acceptance evidence and apply `live-observed` only
-  to that bounded protocol-bridge run.
+- [x] Record then-current exact-SHA external acceptance evidence and apply
+  `live-observed` only to that bounded protocol-bridge run. It remains bound to
+  Sentinel `ff799a7`; the negative contracts are suite-proved, but were not rerun as
+  live evidence at accepted native SUT `5f03c35`.
 - [x] Record current-SHA native Swift/WKWebView acceptance before applying
   `native-proven` or closing the Family-C stage row.
     - [x] Bind the exact Sentinel checkout `5f03c35`, verifier checkout `3511bf6`,
@@ -404,8 +419,31 @@ closure:
       SwiftUI and WKWebView path, with 12 native Scans and six process-changing
       restart retries.
     - [x] Preserve exact eight-action and generation order, three distinct retained
-      native sessions per case, vulnerable-only canonical findings, zero retry
-      traffic, verified cleanup, and zero residue.
+      native sessions per case, vulnerable-only canonical findings, zero additional
+      governed role actions on retry, verified cleanup, and zero residue.
+- [x] **Family-C closure review checkpoint.** The 2026-08-24 review walked the
+  implementation ancestry and production path, recomputed final artifact and binary
+  hashes, re-derived the native journey metrics, classified the ignored failed-run
+  diagnostics, and reran the known security and schema-drift baselines.
+    - [x] Preserve the accepted native claim: the artifact proves the
+      `confirmed_revocation_survival` scenario on owned loopback; it does not prove the
+      separately implemented `confirmed_active_escalation` positive branch.
+    - [x] Keep the four ignored failed-run JSON files local and non-promotable. Three
+      contain a raw diagnostic UUID and none carries an evidence label.
+    - [ ] **R5C7 — seal the server-side Family-C profile.** Require
+      `role_monotonicity` to carry the exact role specification and
+      `behavioral_phase_only`, reject a role specification under other modes, and keep
+      ambient graph or generalized backends from influencing a role-profile request.
+      Add focused positive and negative API/Foundry tests without adding traffic or
+      authority.
+    - [ ] **R5C8 — restore reproducible acceptance configuration and provenance.**
+      Bring `ui/project.yml` into parity with the generated Acceptance scheme and its
+      tests; make the verifier independently bind clean checkout identities, the
+      source-to-build manifest, running PID/executable identity, and an all-route
+      target request ledger.
+    - [ ] **R5C9 — renew current-SHA acceptance.** Rerun the negative protocol gate and
+      the native vulnerable/secure matrix at the repaired SUT, retain remotely durable
+      artifacts, and distinguish network-wide request counts from governed actions.
 
 The Family-C implementation is `2743 passed, 1 skipped, 2 warnings` when
 reverified at accepted checkout `5f03c35`. The exact acceptance Debug build succeeds
@@ -424,22 +462,35 @@ Native run `val-s16-native-family-c-20260824-r5` passed against Sentinel
 `5f03c35789e555a22e284806b05771d6b070d4e5` using verifier
 `3511bf6ec450f184a8ba300bfa251be70116be59`; its artifact SHA-256 is
 `ec758a046f8fe911148413d7baa2ffee67f8ad0ffaf59c9920bc58134c5c224b`.
-It records the actual SwiftUI/WKWebView journey, three clean state roots, three
+It records the actual SwiftUI/WKWebView journey, three pair-level clean state roots, three
 vulnerable findings and three secure no-finding results, six receipt-reusing app
-restart retries with zero added target traffic, exact target ledgers and native-session
-references, verified cleanup, and zero residue. The open repository-security and
+restart retries with zero additional governed role actions, exact governed target
+ledgers and native-session references, verified cleanup, and zero residue. The open
+profile, evidence-provenance, repository-security, and
 generated web-schema drift baselines still prevent treating this as complete release
 evidence.
 
-Exit gate: `OCB-S16` is closed for the bounded revocation-survival slice. External and
-native evidence proves vulnerable and secure twins, negative pre-traffic denial,
-cross-session refusal, revocation freshness, deterministic receipts, app-restart
-deduplication, cleanup, and zero residue at their exact cited SHAs.
+Exit gate: the accepted `OCB-S16` revocation-survival scenario remains native-proven at
+its cited SUT. Family-C advancement remains open until R5C7-R5C9 seal the server
+profile, repair acceptance reproducibility/provenance, and renew the prior-SHA negative
+and native evidence. The existing artifacts remain exact-SHA evidence and are not
+public-target or payout proof.
 
 ### Workstream 3 — Implement OCB-R5 family D capability confinement and freshness
 
 Model issued links, tokens, invitations, exports, and callbacks as explicit capabilities
 with subject, resource, operation, audience, lifetime, use count, and revocation state.
+
+The Family boundary is explicit: invitation-token or invitation-link confinement and
+freshness belong to Family D; membership creation, role assignment, and the authority
+resulting from consuming an invitation remain open Family-C shapes.
+
+First bounded slice after the Family-C repair gate: **R5D1 — transport-free typed
+issued-capability contract and controlled single-owned-account fixture.** Bind subject,
+resource, operation, audience, issuer, lifetime/expiry, use count, revocation state, and
+source evidence while retaining only typed hashes publicly. Define valid,
+wrong-resource/account, expired, revoked, and already-used outcomes without dispatch,
+callback provisioning, finding promotion, or new execution authority.
 
 Exit gate: `OCB-S17` proves confinement, expiry, one-time use, replay refusal, and
 cleanup without treating bearer material as ambient authority.
@@ -535,14 +586,18 @@ Stop the slice rather than weakening a gate when completion appears to require:
 
 ## 11. Immediate next decision
 
-Family B remains closed for the bounded omission and adjacent-reordering scope. Family C
-is now closed and native-proven for the bounded revocation-survival slice at Sentinel
-`5f03c35`, with artifact `val-s16-native-family-c-20260824-r5`. The planned next slice is
-the **Family-C closure review checkpoint**: review the implementation commits, exact
-build and artifact bindings, failed-run diagnostics, remaining baseline debt, and the
-bounded capability/authority statement. Only after that review should the program start
-the first bounded Family-D capability-confinement slice toward `OCB-S17`. The review must
-not relabel loopback evidence as public-target or payout acceptance.
+Family B remains closed for the bounded omission and adjacent-reordering scope. The
+2026-08-24 **Family-C closure review checkpoint is complete**. It preserves the accepted
+`5f03c35` native revocation-survival proof, but found a server-side profile-discrimination
+gap, ambient backend-composition debt, generated-project source drift, prior-SHA-only
+negative live evidence, and procedural checkout/build/process/request bindings.
+
+The planned next slice is **R5C7 — seal the server-side Family-C profile**. It is a
+Sentinel-only contract-and-test slice: require phase-only exact role mode, reject mixed
+profiles, and exclude unrelated behavioral backends from role-profile selection without
+weakening any existing workflow, gate, scope, policy, budget, receipt, or cleanup check.
+R5C8 then repairs acceptance reproducibility/provenance, and R5C9 renews current-SHA
+negative and native evidence. Only after those unchecked items pass should R5D1 begin.
 
 The repository security-check baseline, six generated web-schema drift snapshots,
 remaining skip, and warning debt stay as explicit maintenance/evidence items. They must
@@ -558,8 +613,8 @@ implemented sub-slices.
 | [ ] | Baseline governance | Active | Track the current skip, two warnings, security baseline, and six web-schema drift snapshots separately; preserve the exact native build |
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| [x] | OCB-R5 family C roles/membership | Closed bounded slice; exact-SHA native-proven | Preserve regressions and complete the Family-C closure review before Family D |
-| [ ] | OCB-R5 family D capabilities | Queued | `OCB-S17` |
+| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is exact-SHA native-proven; repair gate open | R5C7 profile isolation, R5C8 reproducibility/provenance, and R5C9 current-SHA acceptance |
+| [ ] | OCB-R5 family D capabilities | Blocked on the Family-C repair gate | R5D1 transport-free issued-capability contract, then `OCB-S17` |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |

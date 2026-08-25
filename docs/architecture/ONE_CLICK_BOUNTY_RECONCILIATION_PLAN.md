@@ -109,9 +109,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Security-obligation graph and closure | Implemented for the observed frontier | Open, blocked, finding, upheld, and conditionally closed questions are content-addressed and bounded. | Add high-value sink reachability and prevent current-frontier closure from being presented as broad target exhaustion. |
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
 | State-machine prerequisite oracles | Production-wired and externally passed for bounded omission and adjacent reordering | Exact same-world lineage preserves a content-addressed DAG; one payout-selected terminal can execute sealed baseline, treatment, and independent control across three fresh owned worlds, compare canonical effects, verify family-specific evidence, clean up, persist redacted denial/completion state, and revalidate current capture before rebuilding the admitted plan. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Define replay and stale-state capability/freshness semantics before adding those counterfactuals. |
-| Role/membership monotonicity oracle | Validated and native-proven for the bounded revocation-survival slice | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three fresh-state vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero retry traffic. | Preserve the bounded regressions and review this closure before adding invitation or broader administrative shapes. |
+| Role/membership monotonicity oracle | Accepted revocation-survival scenario is native-proven; closure repairs are open | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three pair-level fresh vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero additional governed role actions on retry. | Seal the server role profile, repair acceptance configuration/provenance, and renew current-SHA evidence before Family D; invitation and broader administrative shapes remain open. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
-| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B and family-C paths; Family-C native Scan seam passed | The native Scan UI can send paired-persona, anonymous-passive, or exact role profiles; the backend consumes only the selected bounded plan under separate signed workflow and execution gates, with no fallback to a broader executor. External `behavioral_phase_only` and actual SwiftUI/WKWebView acceptance persisted the expected vulnerable-only canonical findings for bounded Family-C revocation survival. | After the Family-C closure review, coordinate the remaining permitted property families without manufacturing authority. |
+| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B and family-C paths; accepted Family-C native UI seam passed, server isolation repair open | The native Scan UI emits the exact phase-only role profile, and the accepted run kept alternate execution gates off. The server schema does not yet require phase-only role completion or reject a role specification under paired mode; other separately gated behavioral configurations can remain visible to selection. | Seal profile discrimination and role-backend isolation before coordinating another property family; preserve every existing signed workflow and execution gate. |
 | Proof topology selector | Implemented and bounded for the closed Family-B scope | `PayoutGoalTopologyPlanner` binds the graph backend to the exact compiled terminal; ordinary click selects one unique omission or, when omission is not uniquely selectable, one unique adjacent reordering. Graph-absent v1 identities remain stable. | Add only separately admitted executable topologies. |
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
@@ -1166,13 +1166,17 @@ identity, origin, redirect, real-user-data, promotion, payout, or submission aut
   - [x] The bounded owned-membership revocation and protected-effect path is typed,
     production-wired, and externally accepted.
   - [x] The actual SwiftUI/WKWebView path passed three fresh-state vulnerable/secure
-    cycles with exact retained sessions, process-changing retries, zero retry traffic,
-    verified cleanup, and zero residue at the cited SHAs.
+    cycles with exact retained sessions, process-changing retries, zero additional
+    governed role actions on retry, verified cleanup, and zero residue at the cited
+    SHAs.
   - [ ] Invitation and broader role-assignment or administrative-boundary shapes remain
     outside the accepted slice.
-- [x] For the bounded slice, lower authority produces a finding only when the
-  higher-only protected effect survives revocation; the secure twin stops with no
-  finding.
+- [x] The accepted native scenario produces a finding when the higher-only protected
+  effect survives revocation; the secure twin stops with no finding.
+- [ ] Production also promotes `confirmed_active_escalation` when the active lower role
+  reproduces the higher-only effect but the revoked role is denied. That branch is
+  suite-proved, not covered by the accepted native artifact; preserve this distinction
+  or add exact native evidence before claiming the broader oracle is native-proven.
 - [x] The supported membership change uses a fresh owned loopback tenant, verifies
   cleanup through both the subject and independent target, and leaves zero lab residue.
 
@@ -1191,13 +1195,30 @@ checkpoint.
 `ec758a046f8fe911148413d7baa2ffee67f8ad0ffaf59c9920bc58134c5c224b` binds the
 exact acceptance executable, three fresh state roots, six vulnerable/secure cases,
 12 native Scans, six process-changing receipt-reuse retries, 48 ordered role actions,
-zero retry traffic, exact opaque native-session references, verified cleanup, and zero
-residue. It records `native_app_exercised: true`, `loopback_only: true`, and no open
+zero additional governed role actions on retry, exact opaque native-session references,
+verified cleanup, and zero residue. The counters cover the governed role ledger, not
+every HTTP route served by the target. It records `native_app_exercised: true`,
+`loopback_only: true`, and no open
 obligations. This closes the bounded revocation-survival slice as `native_proven` but
 does not close broader R5C shapes or establish public-target or payout evidence.
 
+- [x] The 2026-08-24 Family-C closure review preserved that exact bounded claim and
+  rechecked commit ancestry, artifact/binary hashes, journey metrics, failed-run
+  diagnostics, and the still-red security/schema baselines.
+- [ ] R5C7 seals the server role profile: exact role mode is phase-only, mixed modes are
+  rejected, and unrelated behavioral backends cannot influence role-profile selection.
+- [ ] R5C8 restores `ui/project.yml`/generated-scheme parity and independently binds
+  clean checkouts, build/process identity, and all-route request accounting.
+- [ ] R5C9 reruns the negative protocol and native matrices at the repaired current SUT
+  and retains remotely durable artifacts.
+
 #### R5D — Capability confinement, freshness, and replay
 
+- [ ] R5D starts only after the R5C7-R5C9 repair gate. Invitation token/link
+  confinement belongs here; membership creation, role assignment, and resulting
+  authority remain Family-C obligations.
+- [ ] R5D1 defines a transport-free, content-addressed issued-capability contract and
+  controlled single-owned-account fixture before any executable backend exists.
 - [ ] Object-bound, account-bound, tenant-bound, single-use, and expiry properties.
 - [ ] Tokens and keys remain ephemeral; public evidence contains only typed hashes.
 - [ ] Callback-dependent effects require an owned callback receiver and explicit scope.
@@ -1234,7 +1255,10 @@ Every family changes target traffic when its experiments are enabled. Authority 
 never shared across families. Each family must define its exact action classes,
 maximum requests, owned-data requirements, and cleanup behavior before integration.
 
-#### Exit gate for every family
+#### Generic family-exit template
+
+These items remain unchecked until each named family records its own exact gate; a
+bounded sub-slice does not satisfy this template globally.
 
 - [ ] Vulnerable and secure twins produce confirmed and upheld outcomes respectively.
 - [ ] Ambiguous evidence is inconclusive, never promoted.
