@@ -2,13 +2,12 @@
 
 Status: authoritative program index, current-state ledger, and forward execution order
 
-Accepted merged implementation checkpoint: `main` at `7c2053b`, containing the R5C7
-server-profile repair. Current unmerged Sentinel checkpoint:
-`ocb/r5c8-acceptance-provenance` at `8329be8`, limited to project/generated-scheme
-parity. The lab-side work formerly cited for R5C8 is quarantined and is not an accepted
-checkpoint. The accepted native evidence remains separately bound to
-`ocb/s16-native-journey` at Sentinel `5f03c35`; R5C8 has no renewed native or
-live-evidence claim.
+Accepted merged implementation checkpoint: `main` at `87057b8`, containing the
+corrected Sentinel-only R5C8 project/generated-scheme parity and repository-boundary
+record. The R5C9 build candidate is sourced from that exact commit and tree; no R5C9
+lab, native, or live-evidence claim has been earned. The lab-side work formerly cited
+for R5C8 remains quarantined and is not an accepted checkpoint. The accepted native
+evidence remains separately bound to `ocb/s16-native-journey` at Sentinel `5f03c35`.
 
 Last verified: 2026-08-24
 
@@ -153,8 +152,10 @@ or live loopback result is not public-target or payout proof.
 
 ### Sentinel repository
 
-- Current repair branch: `ocb/r5c8-acceptance-provenance` at implementation commit
-  `8329be8`, based on merged `main` at `7c2053b`.
+- Current evidence-preparation branch: `ocb/r5c9-candidate-handoff`, based on merged
+  `main` at `87057b8`. The candidate source is exactly commit
+  `87057b8b0313b6aa1fe9b9036db98e040208bfc3`, tree
+  `449902cf6095f552074ebdeefde24c2d7a17dd3f`.
 - Accepted native evidence remains bound to `ocb/s16-native-journey` at Sentinel
   `5f03c35`; the native-journey implementation began at `fd57721` and its original
   Family-C branch chain was created from `main` at `fc1e997`.
@@ -173,6 +174,19 @@ or live loopback result is not public-target or payout proof.
   `ui/project.yml`, regenerates the committed schemes, and makes
   `tests/unit/test_acceptance_scheme.py` require exact project-spec/scheme environment
   parity while preserving a behavior-gate-free standard scheme.
+- The R5C9 producer build used Xcode 27.0 build `27A5209h`, the committed
+  `SentinelForge-Acceptance` scheme, a fresh DerivedData root, a generic macOS
+  destination, and disabled requested code signing; the product carries only the
+  toolchain's ad-hoc linker signature. It produced a universal `arm64`/`x86_64` Debug
+  app with executable SHA-256
+  `6250ab27dc92ffdc6e2ff2186f9498473861bcd3a832994a4551ba1588d7ff35`.
+- Candidate archive `sentinelforge-r5c9-candidate-87057b8.zip` is 8,277,841 bytes and
+  has SHA-256 `15c468936890145ce616d217ad2f0b875ad24e84d76e96bd1f2b51765f474435`.
+  Its manifest SHA-256 is
+  `d07bee9ce0fb5e1ed35fb39aae570f15a5308070f1a71b6ef9985ae9372c3f32`;
+  all seven app files passed the included checksum list. This is producer-attested
+  build-candidate proof only: the app was not launched, no acceptance ran, no target
+  traffic was sent, and the lab repository was not accessed.
 - The exact `5f03c35` SentinelForge-Acceptance Debug build succeeded on 2026-08-24.
   Its executable SHA-256 is
   `186b243a6ec8e19c76dd9421381264f7f1996b414c617883cae27ecc31bea518`.
@@ -475,13 +489,22 @@ closure:
       suite, manifest, process binding, and request-ledger changes. Those lab-derived
       results are quarantined, satisfy no checkbox, and are not R5C8 evidence. R5C8
       introduces no lab-source or verifier-change requirement.
-    - [ ] **R5C9 — renew current-SHA acceptance.** After the Sentinel branch is reviewed
-      and merged, provide an immutable exact-SHA candidate to a separately scoped lab
-      task and rerun the negative protocol gate and native vulnerable/secure matrix from
-      the unchanged accepted verifier baseline. R5C9 may retain the resulting run
-      evidence under the established lab process, but it must not change verifier or lab
-      source. If the existing verifier cannot run the candidate, stop and report the
-      blocker rather than modifying the lab under this workstream.
+    - [ ] **R5C9 — renew current-SHA acceptance.** Use a separately scoped lab task to
+      rerun the negative protocol gate and native vulnerable/secure matrix from the
+      unchanged accepted verifier baseline. R5C9 may retain the resulting run evidence
+      under the established lab process, but it must not change verifier or lab source.
+      If the existing verifier cannot run the candidate, stop and report the blocker
+      rather than modifying the lab under this workstream.
+      - [x] **Sentinel candidate handoff.** Clean merged source `87057b8` / tree
+        `449902cf` produced universal Debug candidate
+        `sentinelforge-r5c9-candidate-87057b8.zip`, archive SHA-256 `15c46893...`,
+        manifest SHA-256 `d07bee9c...`, and executable SHA-256 `6250ab27...`. The
+        package checksum and all seven app-file checksums pass. This did not launch the
+        app, run acceptance, send target traffic, or access the lab.
+      - [ ] **Independent unchanged-verifier run.** The receiving lab task must verify
+        the package, manifest, checksum list, app bundle, and executable before running
+        the negative protocol and native matrices. Any required verifier/source change
+        is a blocker.
 
 The accepted native SUT was `2743 passed, 1 skipped, 2 warnings` when reverified at
 checkout `5f03c35`. The exact acceptance Debug build succeeds and its executable
@@ -633,17 +656,18 @@ complete**. R5C7 preserves the accepted `5f03c35` native revocation-survival pro
 requiring an exact phase-only role mode, rejecting mixed profiles, and excluding
 unrelated behavioral backends from role-profile selection at commit `f91f5cb`.
 
-The valid R5C8 checkpoint is Sentinel `8329be8`: the committed Acceptance scheme and
-`ui/project.yml` carry the same bounded behavior-gate environment, while the standard
-scheme grants none. The branch is not yet merged. The attempted lab extension at
-`64297dc` is quarantined and supplies no accepted evidence or completion credit.
+The corrected R5C8 checkpoint is merged at Sentinel `87057b8`: the committed Acceptance
+scheme and `ui/project.yml` carry the same bounded behavior-gate environment, while the
+standard scheme grants none. The attempted lab extension at `64297dc` remains
+quarantined and supplies no accepted evidence or completion credit.
 
-The immediate repository action is to review and merge the corrected Sentinel-only
-R5C8 branch. The planned next evidence slice is **R5C9 — renew current-SHA acceptance**:
-hand an immutable exact-SHA Sentinel candidate to a separately scoped lab task and run
-the unchanged accepted verifier baseline. R5C9 may retain only resulting run evidence;
-any required verifier or lab-source modification is a blocker, not an implicit repair.
-Only after that unchecked evidence passes should R5D1 begin.
+The Sentinel-side R5C9 candidate handoff is complete for exact merged source `87057b8`.
+The planned next evidence slice is the remaining **R5C9 unchanged-verifier acceptance
+run** in a separately scoped lab task. The receiver must verify candidate archive
+`15c46893...`, manifest `d07bee9c...`, and executable `6250ab27...` before running.
+R5C9 may retain only resulting run evidence; any required verifier or lab-source
+modification is a blocker, not an implicit repair. Only after that unchecked evidence
+passes should R5D1 begin.
 
 The repository security-check baseline, six generated web-schema drift snapshots,
 remaining skip, and warning debt stay as explicit maintenance/evidence items. They must
@@ -659,7 +683,7 @@ implemented sub-slices.
 | [ ] | Baseline governance | Active | Track the current skip, current warning set, security baseline, and six web-schema drift snapshots separately; preserve the exact native build |
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
-| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; evidence gate open | Review/merge R5C8, then R5C9 from the unchanged accepted lab baseline |
+| [x] | OCB-R5 family C roles/membership | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; immutable current-SHA candidate built; acceptance gate open | R5C9 unchanged-verifier protocol and native run against candidate `15c46893...` |
 | [ ] | OCB-R5 family D capabilities | Blocked on the Family-C repair gate | R5D1 transport-free issued-capability contract, then `OCB-S17` |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |

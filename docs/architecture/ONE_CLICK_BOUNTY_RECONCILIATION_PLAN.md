@@ -1217,11 +1217,17 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   The attempted lab extension at `64297dc`, its `435 passed` result, manifest,
   process-binding changes, and request-ledger changes are quarantined boundary-violation
   records, not accepted evidence, and satisfy no checklist item.
-- [ ] R5C9 provides an immutable exact-SHA candidate to a separately scoped lab task,
-  reruns the negative protocol and native matrices from the unchanged accepted verifier
-  baseline, and retains the resulting run evidence. If the verifier cannot run that
-  candidate without source changes, stop and report the blocker instead of changing the
-  lab under R5C9.
+- [ ] R5C9 uses a separately scoped lab task to rerun the negative protocol and native
+  matrices from the unchanged accepted verifier baseline and retain the resulting run
+  evidence. If the verifier cannot run the candidate without source changes, stop and
+  report the blocker instead of changing the lab under R5C9.
+  - [x] Sentinel candidate handoff: clean merged source `87057b8` / tree `449902cf`
+    produced universal Debug archive `sentinelforge-r5c9-candidate-87057b8.zip`, archive
+    SHA-256 `15c46893...`, manifest SHA-256 `d07bee9c...`, and executable SHA-256
+    `6250ab27...`. Package and seven app-file checksums pass; no app launch, acceptance,
+    target traffic, or lab access occurred.
+  - [ ] The separately scoped lab task independently verifies the package and runs the
+    unchanged accepted verifier. Any verifier or lab-source change is a blocker.
 
 #### R5D — Capability confinement, freshness, and replay
 
