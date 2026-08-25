@@ -1205,8 +1205,11 @@ does not close broader R5C shapes or establish public-target or payout evidence.
 - [x] The 2026-08-24 Family-C closure review preserved that exact bounded claim and
   rechecked commit ancestry, artifact/binary hashes, journey metrics, failed-run
   diagnostics, and the still-red security/schema baselines.
-- [ ] R5C7 seals the server role profile: exact role mode is phase-only, mixed modes are
-  rejected, and unrelated behavioral backends cannot influence role-profile selection.
+- [x] R5C7 at Sentinel `f91f5cb` seals the server role profile: exact role mode is
+  phase-only, mixed modes are rejected, and unrelated behavioral backends cannot
+  influence role-profile selection. Focused API/Foundry and adjacent role/native
+  contracts pass, and the full suite is `2745 passed, 1 skipped, 4 warnings`; no target
+  traffic or additional execution authority was introduced.
 - [ ] R5C8 restores `ui/project.yml`/generated-scheme parity and independently binds
   clean checkouts, build/process identity, and all-route request accounting.
 - [ ] R5C9 reruns the negative protocol and native matrices at the repaired current SUT
@@ -1214,7 +1217,7 @@ does not close broader R5C shapes or establish public-target or payout evidence.
 
 #### R5D — Capability confinement, freshness, and replay
 
-- [ ] R5D starts only after the R5C7-R5C9 repair gate. Invitation token/link
+- [ ] R5D starts only after the remaining R5C8-R5C9 repair gate. Invitation token/link
   confinement belongs here; membership creation, role assignment, and resulting
   authority remain Family-C obligations.
 - [ ] R5D1 defines a transport-free, content-addressed issued-capability contract and
