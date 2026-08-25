@@ -19,10 +19,17 @@ REQUIRED_ACCEPTANCE_ENV = {
     ),
     "SENTINELFORGE_BEHAVIOR_PRIMARY": "1",
     "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION": "1",
+    "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER": "1",
+    "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE": "1",
+    "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK": "1",
+    "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM": "1",
+    "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE": "1",
+    "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION": "1",
 }
 ACTIVE_BEHAVIOR_ENV = {
-    "SENTINELFORGE_BEHAVIOR_PRIMARY",
-    "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+    name
+    for name in REQUIRED_ACCEPTANCE_ENV
+    if name.startswith("SENTINELFORGE_BEHAVIOR_")
 }
 
 
@@ -35,16 +42,16 @@ def _scheme_environment(name: str) -> dict[str, str]:
     }
 
 
-def test_acceptance_scheme_enables_bounded_link_acquisition() -> None:
+def test_acceptance_project_spec_matches_committed_scheme() -> None:
     spec = yaml.safe_load(PROJECT_SPEC.read_text(encoding="utf-8"))
     spec_environment = spec["schemes"]["SentinelForge-Acceptance"]["run"][
         "environmentVariables"
     ]
+    scheme_environment = _scheme_environment("SentinelForge-Acceptance")
 
     assert REQUIRED_ACCEPTANCE_ENV.items() <= spec_environment.items()
-    assert REQUIRED_ACCEPTANCE_ENV.items() <= _scheme_environment(
-        "SentinelForge-Acceptance"
-    ).items()
+    assert REQUIRED_ACCEPTANCE_ENV.items() <= scheme_environment.items()
+    assert spec_environment == scheme_environment
 
 
 def test_standard_scheme_does_not_grant_behavioral_execution_authority() -> None:

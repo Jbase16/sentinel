@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Scheme
    LastUpgradeVersion = "1500"
-   version = "1.3">
+   version = "1.7">
    <BuildAction
       parallelizeBuildables = "YES"
-      buildImplicitDependencies = "YES">
+      buildImplicitDependencies = "YES"
+      runPostActionsOnFailure = "NO">
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
@@ -26,7 +27,8 @@
       buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
-      shouldUseLaunchSchemeArgsEnv = "YES">
+      shouldUseLaunchSchemeArgsEnv = "YES"
+      onlyGenerateCoverageForSpecifiedTargets = "NO">
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
@@ -59,24 +61,11 @@
             ReferencedContainer = "container:SentinelForge.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
       <EnvironmentVariables>
          <EnvironmentVariable
-            key = "SENTINEL_ACCEPTANCE_MODE"
-            value = "1"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "SENTINELFORGE_BEHAVIOR_PRIMARY"
-            value = "1"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
             key = "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION"
-            value = "1"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER"
             value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>
@@ -86,12 +75,12 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK"
+            key = "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER"
             value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM"
+            key = "SENTINELFORGE_BEHAVIOR_PRIMARY"
             value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>
@@ -101,7 +90,22 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION"
+            value = "1"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "SENTINEL_ACCEPTANCE_MODE"
             value = "1"
             isEnabled = "YES">
          </EnvironmentVariable>
@@ -111,13 +115,13 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "SENTINEL_DATA_DIR"
-            value = "/tmp/sentinelforge-acceptance-state"
+            key = "SENTINEL_CA_BUNDLE"
+            value = "../sentinel-visual-acceptance-lab/var/caddy/caddy/pki/authorities/local/root.crt"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "SENTINEL_CA_BUNDLE"
-            value = "../sentinel-visual-acceptance-lab/var/caddy/caddy/pki/authorities/local/root.crt"
+            key = "SENTINEL_DATA_DIR"
+            value = "/tmp/sentinelforge-acceptance-state"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
