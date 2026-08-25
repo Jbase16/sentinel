@@ -2901,6 +2901,9 @@ class TestBehavioralAuthorizationEndpoint:
         )
         for name in (
             "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE",
             "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
             "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
             "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
@@ -2948,6 +2951,9 @@ class TestBehavioralAuthorizationEndpoint:
         ) = self._role_one_click_request()
         for name in (
             "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE",
             "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
             "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
             "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
@@ -3072,6 +3078,7 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["finding_confirmed"] is True
         assert result["finding"]["tool"] == "behavioral_role_monotonicity"
         assert result["role_monotonicity_one_click"]["dispatched"] is True
+        assert result["interaction_acquisition"]["status"] == "disabled"
         assert result["behavioral_shadow"]["receipt_feedback"]["status"] == (
             "unsupported"
         )

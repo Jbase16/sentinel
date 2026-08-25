@@ -1065,14 +1065,29 @@ async def run_behavioral_authorization_endpoint(
         )
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
+    # The inner boundary owns this profile selection too, so direct callers
+    # cannot re-enable unrelated interaction authorities alongside the stricter
+    # role-session contract.
     interaction_acquisition_config = (
-        InteractionAcquisitionConfig.from_environment()
+        InteractionAcquisitionConfig()
+        if role_specification is not None
+        else InteractionAcquisitionConfig.from_environment()
     )
-    interaction_render_config = InteractionRenderConfig.from_environment()
+    interaction_render_config = (
+        InteractionRenderConfig()
+        if role_specification is not None
+        else InteractionRenderConfig.from_environment()
+    )
     interaction_second_config = (
-        InteractionSecondTransitionConfig.from_environment()
+        InteractionSecondTransitionConfig()
+        if role_specification is not None
+        else InteractionSecondTransitionConfig.from_environment()
     )
-    interaction_adaptive_config = InteractionAdaptiveConfig.from_environment()
+    interaction_adaptive_config = (
+        InteractionAdaptiveConfig()
+        if role_specification is not None
+        else InteractionAdaptiveConfig.from_environment()
+    )
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
         raise HTTPException(
             status_code=409,
@@ -4157,14 +4172,29 @@ async def run_behavioral_authorization_from_url_endpoint(
                 f"signed workflow: {ROLE_MONOTONICITY_WORKFLOW}"
             ),
         )
+    # A supplied role specification selects the role-lifecycle URL profile.
+    # Keep the independently enabled interaction profile out of that execution
+    # so its unrelated workflows cannot become accidental prerequisites.
     interaction_acquisition_config = (
-        InteractionAcquisitionConfig.from_environment()
+        InteractionAcquisitionConfig()
+        if role_specification is not None
+        else InteractionAcquisitionConfig.from_environment()
     )
-    interaction_render_config = InteractionRenderConfig.from_environment()
+    interaction_render_config = (
+        InteractionRenderConfig()
+        if role_specification is not None
+        else InteractionRenderConfig.from_environment()
+    )
     interaction_second_config = (
-        InteractionSecondTransitionConfig.from_environment()
+        InteractionSecondTransitionConfig()
+        if role_specification is not None
+        else InteractionSecondTransitionConfig.from_environment()
     )
-    interaction_adaptive_config = InteractionAdaptiveConfig.from_environment()
+    interaction_adaptive_config = (
+        InteractionAdaptiveConfig()
+        if role_specification is not None
+        else InteractionAdaptiveConfig.from_environment()
+    )
     if (
         interaction_render_config.enabled
         and not interaction_acquisition_config.enabled
