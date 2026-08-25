@@ -176,6 +176,7 @@ class OwnedExperimentShadowContext:
         repr=False,
         compare=False,
     )
+    role_world_ids: Tuple[str, ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -193,6 +194,20 @@ class OwnedExperimentShadowContext:
                     not isinstance(self.peer_persona_id, str)
                     or not self.peer_persona_id
                     or self.peer_persona_id == self.actor_persona_id
+                )
+            )
+            or not isinstance(self.role_world_ids, tuple)
+            or (
+                self.role_world_ids
+                and (
+                    self.peer_persona_id is None
+                    or len(self.role_world_ids) != 2
+                    or len(set(self.role_world_ids)) != 2
+                    or set(self.role_world_ids)
+                    != {
+                        self.actor_persona_id,
+                        self.peer_persona_id,
+                    }
                 )
             )
         ):
@@ -1005,18 +1020,23 @@ class BehavioralShadowOrchestrator:
         if omissions.experiments:
             available_backends.append("prerequisite_omission")
         owned_world_ids = ()
+        role_world_ids = ()
         authorization = None
         if experiment_context is not None:
             authorization = experiment_context.authorization
             owned_world_ids = (experiment_context.actor_persona_id,)
             if experiment_context.peer_persona_id is not None:
                 owned_world_ids = (*owned_world_ids, experiment_context.peer_persona_id)
+            role_world_ids = experiment_context.role_world_ids
+            if role_world_ids:
+                available_backends.append("authority_monotonicity")
         payout_context = GoalPlanningContext.build(
             target_ref=graph.target_ref,
             target_origin=target_origin,
             authorization=authorization,
             selected_world_id=world_id,
             owned_world_ids=owned_world_ids,
+            role_world_ids=role_world_ids,
             lifecycle_available=bool(state_machine.candidates),
             available_backends=available_backends,
             graph_bound_prerequisite_terminal_ids=tuple(

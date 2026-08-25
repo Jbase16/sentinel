@@ -57,6 +57,13 @@ def _isolate(monkeypatch, tmp_path):
         "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
         raising=False,
     )
+    for name in (
+        "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
+        "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
+        "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
+        "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
+    ):
+        monkeypatch.delenv(name, raising=False)
     _reset_bus_for_tests()
     yield
     _reset_bus_for_tests()
@@ -475,6 +482,127 @@ class TestBehavioralAuthorizationEndpoint:
             request,
             source_persona,
             peer_persona,
+        )
+
+    def _role_one_click_request(self, *, signed_role_workflow=True):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.normalize import stable_hash
+        from core.behavior.role_monotonicity import ROLE_MONOTONICITY_WORKFLOW
+        from core.foundry.authorization import create_envelope
+        from core.foundry.vault import PersonaVault
+        from core.server.routers.foundry import (
+            RunBehavioralAuthorizationFromURLRequest,
+        )
+
+        vault = PersonaVault()
+        higher = vault.add_persona(
+            label="role-higher",
+            email="role-higher@research.example",
+        )
+        lower = vault.add_persona(
+            label="role-lower",
+            email="role-lower@research.example",
+        )
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="role-example",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="owned role monotonicity test",
+            allowed_workflows=[
+                CONTROLLED_WORKFLOW,
+                *(
+                    [ROLE_MONOTONICITY_WORKFLOW]
+                    if signed_role_workflow
+                    else []
+                ),
+            ],
+            disclosure_attestation=True,
+        )
+        higher_role_ref = stable_hash("experiment_role", "higher-role")
+        lower_role_ref = stable_hash("experiment_role", "lower-role")
+        tenant_id = "tenant_role_one_click"
+        membership_collection = (
+            f"{self.ORIGIN}/api/tenants/{tenant_id}/memberships"
+        )
+        membership_item = f"{membership_collection}/{lower.persona_id}"
+        probe = f"{self.ORIGIN}/api/tenants/{tenant_id}/admin-effect"
+        witness = (
+            f"{self.ORIGIN}/api/tenants/{tenant_id}/authoritative-effect"
+        )
+        role_specification = {
+            "schema_version": 1,
+            "run_id": "ordinary-role-run-001",
+            "tenant_id": tenant_id,
+            "higher_role_ref": higher_role_ref,
+            "lower_role_ref": lower_role_ref,
+            "higher_session_id": "higher-role-session",
+            "active_lower_session_id": "active-lower-role-session",
+            "revoked_lower_session_id": "revoked-lower-role-session",
+            "active_membership_generation": 11,
+            "revoked_membership_generation": 12,
+            "actions": {
+                "setup": {
+                    "url": membership_collection,
+                    "body": {
+                        "member_id": lower.persona_id,
+                        "role_assignment": lower_role_ref,
+                    },
+                },
+                "higher_baseline": {"url": f"{probe}?state=baseline"},
+                "active_lower_probe": {"url": f"{probe}?state=active"},
+                "active_effect_witness": {
+                    "url": f"{witness}?state=active"
+                },
+                "revocation": {
+                    "url": membership_item,
+                    "body": {"state": "revoked"},
+                },
+                "revocation_verification": {"url": membership_item},
+                "revoked_lower_probe": {"url": f"{probe}?state=revoked"},
+                "revoked_effect_witness": {
+                    "url": f"{witness}?state=revoked"
+                },
+            },
+            "membership_pointers": {
+                "tenant": "/tenant_id",
+                "subject": "/member_id",
+                "role": "/role_assignment",
+                "state": "/state",
+                "generation": "/generation",
+            },
+            "effect_pointers": {
+                "probe_authorized": "/authorized",
+                "probe_effect": "/effect",
+                "witness_effect": "/effect",
+            },
+        }
+        source_record = {
+            "id": "role-operation",
+            "persona_id": higher.persona_id,
+            "method": "POST",
+            "url": f"{self.ORIGIN}/api/admin/role/permission",
+            "request_body": "{}",
+            "response_status": 200,
+            "response_body": '{"ok":true}',
+        }
+        peer_record = {
+            **source_record,
+            "id": "peer-role-operation",
+            "persona_id": lower.persona_id,
+        }
+        return (
+            RunBehavioralAuthorizationFromURLRequest(
+                target_url=f"{self.ORIGIN}/app",
+                envelope_id=envelope.envelope_id,
+                source_persona_id=higher.persona_id,
+                peer_persona_id=lower.persona_id,
+                role_monotonicity=role_specification,
+            ),
+            (source_record,),
+            (peer_record,),
+            higher,
+            lower,
+            role_specification,
         )
 
     def _omission_request(
@@ -2756,6 +2884,299 @@ class TestBehavioralAuthorizationEndpoint:
         assert error.value.status_code == 409
         assert "graph-bound prerequisite" in error.value.detail
         assert "missing signed workflow" in error.value.detail
+
+    def test_role_one_click_requires_signed_workflow_before_capture(
+        self,
+        monkeypatch,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+
+        request, *_rest = self._role_one_click_request(
+            signed_role_workflow=False
+        )
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
+            "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        async def forbidden_windows(*_args, **_kwargs):
+            raise AssertionError("role workflow denial must precede windows")
+
+        monkeypatch.setattr(driver, "validate_persona_windows", forbidden_windows)
+
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+
+        assert error.value.status_code == 409
+        assert "role monotonicity" in error.value.detail
+        assert "missing signed workflow" in error.value.detail
+
+    def test_role_one_click_executes_once_and_reuses_outer_and_inner_receipts(
+        self,
+        monkeypatch,
+    ):
+        from urllib.parse import parse_qs, urlsplit
+
+        from core.behavior.receipts import BehavioralReceiptStore
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            RunBehavioralAuthorizationFromURLRequest,
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import (
+            ReplayResponse,
+            SNDReplayTransport,
+            SessionBoundReplayResponse,
+        )
+
+        (
+            request,
+            source_records,
+            peer_records,
+            higher,
+            lower,
+            role_specification,
+        ) = self._role_one_click_request()
+        for name in (
+            "SENTINELFORGE_BEHAVIOR_PRIMARY",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ACQUISITION",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_RENDER",
+            "SENTINELFORGE_BEHAVIOR_INTERACTION_ADAPTIVE",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
+            "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
+        ):
+            monkeypatch.setenv(name, "1")
+
+        captures = 0
+        role_calls = []
+        effect = {"capability": "owned-admin-export", "visible": True}
+
+        async def validate_windows(persona_ids):
+            assert tuple(persona_ids) == (higher.persona_id, lower.persona_id)
+
+        async def capture_pair(**_kwargs):
+            nonlocal captures
+            captures += 1
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=higher.persona_id,
+                    path="/private/role-source.jsonl",
+                    records=source_records,
+                    captured_bytes=128,
+                    limit_reached=False,
+                    page_url=f"{self.ORIGIN}/app",
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=lower.persona_id,
+                    path="/private/role-peer.jsonl",
+                    records=peer_records,
+                    captured_bytes=128,
+                    limit_reached=False,
+                    page_url=f"{self.ORIGIN}/app",
+                ),
+                (),
+            )
+
+        def membership(state, generation):
+            return json.dumps(
+                {
+                    "tenant_id": role_specification["tenant_id"],
+                    "member_id": lower.persona_id,
+                    "role_assignment": role_specification["lower_role_ref"],
+                    "state": state,
+                    "generation": generation,
+                },
+                sort_keys=True,
+            )
+
+        async def fake_send_bound(
+            _transport,
+            persona_id,
+            session_id,
+            replay_request,
+        ):
+            role_calls.append((persona_id, session_id, replay_request))
+            parsed = urlsplit(replay_request.url)
+            state = parse_qs(parsed.query).get("state", [None])[0]
+            if replay_request.method == "POST":
+                response = ReplayResponse(200, membership("active", 11))
+            elif replay_request.method == "PATCH":
+                response = ReplayResponse(200, '{"accepted":true}')
+            elif "/memberships/" in parsed.path:
+                response = ReplayResponse(200, membership("revoked", 12))
+            elif parsed.path.endswith("/admin-effect"):
+                allowed = state in {"baseline", "active"}
+                response = ReplayResponse(
+                    200 if allowed else 403,
+                    json.dumps(
+                        {
+                            "authorized": allowed,
+                            "effect": effect if allowed else None,
+                        },
+                        sort_keys=True,
+                    ),
+                )
+            elif parsed.path.endswith("/authoritative-effect"):
+                response = ReplayResponse(
+                    200,
+                    json.dumps({"effect": effect}, sort_keys=True),
+                )
+            else:
+                raise AssertionError(
+                    f"unexpected role request: {replay_request.method} "
+                    f"{replay_request.url}"
+                )
+            return SessionBoundReplayResponse(
+                response=response,
+                persona=persona_id,
+                session_id=session_id,
+            )
+
+        async def forbidden_legacy_send(*_args, **_kwargs):
+            raise AssertionError("selected role proof must block legacy fallback")
+
+        monkeypatch.setattr(driver, "ensure_capture_available", lambda: None)
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send_bound", fake_send_bound)
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden_legacy_send)
+
+        result = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+        duplicate = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+        inner_duplicate = _run(
+            run_behavioral_authorization_from_url_endpoint(
+                RunBehavioralAuthorizationFromURLRequest(
+                    **{
+                        **request.model_dump(),
+                        "target_url": f"{self.ORIGIN}/app?outer-retry=1",
+                    }
+                ),
+                _=True,
+            )
+        )
+
+        assert result["kind"] == "role_protected_effect_execution"
+        assert result["status"] == "confirmed_active_escalation"
+        assert result["finding_confirmed"] is True
+        assert result["finding"]["tool"] == "behavioral_role_monotonicity"
+        assert result["role_monotonicity_one_click"]["dispatched"] is True
+        assert result["interaction_acquisition"]["status"] == "disabled"
+        assert result["behavioral_shadow"]["receipt_feedback"]["status"] == (
+            "unsupported"
+        )
+        assert duplicate["status"] == "already_executed"
+        assert duplicate["orchestration_receipt"]["reused"] is True
+        assert inner_duplicate["status"] == "already_executed"
+        assert inner_duplicate["orchestration_receipt"]["reused"] is False
+        assert captures == 2
+        assert len(role_calls) == 8
+        stored = BehavioralReceiptStore().load(
+            inner_duplicate["orchestration_receipt"]["receipt_id"].removeprefix(
+                "behavioral-"
+            )
+        )
+        assert stored.outcome["selection_ref"] == result["selection_ref"]
+        assert stored.outcome["finding_confirmed"] is True
+        stored_text = json.dumps(stored.to_dict(), sort_keys=True)
+        for private_value in (
+            role_specification["run_id"],
+            role_specification["tenant_id"],
+            role_specification["higher_session_id"],
+            role_specification["active_lower_session_id"],
+            role_specification["revoked_lower_session_id"],
+        ):
+            assert private_value not in stored_text
+
+    def test_role_one_click_default_off_stops_without_role_replay(
+        self,
+        monkeypatch,
+    ):
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        (
+            request,
+            source_records,
+            peer_records,
+            higher,
+            lower,
+            _role_specification,
+        ) = self._role_one_click_request()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+
+        async def validate_windows(persona_ids):
+            assert tuple(persona_ids) == (higher.persona_id, lower.persona_id)
+
+        async def capture_pair(**_kwargs):
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=higher.persona_id,
+                    path="/private/role-source.jsonl",
+                    records=source_records,
+                    captured_bytes=128,
+                    limit_reached=False,
+                    page_url=f"{self.ORIGIN}/app",
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=lower.persona_id,
+                    path="/private/role-peer.jsonl",
+                    records=peer_records,
+                    captured_bytes=128,
+                    limit_reached=False,
+                    page_url=f"{self.ORIGIN}/app",
+                ),
+                (),
+            )
+
+        async def forbidden_replay(*_args, **_kwargs):
+            raise AssertionError("default-off role selection must not replay")
+
+        monkeypatch.setattr(driver, "ensure_capture_available", lambda: None)
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden_replay)
+        monkeypatch.setattr(SNDReplayTransport, "send_bound", forbidden_replay)
+
+        result = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+
+        assert result["status"] == "no_executable_candidate"
+        assert result["finding"] is None
+        assert result["finding_confirmed"] is False
+        assert result["role_monotonicity_one_click"]["status"] == (
+            "selected_execution_disabled"
+        )
+        assert set(
+            result["role_monotonicity_one_click"]["disabled_gates"]
+        ) == {
+            "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_ONE_CLICK",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
+            "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
+            "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
+        }
+        assert result["orchestration_receipt"]["state"] == "completed"
 
     def test_graph_execution_requires_prior_capture_before_window_access(
         self,

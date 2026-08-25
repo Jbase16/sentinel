@@ -56,6 +56,10 @@ class SignupJob:
     # tied to the researcher's up-front judgment; the audit trail shows
     # which envelope authorized the execution.
     envelope_id: Optional[str] = None
+    # Opaque SND identity for the retained native window. This is not a
+    # target credential; it lets an authenticated local caller bind a later
+    # session-scoped replay contract to the exact window the Swift node owns.
+    native_session_id: Optional[str] = None
     # Filled when the replay finishes. The raw extracted dict (may hold
     # secrets) lives here; the public to_dict() redacts it.
     _outcome: Optional[Any] = None  # ReplayOutcome
@@ -71,6 +75,7 @@ class SignupJob:
             "state": self.state.value,
             "error": self.error,
             "envelope_id": self.envelope_id,
+            "native_session_id": self.native_session_id,
             "created_at": self.created_at,
             "finished_at": self.finished_at,
         }
@@ -220,6 +225,9 @@ class SignupOrchestrator:
         retained_for_persona = False
         try:
             driver = await self._driver_factory()
+            native_session_id = getattr(driver, "session_id", None)
+            if isinstance(native_session_id, str) and native_session_id:
+                job.native_session_id = native_session_id
             restrict_to_origins = getattr(driver, "restrict_to_origins", None)
             if callable(restrict_to_origins):
                 from core.foundry.authorization import get_envelope

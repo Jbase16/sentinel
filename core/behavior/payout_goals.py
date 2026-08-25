@@ -87,6 +87,9 @@ _SINK_WEIGHT = {
 _BACKEND_WORKFLOWS = {
     "object_authorization": ("behavioral_object_authorization",),
     "graph_bound_prerequisite": (GRAPH_BOUND_PREREQUISITE_WORKFLOW,),
+    "authority_monotonicity": (
+        "behavioral_role_membership_monotonicity",
+    ),
     "prerequisite_omission": (
         "behavioral_compiled_owned_sequence",
         "behavioral_state_machine_omission",
@@ -863,6 +866,9 @@ def _world_requirement(
                 ProofTopology.OWNED_ROLE_DIFFERENTIAL,
                 2,
                 required_role_worlds=2,
+                required_workflows=_BACKEND_WORKFLOWS[
+                    "authority_monotonicity"
+                ],
             ),
             "authority_monotonicity",
         )

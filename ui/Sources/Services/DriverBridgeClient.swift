@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Combine
 import AppKit
@@ -34,6 +35,12 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     
     // Registry of authenticated persona windows for BOLA testing
     public var personaWindows: [String: GhostBrowserWindow] = [:]
+
+    // A role experiment can legitimately bind more than one isolated native
+    // session to the same owned persona (for example, pre- and post-revocation
+    // lower-role sessions). Keep those exact windows addressable without
+    // changing the ordinary persona default used by capture and legacy replay.
+    private var personaSessionWindows: [String: [String: GhostBrowserWindow]] = [:]
     
     private override init() {
         super.init()
@@ -295,6 +302,25 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     await executeReplay(reqId: reqId, args: args)
                     // executeReplay handles sending its own response/error, so we return early
                     return
+                case "session_replay":
+                    guard let sessionId = args["session_id"] as? String,
+                          !sessionId.isEmpty else {
+                        throw NSError(
+                            domain: "SND",
+                            code: 400,
+                            userInfo: [
+                                NSLocalizedDescriptionKey:
+                                    "session_id is required"
+                            ]
+                        )
+                    }
+                    await executeReplay(
+                        reqId: reqId,
+                        args: args,
+                        requiredSessionId: sessionId
+                    )
+                    // executeReplay handles sending its own response/error.
+                    return
                 default:
                     throw NSError(domain: "SND", code: 400, userInfo: [NSLocalizedDescriptionKey: "Unknown command \(command)"])
                 }
@@ -543,15 +569,38 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     private func retainBrowser(for personaId: String) throws -> String {
         let window = try getBrowser()
         if let existing = personaWindows[personaId], existing !== window {
-            existing.close()
+            // Session-bound windows remain isolated and addressable by their
+            // opaque SND identity. An unbound/manual window still has the old
+            // replace-one-default lifecycle.
+            if existing.eventSessionId.isEmpty || window.eventSessionId.isEmpty {
+                existing.close()
+            }
         }
         personaWindows[personaId] = window
+        let sessionId = window.eventSessionId
+        if !sessionId.isEmpty {
+            if let existing = personaSessionWindows[personaId]?[sessionId],
+               existing !== window {
+                existing.close()
+            }
+            personaSessionWindows[personaId, default: [:]][sessionId] = window
+        }
         bindOwnershipWitness(to: window, personaId: personaId)
         window.title = "SND Window - retained persona"
         window.observeClose { [weak self, weak window] in
-            guard let self, let window,
-                  self.personaWindows[personaId] === window else { return }
-            self.personaWindows.removeValue(forKey: personaId)
+            guard let self, let window else { return }
+            if self.personaWindows[personaId] === window {
+                self.personaWindows.removeValue(forKey: personaId)
+            }
+            if !sessionId.isEmpty,
+               self.personaSessionWindows[personaId]?[sessionId] === window {
+                self.personaSessionWindows[personaId]?.removeValue(
+                    forKey: sessionId
+                )
+                if self.personaSessionWindows[personaId]?.isEmpty == true {
+                    self.personaSessionWindows.removeValue(forKey: personaId)
+                }
+            }
         }
         currentBrowserWindowController = nil
         return "ok"
@@ -563,10 +612,28 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
     }
     
     @MainActor
-    private func executeReplay(reqId: String, args: [String: Any]) async {
-        guard let persona = args["persona"] as? String,
-              let window = personaWindows[persona] else {
+    private func executeReplay(
+        reqId: String,
+        args: [String: Any],
+        requiredSessionId: String? = nil
+    ) async {
+        guard let persona = args["persona"] as? String else {
+            sendError(reqId: reqId, error: "persona is required")
+            return
+        }
+        let window = requiredSessionId.flatMap {
+            personaSessionWindows[persona]?[$0]
+        } ?? (requiredSessionId == nil ? personaWindows[persona] : nil)
+        guard let window else {
             sendError(reqId: reqId, error: "no authenticated window for persona '\(args["persona"] ?? "?")'")
+            return
+        }
+        if let requiredSessionId,
+           window.eventSessionId != requiredSessionId {
+            sendError(
+                reqId: reqId,
+                error: "session-bound replay refused before target dispatch"
+            )
             return
         }
         guard let requestedURL = args["url"] as? String,
@@ -578,10 +645,24 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
             return
         }
         
+        var requestHeaders = args["headers"] as? [String: String] ?? [:]
+        if let requiredSessionId {
+            requestHeaders = requestHeaders.filter {
+                $0.key.caseInsensitiveCompare(
+                    "X-Sentinel-Native-Session-Ref"
+                ) != .orderedSame
+            }
+            let digest = SHA256.hash(
+                data: Data(requiredSessionId.utf8)
+            ).map { String(format: "%02x", $0) }.joined()
+            requestHeaders["X-Sentinel-Native-Session-Ref"] =
+                "native_session:\(digest)"
+        }
+
         let params: [String: Any] = [
             "url":     requestedURL,
             "method":  args["method"]  as? String ?? "POST",
-            "headers": args["headers"] as? [String: String] ?? [:],
+            "headers": requestHeaders,
             "body":    args["body"]    as? String as Any,
             "maxResponseChars": args["max_response_chars"] as? Int as Any,
             // Fetch cannot expose each redirect hop portably. Keep it manual;
@@ -641,7 +722,11 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         
         do {
             let result = try await window.callAsyncJavaScript(js, arguments: ["args": params], in: .page)
-            sendResponse(reqId: reqId, result: (result as? [String: Any]) ?? [:])
+            var response = (result as? [String: Any]) ?? [:]
+            if requiredSessionId != nil {
+                response["session_id"] = window.eventSessionId
+            }
+            sendResponse(reqId: reqId, result: response)
         } catch {
             sendError(reqId: reqId, error: "\(error)")
         }

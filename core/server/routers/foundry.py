@@ -150,6 +150,7 @@ class RunBehavioralAuthorizationRequest(BaseModel):
         min_length=8,
         max_length=4096,
     )
+    role_monotonicity: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_prior_capture_pair(self) -> "RunBehavioralAuthorizationRequest":
@@ -177,6 +178,7 @@ class RunBehavioralAuthorizationFromURLRequest(BaseModel):
         min_length=1,
         max_length=20_000,
     )
+    role_monotonicity: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_prior_capture_pair(
@@ -831,7 +833,7 @@ async def run_behavioral_authorization_endpoint(
         COMPLETED,
         BehavioralReceiptStore,
         ReceiptStoreError,
-        redacted_graph_bound_prerequisite_denial_response,
+        redacted_behavioral_execution_denial_response,
         redacted_outcome,
         redacted_receipt_context,
         request_fingerprint,
@@ -926,6 +928,32 @@ async def run_behavioral_authorization_endpoint(
     from core.behavior.prerequisite_request_binding import (
         GraphBoundRequestBindingDenied,
     )
+    from core.behavior.role_effect_evaluation import (
+        RoleProtectedEffectExecutionConfig,
+        RoleProtectedEffectExecutionDenied,
+    )
+    from core.behavior.role_execution_claim import (
+        RoleMonotonicityExecutionClaimConfig,
+        RoleMonotonicityExecutionClaimDenied,
+    )
+    from core.behavior.role_membership_lifecycle import (
+        RoleMembershipLifecycleConfig,
+        make_native_role_session_executor,
+    )
+    from core.behavior.role_monotonicity import (
+        ROLE_MONOTONICITY_WORKFLOW,
+        RoleMonotonicityExperimentDenied,
+    )
+    from core.behavior.role_monotonicity_one_click import (
+        RoleMonotonicityOneClickConfig,
+        RoleMonotonicityOneClickDenied,
+        RoleMonotonicityOneClickDispatcher,
+        RoleMonotonicityOneClickInternalError,
+        RoleMonotonicityOneClickSpecification,
+    )
+    from core.behavior.role_request_binding import (
+        RoleMonotonicityRequestBindingDenied,
+    )
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
     from core.foundry.authorization import get_envelope
@@ -995,6 +1023,17 @@ async def run_behavioral_authorization_endpoint(
             status_code=400,
             detail="prior paired captures have no in-scope records",
         )
+    role_specification = None
+    if req.role_monotonicity is not None:
+        try:
+            role_specification = (
+                RoleMonotonicityOneClickSpecification.from_mapping(
+                    req.role_monotonicity,
+                    target_origin=target_origin,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     source_controls = tuple(req.source_controls)
     peer_controls = tuple(req.peer_controls)
     try:
@@ -1026,14 +1065,29 @@ async def run_behavioral_authorization_endpoint(
         )
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
+    # The inner boundary owns this profile selection too, so direct callers
+    # cannot re-enable unrelated interaction authorities alongside the stricter
+    # role-session contract.
     interaction_acquisition_config = (
-        InteractionAcquisitionConfig.from_environment()
+        InteractionAcquisitionConfig()
+        if role_specification is not None
+        else InteractionAcquisitionConfig.from_environment()
     )
-    interaction_render_config = InteractionRenderConfig.from_environment()
+    interaction_render_config = (
+        InteractionRenderConfig()
+        if role_specification is not None
+        else InteractionRenderConfig.from_environment()
+    )
     interaction_second_config = (
-        InteractionSecondTransitionConfig.from_environment()
+        InteractionSecondTransitionConfig()
+        if role_specification is not None
+        else InteractionSecondTransitionConfig.from_environment()
     )
-    interaction_adaptive_config = InteractionAdaptiveConfig.from_environment()
+    interaction_adaptive_config = (
+        InteractionAdaptiveConfig()
+        if role_specification is not None
+        else InteractionAdaptiveConfig.from_environment()
+    )
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
         raise HTTPException(
             status_code=409,
@@ -1163,6 +1217,18 @@ async def run_behavioral_authorization_endpoint(
         .lower()
         in {"1", "true", "yes", "on"}
     )
+    role_one_click_config = RoleMonotonicityOneClickConfig.from_environment()
+    role_claim_config = RoleMonotonicityExecutionClaimConfig.from_environment()
+    role_lifecycle_config = RoleMembershipLifecycleConfig.from_environment()
+    role_execution_config = RoleProtectedEffectExecutionConfig.from_environment()
+    role_execution_active = all(
+        (
+            role_one_click_config.enabled,
+            role_claim_config.enabled,
+            role_lifecycle_config.enabled,
+            role_execution_config.enabled,
+        )
+    )
     capture_freshness = None
     if (
         continuation_config.enabled
@@ -1186,6 +1252,30 @@ async def run_behavioral_authorization_endpoint(
             detail=(
                 "graph-bound prerequisite authorization denied; missing "
                 f"signed workflow: {GRAPH_BOUND_PREREQUISITE_WORKFLOW}"
+            ),
+        )
+    if (
+        role_specification is not None
+        and continuation_config.enabled
+        and ROLE_MONOTONICITY_WORKFLOW in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "bounded continuation and role monotonicity execution are "
+                "mutually exclusive"
+            ),
+        )
+    if (
+        role_specification is not None
+        and role_execution_active
+        and ROLE_MONOTONICITY_WORKFLOW not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "role monotonicity authorization denied; missing signed "
+                f"workflow: {ROLE_MONOTONICITY_WORKFLOW}"
             ),
         )
     if (
@@ -1246,6 +1336,7 @@ async def run_behavioral_authorization_endpoint(
     controlled_executor = None
     generalized_authorization_executor = None
     graph_bound_prerequisite_executor = None
+    role_monotonicity_executor = None
     fresh_boundary_executor = None
     omission_confirmation_admission = None
     executors = None
@@ -1453,6 +1544,32 @@ async def run_behavioral_authorization_endpoint(
             graph_bound_policy,
             graph_bound_provenance,
         )
+        if role_specification is not None:
+            role_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=8,
+                    max_requests_per_endpoint=8,
+                    max_cross_object_reads=0,
+                    max_privilege_mutations=2,
+                    max_creates=0,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+                ownership_registry=OwnershipRegistry(),
+            )
+            role_provenance = ProvenanceSink()
+            role_provenance.record_context(
+                target=target_origin,
+                proof_mode="bounty_safe_role_monotonicity",
+                policy_digest=role_policy.digest(),
+            )
+            role_monotonicity_executor = make_native_role_session_executor(
+                scope_filter=scope_filter,
+                policy=role_policy,
+                provenance=role_provenance,
+            )
         controlled_executor = ControlledAuthorizationExecutor(
             target_origin=target_origin,
             authorization=envelope,
@@ -1551,6 +1668,18 @@ async def run_behavioral_authorization_endpoint(
                     "graph_bound_prerequisite_execution": (
                         graph_bound_execution_gate_enabled
                     ),
+                    "role_monotonicity_one_click": (
+                        role_one_click_config.enabled
+                    ),
+                    "role_monotonicity_execution_claim": (
+                        role_claim_config.enabled
+                    ),
+                    "role_membership_lifecycle": (
+                        role_lifecycle_config.enabled
+                    ),
+                    "role_protected_effect_execution": (
+                        role_execution_config.enabled
+                    ),
                 },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
@@ -1561,6 +1690,11 @@ async def run_behavioral_authorization_endpoint(
                 "capture_freshness_ref": (
                     capture_freshness.binding_id
                     if capture_freshness is not None
+                    else None
+                ),
+                "role_specification_id": (
+                    role_specification.specification_id
+                    if role_specification is not None
                     else None
                 ),
                 "script_urls": script_urls,
@@ -1602,7 +1736,7 @@ async def run_behavioral_authorization_endpoint(
             ):
                 raise HTTPException(
                     status_code=409,
-                    detail=redacted_graph_bound_prerequisite_denial_response(
+                    detail=redacted_behavioral_execution_denial_response(
                         reservation.receipt,
                         reused=True,
                     ),
@@ -1771,6 +1905,14 @@ async def run_behavioral_authorization_endpoint(
         executor=shadow_executor,
         peer_persona_id=peer_persona.persona_id,
         prerequisite_executor=graph_bound_prerequisite_executor,
+        role_world_ids=(
+            (
+                source_persona.persona_id,
+                peer_persona.persona_id,
+            )
+            if role_specification is not None
+            else ()
+        ),
     )
     shadow_run = None
     graph_prior_shadow_run = None
@@ -3309,6 +3451,7 @@ async def run_behavioral_authorization_endpoint(
 
     adaptive_proof_handoff = None
     graph_bound_one_click_run = None
+    role_monotonicity_one_click_run = None
     generalized_one_click_run = None
     graph_bound_shadow_run = shadow_run
     try:
@@ -3348,11 +3491,45 @@ async def run_behavioral_authorization_endpoint(
         if (
             cross_persona_proof_run is None
             and shadow_run is not None
+            and role_specification is not None
+            and role_monotonicity_executor is not None
+            and receipt_store is not None
+            and not (
+                graph_bound_one_click_run is not None
+                and graph_bound_one_click_run.selected
+            )
+        ):
+            role_monotonicity_one_click_run = await (
+                RoleMonotonicityOneClickDispatcher(
+                    target_origin=target_origin,
+                    higher_persona_id=source_persona.persona_id,
+                    lower_persona_id=peer_persona.persona_id,
+                    specification=role_specification,
+                    authorization=envelope,
+                    executor=role_monotonicity_executor,
+                    persona_vault=vault,
+                    receipt_store=receipt_store,
+                    one_click_config=role_one_click_config,
+                    claim_config=role_claim_config,
+                    lifecycle_config=role_lifecycle_config,
+                    execution_config=role_execution_config,
+                ).run(
+                    payout_goal_plan=shadow_run.payout_goal_plan,
+                    graph=shadow_run.graph,
+                )
+            )
+        if (
+            cross_persona_proof_run is None
+            and shadow_run is not None
             and controlled_executor is not None
             and receipt_store is not None
             and not (
                 graph_bound_one_click_run is not None
                 and graph_bound_one_click_run.selected
+            )
+            and not (
+                role_monotonicity_one_click_run is not None
+                and role_monotonicity_one_click_run.selected
             )
         ):
             generalized_one_click_run = await (
@@ -3382,6 +3559,10 @@ async def run_behavioral_authorization_endpoint(
             graph_bound_one_click_run.dispatched
         ):
             response = graph_bound_one_click_run.execution_response()
+        elif role_monotonicity_one_click_run is not None and (
+            role_monotonicity_one_click_run.dispatched
+        ):
+            response = role_monotonicity_one_click_run.execution_response()
         elif generalized_one_click_run is not None and (
             generalized_one_click_run.dispatched
         ):
@@ -3392,6 +3573,13 @@ async def run_behavioral_authorization_endpoint(
         ):
             # Selection is an authority boundary. A disabled or unavailable
             # graph plan must not fall through to a broader legacy executor.
+            run = shadow_run
+        elif (
+            role_monotonicity_one_click_run is not None
+            and role_monotonicity_one_click_run.selected
+        ):
+            # The payout-selected role proof is an authority boundary too. A
+            # disabled Family-C run cannot fall through to another executor.
             run = shadow_run
         elif cross_persona_proof_run is not None:
             run = cross_persona_proof_run
@@ -3445,6 +3633,12 @@ async def run_behavioral_authorization_endpoint(
         GraphBoundExecutionClaimDenied,
         GraphBoundPrerequisiteExecutionDenied,
         GraphBoundPrerequisiteOneClickDenied,
+        RoleMonotonicityExperimentDenied,
+        RoleMonotonicityRequestBindingDenied,
+        RoleMonotonicityExecutionClaimDenied,
+        RoleProtectedEffectExecutionDenied,
+        RoleMonotonicityOneClickDenied,
+        RoleMonotonicityOneClickInternalError,
     ) as exc:
         terminal_receipt = getattr(exc, "terminal_receipt", None)
         if (
@@ -3459,7 +3653,7 @@ async def run_behavioral_authorization_endpoint(
                 raise HTTPException(
                     status_code=503,
                     detail=(
-                        "graph-bound denial orchestration receipt is unavailable"
+                        "behavioral denial orchestration receipt is unavailable"
                     ),
                 ) from exc
             try:
@@ -3470,19 +3664,19 @@ async def run_behavioral_authorization_endpoint(
                     terminal_evidence=terminal_receipt.terminal_evidence,
                 )
                 denial_response = (
-                    redacted_graph_bound_prerequisite_denial_response(
+                    redacted_behavioral_execution_denial_response(
                         root_receipt,
                         reused=False,
                     )
                 )
             except (OSError, ReceiptStoreError) as receipt_exc:
                 logger.exception(
-                    "failed to persist graph-bound denial evidence"
+                    "failed to persist behavioral denial evidence"
                 )
                 raise HTTPException(
                     status_code=503,
                     detail=(
-                        "graph-bound denial receipt terminalization failed"
+                        "behavioral denial receipt terminalization failed"
                     ),
                 ) from receipt_exc
             raise HTTPException(
@@ -3561,6 +3755,10 @@ async def run_behavioral_authorization_endpoint(
             and graph_bound_one_click_run.dispatched
         )
         or (
+            role_monotonicity_one_click_run is not None
+            and role_monotonicity_one_click_run.dispatched
+        )
+        or (
             generalized_one_click_run is not None
             and generalized_one_click_run.dispatched
         )
@@ -3568,6 +3766,9 @@ async def run_behavioral_authorization_endpoint(
         if (
             graph_bound_one_click_run is not None
             and graph_bound_one_click_run.selected
+        ) or (
+            role_monotonicity_one_click_run is not None
+            and role_monotonicity_one_click_run.selected
         ):
             response = {
                 "status": "no_executable_candidate",
@@ -3581,6 +3782,10 @@ async def run_behavioral_authorization_endpoint(
         if graph_bound_one_click_run is not None:
             response["graph_bound_prerequisite_one_click"] = (
                 graph_bound_one_click_run.to_dict()
+            )
+        if role_monotonicity_one_click_run is not None:
+            response["role_monotonicity_one_click"] = (
+                role_monotonicity_one_click_run.to_dict()
             )
         if generalized_one_click_run is not None:
             response["generalized_authorization_one_click"] = (
@@ -3654,12 +3859,13 @@ async def run_behavioral_authorization_endpoint(
         if effective_shadow_run is not None:
             shadow_response = effective_shadow_run.to_dict()
             try:
-                if (
-                    response.get("kind")
-                    == "graph_bound_prerequisite_execution"
-                ):
+                if response.get("kind") == "graph_bound_prerequisite_execution":
                     raise GraphBoundPrerequisiteOneClickDenied(
                         "graph_bound_receipt_obligation_binding_unavailable"
+                    )
+                if response.get("kind") == "role_protected_effect_execution":
+                    raise RoleMonotonicityOneClickDenied(
+                        "role_receipt_obligation_binding_unavailable"
                     )
                 feedback = ReceiptDispositionAdapter().adapt(
                     effective_shadow_run.graph,
@@ -3709,7 +3915,10 @@ async def run_behavioral_authorization_endpoint(
                 # A feedback failure cannot erase or falsify the already finalized
                 # proof receipt.  Keep the pre-execution frontier and expose the
                 # failed accounting step explicitly.
-                if response.get("kind") == "graph_bound_prerequisite_execution":
+                if response.get("kind") in {
+                    "graph_bound_prerequisite_execution",
+                    "role_protected_effect_execution",
+                }:
                     shadow_response["receipt_feedback"] = {
                         "schema_version": 1,
                         "mode": "behavioral_receipt_feedback_v1",
@@ -3717,6 +3926,9 @@ async def run_behavioral_authorization_endpoint(
                         "status": "unsupported",
                         "error_code": (
                             "graph_bound_receipt_obligation_binding_unavailable"
+                            if response.get("kind")
+                            == "graph_bound_prerequisite_execution"
+                            else "role_receipt_obligation_binding_unavailable"
                         ),
                     }
                 else:
@@ -3756,7 +3968,7 @@ async def run_behavioral_authorization_from_url_endpoint(
         COMPLETED,
         BehavioralReceiptStore,
         ReceiptStoreError,
-        redacted_graph_bound_prerequisite_denial_response,
+        redacted_behavioral_execution_denial_response,
         redacted_outcome,
         redacted_receipt_context,
         request_fingerprint,
@@ -3809,6 +4021,20 @@ async def run_behavioral_authorization_from_url_endpoint(
     from core.behavior.prerequisite_provisioning import (
         GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV,
     )
+    from core.behavior.role_effect_evaluation import (
+        RoleProtectedEffectExecutionConfig,
+    )
+    from core.behavior.role_execution_claim import (
+        RoleMonotonicityExecutionClaimConfig,
+    )
+    from core.behavior.role_membership_lifecycle import (
+        RoleMembershipLifecycleConfig,
+    )
+    from core.behavior.role_monotonicity import ROLE_MONOTONICITY_WORKFLOW
+    from core.behavior.role_monotonicity_one_click import (
+        RoleMonotonicityOneClickConfig,
+        RoleMonotonicityOneClickSpecification,
+    )
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
     from core.server.routers.driver import (
@@ -3826,6 +4052,18 @@ async def run_behavioral_authorization_from_url_endpoint(
         target_origin, scope_filter = _behavioral_scope_filter(target_url)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    role_specification = None
+    if req.role_monotonicity is not None:
+        try:
+            role_specification = (
+                RoleMonotonicityOneClickSpecification.from_mapping(
+                    req.role_monotonicity,
+                    target_origin=target_origin,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if not PrimaryPlannerConfig.from_environment().enabled:
         raise HTTPException(
@@ -3887,6 +4125,18 @@ async def run_behavioral_authorization_from_url_endpoint(
         .lower()
         in {"1", "true", "yes", "on"}
     )
+    role_one_click_config = RoleMonotonicityOneClickConfig.from_environment()
+    role_claim_config = RoleMonotonicityExecutionClaimConfig.from_environment()
+    role_lifecycle_config = RoleMembershipLifecycleConfig.from_environment()
+    role_execution_config = RoleProtectedEffectExecutionConfig.from_environment()
+    role_execution_active = all(
+        (
+            role_one_click_config.enabled,
+            role_claim_config.enabled,
+            role_lifecycle_config.enabled,
+            role_execution_config.enabled,
+        )
+    )
     if (
         continuation_config.enabled
         and GRAPH_BOUND_PREREQUISITE_WORKFLOW in envelope.allowed_workflows
@@ -3898,14 +4148,53 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "are mutually exclusive"
             ),
         )
+    if (
+        role_specification is not None
+        and continuation_config.enabled
+        and ROLE_MONOTONICITY_WORKFLOW in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "bounded continuation and role monotonicity execution are "
+                "mutually exclusive"
+            ),
+        )
+    if (
+        role_specification is not None
+        and role_execution_active
+        and ROLE_MONOTONICITY_WORKFLOW not in envelope.allowed_workflows
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "one-click role monotonicity authorization denied; missing "
+                f"signed workflow: {ROLE_MONOTONICITY_WORKFLOW}"
+            ),
+        )
+    # A supplied role specification selects the role-lifecycle URL profile.
+    # Keep the independently enabled interaction profile out of that execution
+    # so its unrelated workflows cannot become accidental prerequisites.
     interaction_acquisition_config = (
-        InteractionAcquisitionConfig.from_environment()
+        InteractionAcquisitionConfig()
+        if role_specification is not None
+        else InteractionAcquisitionConfig.from_environment()
     )
-    interaction_render_config = InteractionRenderConfig.from_environment()
+    interaction_render_config = (
+        InteractionRenderConfig()
+        if role_specification is not None
+        else InteractionRenderConfig.from_environment()
+    )
     interaction_second_config = (
-        InteractionSecondTransitionConfig.from_environment()
+        InteractionSecondTransitionConfig()
+        if role_specification is not None
+        else InteractionSecondTransitionConfig.from_environment()
     )
-    interaction_adaptive_config = InteractionAdaptiveConfig.from_environment()
+    interaction_adaptive_config = (
+        InteractionAdaptiveConfig()
+        if role_specification is not None
+        else InteractionAdaptiveConfig.from_environment()
+    )
     if (
         interaction_render_config.enabled
         and not interaction_acquisition_config.enabled
@@ -4104,11 +4393,24 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "graph_bound_prerequisite_execution": (
                     graph_bound_execution_gate_enabled
                 ),
+                "role_monotonicity_one_click": role_one_click_config.enabled,
+                "role_monotonicity_execution_claim": (
+                    role_claim_config.enabled
+                ),
+                "role_membership_lifecycle": role_lifecycle_config.enabled,
+                "role_protected_effect_execution": (
+                    role_execution_config.enabled
+                ),
             },
             "target_url": target_url,
             "envelope_id": req.envelope_id,
             "source_persona_id": source_persona.persona_id,
             "peer_persona_id": peer_persona.persona_id,
+            "role_specification_id": (
+                role_specification.specification_id
+                if role_specification is not None
+                else None
+            ),
             "prior_capture_ref": (
                 request_fingerprint(
                     {
@@ -4132,7 +4434,7 @@ async def run_behavioral_authorization_from_url_endpoint(
         if receipt.state == ABORTED and receipt.terminal_evidence is not None:
             raise HTTPException(
                 status_code=409,
-                detail=redacted_graph_bound_prerequisite_denial_response(
+                detail=redacted_behavioral_execution_denial_response(
                     receipt,
                     reused=True,
                 ),
@@ -4233,6 +4535,11 @@ async def run_behavioral_authorization_from_url_endpoint(
                 source_controls=list(source_capture.controls),
                 peer_controls=list(peer_capture.controls),
                 interaction_page_url=source_capture.page_url or target_url,
+                role_monotonicity=(
+                    role_specification.private_payload()
+                    if role_specification is not None
+                    else None
+                ),
             ),
             _=True,
         )
@@ -4246,7 +4553,10 @@ async def run_behavioral_authorization_from_url_endpoint(
             and isinstance(detail, dict)
             and detail.get("schema_version") == 1
             and detail.get("kind")
-            == "graph_bound_prerequisite_execution_denial"
+            in {
+                "graph_bound_prerequisite_execution_denial",
+                "role_protected_effect_execution_denial",
+            }
             and detail.get("status") == "denied"
             and isinstance(detail.get("denial"), dict)
         ):
@@ -4258,24 +4568,24 @@ async def run_behavioral_authorization_from_url_endpoint(
                 raise HTTPException(
                     status_code=503,
                     detail=(
-                        "graph-bound denial capture receipt "
+                        "behavioral denial capture receipt "
                         "terminalization failed"
                     ),
                 ) from exc
             try:
                 denial_response = (
-                    redacted_graph_bound_prerequisite_denial_response(
+                    redacted_behavioral_execution_denial_response(
                         terminal_receipt,
                         reused=False,
                     )
                 )
             except (TypeError, ReceiptStoreError) as receipt_exc:
                 logger.exception(
-                    "failed to render persisted graph-bound denial evidence"
+                    "failed to render persisted behavioral denial evidence"
                 )
                 raise HTTPException(
                     status_code=503,
-                    detail="graph-bound denial capture receipt is invalid",
+                    detail="behavioral denial capture receipt is invalid",
                 ) from receipt_exc
             raise HTTPException(
                 status_code=409,
@@ -4328,6 +4638,20 @@ async def run_behavioral_authorization_from_url_endpoint(
             == "graph_bound_prerequisite_execution"
             and receiptable_response.get("oracle_verdict")
             in {"confirmed", "refuted", "inconclusive"}
+        ):
+            receiptable_response["status"] = receiptable_response[
+                "oracle_verdict"
+            ]
+        elif (
+            execution is None
+            and receiptable_response.get("kind")
+            == "role_protected_effect_execution"
+            and receiptable_response.get("oracle_verdict")
+            in {
+                "confirmed_active_escalation",
+                "confirmed_revocation_survival",
+                "refuted",
+            }
         ):
             receiptable_response["status"] = receiptable_response[
                 "oracle_verdict"

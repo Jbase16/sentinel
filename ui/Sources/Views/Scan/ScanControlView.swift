@@ -51,6 +51,7 @@ struct ScanControlView: View {
     @State private var behavioralEnvelopeId = ""
     @State private var behavioralSourcePersonaId = ""
     @State private var behavioralPeerPersonaId = ""
+    @State private var behavioralRoleMonotonicityJSON = ""
     /// Persisted HackerOne research handle → sent as the X-HackerOne-Research
     /// attribution header on bounty scans. Shares the @AppStorage key with the
     /// field in AdvancedScanConfigView so the two stay in sync.
@@ -195,9 +196,11 @@ struct ScanControlView: View {
                         behavioralProfileMode: $behavioralProfileMode,
                         behavioralEnvelopeId: $behavioralEnvelopeId,
                         behavioralSourcePersonaId: $behavioralSourcePersonaId,
-                        behavioralPeerPersonaId: $behavioralPeerPersonaId
+                        behavioralPeerPersonaId: $behavioralPeerPersonaId,
+                        behavioralRoleMonotonicityJSON:
+                            $behavioralRoleMonotonicityJSON
                     )
-                        .frame(width: 540, height: 420)
+                        .frame(width: 620, height: 560)
                         .environmentObject(appState)
                 }
                 .disabled(isScanning)
@@ -376,6 +379,23 @@ struct ScanControlView: View {
         else {
             return nil
         }
+        if behavioralProfileMode == .roleMonotonicity {
+            let roleJSON = behavioralRoleMonotonicityJSON.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            guard !roleJSON.isEmpty,
+                  parseJSONDict(roleJSON) != nil else {
+                return nil
+            }
+            return BehavioralOneClickProfile(
+                mode: .roleMonotonicity,
+                completion: .behavioralPhaseOnly,
+                envelopeId: behavioralEnvelopeId,
+                sourcePersonaId: behavioralSourcePersonaId,
+                peerPersonaId: behavioralPeerPersonaId,
+                roleMonotonicityJSON: roleJSON
+            )
+        }
         return BehavioralOneClickProfile(
             mode: .pairedPersona,
             envelopeId: behavioralEnvelopeId,
@@ -533,6 +553,7 @@ private struct AdvancedScanConfigView: View {
     @Binding var behavioralEnvelopeId: String
     @Binding var behavioralSourcePersonaId: String
     @Binding var behavioralPeerPersonaId: String
+    @Binding var behavioralRoleMonotonicityJSON: String
 
     /// Which tab is visible inside the popover
     @State private var tab: Int = 0
@@ -604,6 +625,7 @@ private struct AdvancedScanConfigView: View {
                     behavioralEnvelopeId = ""
                     behavioralSourcePersonaId = ""
                     behavioralPeerPersonaId = ""
+                    behavioralRoleMonotonicityJSON = ""
                 }
                 .buttonStyle(.link)
                 .font(.caption)
@@ -637,11 +659,21 @@ private struct AdvancedScanConfigView: View {
         "behavioral_object_authorization"
     private static let passiveVisibilityWorkflow =
         "behavioral_passive_visibility"
+    private static let roleMonotonicityWorkflow =
+        "behavioral_role_membership_monotonicity"
 
-    private var requiredBehavioralWorkflow: String {
-        behavioralProfileMode == .anonymousPassive
-            ? Self.passiveVisibilityWorkflow
-            : Self.controlledBehavioralWorkflow
+    private var requiredBehavioralWorkflows: [String] {
+        switch behavioralProfileMode {
+        case .anonymousPassive:
+            return [Self.passiveVisibilityWorkflow]
+        case .roleMonotonicity:
+            return [
+                Self.controlledBehavioralWorkflow,
+                Self.roleMonotonicityWorkflow,
+            ]
+        case .pairedPersona:
+            return [Self.controlledBehavioralWorkflow]
+        }
     }
 
     private var eligibleBehavioralEnvelopes: [FoundryAuthorizationEnvelope] {
@@ -649,8 +681,22 @@ private struct AdvancedScanConfigView: View {
             envelope.isApproved
                 && !envelope.isExpired
                 && envelope.authorizes(urlOrOrigin: scanTarget)
-                && envelope.permits(workflow: requiredBehavioralWorkflow)
+                && requiredBehavioralWorkflows.allSatisfy {
+                    envelope.permits(workflow: $0)
+                }
         }
+    }
+
+    private var roleSpecificationIsJSONObject: Bool {
+        let trimmed = behavioralRoleMonotonicityJSON.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) else {
+            return false
+        }
+        return value is [String: Any]
     }
 
     private var behavioralConfigurationIssue: String? {
@@ -672,6 +718,10 @@ private struct AdvancedScanConfigView: View {
         if behavioralSourcePersonaId == behavioralPeerPersonaId {
             return "Source and peer must be distinct research personas."
         }
+        if behavioralProfileMode == .roleMonotonicity,
+           !roleSpecificationIsJSONObject {
+            return "Paste the exact role lifecycle specification as a JSON object."
+        }
         return nil
     }
 
@@ -681,11 +731,7 @@ private struct AdvancedScanConfigView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Behavioral one-click")
                         .font(.subheadline).bold()
-                    Text(
-                        behavioralProfileMode == .anonymousPassive
-                            ? "Observes already-public same-origin pages without authentication, adaptive execution, or ordinary scan tools."
-                            : "Runs the authorized paired-persona behavioral phase before ordinary scan tools."
-                    )
+                    Text(behavioralProfileDescription)
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -724,7 +770,7 @@ private struct AdvancedScanConfigView: View {
             .pickerStyle(.menu)
             .disabled(!behavioralEnabled)
 
-            if behavioralProfileMode == .pairedPersona {
+            if behavioralProfileMode != .anonymousPassive {
                 HStack(spacing: 12) {
                     Picker("Source", selection: $behavioralSourcePersonaId) {
                         Text("Select Alice").tag("")
@@ -750,6 +796,26 @@ private struct AdvancedScanConfigView: View {
                 .foregroundColor(.secondary)
             }
 
+            if behavioralProfileMode == .roleMonotonicity {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Exact role lifecycle specification")
+                        .font(.caption).bold()
+                    TextEditor(text: $behavioralRoleMonotonicityJSON)
+                        .font(.system(size: 10, design: .monospaced))
+                        .frame(minHeight: 120)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 5)
+                                .stroke(Color.secondary.opacity(0.35))
+                        )
+                        .disabled(!behavioralEnabled)
+                    Text(
+                        "Session IDs must identify retained native windows. The backend revalidates the complete action, generation, scope, policy, receipt, and cleanup contract before dispatch."
+                    )
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
+            }
+
             if let error = behavioralOptionsError {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2)
@@ -760,20 +826,14 @@ private struct AdvancedScanConfigView: View {
                     .foregroundColor(.orange)
             } else if behavioralEnabled {
                 Label(
-                    behavioralProfileMode == .anonymousPassive
-                        ? "Ready. The backend will revalidate the origin, passive workflow, scope, and 15-request zero-mutation budget before traffic."
-                        : "Ready. The backend will still revalidate origin, workflows, personas, policy, and budgets before traffic.",
+                    behavioralReadyDescription,
                     systemImage: "checkmark.shield.fill"
                 )
                 .font(.caption2)
                 .foregroundColor(.green)
             }
 
-            Text(
-                behavioralProfileMode == .anonymousPassive
-                    ? "This selection does not create authority. It passes only the existing signed envelope; passive observations cannot become adaptive findings or receipts."
-                    : "This selection does not create authority. It passes the existing signed envelope and exact vault identities to the backend."
-            )
+            Text(behavioralAuthorityDescription)
                 .font(.caption2)
                 .foregroundColor(.secondary)
 
@@ -793,6 +853,39 @@ private struct AdvancedScanConfigView: View {
         .onChange(of: behavioralProfileMode) { _, _ in
             behavioralEnvelopeId = ""
             revalidateBehavioralSelection()
+        }
+    }
+
+    private var behavioralProfileDescription: String {
+        switch behavioralProfileMode {
+        case .anonymousPassive:
+            return "Observes already-public same-origin pages without authentication, adaptive execution, or ordinary scan tools."
+        case .roleMonotonicity:
+            return "Runs the bounded role and membership lifecycle through exact retained native sessions, then stops before ordinary scan tools."
+        case .pairedPersona:
+            return "Runs the authorized paired-persona behavioral phase before ordinary scan tools."
+        }
+    }
+
+    private var behavioralReadyDescription: String {
+        switch behavioralProfileMode {
+        case .anonymousPassive:
+            return "Ready. The backend will revalidate the origin, passive workflow, scope, and 15-request zero-mutation budget before traffic."
+        case .roleMonotonicity:
+            return "Ready. The backend will revalidate both workflows, exact sessions, role actions, receipts, budgets, and cleanup before traffic."
+        case .pairedPersona:
+            return "Ready. The backend will still revalidate origin, workflows, personas, policy, and budgets before traffic."
+        }
+    }
+
+    private var behavioralAuthorityDescription: String {
+        switch behavioralProfileMode {
+        case .anonymousPassive:
+            return "This selection does not create authority. It passes only the existing signed envelope; passive observations cannot become adaptive findings or receipts."
+        case .roleMonotonicity:
+            return "This selection does not create authority or sessions. It binds an existing signed envelope, exact vault identities, and retained native session IDs to the strict backend contract."
+        case .pairedPersona:
+            return "This selection does not create authority. It passes the existing signed envelope and exact vault identities to the backend."
         }
     }
 
