@@ -14,6 +14,7 @@
     {"id": "OCB-R9", "kind": "phase", "description": "One-click payout acceptance"},
     {"id": "R5D1", "kind": "slice", "description": "Passive issued-capability contract and classifier"},
     {"id": "R5D2", "kind": "slice", "description": "Confined-presentation freshness binding and evaluator"},
+    {"id": "R5D3", "kind": "slice", "description": "Passive capability-consumption ledger and replay-refusal evaluator"},
     {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
     {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
     {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},
