@@ -31,3 +31,9 @@ def test_registry_rejects_colliding_canonical_ids() -> None:
 
     with pytest.raises(IdentifierRegistryError, match=r"colliding canonical IDs: C0"):
         IdentifierRegistry.from_dict(payload)
+
+
+def test_registry_accepts_registered_family_slice_ids() -> None:
+    registry = IdentifierRegistry.load(default_registry_path(REPOSITORY_ROOT))
+
+    assert {"R5D1", "R5D2"} <= registry.canonical_ids

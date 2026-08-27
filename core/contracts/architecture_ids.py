@@ -1,4 +1,4 @@
-"""Canonical phase/scenario identifiers and scoped historical aliases."""
+"""Canonical phase, slice, scenario, and scoped historical identifiers."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 
 _CANONICAL_ID = re.compile(
-    r"^(?:C\d+|(?:OCB|DB)-R\d+|(?:LAB|OCB|DB)-S\d{2}|LAB-R\d+-S\d{2})$"
+    r"^(?:C\d+|R\d+[A-Z]\d+|(?:OCB|DB)-R\d+|(?:LAB|OCB|DB)-S\d{2}|LAB-R\d+-S\d{2})$"
 )
 _BARE_ID = re.compile(r"(?<![A-Za-z0-9-])([RS]\d+)(?![A-Za-z0-9])")
 
