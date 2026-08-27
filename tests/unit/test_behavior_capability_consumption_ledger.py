@@ -833,3 +833,132 @@ def test_evaluator_rejects_untyped_inputs(position):
 
     with pytest.raises(TypeError):
         evaluate_consumption(**values)
+
+
+def test_serialization_round_trip_reloads_inert_entries_without_private_context():
+    contract, capability_decision, binding = _admissible_context()
+    fresh = _consume(
+        contract,
+        capability_decision,
+        binding,
+        CapabilityConsumptionLedger.build(),
+    ).ledger
+
+    reloaded = CapabilityConsumptionLedger.from_dict(
+        json.loads(json.dumps(fresh.to_dict(), sort_keys=True))
+    )
+
+    assert reloaded == fresh
+    assert fresh == reloaded
+    assert reloaded.to_dict() == fresh.to_dict()
+    assert fresh.entries[0].reloaded is False
+    assert reloaded.entries[0].reloaded is True
+    assert reloaded.entries[0]._contract is None
+    assert reloaded.entries[0]._capability_decision is None
+    assert reloaded.entries[0]._confinement_decision is None
+
+
+def test_serialization_surface_preserves_fresh_r5d3_content_addresses():
+    contract, capability_decision, binding = _admissible_context()
+    genesis = CapabilityConsumptionLedger.build()
+    first = _consume(contract, capability_decision, binding, genesis)
+
+    assert genesis.ledger_id == (
+        "capability_consumption_ledger:"
+        "2ee7cfb7787c2ce2d9bbf8414bc9a21831e7415f4c6ed53388dada95067def77"
+    )
+    assert first.ledger.entries[0].entry_id == (
+        "capability_consumption_entry:"
+        "5cecfb4b19efc264e5ea94323cbb918bce0f63cd796cfff56b5aadad17521a22"
+    )
+    assert first.ledger.ledger_id == (
+        "capability_consumption_ledger:"
+        "3f2b778f084a76f0b4cc8709b5459fb74e59458bffbc0fe00d6230e3658f313a"
+    )
+    assert first.decision.decision_id == (
+        "capability_consumption_decision:"
+        "ca60fab04b9bc15dd04a8a5d03dea63d1ab86e003ea32b41a3adfaf9f1bdc0a4"
+    )
+
+
+def test_serialization_reloaded_entry_is_inert_but_live_spend_stays_available():
+    contract, capability_decision, binding = _admissible_context(max_uses=2)
+    first = _consume(
+        contract,
+        capability_decision,
+        binding,
+        CapabilityConsumptionLedger.build(),
+    )
+    reloaded = CapabilityConsumptionLedger.from_dict(first.ledger.to_dict())
+
+    with pytest.raises(
+        ConsumptionLedgerDenied,
+        match="reloaded_capability_consumption_entry_is_inert",
+    ):
+        reloaded.with_entry(reloaded.entries[0])
+
+    second = _consume(
+        contract,
+        capability_decision,
+        binding,
+        reloaded,
+        index=1,
+    )
+    by_slot = {entry.use_slot: entry for entry in second.ledger.entries}
+    assert second.decision.outcome is ConsumptionOutcome.FIRST_CONSUMPTION
+    assert by_slot[0].reloaded is True
+    assert by_slot[1].reloaded is False
+    assert by_slot[1]._contract is contract
+    assert by_slot[1]._capability_decision is capability_decision
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "mutated_ref",
+        "injected_replay_key",
+        "forged_entry_id",
+        "forged_ledger_id",
+        "enabled_authority",
+        "unknown_field",
+    ),
+)
+def test_serialization_rejects_tampered_public_payloads(mutation):
+    contract, capability_decision, binding = _admissible_context()
+    first = _consume(
+        contract,
+        capability_decision,
+        binding,
+        CapabilityConsumptionLedger.build(),
+    )
+    value = json.loads(json.dumps(first.ledger.to_dict()))
+
+    if mutation == "mutated_ref":
+        value["entries"][0]["capability_decision_ref"] = stable_hash(
+            "capability_decision",
+            "mutated",
+        )
+    elif mutation == "injected_replay_key":
+        injected = stable_hash("capability_confinement_decision", "injected")
+        value["entries"][0]["presentation_ref"] = injected
+        value["entries"][0]["confinement_decision_ref"] = injected
+    elif mutation == "forged_entry_id":
+        value["entries"][0]["entry_id"] = stable_hash(
+            "capability_consumption_entry",
+            "forged",
+        )
+    elif mutation == "forged_ledger_id":
+        value["ledger_id"] = stable_hash(
+            "capability_consumption_ledger",
+            "forged",
+        )
+    elif mutation == "enabled_authority":
+        value["durable_persistence_authority"] = True
+    else:
+        value["unknown"] = "field"
+
+    with pytest.raises(
+        ConsumptionLedgerDenied,
+        match="capability_consumption_serialization_invalid",
+    ):
+        CapabilityConsumptionLedger.from_dict(value)

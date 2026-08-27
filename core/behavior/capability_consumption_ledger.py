@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Dict, Mapping, Sequence, Tuple
 
 from .capability_confinement_freshness import (
     ConfinementDecision,
@@ -197,6 +197,133 @@ class ConsumptionEntry:
             **_entry_payload(self),
         }
 
+    @property
+    def reloaded(self) -> bool:
+        """Whether this entry was integrity-checked without live decision context."""
+
+        return False
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ConsumptionEntry":
+        """Reload an inert entry after re-verifying its public content address."""
+
+        expected_fields = {
+            "schema_version",
+            "entry_id",
+            "capability_ref",
+            "presentation_ref",
+            "capability_decision_ref",
+            "confinement_decision_ref",
+            "use_slot",
+        }
+        if not isinstance(value, Mapping) or set(value) != expected_fields:
+            raise ConsumptionLedgerDenied(
+                "capability_consumption_serialization_invalid"
+            )
+        if type(value.get("schema_version")) is not int or value["schema_version"] != 1:
+            raise ConsumptionLedgerDenied(
+                "capability_consumption_serialization_invalid"
+            )
+        try:
+            return _ReloadedConsumptionEntry(
+                entry_id=value["entry_id"],
+                capability_ref=value["capability_ref"],
+                presentation_ref=value["presentation_ref"],
+                capability_decision_ref=value["capability_decision_ref"],
+                confinement_decision_ref=value["confinement_decision_ref"],
+                use_slot=value["use_slot"],
+            )
+        except (TypeError, ValueError) as exc:
+            raise ConsumptionLedgerDenied(
+                "capability_consumption_serialization_invalid"
+            ) from exc
+
+
+class _ReloadedConsumptionEntry(ConsumptionEntry):
+    """Hash-verified persisted entry with no live construction authority."""
+
+    __slots__ = ()
+
+    def __init__(
+        self,
+        *,
+        entry_id: str,
+        capability_ref: str,
+        presentation_ref: str,
+        capability_decision_ref: str,
+        confinement_decision_ref: str,
+        use_slot: int,
+        _contract: object = None,
+        _capability_decision: object = None,
+        _confinement_decision: object = None,
+    ) -> None:
+        if any(
+            context is not None
+            for context in (
+                _contract,
+                _capability_decision,
+                _confinement_decision,
+            )
+        ):
+            raise ConsumptionLedgerDenied(
+                "reloaded_capability_consumption_entry_is_inert"
+            )
+        values = {
+            "entry_id": entry_id,
+            "capability_ref": capability_ref,
+            "presentation_ref": presentation_ref,
+            "capability_decision_ref": capability_decision_ref,
+            "confinement_decision_ref": confinement_decision_ref,
+            "use_slot": use_slot,
+        }
+        refs = (
+            (entry_id, "capability_consumption_entry"),
+            (capability_ref, "issued_capability_contract"),
+            (presentation_ref, "capability_confinement_decision"),
+            (capability_decision_ref, "capability_decision"),
+            (confinement_decision_ref, "capability_confinement_decision"),
+        )
+        if (
+            any(
+                not isinstance(item, str)
+                for item in (
+                    entry_id,
+                    capability_ref,
+                    presentation_ref,
+                    capability_decision_ref,
+                    confinement_decision_ref,
+                )
+            )
+            or any(not _hash_ref(item, prefix) for item, prefix in refs)
+            or entry_id
+            != stable_hash(
+                "capability_consumption_entry",
+                {key: item for key, item in values.items() if key != "entry_id"},
+            )
+            or presentation_ref != confinement_decision_ref
+            or type(use_slot) is not int
+            or use_slot < 0
+        ):
+            raise ValueError("reloaded capability consumption entry is invalid")
+        for name, item in values.items():
+            object.__setattr__(self, name, item)
+        object.__setattr__(self, "_contract", None)
+        object.__setattr__(self, "_capability_decision", None)
+        object.__setattr__(self, "_confinement_decision", None)
+
+    @property
+    def reloaded(self) -> bool:
+        return True
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ConsumptionEntry):
+            return NotImplemented
+        return self.entry_id == other.entry_id and _entry_payload(self) == (
+            _entry_payload(other)
+        )
+
+    __hash__ = ConsumptionEntry.__hash__
+
 
 def _ledger_identity_payload(
     entries: Tuple[ConsumptionEntry, ...],
@@ -321,6 +448,10 @@ class CapabilityConsumptionLedger:
     ) -> "CapabilityConsumptionLedger":
         if not isinstance(entry, ConsumptionEntry):
             raise TypeError("entry must be a ConsumptionEntry")
+        if entry.reloaded:
+            raise ConsumptionLedgerDenied(
+                "reloaded_capability_consumption_entry_is_inert"
+            )
         replace(self)
         return type(self).build(entries=(*self.entries, entry))
 
@@ -337,6 +468,61 @@ class CapabilityConsumptionLedger:
             "finding_authority": self.finding_authority,
             "executable": self.executable,
         }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "CapabilityConsumptionLedger":
+        """Reload a ledger after verifying all public entry and ledger identities."""
+
+        expected_fields = {
+            "schema_version",
+            "mode",
+            "ledger_id",
+            "entries",
+            "durable_persistence_authority",
+            "target_io_authority",
+            "backend_dispatch_authority",
+            "receipt_authority",
+            "finding_authority",
+            "executable",
+        }
+        passive_fields = (
+            "durable_persistence_authority",
+            "target_io_authority",
+            "backend_dispatch_authority",
+            "receipt_authority",
+            "finding_authority",
+            "executable",
+        )
+        if (
+            not isinstance(value, Mapping)
+            or set(value) != expected_fields
+            or type(value.get("schema_version")) is not int
+            or value.get("schema_version") != 1
+            or value.get("mode") != CAPABILITY_CONSUMPTION_LEDGER_MODE
+            or not isinstance(value.get("ledger_id"), str)
+            or not _hash_ref(value["ledger_id"], "capability_consumption_ledger")
+            or not isinstance(value.get("entries"), list)
+            or any(value.get(field_name) is not False for field_name in passive_fields)
+        ):
+            raise ConsumptionLedgerDenied(
+                "capability_consumption_serialization_invalid"
+            )
+        try:
+            entries = tuple(
+                ConsumptionEntry.from_dict(item) for item in value["entries"]
+            )
+            if entries != tuple(sorted(entries, key=lambda entry: entry.entry_id)):
+                raise ValueError("serialized entries are not canonical")
+            ledger = cls.build(entries=entries)
+        except (ConsumptionLedgerDenied, TypeError, ValueError) as exc:
+            raise ConsumptionLedgerDenied(
+                "capability_consumption_serialization_invalid"
+            ) from exc
+        if ledger.ledger_id != value["ledger_id"]:
+            raise ConsumptionLedgerDenied(
+                "capability_consumption_serialization_invalid"
+            )
+        return ledger
 
 
 def _decision_payload(decision: "ConsumptionDecision") -> Dict[str, Any]:
