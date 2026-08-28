@@ -110,9 +110,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
 | State-machine prerequisite oracles | Production-wired and externally passed for bounded omission and adjacent reordering | Exact same-world lineage preserves a content-addressed DAG; one payout-selected terminal can execute sealed baseline, treatment, and independent control across three fresh owned worlds, compare canonical effects, verify family-specific evidence, clean up, persist redacted denial/completion state, and revalidate current capture before rebuilding the admitted plan. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Define replay and stale-state capability/freshness semantics before adding those counterfactuals. |
 | Role/membership monotonicity oracle | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel Acceptance parity are suite-proved; R5C9 current-SHA acceptance is mediator-verified, while broader membership-creation, role-assignment, and administrative-boundary shapes remain open and deferred | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three pair-level fresh vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero additional governed role actions on retry; the R5D1 work-order handoff records the separate R5C9 renewal at Sentinel `dfccecc`. | Preserve the exact R5C9 claim and repository boundary; the broader Family-C shapes remain open and deferred and are not part of Family D. |
-| Issued-capability logical, evidence, consumption, and runtime-expiry contracts | R5D1-R5D3 and R5D5 are passive and suite-proved; R5D4 durable local storage is suite-proved; all remain production-unwired | R5D1 binds the content-addressed authority tuple and returns a pure logical outcome. R5D2 separately binds the exact owned world, tenant, canonical origin, and structurally revalidated current capture. R5D3 adds an explicit immutable consumption ledger and purely classifies identical-presentation replay, distinct-presentation budget exhaustion, or first consumption. R5D4 persists that verdict across restart through append-only exclusive-create snapshots with real cross-process atomicity. R5D5 binds a separately admitted runtime's absolute epoch window and composes it with R5D1 at an injected instant. It reads no real clock. Public evidence remains typed-hash-only; the full suite is `2988 passed, 1 skipped, 3 warnings in 38.51s`. | Wire a real clock reading and execution-receipt transition at a boundary, then add effect proof, target cleanup, and `OCB-S17`. |
+| Issued-capability logical, evidence, consumption, runtime-expiry, and terminal-receipt contracts | R5D1-R5D3 and R5D5 are passive and suite-proved; R5D4 durable local storage is suite-proved; R5D6's real-clock/ephemeral-receipt boundary is suite-proved; all remain production-unwired | R5D1 binds the content-addressed authority tuple and returns a pure logical outcome. R5D2 separately binds the exact owned world, tenant, canonical origin, and structurally revalidated current capture. R5D3 adds an explicit immutable consumption ledger and purely classifies identical-presentation replay, distinct-presentation budget exhaustion, or first consumption. R5D4 persists that verdict across restart through append-only exclusive-create snapshots with real cross-process atomicity. R5D5 binds a separately admitted runtime's absolute epoch window and composes it with R5D1 at an injected instant. R5D6 reads one real instant, delegates time classification to R5D5, and composes that result with the existing R5D3 decision in an ephemeral terminal receipt. It persists no receipt and sends no target traffic. The full suite is `3051 passed, 1 skipped, 4 warnings in 39.16s`. | Add purpose-built durable receipt persistence in R5D7, then effect proof, target cleanup, and `OCB-S17`. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
-| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B and family-C paths; accepted Family-C native UI seam passed, server profile isolation is suite-proved, and R5C9 current-SHA acceptance is mediator-verified while broader Family-C shapes remain open and deferred | The native Scan UI emits the exact phase-only role profile. R5C7 makes the server require that phase-only completion for role mode, reject role specifications under other modes, and exclude ambient graph or generalized backends from a role-profile request. R5D1-R5D5 are deliberately absent from this bridge. | Add no Family-D Scan route until a later slice supplies its separately admitted backend, durable claim, effect oracle, receipt, and cleanup contracts. |
+| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B and family-C paths; accepted Family-C native UI seam passed, server profile isolation is suite-proved, and R5C9 current-SHA acceptance is mediator-verified while broader Family-C shapes remain open and deferred | The native Scan UI emits the exact phase-only role profile. R5C7 makes the server require that phase-only completion for role mode, reject role specifications under other modes, and exclude ambient graph or generalized backends from a role-profile request. R5D1-R5D6 are deliberately absent from this bridge. | Add no Family-D Scan route until a later slice supplies its separately admitted backend, durable claim, effect oracle, receipt, and cleanup contracts. |
 | Proof topology selector | Implemented and bounded for the closed Family-B scope | `PayoutGoalTopologyPlanner` binds the graph backend to the exact compiled terminal; ordinary click selects one unique omission or, when omission is not uniquely selectable, one unique adjacent reordering. Graph-absent v1 identities remain stable. | Add only separately admitted executable topologies. |
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
@@ -1265,13 +1265,22 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   performs no I/O, and owns no dispatch or receipt authority. The detailed contract is
   in
   [`ONE_CLICK_BOUNTY_R5D5_RUNTIME_EXPIRY_PLAN.md`](ONE_CLICK_BOUNTY_R5D5_RUNTIME_EXPIRY_PLAN.md).
+- [x] R5D6 reads one real wall-clock instant and mints an ephemeral,
+  content-addressed terminal execution-receipt decision. It delegates all liveness
+  classification to R5D5, consumes R5D3's already-computed verdict without mutating or
+  persisting it, and uses the fixed inadmissible, already-consumed, expired, not-live,
+  completed precedence. It remains production-unwired, sends no target traffic, and
+  owns no effect, finding, cleanup, or durable-receipt authority. The detailed contract
+  is in
+  [`ONE_CLICK_BOUNTY_R5D6_EXECUTION_RECEIPT_PLAN.md`](ONE_CLICK_BOUNTY_R5D6_EXECUTION_RECEIPT_PLAN.md).
 - [ ] Prove object-bound, account-bound, tenant-bound, single-use, and expiry properties
   through a later admitted runtime. R5D1 types logical bounds, R5D2 classifies
   operator-supplied evidence, R5D3 evaluates ledger transitions, and R5D4 persists
   those transitions locally. R5D5 now defines and unit-enforces real-time expiry as a
-  pure clock-injected function, but none enforces or observes them against a target.
-  No Family-D module reads a real clock, dispatches an action, or observes expiry
-  against a running target.
+  pure clock-injected function. R5D6 reads one real clock and composes the existing
+  verdicts into a terminal value, but none enforces or observes them against a target.
+  R5D6 observes only the machine clock; no Family-D module dispatches an action or
+  observes expiry against a running target.
 - [x] R5D1 keeps bearer tokens and keys ephemeral; public contract and fixture evidence
   contains only typed hashes, including `secret_digest` rather than raw material.
 - [x] R5D1 requires a callback reference to bind an SDK callback-receiver world and
@@ -1282,11 +1291,15 @@ does not close broader R5C shapes or establish public-target or payout evidence.
 - [x] R5D5 adds expiry semantics only: an admitted absolute wall-clock window and pure,
   clock-injected liveness evaluation. It does not read or enforce a target-relevant
   clock.
-- [ ] Wire a real clock reading and receipt completion/abort for an executed capability
-  action at a boundary, then add independent target-effect evaluation and verified
-  target cleanup.
+- [x] R5D6 adds one real-clock read and an ephemeral terminal execution-receipt
+  decision only. It does not persist the receipt, dispatch an action, evaluate an
+  effect, promote a finding, or verify cleanup.
+- [ ] R5D7 durably persists capability-execution receipts in a purpose-built namespace
+  with cross-process atomicity, restart survival, refusal immutability, and
+  tamper-evident reload while remaining production-unwired. Independent target-effect
+  evaluation and verified target cleanup remain later work.
 - [ ] Accept `OCB-S17` for confinement, expiry, one-time use, replay refusal, and
-  cleanup. No R5D1-R5D5 unit or suite result satisfies this external gate.
+  cleanup. No R5D1-R5D6 unit or suite result satisfies this external gate.
 
 #### R5E — Owned-data integrity relations
 
