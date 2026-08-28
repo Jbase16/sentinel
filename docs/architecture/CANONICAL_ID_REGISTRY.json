@@ -16,6 +16,7 @@
     {"id": "R5D2", "kind": "slice", "description": "Confined-presentation freshness binding and evaluator"},
     {"id": "R5D3", "kind": "slice", "description": "Passive capability-consumption ledger and replay-refusal evaluator"},
     {"id": "R5D4", "kind": "slice", "description": "Durable atomic capability-consumption store"},
+    {"id": "R5D5", "kind": "slice", "description": "Wall-clock expiry evaluation under an admitted runtime contract for an issued capability (pure, clock-injected, production-unwired)"},
     {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
     {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
     {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},
