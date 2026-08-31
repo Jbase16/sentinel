@@ -861,7 +861,9 @@ def test_execution_receipt_module_is_not_imported_by_any_other_core_module():
         and "capability_execution_receipt" in path.read_text(encoding="utf-8")
     ]
 
-    assert production_consumers == []
+    assert production_consumers == [
+        source_path.with_name("capability_execution_receipt_store.py")
+    ]
     assert CAPABILITY_EXECUTION_RECEIPT_MODE == (
         "behavioral_capability_execution_receipt_v1"
     )
