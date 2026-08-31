@@ -40,6 +40,13 @@ def test_registry_rejects_colliding_canonical_ids() -> None:
 def test_registry_accepts_registered_family_slice_ids() -> None:
     registry = IdentifierRegistry.load(default_registry_path(REPOSITORY_ROOT))
 
-    assert {"R5D1", "R5D2", "R5D3", "R5D4", "R5D5", "R5D6", "R5D7"} <= (
-        registry.canonical_ids
-    )
+    assert {
+        "R5D1",
+        "R5D2",
+        "R5D3",
+        "R5D4",
+        "R5D5",
+        "R5D6",
+        "R5D7",
+        "R5D8",
+    } <= registry.canonical_ids
