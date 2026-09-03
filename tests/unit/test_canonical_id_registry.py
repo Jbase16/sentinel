@@ -49,4 +49,5 @@ def test_registry_accepts_registered_family_slice_ids() -> None:
         "R5D6",
         "R5D7",
         "R5D8",
+        "R5D9",
     } <= registry.canonical_ids

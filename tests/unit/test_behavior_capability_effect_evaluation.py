@@ -773,17 +773,17 @@ def test_transport_is_a_protocol_and_module_has_no_client_or_clock_import():
     assert "https://" not in source
 
 
-def test_module_is_production_unwired_and_exports_exact_public_surface():
+def test_module_has_exact_operator_consumer_and_exports_exact_public_surface():
     source_path = Path(effect_module.__file__)
     repository_root = Path(__file__).resolve().parents[2]
-    production_consumers = [
-        path
+    production_consumers = sorted(
+        path.relative_to(repository_root).as_posix()
         for path in (repository_root / "core").rglob("*.py")
         if path != source_path
         and "capability_effect_evaluation" in path.read_text(encoding="utf-8")
-    ]
+    )
 
-    assert production_consumers == []
+    assert production_consumers == ["core/behavior/capability_effect_one_click.py"]
     assert effect_module.__all__ == [
         "CAPABILITY_EFFECT_EXECUTION_ENV",
         "CAPABILITY_EFFECT_EXECUTION_MODE",

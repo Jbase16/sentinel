@@ -862,6 +862,7 @@ def test_execution_receipt_module_is_not_imported_by_any_other_core_module():
     ]
 
     assert set(production_consumers) == {
+        source_path.with_name("capability_effect_one_click.py"),
         source_path.with_name("capability_effect_evaluation.py"),
         source_path.with_name("capability_execution_receipt_store.py"),
     }

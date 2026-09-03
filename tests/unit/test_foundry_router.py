@@ -62,6 +62,7 @@ def _isolate(monkeypatch, tmp_path):
         "SENTINELFORGE_BEHAVIOR_ROLE_MONOTONICITY_EXECUTION_CLAIM",
         "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
         "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
+        "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
     ):
         monkeypatch.delenv(name, raising=False)
     _reset_bus_for_tests()
@@ -458,6 +459,80 @@ class TestBehavioralAuthorizationEndpoint:
         )
         return request, source_persona, peer_persona
 
+    def _capability_effect_request(self, *, signed_workflow=True):
+        from core.behavior.active import CONTROLLED_WORKFLOW
+        from core.behavior.capability_effect_one_click import (
+            CAPABILITY_EFFECT_WORKFLOW,
+        )
+        from core.foundry.authorization import create_envelope
+        from core.foundry.vault import PersonaVault
+        from core.server.routers.foundry import RunBehavioralAuthorizationRequest
+
+        vault = PersonaVault()
+        source_persona = vault.add_persona(
+            label="capability-source",
+            email="capability-source@research.example",
+        )
+        peer_persona = vault.add_persona(
+            label="capability-peer",
+            email="capability-peer@research.example",
+        )
+        envelope = create_envelope(
+            researcher_identity="researcher",
+            target_handle="controlled-capability-target",
+            authorized_origins=[self.ORIGIN],
+            authorization_basis="owned capability-effect verification",
+            allowed_workflows=[
+                CONTROLLED_WORKFLOW,
+                *(
+                    [CAPABILITY_EFFECT_WORKFLOW]
+                    if signed_workflow
+                    else []
+                ),
+            ],
+            disclosure_attestation=True,
+        )
+        source_records = [
+            {
+                "id": "capability-source-evidence",
+                "persona_id": source_persona.persona_id,
+                "method": "GET",
+                "url": f"{self.ORIGIN}/api/capability-seed",
+                "response_status": 200,
+                "response_body": '{"available":true}',
+            }
+        ]
+        peer_records = [
+            {
+                "id": "capability-peer-evidence",
+                "persona_id": peer_persona.persona_id,
+                "method": "GET",
+                "url": f"{self.ORIGIN}/api/status",
+                "response_status": 200,
+                "response_body": '{"status":"ok"}',
+            }
+        ]
+        capability_effect = {
+            "schema_version": 1,
+            "run_id": "foundry-capability-effect-001",
+            "target_url": f"{self.ORIGIN}/api/capability-effect",
+            "cleanup_url": f"{self.ORIGIN}/api/capability-cleanup",
+        }
+        return (
+            RunBehavioralAuthorizationRequest(
+                target_origin=self.ORIGIN,
+                envelope_id=envelope.envelope_id,
+                source_persona_id=source_persona.persona_id,
+                peer_persona_id=peer_persona.persona_id,
+                source_records=source_records,
+                peer_records=peer_records,
+                capability_effect=capability_effect,
+            ),
+            source_persona,
+            peer_persona,
+            capability_effect,
+        )
+
     def _one_click_request(self, *, graph_bound=False):
         from core.server.routers.foundry import (
             RunBehavioralAuthorizationFromURLRequest,
@@ -780,6 +855,189 @@ class TestBehavioralAuthorizationEndpoint:
         assert result["behavioral_shadow"]["selected"]["resolution_kind"] == (
             "authorization_proposal"
         )
+
+    def test_capability_effect_profile_is_inert_with_gate_off(self, monkeypatch):
+        from core.behavior.capability_effect_evaluation import (
+            CAPABILITY_EFFECT_EXECUTION_ENV,
+        )
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _, _, _ = self._capability_effect_request()
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("disabled capability profile reached target traffic")
+
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == "no_executable_candidate"
+        assert result["execution"] is None
+        assert result["finding"] is None
+        capability = result["capability_effect_one_click"]
+        assert capability["status"] == "selected_execution_disabled"
+        assert capability["disabled_gates"] == [CAPABILITY_EFFECT_EXECUTION_ENV]
+        assert capability["dispatched"] is False
+        assert capability["promotion_authority"] is False
+        assert capability["finding_authority"] is False
+
+    def test_capability_effect_profile_executes_exact_matrix_once(self, monkeypatch):
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, source_persona, _, _ = self._capability_effect_request()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
+            "1",
+        )
+        raw_effect_marker = "FoundryRawCapabilityEffectMustNotSurvive"
+        calls = []
+
+        async def fake_send(_transport, persona_id, replay_request):
+            assert persona_id == source_persona.persona_id
+            assert replay_request.method == "POST"
+            body = json.loads(replay_request.body)
+            calls.append((replay_request.url, body))
+            if replay_request.url.endswith("/api/capability-cleanup"):
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "cleanup_verified": True,
+                            "orphaned_owned_state_possible": False,
+                            "target_projection_observed": True,
+                        }
+                    ),
+                )
+            observation_kind = body["observation_kind"]
+            if observation_kind == "valid_capability_effect_witness":
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "access_decision": "allowed",
+                            "effect": {
+                                "effect": raw_effect_marker,
+                                "resource": "raw-foundry-resource",
+                                "session": "raw-foundry-session",
+                            },
+                            "target_projection_observed": True,
+                        }
+                    ),
+                )
+            return ReplayResponse(
+                403,
+                json.dumps(
+                    {
+                        "access_decision": "denied",
+                        "effect": None,
+                        "target_projection_observed": True,
+                    }
+                ),
+            )
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+        duplicate = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["kind"] == "capability_effect_one_click"
+        assert result["status"] == "confirmed_one_time_authorized_effect"
+        assert result["finding"] is None
+        assert result["finding_confirmed"] is False
+        assert result["promotion_authority"] is False
+        assert result["finding_authority"] is False
+        capability = result["capability_effect_one_click"]
+        assert capability["status"] == "completed"
+        assert capability["dispatched"] is True
+        assert capability["cleanup"]["status"] == "verified"
+        assert capability["cleanup"]["target_requests_sent"] == 6
+        assert result["finding_candidate"]["adversarial_triage_required"] is True
+        assert result["finding_candidate"]["promotion_authority"] is False
+        assert result["finding_candidate"]["finding_authority"] is False
+        assert [body.get("observation_kind", "cleanup") for _, body in calls] == [
+            "no_capability_baseline",
+            "valid_capability_effect_witness",
+            "replayed_capability_probe",
+            "expired_capability_probe",
+            "inadmissible_capability_probe",
+            "cleanup",
+        ]
+        assert raw_effect_marker not in repr(result)
+        assert "raw-foundry-resource" not in repr(result)
+        assert "raw-foundry-session" not in repr(result)
+        assert duplicate["status"] == "already_executed"
+        assert len(calls) == 6
+
+    def test_capability_effect_missing_workflow_denies_before_traffic(
+        self,
+        monkeypatch,
+    ):
+        from fastapi import HTTPException
+
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        request, _, _, _ = self._capability_effect_request(
+            signed_workflow=False
+        )
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
+            "1",
+        )
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("unsigned capability workflow reached target traffic")
+
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert error.value.status_code == 409
+        assert error.value.detail == "capability_effect_authorization_denied"
+
+    def test_capability_effect_url_profile_stops_before_capture_when_disabled(
+        self,
+        monkeypatch,
+    ):
+        from core.server.routers import driver as driver_module
+        from core.server.routers.foundry import (
+            RunBehavioralAuthorizationFromURLRequest,
+            run_behavioral_authorization_from_url_endpoint,
+        )
+
+        direct_request, source_persona, peer_persona, capability_effect = (
+            self._capability_effect_request()
+        )
+        request = RunBehavioralAuthorizationFromURLRequest(
+            target_url=f"{self.ORIGIN}/app",
+            envelope_id=direct_request.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+            capability_effect=capability_effect,
+        )
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("disabled capability profile reached browser capture")
+
+        monkeypatch.setattr(driver_module, "capture_persona_pair", forbidden)
+        result = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+
+        assert result["status"] == "no_executable_candidate"
+        assert result["capability_effect_one_click"]["status"] == (
+            "selected_execution_disabled"
+        )
+        assert result["capability_effect_one_click"]["dispatched"] is False
 
     def test_invalid_envelope_blocks_resolver_traffic(self, monkeypatch):
         from fastapi import HTTPException

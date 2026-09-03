@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -151,6 +151,7 @@ class RunBehavioralAuthorizationRequest(BaseModel):
         max_length=4096,
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
+    capability_effect: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_prior_capture_pair(self) -> "RunBehavioralAuthorizationRequest":
@@ -179,6 +180,7 @@ class RunBehavioralAuthorizationFromURLRequest(BaseModel):
         max_length=20_000,
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
+    capability_effect: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_prior_capture_pair(
@@ -768,6 +770,27 @@ def _graph_bound_capture_selection_descriptor(run) -> Dict[str, Any]:
     }
 
 
+def _capability_effect_receipt_projection(
+    response: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Project R5D9 to a dedup marker without persisting a finding claim."""
+
+    if response.get("kind") != "capability_effect_one_click":
+        return response
+    projected = {
+        "status": "no_executable_candidate",
+        "plan": {"selected_proposal_id": None},
+        "execution": None,
+        "finding": None,
+        "finding_confirmed": False,
+        "graphql_resolution": response.get("graphql_resolution"),
+    }
+    for field_name in ("read_exploration", "interaction_acquisition"):
+        if field_name in response:
+            projected[field_name] = response[field_name]
+    return projected
+
+
 @router.post("/behavioral-authorization")
 async def run_behavioral_authorization_endpoint(
     req: RunBehavioralAuthorizationRequest,
@@ -954,6 +977,14 @@ async def run_behavioral_authorization_endpoint(
     from core.behavior.role_request_binding import (
         RoleMonotonicityRequestBindingDenied,
     )
+    from core.behavior.capability_effect_one_click import (
+        CapabilityEffectExecutionConfig,
+        CapabilityEffectExecutionDenied,
+        CapabilityEffectOneClickDenied,
+        CapabilityEffectOneClickDispatcher,
+        CapabilityEffectOneClickRun,
+        CapabilityEffectOneClickSpecification,
+    )
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
     from core.foundry.authorization import get_envelope
@@ -1035,6 +1066,31 @@ async def run_behavioral_authorization_endpoint(
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     role_profile_selected = role_specification is not None
+    capability_effect_specification = None
+    if req.capability_effect is not None:
+        try:
+            capability_effect_specification = (
+                CapabilityEffectOneClickSpecification.from_mapping(
+                    req.capability_effect,
+                    target_origin=target_origin,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    capability_effect_profile_selected = (
+        capability_effect_specification is not None
+    )
+    if role_profile_selected and capability_effect_profile_selected:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "role monotonicity and capability effect profiles are mutually "
+                "exclusive"
+            ),
+        )
+    exclusive_profile_selected = (
+        role_profile_selected or capability_effect_profile_selected
+    )
     source_controls = tuple(req.source_controls)
     peer_controls = tuple(req.peer_controls)
     try:
@@ -1066,27 +1122,40 @@ async def run_behavioral_authorization_endpoint(
         )
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
+    capability_effect_config = CapabilityEffectExecutionConfig.from_environment()
+    if (
+        capability_effect_profile_selected
+        and capability_effect_config.enabled
+        and not resolver_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "capability effect execution requires "
+                "SENTINELFORGE_BEHAVIOR_PRIMARY=1"
+            ),
+        )
     # The inner boundary owns this profile selection too, so direct callers
     # cannot re-enable unrelated interaction authorities alongside the stricter
     # role-session contract.
     interaction_acquisition_config = (
         InteractionAcquisitionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionAcquisitionConfig.from_environment()
     )
     interaction_render_config = (
         InteractionRenderConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionRenderConfig.from_environment()
     )
     interaction_second_config = (
         InteractionSecondTransitionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionSecondTransitionConfig.from_environment()
     )
     interaction_adaptive_config = (
         InteractionAdaptiveConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionAdaptiveConfig.from_environment()
     )
     if interaction_acquisition_config.enabled and not resolver_config.enabled:
@@ -1183,13 +1252,13 @@ async def run_behavioral_authorization_endpoint(
                 f"{INTERACTION_ADAPTIVE_WORKFLOW!r}"
             ),
         )
-    # The exact role profile is mutually exclusive with every other active
-    # behavioral backend. Keep passive reconstruction available, but do not let
+    # Exact role and capability-effect requests each select a mutually exclusive
+    # active profile. Keep passive reconstruction available, but do not let
     # ambient process configuration add prerequisites, selection candidates, or
-    # dispatch authority to this request.
+    # dispatch authority to either request.
     continuation_config = (
         BoundedContinuationConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else BoundedContinuationConfig.from_environment()
     )
     try:
@@ -1198,43 +1267,43 @@ async def run_behavioral_authorization_endpoint(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     fresh_boundary_config = (
         FreshOwnedBoundaryConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else FreshOwnedBoundaryConfig.from_environment()
     )
     omission_confirmation_config = (
         FreshOmissionConfirmationConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else FreshOmissionConfirmationConfig.from_environment()
     )
     proof_experiment_admission_config = (
         ProofExperimentAdmissionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else ProofExperimentAdmissionConfig.from_environment()
     )
     generalized_authorization_execution_config = (
         GeneralizedAuthorizationExecutionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else GeneralizedAuthorizationExecutionConfig.from_environment()
     )
     graph_bound_claim_config = (
         GraphBoundExecutionClaimConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else GraphBoundExecutionClaimConfig.from_environment()
     )
     graph_bound_execution_config = (
         GraphBoundPrerequisiteExecutionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else GraphBoundPrerequisiteExecutionConfig.from_environment()
     )
     graph_bound_claim_gate_enabled = (
         False
-        if role_profile_selected
+        if exclusive_profile_selected
         else os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     graph_bound_provisioning_gate_enabled = (
         False
-        if role_profile_selected
+        if exclusive_profile_selected
         else os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
         .strip()
         .lower()
@@ -1242,7 +1311,7 @@ async def run_behavioral_authorization_endpoint(
     )
     graph_bound_execution_gate_enabled = (
         False
-        if role_profile_selected
+        if exclusive_profile_selected
         else os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
         .strip()
         .lower()
@@ -1368,6 +1437,7 @@ async def run_behavioral_authorization_endpoint(
     generalized_authorization_executor = None
     graph_bound_prerequisite_executor = None
     role_monotonicity_executor = None
+    capability_effect_executor = None
     fresh_boundary_executor = None
     omission_confirmation_admission = None
     executors = None
@@ -1518,6 +1588,31 @@ async def run_behavioral_authorization_endpoint(
                 provenance,
             ),
         }
+        if capability_effect_profile_selected:
+            capability_effect_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=6,
+                    max_requests_per_endpoint=5,
+                    max_cross_object_reads=0,
+                    max_privilege_mutations=0,
+                    max_creates=0,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+            )
+            capability_effect_provenance = ProvenanceSink()
+            capability_effect_provenance.record_context(
+                target=target_origin,
+                proof_mode="bounty_safe_capability_effect",
+                policy_digest=capability_effect_policy.digest(),
+            )
+            capability_effect_executor = make_executor(
+                source_persona.persona_id,
+                capability_effect_policy,
+                capability_effect_provenance,
+            )
         boundary_policy = ExecutionPolicy(
             "bounty_safe",
             scope_filter=scope_filter,
@@ -1550,7 +1645,7 @@ async def run_behavioral_authorization_endpoint(
                 boundary_provenance,
             ),
         }
-        if not role_profile_selected:
+        if not exclusive_profile_selected:
             graph_bound_policy = ExecutionPolicy(
                 "bounty_safe",
                 scope_filter=scope_filter,
@@ -1712,6 +1807,9 @@ async def run_behavioral_authorization_endpoint(
                     "role_protected_effect_execution": (
                         role_execution_config.enabled
                     ),
+                    "capability_effect_execution": (
+                        capability_effect_config.enabled
+                    ),
                 },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
@@ -1727,6 +1825,11 @@ async def run_behavioral_authorization_endpoint(
                 "role_specification_id": (
                     role_specification.specification_id
                     if role_specification is not None
+                    else None
+                ),
+                "capability_effect_specification_id": (
+                    capability_effect_specification.specification_id
+                    if capability_effect_specification is not None
                     else None
                 ),
                 "script_urls": script_urls,
@@ -1789,7 +1892,9 @@ async def run_behavioral_authorization_endpoint(
             )
 
         source_executor = executors[source_persona.persona_id]
-        for script_url in script_urls:
+        for script_url in (
+            () if capability_effect_profile_selected else script_urls
+        ):
             asset_resolution["attempted"] += 1
             try:
                 status, body = await source_executor.send(
@@ -1831,7 +1936,11 @@ async def run_behavioral_authorization_endpoint(
     source_records = list(source_resolution.records)
     peer_records = list(peer_resolution.records)
 
-    if config.enabled and executors is not None:
+    if (
+        config.enabled
+        and executors is not None
+        and not capability_effect_profile_selected
+    ):
         preliminary_plan = scheduler.plan(
             source_records,
             peer_records,
@@ -3484,11 +3593,43 @@ async def run_behavioral_authorization_endpoint(
     adaptive_proof_handoff = None
     graph_bound_one_click_run = None
     role_monotonicity_one_click_run = None
+    capability_effect_one_click_run = (
+        CapabilityEffectOneClickRun.disabled(capability_effect_specification)
+        if capability_effect_specification is not None
+        and not capability_effect_config.enabled
+        else None
+    )
     generalized_one_click_run = None
     graph_bound_shadow_run = shadow_run
     try:
         if (
-            cross_persona_proof_run is None
+            capability_effect_specification is not None
+            and capability_effect_config.enabled
+        ):
+            if (
+                capability_effect_executor is None
+                or receipt_store is None
+                or receipt_fingerprint is None
+                or receipt_reservation_token is None
+            ):
+                raise CapabilityEffectOneClickDenied(
+                    "capability_effect_receipt_gate_unavailable"
+                )
+            capability_effect_one_click_run = await (
+                CapabilityEffectOneClickDispatcher(
+                    target_origin=target_origin,
+                    persona_id=source_persona.persona_id,
+                    specification=capability_effect_specification,
+                    authorization=envelope,
+                    executor=capability_effect_executor,
+                    persona_vault=vault,
+                    evidence_records=source_records,
+                    config=capability_effect_config,
+                ).run()
+            )
+        if (
+            capability_effect_specification is None
+            and cross_persona_proof_run is None
             and graph_bound_shadow_run is not None
             and graph_bound_prerequisite_executor is not None
             and receipt_store is not None
@@ -3521,7 +3662,8 @@ async def run_behavioral_authorization_endpoint(
                 )
             )
         if (
-            cross_persona_proof_run is None
+            capability_effect_specification is None
+            and cross_persona_proof_run is None
             and shadow_run is not None
             and role_specification is not None
             and role_monotonicity_executor is not None
@@ -3551,7 +3693,8 @@ async def run_behavioral_authorization_endpoint(
                 )
             )
         if (
-            cross_persona_proof_run is None
+            capability_effect_specification is None
+            and cross_persona_proof_run is None
             and shadow_run is not None
             and controlled_executor is not None
             and receipt_store is not None
@@ -3587,7 +3730,11 @@ async def run_behavioral_authorization_endpoint(
                     ),
                 )
             )
-        if graph_bound_one_click_run is not None and (
+        if capability_effect_one_click_run is not None and (
+            capability_effect_one_click_run.dispatched
+        ):
+            response = capability_effect_one_click_run.execution_response()
+        elif graph_bound_one_click_run is not None and (
             graph_bound_one_click_run.dispatched
         ):
             response = graph_bound_one_click_run.execution_response()
@@ -3599,6 +3746,13 @@ async def run_behavioral_authorization_endpoint(
             generalized_one_click_run.dispatched
         ):
             response = generalized_one_click_run.execution_response()
+        elif (
+            capability_effect_one_click_run is not None
+            and capability_effect_one_click_run.selected
+        ):
+            # A selected Family-D profile cannot fall through to a broader
+            # behavioral executor when its independent execution gate is off.
+            run = shadow_run
         elif (
             graph_bound_one_click_run is not None
             and graph_bound_one_click_run.selected
@@ -3660,6 +3814,8 @@ async def run_behavioral_authorization_endpoint(
         FreshOwnedBoundaryDenied,
         FreshOmissionDenied,
         GeneralizedAuthorizationOneClickDenied,
+        CapabilityEffectExecutionDenied,
+        CapabilityEffectOneClickDenied,
         GraphBoundManifestAdmissionDenied,
         GraphBoundRequestBindingDenied,
         GraphBoundExecutionClaimDenied,
@@ -3783,6 +3939,10 @@ async def run_behavioral_authorization_endpoint(
         ) from exc
     if not (
         (
+            capability_effect_one_click_run is not None
+            and capability_effect_one_click_run.dispatched
+        )
+        or (
             graph_bound_one_click_run is not None
             and graph_bound_one_click_run.dispatched
         )
@@ -3796,6 +3956,9 @@ async def run_behavioral_authorization_endpoint(
         )
     ):
         if (
+            capability_effect_one_click_run is not None
+            and capability_effect_one_click_run.selected
+        ) or (
             graph_bound_one_click_run is not None
             and graph_bound_one_click_run.selected
         ) or (
@@ -3818,6 +3981,10 @@ async def run_behavioral_authorization_endpoint(
         if role_monotonicity_one_click_run is not None:
             response["role_monotonicity_one_click"] = (
                 role_monotonicity_one_click_run.to_dict()
+            )
+        if capability_effect_one_click_run is not None:
+            response["capability_effect_one_click"] = (
+                capability_effect_one_click_run.to_dict()
             )
         if generalized_one_click_run is not None:
             response["generalized_authorization_one_click"] = (
@@ -3868,7 +4035,9 @@ async def run_behavioral_authorization_endpoint(
             completed_receipt = receipt_store.complete(
                 receipt_fingerprint,
                 reservation_token=receipt_reservation_token,
-                outcome=redacted_outcome(response),
+                outcome=redacted_outcome(
+                    _capability_effect_receipt_projection(response)
+                ),
             )
         except (OSError, ReceiptStoreError) as exc:
             raise HTTPException(
@@ -3898,6 +4067,10 @@ async def run_behavioral_authorization_endpoint(
                 if response.get("kind") == "role_protected_effect_execution":
                     raise RoleMonotonicityOneClickDenied(
                         "role_receipt_obligation_binding_unavailable"
+                    )
+                if response.get("kind") == "capability_effect_one_click":
+                    raise CapabilityEffectOneClickDenied(
+                        "capability_effect_receipt_obligation_binding_unavailable"
                     )
                 feedback = ReceiptDispositionAdapter().adapt(
                     effective_shadow_run.graph,
@@ -3950,18 +4123,25 @@ async def run_behavioral_authorization_endpoint(
                 if response.get("kind") in {
                     "graph_bound_prerequisite_execution",
                     "role_protected_effect_execution",
+                    "capability_effect_one_click",
                 }:
+                    feedback_error_codes = {
+                        "graph_bound_prerequisite_execution": (
+                            "graph_bound_receipt_obligation_binding_unavailable"
+                        ),
+                        "role_protected_effect_execution": (
+                            "role_receipt_obligation_binding_unavailable"
+                        ),
+                        "capability_effect_one_click": (
+                            "capability_effect_receipt_obligation_binding_unavailable"
+                        ),
+                    }
                     shadow_response["receipt_feedback"] = {
                         "schema_version": 1,
                         "mode": "behavioral_receipt_feedback_v1",
                         "executable": False,
                         "status": "unsupported",
-                        "error_code": (
-                            "graph_bound_receipt_obligation_binding_unavailable"
-                            if response.get("kind")
-                            == "graph_bound_prerequisite_execution"
-                            else "role_receipt_obligation_binding_unavailable"
-                        ),
+                        "error_code": feedback_error_codes[response["kind"]],
                     }
                 else:
                     logger.exception("behavioral receipt feedback failed")
@@ -4067,6 +4247,12 @@ async def run_behavioral_authorization_from_url_endpoint(
         RoleMonotonicityOneClickConfig,
         RoleMonotonicityOneClickSpecification,
     )
+    from core.behavior.capability_effect_one_click import (
+        CAPABILITY_EFFECT_WORKFLOW,
+        CapabilityEffectExecutionConfig,
+        CapabilityEffectOneClickRun,
+        CapabilityEffectOneClickSpecification,
+    )
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
     from core.server.routers.driver import (
@@ -4097,6 +4283,32 @@ async def run_behavioral_authorization_from_url_endpoint(
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     role_profile_selected = role_specification is not None
+    capability_effect_specification = None
+    if req.capability_effect is not None:
+        try:
+            capability_effect_specification = (
+                CapabilityEffectOneClickSpecification.from_mapping(
+                    req.capability_effect,
+                    target_origin=target_origin,
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    capability_effect_profile_selected = (
+        capability_effect_specification is not None
+    )
+    if role_profile_selected and capability_effect_profile_selected:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "role monotonicity and capability effect profiles are mutually "
+                "exclusive"
+            ),
+        )
+    exclusive_profile_selected = (
+        role_profile_selected or capability_effect_profile_selected
+    )
+    capability_effect_config = CapabilityEffectExecutionConfig.from_environment()
 
     if not PrimaryPlannerConfig.from_environment().enabled:
         raise HTTPException(
@@ -4124,12 +4336,39 @@ async def run_behavioral_authorization_from_url_endpoint(
         )
     except ControlledExecutionDenied as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    # A supplied role specification selects one mutually exclusive active
-    # profile before any window access. Ambient Family-B/generalized settings
-    # cannot become prerequisites or authority for the role capture.
+    if capability_effect_profile_selected and capability_effect_config.enabled:
+        try:
+            envelope.authorize_action(
+                target_origin=target_origin,
+                workflow=CAPABILITY_EFFECT_WORKFLOW,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="capability_effect_authorization_denied",
+            ) from exc
+    if capability_effect_specification is not None and not (
+        capability_effect_config.enabled
+    ):
+        disabled = CapabilityEffectOneClickRun.disabled(
+            capability_effect_specification
+        )
+        return {
+            "status": "no_executable_candidate",
+            "plan": {"selected_proposal_id": None},
+            "execution": None,
+            "finding": None,
+            "finding_confirmed": False,
+            "capability_effect_one_click": disabled.to_dict(),
+            "promotion_authority": False,
+            "finding_authority": False,
+        }
+    # A supplied role or capability-effect specification selects one mutually
+    # exclusive active profile before any window access. Ambient backends cannot
+    # become prerequisites or authority for that capture.
     continuation_config = (
         BoundedContinuationConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else BoundedContinuationConfig.from_environment()
     )
     try:
@@ -4138,43 +4377,43 @@ async def run_behavioral_authorization_from_url_endpoint(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     fresh_boundary_config = (
         FreshOwnedBoundaryConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else FreshOwnedBoundaryConfig.from_environment()
     )
     omission_confirmation_config = (
         FreshOmissionConfirmationConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else FreshOmissionConfirmationConfig.from_environment()
     )
     proof_experiment_admission_config = (
         ProofExperimentAdmissionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else ProofExperimentAdmissionConfig.from_environment()
     )
     generalized_authorization_execution_config = (
         GeneralizedAuthorizationExecutionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else GeneralizedAuthorizationExecutionConfig.from_environment()
     )
     graph_bound_claim_config = (
         GraphBoundExecutionClaimConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else GraphBoundExecutionClaimConfig.from_environment()
     )
     graph_bound_execution_config = (
         GraphBoundPrerequisiteExecutionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else GraphBoundPrerequisiteExecutionConfig.from_environment()
     )
     graph_bound_claim_gate_enabled = (
         False
-        if role_profile_selected
+        if exclusive_profile_selected
         else os.environ.get(GRAPH_BOUND_EXECUTION_CLAIM_ENV, "").strip().lower()
         in {"1", "true", "yes", "on"}
     )
     graph_bound_provisioning_gate_enabled = (
         False
-        if role_profile_selected
+        if exclusive_profile_selected
         else os.environ.get(GRAPH_BOUND_FRESH_WORLD_PROVISIONING_ENV, "")
         .strip()
         .lower()
@@ -4182,7 +4421,7 @@ async def run_behavioral_authorization_from_url_endpoint(
     )
     graph_bound_execution_gate_enabled = (
         False
-        if role_profile_selected
+        if exclusive_profile_selected
         else os.environ.get(GRAPH_BOUND_PREREQUISITE_EXECUTION_ENV, "")
         .strip()
         .lower()
@@ -4235,27 +4474,26 @@ async def run_behavioral_authorization_from_url_endpoint(
                 f"signed workflow: {ROLE_MONOTONICITY_WORKFLOW}"
             ),
         )
-    # A supplied role specification selects the role-lifecycle URL profile.
-    # Keep the independently enabled interaction profile out of that execution
-    # so its unrelated workflows cannot become accidental prerequisites.
+    # Keep independently enabled interaction settings out of either exact
+    # profile so unrelated workflows cannot become accidental prerequisites.
     interaction_acquisition_config = (
         InteractionAcquisitionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionAcquisitionConfig.from_environment()
     )
     interaction_render_config = (
         InteractionRenderConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionRenderConfig.from_environment()
     )
     interaction_second_config = (
         InteractionSecondTransitionConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionSecondTransitionConfig.from_environment()
     )
     interaction_adaptive_config = (
         InteractionAdaptiveConfig()
-        if role_profile_selected
+        if exclusive_profile_selected
         else InteractionAdaptiveConfig.from_environment()
     )
     if (
@@ -4462,6 +4700,9 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "role_protected_effect_execution": (
                     role_execution_config.enabled
                 ),
+                "capability_effect_execution": (
+                    capability_effect_config.enabled
+                ),
             },
             "target_url": target_url,
             "envelope_id": req.envelope_id,
@@ -4470,6 +4711,11 @@ async def run_behavioral_authorization_from_url_endpoint(
             "role_specification_id": (
                 role_specification.specification_id
                 if role_specification is not None
+                else None
+            ),
+            "capability_effect_specification_id": (
+                capability_effect_specification.specification_id
+                if capability_effect_specification is not None
                 else None
             ),
             "prior_capture_ref": (
@@ -4601,6 +4847,11 @@ async def run_behavioral_authorization_from_url_endpoint(
                     if role_specification is not None
                     else None
                 ),
+                capability_effect=(
+                    req.capability_effect
+                    if capability_effect_specification is not None
+                    else None
+                ),
             ),
             _=True,
         )
@@ -4723,7 +4974,9 @@ async def run_behavioral_authorization_from_url_endpoint(
         completed_receipt = receipt_store.complete(
             fingerprint,
             reservation_token=reservation_token,
-            outcome=redacted_outcome(receiptable_response),
+            outcome=redacted_outcome(
+                _capability_effect_receipt_projection(receiptable_response)
+            ),
         )
     except (OSError, ReceiptStoreError) as exc:
         raise HTTPException(

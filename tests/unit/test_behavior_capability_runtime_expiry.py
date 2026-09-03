@@ -492,7 +492,8 @@ def test_runtime_expiry_module_has_no_io_clock_store_or_production_wiring():
         if path != source_path
         and "capability_runtime_expiry" in path.read_text(encoding="utf-8")
     ]
-    assert production_consumers == [
-        source_path.with_name("capability_execution_receipt.py")
-    ]
+    assert set(production_consumers) == {
+        source_path.with_name("capability_effect_one_click.py"),
+        source_path.with_name("capability_execution_receipt.py"),
+    }
     assert CAPABILITY_RUNTIME_EXPIRY_MODE == ("behavioral_capability_runtime_expiry_v1")
