@@ -986,7 +986,11 @@ async def run_behavioral_authorization_endpoint(
         CapabilityEffectOneClickSpecification,
     )
     from core.behavior.affordances import ClientArtifact
-    from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
+    from core.cortex.execution_policy import (
+        DENIED_STATUS,
+        ExecutionPolicy,
+        PolicyExecutor,
+    )
     from core.foundry.authorization import get_envelope
     from core.foundry.vault import PersonaVault
     from core.safety.provenance import ProvenanceSink
@@ -3808,13 +3812,39 @@ async def run_behavioral_authorization_endpoint(
     except asyncio.CancelledError:
         abort_reserved_root_receipt("behavioral_execution_cancelled")
         raise
+    except CapabilityEffectExecutionDenied as exc:
+        # Capability receipts carry outcomes, not omission terminal evidence.
+        # Keep the root reservation terminal even when evidence is unavailable.
+        abort_reserved_root_receipt("controlled_execution_denied")
+        return {
+            "kind": "capability_effect_one_click",
+            "status": DENIED_STATUS,
+            "execution": None,
+            "finding": None,
+            "finding_candidate": None,
+            "finding_confirmed": False,
+            "promotion_authority": False,
+            "finding_authority": False,
+            "capability_effect_one_click": {
+                "status": "denied",
+                "reason": str(exc),
+                "category": exc.category,
+                "target_request_possible": exc.target_request_possible,
+                "cleanup": exc.cleanup.to_dict() if exc.cleanup is not None else None,
+                "oracle": exc.oracle.to_dict() if exc.oracle is not None else None,
+                "terminal_receipt": (
+                    exc.terminal_receipt.to_dict()
+                    if exc.terminal_receipt is not None
+                    else None
+                ),
+            },
+        }
     except (
         ControlledExecutionDenied,
         ControlledSequenceDenied,
         FreshOwnedBoundaryDenied,
         FreshOmissionDenied,
         GeneralizedAuthorizationOneClickDenied,
-        CapabilityEffectExecutionDenied,
         CapabilityEffectOneClickDenied,
         GraphBoundManifestAdmissionDenied,
         GraphBoundRequestBindingDenied,

@@ -469,8 +469,10 @@ def _oracle_components(
 
     uncertainty = set()
     for kind, item in zip(_OBSERVATION_KINDS, values):
-        if not item.target_projection_observed or item.access_decision == "unknown":
+        if not item.target_projection_observed:
             uncertainty.add(f"{kind}_evidence_unavailable")
+        elif item.access_decision == "unknown":
+            uncertainty.add(f"{kind}_projected_access_decision_unavailable")
     if not witness_effect and not witness_absent:
         uncertainty.add("authorized_effect_witness_unavailable")
     for kind, absent, item in zip(
@@ -1052,6 +1054,25 @@ class CapabilityEffectExperimentExecutor:
                     "target_projection_observed": target_projection_observed,
                 },
             )
+            if access_decision == "denied":
+                if (
+                    effect is not None
+                    and observation_kind in _REFUSAL_KINDS
+                    and target_projection_observed
+                    and 200 <= response_status < 300
+                ):
+                    # A projected effect contradicts the denial label. Record
+                    # observed access so the refusal-phase oracle REFUTES; this
+                    # grants no receipt authority and never rewrites a witness.
+                    access_decision = "allowed"
+                elif effect is None and (
+                    not target_projection_observed or 200 <= response_status < 300
+                ):
+                    # Projected 2xx denial is provisionally INCONCLUSIVE pending
+                    # OCB-S17 O-1b, not final refusal semantics. Keep its projection
+                    # and original response digest distinct from target silence;
+                    # O-1a/O-1b must be resolved before it can prove refusal.
+                    access_decision = "unknown"
             return CapabilityEffectObservation.build(
                 terminal_receipt=receipt,
                 observation_binding=world,

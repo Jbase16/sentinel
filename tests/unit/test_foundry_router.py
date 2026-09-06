@@ -973,6 +973,165 @@ class TestBehavioralAuthorizationEndpoint:
         assert duplicate["status"] == "already_executed"
         assert len(calls) == 6
 
+    def test_capability_effect_execution_denial_returns_http_200_status_zero(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import FastAPI
+        import httpx
+
+        from core.behavior.capability_effect_evaluation import (
+            CapabilityEffectExecutionDenied,
+        )
+        from core.behavior.capability_effect_one_click import (
+            CapabilityEffectOneClickDispatcher,
+        )
+        from core.server.routers import foundry
+        from core.wraith.bola_replay import SNDReplayTransport
+        from tests.unit.test_behavior_capability_execution_receipt import (
+            ADMITTED_AT,
+            _evaluate,
+        )
+
+        request, _, _, _ = self._capability_effect_request()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION", "1")
+        receipt = _evaluate(suffix="foundry-capability-denial", now=ADMITTED_AT - 1.0)
+        calls = []
+
+        async def deny(_dispatcher):
+            calls.append(True)
+            raise CapabilityEffectExecutionDenied(
+                "capability_effect_execution_receipt_not_completed",
+                category="receipt",
+                terminal_receipt=receipt,
+            )
+
+        async def forbidden(*_args, **_kwargs):
+            raise AssertionError("injected denial reached target traffic")
+
+        monkeypatch.setattr(CapabilityEffectOneClickDispatcher, "run", deny)
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+        app = FastAPI()
+        app.include_router(foundry.router)
+        app.dependency_overrides[foundry.verify_sensitive_token] = lambda: True
+
+        async def post():
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                base_url="http://foundry.test",
+            ) as client:
+                response = await client.post(
+                    "/behavioral-authorization", json=request.model_dump(mode="json")
+                )
+                duplicate = await client.post(
+                    "/behavioral-authorization", json=request.model_dump(mode="json")
+                )
+                return response, duplicate
+
+        response, duplicate = _run(post())
+
+        assert response.status_code == 200
+        result = response.json()
+        assert result["status"] == 0
+        assert result["kind"] == "capability_effect_one_click"
+        assert result["execution"] is None
+        assert result["finding"] is None
+        assert result["finding_candidate"] is None
+        assert result["finding_confirmed"] is False
+        assert result["promotion_authority"] is False
+        assert result["finding_authority"] is False
+        denial = result["capability_effect_one_click"]
+        assert denial["status"] == "denied"
+        assert denial["category"] == "receipt"
+        assert denial["reason"] == "capability_effect_execution_receipt_not_completed"
+        assert denial["terminal_receipt"] == receipt.to_dict()
+        assert denial["target_request_possible"] is False
+        assert denial["cleanup"] is None
+        assert denial["oracle"] is None
+        assert duplicate.status_code == 409
+        assert len(calls) == 1
+        stored = list((tmp_path / "behavioral_receipts").glob("*.json"))
+        assert len(stored) == 1
+        root_receipt = json.loads(stored[0].read_text(encoding="utf-8"))
+        assert root_receipt["state"] == "aborted"
+        assert root_receipt["terminal_evidence"] is None
+
+    @pytest.mark.parametrize("projection", (False, True))
+    def test_capability_effect_degraded_response_returns_inconclusive_status_zero(
+        self,
+        monkeypatch,
+        projection,
+    ):
+        from core.server.routers.foundry import run_behavioral_authorization_endpoint
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        request, _, _, _ = self._capability_effect_request()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION", "1")
+        calls = []
+
+        async def fake_send(_transport, persona_id, replay_request):
+            body = json.loads(replay_request.body)
+            kind = body.get("observation_kind", "cleanup")
+            calls.append(kind)
+            if kind == "cleanup":
+                return ReplayResponse(200, json.dumps({
+                    "cleanup_verified": True,
+                    "orphaned_owned_state_possible": False,
+                    "target_projection_observed": True,
+                }))
+            if kind == "valid_capability_effect_witness":
+                return ReplayResponse(200, json.dumps({
+                    "access_decision": "allowed",
+                    "effect": {"resource": "degraded-response-raw-effect"},
+                    "target_projection_observed": True,
+                }))
+            degraded = kind == "replayed_capability_probe"
+            return ReplayResponse(200 if degraded else 403, json.dumps({
+                "access_decision": "denied",
+                "effect": None,
+                "target_projection_observed": projection if degraded else True,
+            }))
+
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert result["status"] == 0
+        assert result["finding_candidate"] is None
+        assert result["finding_confirmed"] is False
+        assert result["promotion_authority"] is False
+        assert result["finding_authority"] is False
+        denial = result["capability_effect_one_click"]
+        assert denial["reason"] == "capability_effect_oracle_inconclusive"
+        assert denial["category"] == "oracle"
+        assert denial["oracle"]["verdict"] == "inconclusive"
+        expected_reason = (
+            "replayed_capability_probe_projected_access_decision_unavailable"
+            if projection
+            else "replayed_capability_probe_evidence_unavailable"
+        )
+        assert expected_reason in denial["oracle"]["uncertainty_reasons"]
+        if projection:
+            assert "replayed_capability_probe_evidence_unavailable" not in (
+                denial["oracle"]["uncertainty_reasons"]
+            )
+        assert denial["cleanup"]["status"] == "verified"
+        assert denial["cleanup"]["target_requests_sent"] == 6
+        assert denial["target_request_possible"] is True
+        assert denial["terminal_receipt"] is None
+        assert calls == [
+            "no_capability_baseline",
+            "valid_capability_effect_witness",
+            "replayed_capability_probe",
+            "expired_capability_probe",
+            "inadmissible_capability_probe",
+            "cleanup",
+        ]
+        assert "degraded-response-raw-effect" not in json.dumps(result)
+
     def test_capability_effect_missing_workflow_denies_before_traffic(
         self,
         monkeypatch,

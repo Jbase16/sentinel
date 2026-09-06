@@ -103,6 +103,10 @@ class _TwinTransport:
         leak_kind: str | None = None,
         witness_effect: bool = True,
         missing_projection_kind: str | None = None,
+        denial_response_kind: str | None = None,
+        denial_status: int = 403,
+        denial_projection: bool = True,
+        denial_effect=None,
         wrong_receipt_kind: str | None = None,
         wrong_receipt=None,
         dispatch_raises_at: int | None = None,
@@ -114,6 +118,10 @@ class _TwinTransport:
         self.leak_kind = leak_kind
         self.witness_effect = witness_effect
         self.missing_projection_kind = missing_projection_kind
+        self.denial_response_kind = denial_response_kind
+        self.denial_status = denial_status
+        self.denial_projection = denial_projection
+        self.denial_effect = denial_effect
         self.wrong_receipt_kind = wrong_receipt_kind
         self.wrong_receipt = wrong_receipt
         self.dispatch_raises_at = dispatch_raises_at
@@ -154,6 +162,13 @@ class _TwinTransport:
                 "access_decision": "allowed",
                 "effect": EFFECT_VALUE,
                 "target_projection_observed": True,
+            }
+        if kind == self.denial_response_kind:
+            return self.denial_status, {
+                "terminal_receipt": receipt,
+                "access_decision": "denied",
+                "effect": self.denial_effect,
+                "target_projection_observed": self.denial_projection,
             }
         return 403, {
             "terminal_receipt": receipt,
@@ -324,6 +339,271 @@ def test_missing_projection_is_inconclusive_after_verified_cleanup():
     assert denied.value.oracle.verdict is CapabilityEffectOracleVerdict.INCONCLUSIVE
     assert denied.value.cleanup.status == "verified"
     assert denied.value.target_request_possible is True
+    assert len(transport.calls) == 5
+    assert len(transport.cleanup_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "kind",
+    tuple(k for k in OBSERVATION_KINDS if k != "valid_capability_effect_witness"),
+)
+@pytest.mark.parametrize("status,projection", ((200, False), (403, False), (200, True)))
+def test_degraded_denial_is_inconclusive_after_verified_cleanup(
+    kind, status, projection
+):
+    receipts = _receipts("degraded-denial")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind=kind,
+        denial_status=status,
+        denial_projection=projection,
+    )
+
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_oracle_inconclusive",
+    ) as denied:
+        _run(transport, receipts)
+
+    assert denied.value.category == "oracle"
+    assert denied.value.oracle.verdict is CapabilityEffectOracleVerdict.INCONCLUSIVE
+    expected_reason = (
+        f"{kind}_projected_access_decision_unavailable"
+        if projection
+        else f"{kind}_evidence_unavailable"
+    )
+    assert expected_reason in denied.value.oracle.uncertainty_reasons
+    other_reason = (
+        f"{kind}_evidence_unavailable"
+        if projection
+        else f"{kind}_projected_access_decision_unavailable"
+    )
+    assert other_reason not in denied.value.oracle.uncertainty_reasons
+    assert denied.value.oracle.finding_candidate_ref is None
+    assert denied.value.cleanup.status == "verified"
+    assert denied.value.cleanup.target_requests_sent == 6
+    assert denied.value.target_request_possible is True
+    assert len(transport.calls) == 5
+    assert len(transport.cleanup_calls) == 1
+
+
+@pytest.mark.parametrize("status,projection", ((200, False), (403, False), (200, True)))
+def test_degraded_denial_preserves_original_response_digest(status, projection):
+    receipts = _receipts("denial-provenance")
+    witness = receipts["valid_capability_effect_witness"]
+    receipt = receipts["replayed_capability_probe"]
+    world = witness._liveness_decision._admission._contract._owned_world
+    response = {
+        "terminal_receipt": receipt,
+        "access_decision": "denied",
+        "effect": None,
+        "target_projection_observed": projection,
+    }
+
+    observation = CapabilityEffectExperimentExecutor._observation(
+        witness_receipt=witness,
+        world=world,
+        observation_kind="replayed_capability_probe",
+        response_status=status,
+        response=response,
+    )
+
+    original_payload = {
+        "receipt_ref": receipt.receipt_id,
+        "response_status": status,
+        "access_decision": "denied",
+        "effect_ref": None,
+        "target_projection_observed": projection,
+    }
+    assert observation.response_ref == stable_hash(
+        "capability_effect_target_response", original_payload
+    )
+    assert observation.response_ref != stable_hash(
+        "capability_effect_target_response",
+        {
+            **original_payload,
+            "access_decision": "unknown",
+            "target_projection_observed": False,
+        },
+    )
+    assert observation.access_decision == "unknown"
+    assert observation.target_projection_observed is projection
+    assert observation.response_status == status
+    assert observation.receipt_ref == receipt.receipt_id
+    assert observation.protected_effect_observed is False
+    assert response["access_decision"] == "denied"
+    assert response["target_projection_observed"] is projection
+    assert replace(observation) == observation
+
+
+@pytest.mark.parametrize(
+    "kind",
+    tuple(k for k in OBSERVATION_KINDS if k != "valid_capability_effect_witness"),
+)
+@pytest.mark.parametrize("effect", (EFFECT_VALUE, False, 0, "", {}, []))
+def test_projected_denial_with_present_effect_refutes_before_normalization(
+    kind, effect
+):
+    receipts = _receipts("projected-denial-leak")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind=kind,
+        denial_status=200,
+        denial_projection=True,
+        denial_effect=effect,
+    )
+
+    result = _run(transport, receipts)
+
+    assert result.oracle.verdict is CapabilityEffectOracleVerdict.REFUTED
+    assert result.execution_effect_authority is False
+    assert result.oracle.finding_candidate_ref is None
+    assert result.oracle.promotion_authority is False
+    assert result.oracle.finding_authority is False
+    observation = next(
+        item for item in result.effect_observations if item.observation_kind == kind
+    )
+    assert observation.effect_ref == stable_hash("capability_protected_effect", effect)
+    assert observation.protected_effect_observed is True
+    assert observation.target_projection_observed is True
+    assert observation.response_ref == stable_hash(
+        "capability_effect_target_response",
+        {
+            "receipt_ref": receipts[kind].receipt_id,
+            "response_status": 200,
+            "access_decision": "denied",
+            "effect_ref": stable_hash("capability_protected_effect", effect),
+            "target_projection_observed": True,
+        },
+    )
+    assert result.cleanup.status == "verified"
+    assert len(transport.calls) == 5
+    assert len(transport.cleanup_calls) == 1
+
+
+def test_projected_denial_leak_refutes_despite_missing_evidence_elsewhere():
+    receipts = _receipts("denied-leak-and-silence")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind="replayed_capability_probe",
+        denial_status=200,
+        denial_projection=True,
+        denial_effect=False,
+        missing_projection_kind="expired_capability_probe",
+    )
+
+    result = _run(transport, receipts)
+
+    assert result.oracle.verdict is CapabilityEffectOracleVerdict.REFUTED
+    assert (
+        "expired_capability_probe_evidence_unavailable"
+        in result.oracle.uncertainty_reasons
+    )
+    assert result.execution_effect_authority is False
+    assert result.oracle.finding_candidate_ref is None
+    assert result.cleanup.status == "verified"
+
+
+def test_projected_denied_witness_is_not_rewritten_as_authorized_effect():
+    receipts = _receipts("denied-witness")
+    witness = receipts["valid_capability_effect_witness"]
+
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_transport_response_invalid",
+    ) as denied:
+        CapabilityEffectExperimentExecutor._observation(
+            witness_receipt=witness,
+            world=witness._liveness_decision._admission._contract._owned_world,
+            observation_kind="valid_capability_effect_witness",
+            response_status=200,
+            response={
+                "terminal_receipt": witness,
+                "access_decision": "denied",
+                "effect": EFFECT_VALUE,
+                "target_projection_observed": True,
+            },
+        )
+
+    assert denied.value.category == "transport"
+    assert denied.value.oracle is None
+
+
+@pytest.mark.parametrize("effect", (EFFECT_VALUE, False, 0, "", {}, []))
+def test_denied_effect_is_not_normalized_to_missing_evidence(effect):
+    receipts = _receipts("denied-effect")
+    witness = receipts["valid_capability_effect_witness"]
+
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_transport_response_invalid",
+    ) as denied:
+        CapabilityEffectExperimentExecutor._observation(
+            witness_receipt=witness,
+            world=witness._liveness_decision._admission._contract._owned_world,
+            observation_kind="replayed_capability_probe",
+            response_status=200,
+            response={
+                "terminal_receipt": receipts["replayed_capability_probe"],
+                "access_decision": "denied",
+                "effect": effect,
+                "target_projection_observed": False,
+            },
+        )
+
+    assert denied.value.category == "transport"
+    assert denied.value.oracle is None
+
+
+def test_degraded_denial_does_not_bypass_receipt_binding():
+    receipts = _receipts("degraded-wrong-receipt")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind="replayed_capability_probe",
+        denial_status=200,
+        denial_projection=False,
+        wrong_receipt_kind="replayed_capability_probe",
+        wrong_receipt=receipts["expired_capability_probe"],
+    )
+
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_transport_response_invalid",
+    ) as denied:
+        _run(transport, receipts)
+
+    assert denied.value.category == "transport"
+    assert denied.value.oracle is None
+    assert denied.value.cleanup.status == "verified"
+    assert len(transport.calls) == 3
+    assert len(transport.cleanup_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "leak_kind",
+    tuple(k for k in OBSERVATION_KINDS if k != "valid_capability_effect_witness"),
+)
+def test_effect_in_refusal_refutes_even_with_degraded_denial_elsewhere(leak_kind):
+    receipts = _receipts("leak-with-degraded-denial")
+    degraded_kind = (
+        "replayed_capability_probe"
+        if leak_kind == "no_capability_baseline"
+        else "no_capability_baseline"
+    )
+    transport = _TwinTransport(
+        receipts,
+        leak_kind=leak_kind,
+        denial_response_kind=degraded_kind,
+        denial_status=200,
+        denial_projection=False,
+    )
+
+    result = _run(transport, receipts)
+
+    assert result.oracle.verdict is CapabilityEffectOracleVerdict.REFUTED
+    assert result.execution_effect_authority is False
+    assert result.oracle.finding_candidate_ref is None
+    assert result.cleanup.status == "verified"
     assert len(transport.calls) == 5
     assert len(transport.cleanup_calls) == 1
 
