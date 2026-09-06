@@ -26,6 +26,7 @@ from .normalize import stable_hash
 
 
 CAPABILITY_EFFECT_EXECUTION_ENV = "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION"
+CAPABILITY_REFUSAL_2XX_ENV = "SENTINELFORGE_BEHAVIOR_CAPABILITY_REFUSAL_2XX"
 CAPABILITY_EFFECT_EXECUTION_MODE = "behavioral_capability_effect_execution_v1"
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
@@ -96,10 +97,13 @@ def _owned_world(receipt: CapabilityExecutionReceipt) -> ExperimentWorldBinding:
 @dataclass(frozen=True)
 class CapabilityEffectExecutionConfig:
     enabled: bool = False
+    refusal_2xx_enabled: bool = False
 
     def __post_init__(self) -> None:
         if type(self.enabled) is not bool:
             raise TypeError("capability effect execution enabled must be boolean")
+        if type(self.refusal_2xx_enabled) is not bool:
+            raise TypeError("capability refusal 2xx enabled must be boolean")
 
     @classmethod
     def from_environment(cls) -> "CapabilityEffectExecutionConfig":
@@ -107,7 +111,11 @@ class CapabilityEffectExecutionConfig:
             enabled=(
                 str(os.environ.get(CAPABILITY_EFFECT_EXECUTION_ENV, "")).strip().lower()
                 in _TRUE
-            )
+            ),
+            refusal_2xx_enabled=(
+                str(os.environ.get(CAPABILITY_REFUSAL_2XX_ENV, "")).strip().lower()
+                in _TRUE
+            ),
         )
 
 
@@ -339,7 +347,15 @@ class CapabilityEffectObservation:
         denied = (
             self.access_decision == "denied"
             and status_valid
-            and not 200 <= self.response_status < 300
+            and (
+                not 200 <= self.response_status < 300
+                or (
+                    self.observation_kind in _REFUSAL_KINDS
+                    and receipt.outcome in _REFUSAL_OUTCOMES
+                    and self.target_projection_observed
+                    and not self.protected_effect_observed
+                )
+            )
         )
         unknown = self.access_decision == "unknown" and status_valid
         if (
@@ -1003,6 +1019,7 @@ class CapabilityEffectExperimentExecutor:
         observation_kind: str,
         response_status: object,
         response: object,
+        refusal_2xx_enabled: bool = False,
     ) -> CapabilityEffectObservation:
         attached = None
         if isinstance(response, Mapping):
@@ -1065,13 +1082,22 @@ class CapabilityEffectExperimentExecutor:
                     # observed access so the refusal-phase oracle REFUTES; this
                     # grants no receipt authority and never rewrites a witness.
                     access_decision = "allowed"
+                elif (
+                    refusal_2xx_enabled is True
+                    and observation_kind in _REFUSAL_KINDS
+                    and target_projection_observed
+                    and effect is None
+                    and 200 <= response_status < 300
+                    and receipt.outcome in _REFUSAL_OUTCOMES
+                ):
+                    # Honor only a validated, projected refusal without an effect.
+                    # The original denial and its response digest stay intact.
+                    assert receipt.outcome in _REFUSAL_OUTCOMES
                 elif effect is None and (
                     not target_projection_observed or 200 <= response_status < 300
                 ):
-                    # Projected 2xx denial is provisionally INCONCLUSIVE pending
-                    # OCB-S17 O-1b, not final refusal semantics. Keep its projection
-                    # and original response digest distinct from target silence;
-                    # O-1a/O-1b must be resolved before it can prove refusal.
+                    # Preserve default-off grading and distinguish projected but
+                    # unrepresentable denial from missing target evidence.
                     access_decision = "unknown"
             return CapabilityEffectObservation.build(
                 terminal_receipt=receipt,
@@ -1199,6 +1225,7 @@ class CapabilityEffectExperimentExecutor:
                             observation_kind=observation_kind,
                             response_status=response_status,
                             response=response,
+                            refusal_2xx_enabled=self.config.refusal_2xx_enabled,
                         )
                     )
                 oracle = CapabilityEffectOracleEvaluation.build(

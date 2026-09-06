@@ -107,6 +107,7 @@ class _TwinTransport:
         denial_status: int = 403,
         denial_projection: bool = True,
         denial_effect=None,
+        refusal_status: int = 403,
         wrong_receipt_kind: str | None = None,
         wrong_receipt=None,
         dispatch_raises_at: int | None = None,
@@ -122,6 +123,7 @@ class _TwinTransport:
         self.denial_status = denial_status
         self.denial_projection = denial_projection
         self.denial_effect = denial_effect
+        self.refusal_status = refusal_status
         self.wrong_receipt_kind = wrong_receipt_kind
         self.wrong_receipt = wrong_receipt
         self.dispatch_raises_at = dispatch_raises_at
@@ -170,7 +172,7 @@ class _TwinTransport:
                 "effect": self.denial_effect,
                 "target_projection_observed": self.denial_projection,
             }
-        return 403, {
+        return self.refusal_status, {
             "terminal_receipt": receipt,
             "access_decision": "denied",
             "effect": None,
@@ -204,17 +206,26 @@ class _TwinTransport:
         )
 
 
-def _executor(transport, receipts=None, *, enabled=True):
+def _executor(transport, receipts=None, *, enabled=True, refusal_2xx_enabled=False):
     values = receipts or _receipts()
     return CapabilityEffectExperimentExecutor(
         values["valid_capability_effect_witness"],
         transport=transport,
-        config=CapabilityEffectExecutionConfig(enabled=enabled),
+        config=CapabilityEffectExecutionConfig(
+            enabled=enabled, refusal_2xx_enabled=refusal_2xx_enabled
+        ),
     )
 
 
-def _run(transport, receipts=None, *, enabled=True):
-    return asyncio.run(_executor(transport, receipts, enabled=enabled).execute())
+def _run(transport, receipts=None, *, enabled=True, refusal_2xx_enabled=False):
+    return asyncio.run(
+        _executor(
+            transport,
+            receipts,
+            enabled=enabled,
+            refusal_2xx_enabled=refusal_2xx_enabled,
+        ).execute()
+    )
 
 
 @pytest.mark.parametrize(
@@ -242,6 +253,66 @@ def test_default_config_is_disabled_when_environment_is_absent(monkeypatch):
     monkeypatch.delenv(CAPABILITY_EFFECT_EXECUTION_ENV, raising=False)
     assert CapabilityEffectExecutionConfig().enabled is False
     assert CapabilityEffectExecutionConfig.from_environment().enabled is False
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    (
+        (None, False),
+        ("", False),
+        ("garbage", False),
+        ("0", False),
+        ("false", False),
+        ("off", False),
+        ("1", True),
+        ("TRUE", True),
+        (" yes ", True),
+        ("On", True),
+    ),
+)
+def test_refusal_2xx_config_uses_only_explicit_truthy_values(
+    monkeypatch, raw, expected
+):
+    monkeypatch.setenv(CAPABILITY_EFFECT_EXECUTION_ENV, "1")
+    if raw is None:
+        monkeypatch.delenv(effect_module.CAPABILITY_REFUSAL_2XX_ENV, raising=False)
+    else:
+        monkeypatch.setenv(effect_module.CAPABILITY_REFUSAL_2XX_ENV, raw)
+
+    config = CapabilityEffectExecutionConfig.from_environment()
+
+    assert config.enabled is True
+    assert config.refusal_2xx_enabled is expected
+    assert CapabilityEffectExecutionConfig().refusal_2xx_enabled is False
+
+
+@pytest.mark.parametrize("value", (None, 0, 1, "false", "true"))
+def test_refusal_2xx_config_rejects_non_boolean_values(value):
+    with pytest.raises(TypeError, match="boolean"):
+        CapabilityEffectExecutionConfig(refusal_2xx_enabled=value)
+
+
+def test_refusal_2xx_flag_alone_never_enables_execution(monkeypatch):
+    monkeypatch.delenv(CAPABILITY_EFFECT_EXECUTION_ENV, raising=False)
+    monkeypatch.setenv(effect_module.CAPABILITY_REFUSAL_2XX_ENV, "1")
+    receipts = _receipts("refusal-gate-only")
+    transport = _TwinTransport(receipts, refusal_status=200)
+    executor = CapabilityEffectExperimentExecutor(
+        receipts["valid_capability_effect_witness"], transport=transport
+    )
+
+    assert executor.config.enabled is False
+    assert executor.config.refusal_2xx_enabled is True
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_execution_is_disabled",
+    ) as denied:
+        asyncio.run(executor.execute())
+
+    assert denied.value.category == "configuration"
+    assert denied.value.cleanup.status == "unattempted"
+    assert transport.calls == []
+    assert transport.cleanup_calls == []
 
 
 def test_secure_twin_confirms_exact_one_time_effect_and_verified_cleanup():
@@ -434,6 +505,304 @@ def test_degraded_denial_preserves_original_response_digest(status, projection):
     assert response["access_decision"] == "denied"
     assert response["target_projection_observed"] is projection
     assert replace(observation) == observation
+
+
+@pytest.mark.parametrize("status", (200, 299))
+def test_projected_2xx_refusal_preserves_original_digest_with_gate_on(status):
+    receipts = _receipts("honored-refusal-provenance")
+    witness = receipts["valid_capability_effect_witness"]
+    receipt = receipts["replayed_capability_probe"]
+    response = {
+        "terminal_receipt": receipt,
+        "access_decision": "denied",
+        "effect": None,
+        "target_projection_observed": True,
+    }
+    original_response = dict(response)
+
+    observation = CapabilityEffectExperimentExecutor._observation(
+        witness_receipt=witness,
+        world=witness._liveness_decision._admission._contract._owned_world,
+        observation_kind="replayed_capability_probe",
+        response_status=status,
+        response=response,
+        refusal_2xx_enabled=True,
+    )
+
+    assert observation.access_decision == "denied"
+    assert observation.response_status == status
+    assert observation.protected_effect_observed is False
+    assert observation.target_projection_observed is True
+    assert observation.receipt_outcome is (
+        CapabilityExecutionOutcome.EXECUTION_REFUSED_ALREADY_CONSUMED
+    )
+    assert observation.response_ref == stable_hash(
+        "capability_effect_target_response",
+        {
+            "receipt_ref": receipt.receipt_id,
+            "response_status": status,
+            "access_decision": "denied",
+            "effect_ref": None,
+            "target_projection_observed": True,
+        },
+    )
+    assert replace(observation) == observation
+    assert response == original_response
+
+
+@pytest.mark.parametrize(
+    "kind",
+    tuple(k for k in OBSERVATION_KINDS if k != "valid_capability_effect_witness"),
+)
+def test_projected_2xx_refusal_confirms_with_environment_gate_on(monkeypatch, kind):
+    monkeypatch.setenv(CAPABILITY_EFFECT_EXECUTION_ENV, "1")
+    monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_CAPABILITY_REFUSAL_2XX", "1")
+    receipts = _receipts("projected-2xx-refusal")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind=kind,
+        denial_status=200,
+    )
+    executor = CapabilityEffectExperimentExecutor(
+        receipts["valid_capability_effect_witness"], transport=transport
+    )
+
+    result = asyncio.run(executor.execute())
+
+    assert result.oracle.verdict is (
+        CapabilityEffectOracleVerdict.CONFIRMED_ONE_TIME_AUTHORIZED_EFFECT
+    )
+    observation = next(
+        item for item in result.effect_observations if item.observation_kind == kind
+    )
+    assert observation.access_decision == "denied"
+    assert observation.response_status == 200
+    assert observation.protected_effect_observed is False
+    assert result.cleanup.status == "verified"
+
+
+def test_full_200_refusal_secure_twin_confirms_with_gate_on(monkeypatch):
+    monkeypatch.setenv(CAPABILITY_EFFECT_EXECUTION_ENV, "1")
+    monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_CAPABILITY_REFUSAL_2XX", "1")
+    receipts = _receipts("full-200-refusal")
+    transport = _TwinTransport(receipts, refusal_status=200)
+    executor = CapabilityEffectExperimentExecutor(
+        receipts["valid_capability_effect_witness"], transport=transport
+    )
+
+    result = asyncio.run(executor.execute())
+
+    assert result.oracle.verdict is (
+        CapabilityEffectOracleVerdict.CONFIRMED_ONE_TIME_AUTHORIZED_EFFECT
+    )
+    assert result.oracle.authorized_effect_observed_once is True
+    assert result.oracle.promotion_authority is False
+    assert result.oracle.finding_authority is False
+    assert result.cleanup.status == "verified"
+    assert result.cleanup.target_requests_sent == 6
+    assert result.cleanup.target_request_may_have_been_sent is False
+    assert result.cleanup.orphaned_owned_state_possible is False
+    assert [call["observation_kind"] for call in transport.calls] == list(
+        OBSERVATION_KINDS
+    )
+    assert len(transport.cleanup_calls) == 1
+    assert all(item.response_status == 200 for item in result.effect_observations)
+    refusals = tuple(
+        item
+        for item in result.effect_observations
+        if item.observation_kind != "valid_capability_effect_witness"
+    )
+    assert len(refusals) == 4
+    assert all(item.access_decision == "denied" for item in refusals)
+    assert all(item.target_projection_observed for item in refusals)
+    assert all(not item.protected_effect_observed for item in refusals)
+    assert (
+        sum(item.protected_effect_observed for item in result.effect_observations) == 1
+    )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    tuple(k for k in OBSERVATION_KINDS if k != "valid_capability_effect_witness"),
+)
+@pytest.mark.parametrize("effect", (EFFECT_VALUE, False, 0, "", {}, []))
+def test_projected_denial_effect_refutes_with_refusal_2xx_gate_on(kind, effect):
+    receipts = _receipts("honored-refusal-leak")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind=kind,
+        denial_status=200,
+        denial_effect=effect,
+        refusal_status=200,
+    )
+
+    result = _run(transport, receipts, refusal_2xx_enabled=True)
+
+    assert result.oracle.verdict is CapabilityEffectOracleVerdict.REFUTED
+    assert result.oracle.finding_candidate_ref is None
+    assert result.execution_effect_authority is False
+    observation = next(
+        item for item in result.effect_observations if item.observation_kind == kind
+    )
+    assert observation.access_decision == "allowed"
+    assert observation.protected_effect_observed is True
+    assert observation.effect_ref == stable_hash("capability_protected_effect", effect)
+    assert observation.response_ref == stable_hash(
+        "capability_effect_target_response",
+        {
+            "receipt_ref": receipts[kind].receipt_id,
+            "response_status": 200,
+            "access_decision": "denied",
+            "effect_ref": stable_hash("capability_protected_effect", effect),
+            "target_projection_observed": True,
+        },
+    )
+    assert result.cleanup.status == "verified"
+    assert len(transport.calls) == 5
+    assert len(transport.cleanup_calls) == 1
+
+
+@pytest.mark.parametrize("status", (200, 403))
+def test_missing_projection_stays_inconclusive_with_refusal_2xx_gate_on(status):
+    receipts = _receipts("honored-refusal-silence")
+    kind = "expired_capability_probe"
+    witness = receipts["valid_capability_effect_witness"]
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind=kind,
+        denial_status=status,
+        denial_projection=False,
+        refusal_status=200,
+    )
+    observation = CapabilityEffectExperimentExecutor._observation(
+        witness_receipt=witness,
+        world=witness._liveness_decision._admission._contract._owned_world,
+        observation_kind=kind,
+        response_status=status,
+        response={
+            "terminal_receipt": receipts[kind],
+            "access_decision": "denied",
+            "effect": None,
+            "target_projection_observed": False,
+        },
+        refusal_2xx_enabled=True,
+    )
+
+    assert observation.access_decision == "unknown"
+    assert observation.target_projection_observed is False
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_oracle_inconclusive",
+    ) as denied:
+        _run(transport, receipts, refusal_2xx_enabled=True)
+
+    assert denied.value.oracle.verdict is CapabilityEffectOracleVerdict.INCONCLUSIVE
+    assert f"{kind}_evidence_unavailable" in denied.value.oracle.uncertainty_reasons
+    assert denied.value.cleanup.status == "verified"
+    assert len(transport.calls) == 5
+    assert len(transport.cleanup_calls) == 1
+
+
+@pytest.mark.parametrize("effect", (None, EFFECT_VALUE))
+def test_denied_witness_is_never_honored_with_refusal_2xx_gate_on(effect):
+    receipts = _receipts("honored-refusal-witness")
+    witness = receipts["valid_capability_effect_witness"]
+    response = {
+        "terminal_receipt": witness,
+        "access_decision": "denied",
+        "effect": effect,
+        "target_projection_observed": True,
+    }
+    original_response = dict(response)
+    arguments = {
+        "witness_receipt": witness,
+        "world": witness._liveness_decision._admission._contract._owned_world,
+        "observation_kind": "valid_capability_effect_witness",
+        "response_status": 200,
+        "response": response,
+        "refusal_2xx_enabled": True,
+    }
+
+    if effect is None:
+        observation = CapabilityEffectExperimentExecutor._observation(**arguments)
+        assert observation.access_decision == "unknown"
+        assert observation.protected_effect_observed is False
+        assert observation.receipt_outcome is (
+            CapabilityExecutionOutcome.EXECUTION_COMPLETED
+        )
+    else:
+        with pytest.raises(
+            CapabilityEffectExecutionDenied,
+            match="capability_effect_transport_response_invalid",
+        ) as denied:
+            CapabilityEffectExperimentExecutor._observation(**arguments)
+        assert denied.value.category == "transport"
+        assert denied.value.oracle is None
+    assert response == original_response
+
+
+@pytest.mark.parametrize(
+    "wrong_kind", ("expired_capability_probe", "valid_capability_effect_witness")
+)
+def test_refusal_2xx_gate_does_not_bypass_receipt_binding(wrong_kind):
+    receipts = _receipts("honored-refusal-wrong-receipt")
+    transport = _TwinTransport(
+        receipts,
+        denial_response_kind="replayed_capability_probe",
+        denial_status=200,
+        wrong_receipt_kind="replayed_capability_probe",
+        wrong_receipt=receipts[wrong_kind],
+        refusal_status=200,
+    )
+
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_transport_response_invalid",
+    ) as denied:
+        _run(transport, receipts, refusal_2xx_enabled=True)
+
+    assert denied.value.category == "transport"
+    assert denied.value.oracle is None
+    assert denied.value.cleanup.status == "verified"
+    assert len(transport.calls) == 3
+    assert len(transport.cleanup_calls) == 1
+
+
+@pytest.mark.parametrize("effect,projection", ((EFFECT_VALUE, True), (None, False)))
+def test_projected_2xx_refusal_invariant_rejects_effect_or_missing_projection(
+    effect, projection
+):
+    receipts = _receipts("honored-refusal-invariant")
+    witness = receipts["valid_capability_effect_witness"]
+    world = witness._liveness_decision._admission._contract._owned_world
+
+    with pytest.raises(ValueError, match="capability effect observation"):
+        CapabilityEffectObservation.build(
+            terminal_receipt=receipts["replayed_capability_probe"],
+            observation_binding=world,
+            response_ref=stable_hash("capability_effect_target_response", "invalid"),
+            observation_kind="replayed_capability_probe",
+            access_decision="denied",
+            response_status=200,
+            effect=effect,
+            target_projection_observed=projection,
+        )
+
+
+def test_full_200_refusal_still_requires_verified_cleanup_with_gate_on():
+    receipts = _receipts("honored-refusal-uncertain-cleanup")
+    transport = _TwinTransport(receipts, refusal_status=200, cleanup_status="uncertain")
+
+    with pytest.raises(
+        CapabilityEffectExecutionDenied,
+        match="capability_effect_cleanup_unverified",
+    ) as denied:
+        _run(transport, receipts, refusal_2xx_enabled=True)
+
+    assert denied.value.cleanup.status == "uncertain"
+    assert denied.value.cleanup.orphaned_owned_state_possible is True
+    assert len(transport.calls) == 5
+    assert len(transport.cleanup_calls) == 1
 
 
 @pytest.mark.parametrize(
