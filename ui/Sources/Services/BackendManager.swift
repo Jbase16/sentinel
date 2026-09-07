@@ -63,6 +63,7 @@ class BackendManager: ObservableObject {
 
     private var process: Process?
     private var pipe: Pipe?
+    private var attachTask: Task<Void, Never>?
     private var healthCheckTask: Task<Void, Never>?
     private var bootManifestURL: URL?
     private var logRingBuffer: [String] = []
@@ -113,43 +114,63 @@ class BackendManager: ObservableObject {
 
     /// Function start.
     func start() {
-        Task {
-            let isRunning = await backendAlreadyRunning()
-            await MainActor.run {
-                self.appendLogLine("[BackendManager] backendAlreadyRunning check: \(isRunning)")
+        guard attachTask == nil, healthCheckTask == nil, !isRunning,
+            process?.isRunning != true
+        else { return }
+
+        attachTask = Task {
+            defer {
+                // stop() clears the slot; a canceled task must not clear a newer start().
+                if !Task.isCancelled { attachTask = nil }
             }
 
-            // Check if backend is already running externally
-            if isRunning {
-                print("[BackendManager] Existing backend detected — attaching instead of spawning")
-                await MainActor.run {
-                    self.backendState = .ready
-                    self.status = "Core Connected (External)"
-                    self.isRunning = true
-                    NotificationCenter.default.post(name: .backendReady, object: nil)
+            while !Task.isCancelled {
+                let (probe, statusCode) = await probeExistingBackend()
+                guard !Task.isCancelled else { return }
+
+                switch attachAction(for: probe, allowExternalBackend: allowExternalBackend) {
+                case .attach:
+                    attachToExistingBackend()
+                    return
+                case .spawn:
+                    ownsBackendProcess = true
+                    await launchIntegratedServer()
+                    return
+                case .wait:
+                    backendState = .starting
+                    if statusCode == 401 || statusCode == 403 {
+                        status = "Core present, auth mismatch — check api_token"
+                    } else if probe == .presentNotReady {
+                        status = "Core present, waiting for readiness..."
+                    } else {
+                        status = "Waiting for External Core..."
+                    }
                 }
-                // We do NOT own this process, so we won't kill it on exit
-                self.ownsBackendProcess = false
-                startHealthMonitor()
-                return
-            }
 
-            if allowExternalBackend {
-                print("[BackendManager] External backend required but not found. Waiting...")
-                await MainActor.run {
-                    self.status = "Waiting for External Core..."
+                do {
+                    try await Task.sleep(nanoseconds: healthCheckInterval)
+                } catch {
+                    return
                 }
-                return
             }
-
-            // Launch our own server
-            self.ownsBackendProcess = true
-            await launchIntegratedServer()
         }
+    }
+
+    private func attachToExistingBackend() {
+        print("[BackendManager] Existing backend ready — attaching instead of spawning")
+        ownsBackendProcess = false
+        backendState = .ready
+        status = allowExternalBackend ? "Core Connected (External)" : "Core Online"
+        isRunning = true
+        consecutiveFailures = 0
+        startHealthMonitor()
+        NotificationCenter.default.post(name: .backendReady, object: nil)
     }
 
     /// Function stop.
     func stop() {
+        attachTask?.cancel()
+        attachTask = nil
         healthCheckTask?.cancel()
         healthCheckTask = nil
 
@@ -177,34 +198,30 @@ class BackendManager: ObservableObject {
         status = "Core Stopped"
     }
 
-    private func backendAlreadyRunning() async -> Bool {
-        var request = URLRequest(url: healthCheckURL)
-        request.timeoutInterval = 0.5
+    private func probeExistingBackend() async -> (probe: ExternalCoreProbe, statusCode: Int?) {
+        var request = healthRequest(url: healthCheckURL, timeoutInterval: 0.5)
         request.cachePolicy = .reloadIgnoringLocalCacheData
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse {
-                return http.statusCode == 200
-            }
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let statusCode = (response as? HTTPURLResponse)?.statusCode
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (
+                classifyProbe(
+                    statusCode: statusCode, healthStatus: json?["status"] as? String,
+                    transportFailed: false),
+                statusCode
+            )
         } catch {
-            return false
+            return (
+                classifyProbe(statusCode: nil, healthStatus: nil, transportFailed: true), nil
+            )
         }
-
-        return false
     }
 
-    private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async
-        -> (reachable: Bool, status: String?)
-    {
-        let requestURL = url ?? healthCheckURL
-
-        // BYPASS: The "port available" check (shouldSkipLocalHealthProbe) is unreliable
-        // and frequently reports the port as "free" (and thus the backend as "down")
-        // even when the server is actually listening. We rely on URLSession to tell the truth.
-
-        var request = URLRequest(url: requestURL)
-        request.timeoutInterval = timeoutInterval  // Allow more time for slow responses
+    private func healthRequest(url: URL, timeoutInterval: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeoutInterval
         let tokenPath = SentinelRuntimePaths.file("api_token")
         if let token = try? String(contentsOf: tokenPath, encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines),
@@ -212,6 +229,14 @@ class BackendManager: ObservableObject {
         {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        return request
+    }
+
+    private func checkBackendHealth(timeoutInterval: TimeInterval = 10.0, url: URL? = nil) async
+        -> (reachable: Bool, status: String?)
+    {
+        // Rely on URLSession rather than the unreliable local port-availability probe.
+        let request = healthRequest(url: url ?? healthCheckURL, timeoutInterval: timeoutInterval)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -251,6 +276,7 @@ class BackendManager: ObservableObject {
 
                 let (reachable, _) = await checkBackendHealth()
                 await MainActor.run {
+                    guard !Task.isCancelled else { return }
                     // Conditional branch.
                     if reachable {
                         self.consecutiveFailures = 0
@@ -279,14 +305,15 @@ class BackendManager: ObservableObject {
     }
 
     private func launchIntegratedServer() async {
-        await MainActor.run { self.status = "Locating Neural Core..." }
+        guard !Task.isCancelled else { return }
+        status = "Locating Neural Core..."
 
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
         let dataDirectory = SentinelRuntimePaths.dataDirectory
 
         guard let repoPath = resolveBackendRoot(home: home) else {
-            await MainActor.run { self.status = "Error: Backend path not found" }
+            status = "Error: Backend path not found"
             return
         }
 
@@ -296,31 +323,30 @@ class BackendManager: ObservableObject {
         let pythonExecutable = resolvePythonExecutable(for: repoPath)
         // Guard condition.
         guard let python = pythonExecutable else {
-            await MainActor.run { self.status = "Error: Python not found" }
+            status = "Error: Python not found"
             return
         }
 
-        await MainActor.run {
-            self.pythonPath = python.path
-            self.status = "Running Preflight..."
-        }
+        pythonPath = python.path
+        status = "Running Preflight..."
         print("[BackendManager] Python: \(python.path)")
         resetStartupState()
 
         let environmentIssues = await validateEnvironment(python: python, backendRoot: repoPath)
+        guard !Task.isCancelled else { return }
         if !environmentIssues.isEmpty {
             recordStartupFailure("Preflight failed: \(environmentIssues.joined(separator: "; "))")
             return
         }
 
-        if let preflightError = await runPreflightChecks(python: python, backendRoot: repoPath) {
+        let preflightError = await runPreflightChecks(python: python, backendRoot: repoPath)
+        guard !Task.isCancelled else { return }
+        if let preflightError {
             recordStartupFailure(preflightError)
             return
         }
 
-        await MainActor.run {
-            self.status = "Booting Neural Core..."
-        }
+        status = "Booting Neural Core..."
 
         // Create and configure the process
         let p = Process()
@@ -431,16 +457,13 @@ class BackendManager: ObservableObject {
         self.pipe = pipe
 
         // Launch the process
+        guard !Task.isCancelled else { return }
         do {
             try p.run()
             print("[BackendManager] Process started (PID: \(p.processIdentifier))")
-            await MainActor.run {
-                self.status = "Core Starting (PID: \(p.processIdentifier))..."
-            }
+            status = "Core Starting (PID: \(p.processIdentifier))..."
         } catch {
-            await MainActor.run {
-                self.status = "Boot Failed: \(error.localizedDescription)"
-            }
+            status = "Boot Failed: \(error.localizedDescription)"
             return
         }
 
@@ -451,13 +474,13 @@ class BackendManager: ObservableObject {
     /// Polls the health endpoint until the server is ready
     /// - Parameter launchTime: The time the process was started (used to verify token freshness)
     private func waitForServerReady(launchTime: Date) async {
+        guard !shouldAbortStartup() else { return }
         // Set backend to starting state
-        await MainActor.run {
-            self.backendState = .starting
-        }
+        backendState = .starting
 
         // Avoid spamming /health before the core has written its boot manifest.
         await waitForBootManifest()
+        guard !shouldAbortStartup() else { return }
 
         let deadline = Date().addingTimeInterval(maxStartupDuration)
         var attempt = 0
@@ -473,6 +496,7 @@ class BackendManager: ObservableObject {
 
             // Check health endpoint and parse readiness status
             let (reachable, status) = await checkBackendHealth(timeoutInterval: requestTimeout)
+            guard !shouldAbortStartup() else { return }
             if reachable, status == "ready" {
                 // TOKEN READINESS CHECK:
                 // The backend ADOPTS the existing on-disk token (precedence:
@@ -487,14 +511,12 @@ class BackendManager: ObservableObject {
                 // rewritten and isTokenFileFresh() can never become true. Treat
                 // freshness as a positive signal, but accept any usable token.
                 if isTokenFileFresh(since: launchTime) || tokenFileIsUsable() {
-                    await MainActor.run {
-                        self.backendState = .ready
-                        self.status = "Core Online"
-                        self.isRunning = true
-                        NotificationCenter.default.post(name: .backendReady, object: nil)
-                    }
-                    print("[BackendManager] Server ready after \(attempt) attempt(s)")
+                    backendState = .ready
+                    self.status = "Core Online"
+                    isRunning = true
                     startHealthMonitor()
+                    NotificationCenter.default.post(name: .backendReady, object: nil)
+                    print("[BackendManager] Server ready after \(attempt) attempt(s)")
                     return
                 } else {
                     print("[BackendManager] Health OK but no usable token file yet. Waiting for token write...")
@@ -510,9 +532,7 @@ class BackendManager: ObservableObject {
                 return
             }
 
-            await MainActor.run {
-                self.status = "Core Starting (attempt \(attempt))..."
-            }
+            self.status = "Core Starting (attempt \(attempt))..."
 
             // Custom backoff: 0, 0.2, 0.5, 1.0, 5.0 seconds
             let sleepDuration = min(
@@ -522,12 +542,14 @@ class BackendManager: ObservableObject {
             }
         }
 
+        guard !shouldAbortStartup() else { return }
         let manifest = readBootManifest()
         if let manifestState = manifest?["state"] as? String {
             print("[BackendManager] Boot manifest state: \(manifestState)")
         }
 
         await MainActor.run {
+            guard !self.shouldAbortStartup() else { return }
             let timeoutError = NSError(
                 domain: NSURLErrorDomain,
                 code: NSURLErrorTimedOut,
@@ -567,7 +589,7 @@ class BackendManager: ObservableObject {
     }
 
     private func shouldAbortStartup() -> Bool {
-        startupStateQueue.sync { startupAbortRequested }
+        Task.isCancelled || startupStateQueue.sync { startupAbortRequested }
     }
 
     private func detectStartupFailureSignature(in output: String) {

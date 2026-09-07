@@ -64,6 +64,7 @@
 		FAF5F3644A98AEA223E96513 /* GhostConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9D7718A76376AF130F1182 /* GhostConsoleView.swift */; };
 		FB54B31E033C572BFA666FB3 /* AnyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA4C5DC1C91D1C3867752C8 /* AnyCodable.swift */; };
 		FD713260357E395BCDCB0682 /* BackendManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */; };
+		07AB998B9C7C4F0ABD4BF1D5 /* BackendAttachDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D47347DC36403C89E93254 /* BackendAttachDecision.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -91,6 +92,7 @@
 		6EA4C5DC1C91D1C3867752C8 /* AnyCodable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnyCodable.swift; sourceTree = "<group>"; };
 		71DA56ED4F2F3426B9E02034 /* NeuralGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NeuralGraphView.swift; sourceTree = "<group>"; };
 		7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendManager.swift; sourceTree = "<group>"; };
+		50D47347DC36403C89E93254 /* BackendAttachDecision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendAttachDecision.swift; sourceTree = "<group>"; };
 		7D47C9AABA588CA41003B700 /* SharedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedModels.swift; sourceTree = "<group>"; };
 		7E340539956225F2B0A21565 /* ErrorClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorClassifier.swift; sourceTree = "<group>"; };
 		81B35BB2EF550D1169E8CFED /* SentinelAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelAPIClient.swift; sourceTree = "<group>"; };
@@ -184,6 +186,7 @@
 			isa = PBXGroup;
 			children = (
 				7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */,
+				50D47347DC36403C89E93254 /* BackendAttachDecision.swift */,
 				BCE68CC8F07C4B289363C486 /* CortexStream.swift */,
 				E47F14AFA91EECE221531D6A /* DriverBridgeClient.swift */,
 				AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */,
@@ -453,6 +456,7 @@
 				AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */,
 				9369DFE67CE6BB7E573BBAB3 /* AuditFeedView.swift in Sources */,
 				FD713260357E395BCDCB0682 /* BackendManager.swift in Sources */,
+				07AB998B9C7C4F0ABD4BF1D5 /* BackendAttachDecision.swift in Sources */,
 				A69DC389458BE83CA02318CC /* BackendSettingsView.swift in Sources */,
 				1A516CAE139B1C4AE47F16B6 /* BackendState.swift in Sources */,
 				8D2EC02C24E7EDBC587BBCF1 /* BolaLabView.swift in Sources */,
