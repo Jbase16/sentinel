@@ -113,9 +113,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
 | State-machine prerequisite oracles | Production-wired and externally passed for bounded omission and adjacent reordering | Exact same-world lineage preserves a content-addressed DAG; one payout-selected terminal can execute sealed baseline, treatment, and independent control across three fresh owned worlds, compare canonical effects, verify family-specific evidence, clean up, persist redacted denial/completion state, and revalidate current capture before rebuilding the admitted plan. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Define replay and stale-state capability/freshness semantics before adding those counterfactuals. |
 | Role/membership monotonicity oracle | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel Acceptance parity are suite-proved; R5C9 current-SHA acceptance is mediator-verified, while broader membership-creation, role-assignment, and administrative-boundary shapes remain open and deferred | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three pair-level fresh vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero additional governed role actions on retry; the R5D1 work-order handoff records the separate R5C9 renewal at Sentinel `dfccecc`. | Preserve the exact R5C9 claim and repository boundary; the broader Family-C shapes remain open and deferred and are not part of Family D. |
-| Issued-capability contracts through durable evidence and canonical replay-leak promotion | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and focused-tested for strict durable inner evidence, default-off local promotion/recovery, and phase-only Scan selection; its single full-suite run was non-green, so it is not suite-proved | R5D10 preserves R5D9's controlled-twin target-request count/order, five outcomes, oracle and confinement/consumption decisions, cleanup, and failures. Each authoritative inner receipt may retain one versioned redacted evidence source bounded to 256 KiB. A journal binds it to the original assessment, producer, identity, operation, and source receipt; one service applies the strict replay predicate and atomically commits the Observation, replay-leak Finding, events, and successful result. Secure/non-matching evidence remains a non-finding. All production DB/WAL/SHM, receipt, CAS, journal, audit, and reconciliation paths must resolve outside every Git worktree before dispatch. Gate state and bounded attempt history live only in journal/audit. Status, explicit promotion, retry, and bounded restart reconciliation have no target-transport dependency and add zero requests. | Obtain one complete green suite at a resulting SHA before claiming suite-proved. `OCB-S17` is already local operator-native and `native_proven` for Sentinel `cb3e926` only by artifact `c1239945…`; it does not attest R5D10. Independently counted effect occurrence and report/submission evidence remain later work. |
+| Issued-capability contracts through durable evidence and canonical replay-leak promotion | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and suite-proved for strict durable inner evidence, default-off local promotion/recovery, and phase-only Scan selection by the complementary two-invocation repository gate | R5D10 preserves R5D9's controlled-twin target-request count/order, five outcomes, oracle and confinement/consumption decisions, cleanup, and failures. Each authoritative inner receipt may retain one versioned redacted evidence source bounded to 256 KiB. A journal binds it to the original assessment, producer, identity, operation, and source receipt; one service applies the strict replay predicate and atomically commits the Observation, replay-leak Finding, events, and successful result. Secure/non-matching evidence remains a non-finding. All production DB/WAL/SHM, receipt, CAS, journal, audit, and reconciliation paths must resolve outside every Git worktree before dispatch. Gate state and bounded attempt history live only in journal/audit. Status, explicit promotion, retry, and bounded restart reconciliation have no target-transport dependency and add zero requests. | Preserve the suite-proved repository gate. `OCB-S17` is already local operator-native and `native_proven` for Sentinel `cb3e926` only by artifact `c1239945…`; it does not attest R5D10. Independently counted effect occurrence and report/submission evidence remain later work. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
-| Ordinary one-click behavioral bridge | Implemented for family A, bounded family-B/family-C paths, and an explicit phase-only default-off Family-D Scan/API profile | R5D10 adds symmetric Scan request validation: capability evidence payload is present if and only if capability mode is selected, capability mode requires `behavioral_phase_only`, remains mutually exclusive with other behavioral profiles, and suppresses ordinary follow-on scan and verification work. Direct Foundry and scan-triggered runs share the same original-assessment admission, evidence, and promotion service; a later scan references an existing source's original session rather than reminting it. Local promotion can expose the committed result through that canonical session's read model. | Obtain one complete green R5D10 suite. Native UI selection and changed-build acceptance still require separate authorization and exact-build proof; the accepted `cb3e926` OCB-S17 artifact does not cross that SHA boundary. |
+| Ordinary one-click behavioral bridge | Implemented for family A, bounded family-B/family-C paths, and an explicit phase-only default-off Family-D Scan/API profile | R5D10 adds symmetric Scan request validation: capability evidence payload is present if and only if capability mode is selected, capability mode requires `behavioral_phase_only`, remains mutually exclusive with other behavioral profiles, and suppresses ordinary follow-on scan and verification work. Direct Foundry and scan-triggered runs share the same original-assessment admission, evidence, and promotion service; a later scan references an existing source's original session rather than reminting it. Local promotion can expose the committed result through that canonical session's read model. | Preserve the suite-proved R5D10 repository gate. Native UI selection and changed-build acceptance still require separate authorization and exact-build proof; the accepted `cb3e926` OCB-S17 artifact does not cross that SHA boundary. |
 | Proof topology selector | Implemented and bounded for the closed Family-B scope | `PayoutGoalTopologyPlanner` binds the graph backend to the exact compiled terminal; ordinary click selects one unique omission or, when omission is not uniquely selectable, one unique adjacent reordering. Graph-absent v1 identities remain stable. | Add only separately admitted executable topologies. |
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
@@ -1374,11 +1374,41 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   and phase-only Scan production caller. The secure control and every non-matching
   refuted shape remain non-findings. Production evidence-root admission is pre-dispatch
   and outside-worktree only. The integrated checkpoint passed `465` tests and the final
-  durability checkpoint passed `58`. The required single full-suite run reported
-  `3370 passed`, `1 skipped`, `3 warnings`, and `9 failed` in `57.58s`; after the
-  process-harness and mock-storage-fixture repairs, all nine failed cases passed in a
-  `12 passed in 1.32s` targeted checkpoint. The resulting tree is focused-tested, not
-  suite-proved, because the full suite was not rerun.
+  durability checkpoint passed `58`. The complete repository test surface is green on
+  this host through two complementary invocations. The unmarked suite ran with:
+
+  ```text
+  .venv/bin/python -m pytest -q -m 'not subprocess_spawn'
+  ```
+
+  Result: `3355 passed, 1 skipped, 26 deselected, 3 warnings in 36.03s`.
+
+  Every real-process specimen ran in a fresh interpreter without collecting the rest
+  of the repository, with:
+
+  ```text
+  .venv/bin/python -m pytest -q -m subprocess_spawn \
+    tests/integration/test_session_safety.py \
+    tests/unit/intel/test_token_store.py \
+    tests/unit/test_behavior_capability_consumption_store.py \
+    tests/unit/test_behavior_capability_execution_receipt_store.py \
+    tests/unit/test_behavior_capability_effect_promotion.py \
+    tests/unit/test_behavior_capability_effect_crash_recovery.py \
+    tests/unit/test_epistemic_cas.py \
+    tests/unit/test_teardown_deadline.py \
+    tests/unit/test_verify_r5d10_evidence.py
+  ```
+
+  Result: `26 passed, 115 deselected in 16.39s`. Full-tree collection contains `3382`
+  items: the first invocation selects `3356` and deselects the exact `26`-item
+  `subprocess_spawn` set; the second invocation selects and runs those `26`. Its `115`
+  deselected unmarked items already ran in the first invocation. Together the commands
+  cover the complete repository surface with no marked test left unrun. The
+  cross-process and verifier specimens still spawn real, separate processes; only
+  their suite scheduling changed. The resulting tree is suite-proved. This advances
+  only the `Suite-proved` evidence label and changes no production behavior, frozen
+  R5D10 contract, execution authority, target traffic, or lab, native, live,
+  external-target, report, submission, or payout claim.
 - [x] R5D10 execution remains restricted to the existing controlled secure/replay-leak
   twins and an explicitly owned controlled lab. This slice performs no external-target
   run, native run, lab attestation, report generation, or submission.

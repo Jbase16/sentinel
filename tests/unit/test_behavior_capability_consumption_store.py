@@ -313,6 +313,7 @@ def test_restart_survival_distinguishes_replay_and_single_use_exhaustion(tmp_pat
     assert exhausted.durable_state_written is False
 
 
+@pytest.mark.subprocess_spawn
 def test_single_use_is_atomic_across_spawned_processes(tmp_path):
     root = tmp_path / "store"
     context = multiprocessing.get_context("spawn")

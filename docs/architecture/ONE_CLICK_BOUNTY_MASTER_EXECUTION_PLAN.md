@@ -12,11 +12,41 @@ root is refused before target dispatch when any effective production evidence pa
 resolves inside a Git worktree. Promotion, status, retry, and startup reconciliation
 operate only on retained local evidence and add zero target requests. The integrated
 R5D10 checkpoint passed `465` tests; the final durability checkpoint passed `58` tests.
-The required single full-suite run reported `3370 passed`, `1 skipped`, `3 warnings`,
-and `9 failed` in `57.58s`. After replacing one process-pool race harness and two stale
-mock-storage fixtures, all nine failed cases passed in a `12 passed in 1.32s` targeted
-checkpoint. The resulting tree is focused-tested, not suite-proved, because the full
-suite was not rerun after those repairs.
+The complete repository test surface is green on this host through two complementary
+invocations. The unmarked suite ran with:
+
+```text
+.venv/bin/python -m pytest -q -m 'not subprocess_spawn'
+```
+
+Result: `3355 passed, 1 skipped, 26 deselected, 3 warnings in 36.03s`.
+
+Every real-process specimen ran in a fresh interpreter without collecting the rest of
+the repository, with:
+
+```text
+.venv/bin/python -m pytest -q -m subprocess_spawn \
+  tests/integration/test_session_safety.py \
+  tests/unit/intel/test_token_store.py \
+  tests/unit/test_behavior_capability_consumption_store.py \
+  tests/unit/test_behavior_capability_execution_receipt_store.py \
+  tests/unit/test_behavior_capability_effect_promotion.py \
+  tests/unit/test_behavior_capability_effect_crash_recovery.py \
+  tests/unit/test_epistemic_cas.py \
+  tests/unit/test_teardown_deadline.py \
+  tests/unit/test_verify_r5d10_evidence.py
+```
+
+Result: `26 passed, 115 deselected in 16.39s`. Full-tree collection contains `3382`
+items: the first invocation selects `3356` and deselects the exact `26`-item
+`subprocess_spawn` set; the second invocation selects and runs those `26`. Its `115`
+deselected unmarked items already ran in the first invocation. Together the commands
+cover the complete repository surface with no marked test left unrun. The
+cross-process and verifier specimens still spawn real, separate processes; only their
+suite scheduling changed. The resulting tree is suite-proved. This advances only the
+`Suite-proved` evidence label and changes no production behavior, frozen R5D10
+contract, execution authority, target traffic, or lab, native, live, external-target,
+report, submission, or payout claim.
 
 `OCB-S17` native acceptance completed on 2026-09-06 for Sentinel `cb3e926` only.
 Accepted local operator-native artifact SHA-256
@@ -295,9 +325,9 @@ or live loopback result is not public-target or payout proof.
   `cb3e9267d887e68007b804277b00f50929ba7786`. It adds the durable inner-evidence,
   strict replay predicate, original-assessment admission, default-off local promotion,
   bounded recovery/status, scan wiring, and independent-verification surfaces described
-  below. Exact focused and single-run full-suite results are recorded above. All failed
-  cases are targeted-green after their test-harness and fixture repairs, but the changed
-  build remains not suite-proved until a complete suite passes at one resulting SHA.
+  below. Exact focused and complementary two-invocation full-surface results are
+  recorded above. Their union covers the complete repository suite, so the changed
+  build is suite-proved.
 - The former 17-skip backlog has been reduced to one remaining conditional skip:
   `tests/verification/test_websocket_terminal_bidirectional.py` skips because
   `/ws/terminal` is absent.
@@ -419,12 +449,12 @@ accepted baseline remains the Family-C checkpoint described below.
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
 | OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; the R5C9 current-SHA acceptance renewal is mediator-verified, while broader membership-creation, role-assignment, and administrative-boundary shapes remain open and deferred | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, generated Acceptance parity, three prior pair-level fresh vulnerable/secure Swift/WKWebView cycles, and the separately recorded current-SHA renewal | Preserve the exact R5C9 acceptance claim and boundaries; the broader Family-C shapes remain open and deferred and are not part of Family D |
-| OCB-R5 family D: capability safety | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and focused-tested for strict durable inner evidence, default-off local replay-leak promotion/recovery, and phase-only Scan selection; its one full-suite run was non-green and it is not suite-proved | R5D10 preserves the accepted `cb3e926` five-phase controlled-twin execution behavior while retaining a versioned, redacted evidence source no larger than 256 KiB. One journaled service validates the strict replay predicate and atomically commits one original-session canonical Observation/Finding result. Production evidence paths must resolve outside every Git worktree. Status, promotion, retry, and bounded reconciliation inspect only local evidence and add zero target requests; the secure control and every non-matching refuted shape remain non-findings. | Obtain one complete green suite at a resulting SHA before claiming suite-proved; separately authorize exact-build native acceptance if desired. `OCB-S17` is already native-proven only for `cb3e926` by local operator-native artifact `c1239945…`, not for R5D10. Independent effect-occurrence proof and submission material remain later work. |
+| OCB-R5 family D: capability safety | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and suite-proved for strict durable inner evidence, default-off local replay-leak promotion/recovery, and phase-only Scan selection by the complementary repository gate recorded above | R5D10 preserves the accepted `cb3e926` five-phase controlled-twin execution behavior while retaining a versioned, redacted evidence source no larger than 256 KiB. One journaled service validates the strict replay predicate and atomically commits one original-session canonical Observation/Finding result. Production evidence paths must resolve outside every Git worktree. Status, promotion, retry, and bounded reconciliation inspect only local evidence and add zero target requests; the secure control and every non-matching refuted shape remain non-findings. | Preserve the suite-proved repository gate; separately authorize exact-build native acceptance if desired. `OCB-S17` is already native-proven only for `cb3e926` by local operator-native artifact `c1239945…`, not for R5D10. Independent effect-occurrence proof and submission material remain later work. |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Partial and narrow | Ranked obligations, payout-guided frontier choice, continuation receipts, and deterministic replanning exist | Build the high-value sink ledger, marginal-value scheduler, family-aware coverage, and honest stop certificate; prove `OCB-S18` |
 | OCB-R7 Submission-grade candidate assembly | Partial but production-wired for completed proofs | Completed positive receipt to canonical finding, Verify workbench, deterministic receipt-bound `SubmissionCandidate`, and candidate-only report routes | Generalize minimization/replay, impact binding, sanitized reproduction, invalidation behavior, and end-to-end `OCB-S19` across supported families |
-| OCB-R8 Operational one-click completion | Partial for OCB-R5 families A-C plus a phase-only default-off Family-D scan profile | Direct Foundry and ordinary Scan capability executions now share one evidence/admission/promotion service. Capability mode requires its payload, excludes other profiles, suppresses normal follow-on scan/verification work, and returns the canonical result in the original assessment when local promotion is enabled. This does not make capability mode a native UI selection or complete acquisition, stopping, report, or submission handoff. | Obtain one complete green R5D10 suite, then complete acquisition, replanning, stop status, and report handoff; prove `OCB-S20` without treating the prior-SHA OCB-S17 artifact as changed-build evidence. |
+| OCB-R8 Operational one-click completion | Partial for OCB-R5 families A-C plus a phase-only default-off Family-D scan profile | Direct Foundry and ordinary Scan capability executions now share one evidence/admission/promotion service. Capability mode requires its payload, excludes other profiles, suppresses normal follow-on scan/verification work, and returns the canonical result in the original assessment when local promotion is enabled. This does not make capability mode a native UI selection or complete acquisition, stopping, report, or submission handoff. | Preserve the suite-proved R5D10 repository gate while completing acquisition, replanning, stop status, and report handoff; prove `OCB-S20` without treating the prior-SHA OCB-S17 artifact as changed-build evidence. |
 | OCB-R9 Real-target validation and payout acceptance | Evidence in progress | Family C retains exact-SHA native loopback evidence; Family D has local operator-native `OCB-S17` evidence at `cb3e926` only; LAB-S01 through LAB-S10 have operator-attested passes; DB-S15 is live-observed on loopback at Sentinel `375137f`. No R5D10 exact-build native, external-target, report, submission, or payout evidence exists. | Resolve or baseline the remaining release-gate debt at a release SHA, run separately authorized exact-build acceptance where required, then conduct separately authorized real-program validation; only an accepted or paid finding earns payout-proven status. |
 
 ### What DB-R1 actually changed in this map
@@ -808,9 +838,10 @@ callback provisioning, finding promotion, or new execution authority.
   dependency. Gate state stays in journal and audit records, never finding identity.
   Scan capability selection is payload-exact,
   mutually exclusive, and phase-only, and suppresses ordinary follow-on scanning and
-  verification. Focused verification is green. The required single full-suite run and
-  its targeted post-failure repairs are recorded at the top of this plan; the resulting
-  tree is not suite-proved without a complete green rerun.
+  verification. Focused verification is green. The complementary two-invocation
+  repository gate and exact results are recorded at the top of this plan; together they
+  cover the complete test surface, including the real separate-process specimens. The
+  resulting tree is suite-proved.
 - [x] `OCB-S17` confinement, expiry, one-time use, replay-refusal, and cleanup
   acceptance completed 2026-09-06 for Sentinel `cb3e926` only. The accepted local
   operator-native artifact SHA-256 is
@@ -949,8 +980,10 @@ The controlled secure and replay-leaking twins and explicitly owned controlled-l
 targets remain the execution boundary. The 2026-09-06 local operator-native OCB-S17
 artifact is `native_proven` only for Sentinel `cb3e926`; it does not attest this changed
 R5D10 build. No external target, R5D10 native run, lab attestation, report, or submission
-occurred. Focused R5D10 proof is green; the one full-suite run was non-green, all nine
-failed cases are now targeted-green, and the resulting tree remains not suite-proved.
+occurred. Focused R5D10 proof and the two complementary repository invocations are
+green; their union covers the complete test surface, so the resulting tree is
+suite-proved. That test label changes none of the preceding execution or acceptance
+boundaries.
 Broader membership-creation, role-assignment, and administrative-boundary shapes remain
 open Family-C work.
 
@@ -969,7 +1002,7 @@ implemented sub-slices.
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
 | [x] | OCB-R5 family C roles/membership | Prior-SHA bounded revocation survival is native-proven; R5C7/R5C8 are suite-proved; R5C9 current-SHA acceptance is mediator-verified; broader Family-C shapes remain open and deferred | Preserve the exact R5C9 claim and keep membership creation, role assignment, and administrative boundaries outside Family D |
-| [ ] | OCB-R5 family D capabilities | R5D1-R5D9 retain their bounded layers; R5D10 adds focused-tested strict durable inner evidence, original-session canonical replay-leak promotion, bounded local recovery/status, and phase-only ordinary Scan reachability behind a separate default-off promotion gate. Its single full-suite run was non-green, so it is not suite-proved. `OCB-S17` is local operator-native and native-proven for `cb3e926` only, not the changed build. | Obtain one complete green suite at the resulting SHA; preserve zero-target promotion/recovery and the controlled-twin-only execution boundary; separately authorize exact-build native acceptance if desired. Independent effect-occurrence proof and report/submission material remain later work. |
+| [ ] | OCB-R5 family D capabilities | R5D1-R5D9 retain their bounded layers; R5D10 is suite-proved for strict durable inner evidence, original-session canonical replay-leak promotion, bounded local recovery/status, and phase-only ordinary Scan reachability behind a separate default-off promotion gate. `OCB-S17` is local operator-native and native-proven for `cb3e926` only, not the changed build. | Preserve the suite-proved repository gate, zero-target promotion/recovery, and the controlled-twin-only execution boundary; separately authorize exact-build native acceptance if desired. Independent effect-occurrence proof and report/submission material remain later work. |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |

@@ -39,6 +39,7 @@ print(ContentAddressableStorage(config).store(payload), flush=True)
 """
 
 
+@pytest.mark.subprocess_spawn
 def test_cas_separate_process_race_publishes_one_verified_blob(tmp_path):
     payload = b"r5d10-concurrent-canonical-evidence"
     expected = hashlib.sha256(payload).hexdigest()

@@ -22,6 +22,9 @@ from core.epistemic.ledger import EvidenceLedger
 from tests.unit.test_behavior_capability_effect_promotion import _completed_source
 
 
+pytestmark = pytest.mark.subprocess_spawn
+
+
 _CRASH_EXIT = 86
 _MISSED_BOUNDARY_EXIT = 87
 _TARGET_TRAFFIC_EXIT = 97

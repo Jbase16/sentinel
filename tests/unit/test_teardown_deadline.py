@@ -66,6 +66,7 @@ def _run_script(source: str, timeout_s: float) -> subprocess.CompletedProcess:
     not hasattr(subprocess, "_fork_exec"),
     reason="fork-exec implementation is POSIX-specific",
 )
+@pytest.mark.subprocess_spawn
 def test_script_runner_avoids_fork_exec(monkeypatch):
     def reject_fork(*args, **kwargs):
         raise AssertionError("fork_exec used")
@@ -78,6 +79,7 @@ def test_script_runner_avoids_fork_exec(monkeypatch):
     assert result.stdout.strip() == "spawn-safe"
 
 
+@pytest.mark.subprocess_spawn
 def test_scan_session_construction_exits_cleanly():
     """A bare ScanSession construction + immediate return must exit
     within 15 seconds. This is the no-leak baseline — if even this
@@ -93,6 +95,7 @@ def test_scan_session_construction_exits_cleanly():
     assert result.returncode is not None
 
 
+@pytest.mark.subprocess_spawn
 def test_simulated_orphan_thread_does_not_hang_interpreter():
     """If something inside SentinelForge leaks a NON-daemon thread that
     sleeps forever, the deadman switch must still force exit.
@@ -161,6 +164,7 @@ def test_install_shutdown_deadline_is_idempotent():
         assert third is False
 
 
+@pytest.mark.subprocess_spawn
 def test_env_var_opt_out_disables_install():
     """Setting SENTINEL_DISABLE_TEARDOWN_DEADLINE must prevent
     installation, so debugging sessions can use faulthandler / gdb

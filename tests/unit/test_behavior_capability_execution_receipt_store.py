@@ -455,6 +455,7 @@ def test_capability_namespaces_load_independently(tmp_path):
     assert len(list(root.glob("*.json"))) == 2
 
 
+@pytest.mark.subprocess_spawn
 def test_identical_spawned_writes_converge_idempotently(tmp_path):
     root = tmp_path / "store"
 
@@ -474,6 +475,7 @@ def test_identical_spawned_writes_converge_idempotently(tmp_path):
     )
 
 
+@pytest.mark.subprocess_spawn
 def test_distinct_instant_spawned_writes_both_survive(tmp_path):
     root = tmp_path / "store"
 

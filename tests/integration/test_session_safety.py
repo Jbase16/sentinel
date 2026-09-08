@@ -1,8 +1,13 @@
 
 import unittest
 import time
-import asyncio
+
+import pytest
+
 from core.engine.pty_manager import PTYManager, PTYSession
+
+pytestmark = pytest.mark.subprocess_spawn
+
 
 class TestSessionSafety(unittest.IsolatedAsyncioTestCase):
     async def test_log_capping(self):

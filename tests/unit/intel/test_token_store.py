@@ -24,8 +24,6 @@ import json
 import os
 import platform as platform_module
 import stat
-from pathlib import Path
-from typing import Optional
 
 import pytest
 
@@ -212,6 +210,7 @@ class TestKeychainSmoke:
     its accessor methods don't crash. We don't write/read real
     credentials in tests (would pollute the real Keychain)."""
 
+    @pytest.mark.subprocess_spawn
     def test_keychain_available_on_macos(self):
         # ``security`` should be in $PATH on any standard macOS install.
         assert _keychain_available() is True
@@ -220,6 +219,7 @@ class TestKeychainSmoke:
         kb = _KeychainBackend()
         assert kb.name == "keychain"
 
+    @pytest.mark.subprocess_spawn
     def test_keychain_get_returns_none_for_unset_platform(self):
         # We never wrote "bugcrowd" to Keychain in tests, so get should
         # return None — and crucially, must NOT raise.
@@ -235,6 +235,7 @@ class TestKeychainSmoke:
 # ─────────────────────────── Backend selection ─────────────────────
 
 class TestBackendSelection:
+    @pytest.mark.subprocess_spawn
     def test_backend_name_returns_string(self):
         # Whichever backend is selected, its name is a non-empty string.
         name = token_store.backend_name()

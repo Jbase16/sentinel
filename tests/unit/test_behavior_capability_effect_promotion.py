@@ -629,6 +629,7 @@ def test_retry_converges_after_cas_and_transaction_failures(
     assert (len(twin.calls), len(twin.cleanup_calls)) == calls_before
 
 
+@pytest.mark.subprocess_spawn
 def test_separate_process_promotion_race_converges_on_one_result(
     tmp_path,
     monkeypatch,

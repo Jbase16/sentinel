@@ -17,6 +17,10 @@ if _REPO_ROOT not in sys.path:
 def pytest_configure(config):
     # Register the marker used by the pinned pytest-asyncio runtime.
     config.addinivalue_line("markers", "asyncio: run async test via pytest-asyncio")
+    config.addinivalue_line(
+        "markers",
+        "subprocess_spawn: run real child-process proofs in a clean pytest invocation",
+    )
 
     # Enable development mode for tests so loopback port wildcards are allowed.
     os.environ.setdefault("SENTINEL_DEBUG", "true")

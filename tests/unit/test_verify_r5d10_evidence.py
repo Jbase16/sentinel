@@ -10,6 +10,8 @@ import sqlite3
 import subprocess
 import sys
 
+import pytest
+
 from core.behavior.capability_effect_evidence import build_capability_effect_evidence
 from core.behavior.capability_effect_promotion import (
     CAPABILITY_FINDING_PROMOTION_ENV,
@@ -21,6 +23,8 @@ from tests.unit.test_behavior_capability_effect_promotion import _completed_sour
 ROOT = Path(__file__).resolve().parents[2]
 VERIFIER = ROOT / "scripts" / "verify_r5d10_evidence.py"
 EVIDENCE_ROOT_DOMAIN = b"sentinelforge:capability-effect-evidence:v1\x00"
+
+pytestmark = pytest.mark.subprocess_spawn
 
 
 def _promoted_specimen(tmp_path, monkeypatch):
