@@ -7,6 +7,10 @@ Verifies that the Hypervisor correctly drives the EvidenceLedger to reconstruct 
 
 import unittest
 import time
+from pathlib import Path
+import tempfile
+
+from core.base.config import SentinelConfig, StorageConfig
 from core.epistemic.ledger import EvidenceLedger, LifecycleState
 from core.replay.models import CapsuleManifest
 from core.replay.merkle import MerkleEngine
@@ -72,10 +76,11 @@ class TestReplaySemantics(unittest.TestCase):
             mock_gsa.run_id = "test-run-123"
             mock_gsa_cls.instance.return_value = mock_gsa
             
-            mock_config = MagicMock()
-            mock_config.storage_path = "/tmp/sentinel_test_replay"
-            import os
-            os.makedirs(mock_config.storage_path, exist_ok=True)
+            storage = tempfile.TemporaryDirectory(prefix="sentinel-test-replay-")
+            self.addCleanup(storage.cleanup)
+            mock_config = SentinelConfig(
+                storage=StorageConfig(base_dir=Path(storage.name))
+            )
             
             ledger = EvidenceLedger(config=mock_config)
             # Prevent DB writes by mocking the sync method directly

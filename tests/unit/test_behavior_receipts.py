@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
@@ -444,6 +445,23 @@ def test_corrupt_existing_receipt_fails_closed(tmp_path):
         store.reserve(fingerprint, context=_context())
 
 
+def test_receipt_store_rejects_duplicate_json_keys_at_any_depth(tmp_path):
+    store = BehavioralReceiptStore(tmp_path)
+    fingerprint = _fingerprint()
+    store.reserve(fingerprint, context=_context())
+    path = tmp_path / f"behavioral-{fingerprint}.json"
+    serialized = path.read_text(encoding="utf-8")
+    serialized = serialized.replace(
+        '"target_ref":',
+        '"target_ref":"behavioral_receipt_target:' + "0" * 64 + '","target_ref":',
+        1,
+    )
+    path.write_text(serialized, encoding="utf-8")
+
+    with pytest.raises(ReceiptStoreError, match="cannot be read safely"):
+        store.load(fingerprint)
+
+
 def test_receipt_with_unsafe_permissions_fails_closed(tmp_path):
     store = BehavioralReceiptStore(tmp_path)
     fingerprint = _fingerprint()
@@ -536,3 +554,40 @@ def test_compiled_receipt_rejects_arbitrary_error_text():
 
     with pytest.raises(ReceiptStoreError, match="error code is invalid"):
         redacted_compiled_outcome(outcome)
+
+
+def test_new_receipt_root_creation_fsyncs_each_parent(tmp_path, monkeypatch):
+    root = tmp_path / "nested" / "receipts"
+    original_fsync = os.fsync
+    synchronized_directories: set[tuple[int, int]] = set()
+
+    def recording_fsync(descriptor: int) -> None:
+        metadata = os.fstat(descriptor)
+        if stat.S_ISDIR(metadata.st_mode):
+            synchronized_directories.add((metadata.st_dev, metadata.st_ino))
+        original_fsync(descriptor)
+
+    monkeypatch.setattr("core.behavior.receipts.os.fsync", recording_fsync)
+
+    BehavioralReceiptStore(root)._prepare_root()
+
+    expected = {
+        (directory.stat().st_dev, directory.stat().st_ino)
+        for directory in (tmp_path, root.parent)
+    }
+    assert expected <= synchronized_directories
+
+
+def test_missing_receipt_lookup_closes_open_root_descriptor(tmp_path, monkeypatch):
+    store = BehavioralReceiptStore(tmp_path)
+    store._prepare_root()
+    root_descriptor = os.open(tmp_path, store._directory_flags())
+    monkeypatch.setattr(
+        store,
+        "_open_root",
+        lambda *, create=True: root_descriptor,
+    )
+
+    assert store.load("a" * 64) is None
+    with pytest.raises(OSError):
+        os.fstat(root_descriptor)

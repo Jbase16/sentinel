@@ -418,6 +418,17 @@ class CapabilityEffectObservation:
             ),
         }
 
+    def terminal_receipt_projection(self) -> Dict[str, Any]:
+        """Export the public terminal receipt bound to this observation.
+
+        R5D10 retains this projection beside the observation so recovery never
+        needs to reach through the producer's private receipt field.  Returning
+        the existing receipt serialization does not change execution, grading,
+        or receipt identity.
+        """
+
+        return self._terminal_receipt.to_dict()
+
 
 class CapabilityEffectOracleVerdict(str, Enum):
     CONFIRMED_ONE_TIME_AUTHORIZED_EFFECT = "confirmed_one_time_authorized_effect"
@@ -928,6 +939,23 @@ class CapabilityEffectExecutionResult:
                 execution_effect_authority=self.execution_effect_authority,
                 mode=self.mode,
             ),
+        }
+
+    def evidence_export(self) -> Dict[str, Any]:
+        """Return the complete public R5D10 serialization seam.
+
+        The export is deliberately passive.  It exposes the already-produced
+        five observations, their terminal receipts, and the owned world
+        commitment without sending another request or re-running an oracle.
+        """
+
+        return {
+            **self.to_dict(),
+            "experiment_world_ref": _owned_world(self._receipt).world_ref,
+            "terminal_receipts": [
+                item.terminal_receipt_projection()
+                for item in self.effect_observations
+            ],
         }
 
 

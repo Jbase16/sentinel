@@ -40,6 +40,7 @@ from core.behavior.capability_execution_receipt import (
 from core.behavior.capability_runtime_expiry import AdmittedRuntimeContract
 from core.behavior.experiment_sdk import ExperimentWorldBinding, ExperimentWorldKind
 from core.behavior.normalize import stable_hash
+from tests.import_contract import find_module_consumers
 
 
 ORIGIN = "https://api.example.test"
@@ -854,12 +855,12 @@ def test_default_clock_and_ast_prove_one_real_clock_seam_and_no_io_imports():
 def test_execution_receipt_module_is_not_imported_by_any_other_core_module():
     source_path = Path(execution_module.__file__)
     repository_root = Path(__file__).resolve().parents[2]
-    production_consumers = [
-        path
-        for path in (repository_root / "core").rglob("*.py")
-        if path != source_path
-        and "capability_execution_receipt" in path.read_text(encoding="utf-8")
-    ]
+    production_consumers = find_module_consumers(
+        (repository_root / "core").rglob("*.py"),
+        "core.behavior.capability_execution_receipt",
+        repository_root=repository_root,
+        exclude=(source_path,),
+    )
 
     assert set(production_consumers) == {
         source_path.with_name("capability_effect_one_click.py"),

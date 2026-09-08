@@ -24,6 +24,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+from core.epistemic.storage_boundary import (
+    EvidenceStorageAnchor,
+    EvidenceStorageBoundaryError,
+)
+
 from .normalize import stable_hash
 
 RECEIPT_ENV = "SENTINELFORGE_BEHAVIOR_RECEIPTS"
@@ -271,6 +276,17 @@ _CONTEXT_PREFIXES = {
     "peer_persona_ref": "behavioral_receipt_persona:",
 }
 _MAX_RECEIPT_BYTES = 1024 * 1024
+
+
+def _reject_duplicate_json_keys(pairs: Sequence[tuple[str, Any]]) -> Dict[str, Any]:
+    """Build one JSON object while rejecting ambiguous signed evidence."""
+
+    value: Dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
 
 
 class ReceiptStoreError(RuntimeError):
@@ -4305,8 +4321,73 @@ def redacted_behavioral_execution_denial_response(
     )
 
 
+def redacted_capability_effect_evidence_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Persist the strict inner R5D10 source without candidate authority."""
+
+    from core.behavior.capability_effect_evidence import CapabilityEffectEvidence
+
+    if response.get("kind") != "capability_effect_one_click":
+        raise ReceiptStoreError("capability effect receipt kind is invalid")
+    evidence_value = response.get("capability_effect_evidence")
+    if not isinstance(evidence_value, Mapping):
+        raise ReceiptStoreError("capability effect receipt evidence is missing")
+    try:
+        evidence = CapabilityEffectEvidence.from_mapping(evidence_value)
+    except (TypeError, ValueError) as exc:
+        raise ReceiptStoreError(
+            "capability effect receipt evidence is invalid"
+        ) from exc
+    status = evidence.oracle["verdict"]
+    if response.get("status") != status:
+        raise ReceiptStoreError("capability effect receipt status is inconsistent")
+    return {
+        "kind": "capability_effect_one_click",
+        "status": status,
+        "capability_effect_evidence": evidence.to_dict(),
+        "finding": None,
+        "finding_confirmed": False,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+
+
+def redacted_capability_effect_orchestration_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Retain only the outer orchestration link to the authoritative source."""
+
+    source_receipt_id = response.get("source_receipt_id")
+    assessment_session_id = response.get("assessment_session_id")
+    if (
+        response.get("kind") != "capability_effect_orchestration"
+        or response.get("status") != "completed"
+        or not isinstance(source_receipt_id, str)
+        or not source_receipt_id.startswith("behavioral-")
+        or not re_full_sha256(source_receipt_id.removeprefix("behavioral-"))
+        or not isinstance(assessment_session_id, str)
+        or not assessment_session_id
+        or assessment_session_id == "global_scan"
+    ):
+        raise ReceiptStoreError("capability effect orchestration outcome is invalid")
+    return {
+        "kind": "capability_effect_orchestration",
+        "status": "completed",
+        "source_receipt_id": source_receipt_id,
+        "assessment_session_id": assessment_session_id,
+    }
+
+
 def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the only response fields permitted in a durable receipt."""
+    if response.get("kind") == "capability_effect_orchestration":
+        return redacted_capability_effect_orchestration_outcome(response)
+    if (
+        response.get("kind") == "capability_effect_one_click"
+        and "capability_effect_evidence" in response
+    ):
+        return redacted_capability_effect_evidence_outcome(response)
     if response.get("kind") == "graph_bound_prerequisite_execution":
         return redacted_graph_bound_prerequisite_execution_outcome(response)
     if response.get("kind") == "role_protected_effect_execution":
@@ -4386,6 +4467,10 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
+    if value.get("kind") == "capability_effect_orchestration":
+        return redacted_capability_effect_orchestration_outcome(value)
+    if value.get("kind") == "capability_effect_one_click":
+        return redacted_capability_effect_evidence_outcome(value)
     if value.get("kind") == "graph_bound_prerequisite_execution":
         return redacted_graph_bound_prerequisite_execution_outcome(value)
     if value.get("kind") == "role_protected_effect_execution":
@@ -4420,6 +4505,36 @@ def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
 class BehavioralReceiptStore:
     def __init__(self, root: Optional[Path] = None) -> None:
         self.root = root
+        self._storage_anchor: Optional[EvidenceStorageAnchor] = None
+        self._root_identity: Optional[tuple[int, int]] = None
+        self._root_location: Optional[Path] = None
+
+    def _assert_storage_anchor(self, *, seal: bool = False) -> None:
+        if self._storage_anchor is None:
+            return
+        try:
+            if seal:
+                self._storage_anchor.seal()
+            else:
+                self._storage_anchor.assert_unchanged()
+        except EvidenceStorageBoundaryError as exc:
+            raise ReceiptStoreError(
+                "behavioral receipt storage changed after admission"
+            ) from exc
+
+    def bind_storage_anchor(self, anchor: EvidenceStorageAnchor) -> None:
+        """Require every later receipt access to retain an admitted location."""
+
+        if not isinstance(anchor, EvidenceStorageAnchor):
+            raise TypeError("behavioral receipt storage anchor is invalid")
+        anchor.assert_unchanged()
+        if self._storage_anchor is not None:
+            self._assert_storage_anchor()
+            if self._storage_anchor.resolved_locations != anchor.resolved_locations:
+                raise ReceiptStoreError(
+                    "behavioral receipt storage anchor cannot be replaced"
+                )
+        self._storage_anchor = anchor
 
     def _root(self) -> Path:
         if self.root is not None:
@@ -4433,7 +4548,18 @@ class BehavioralReceiptStore:
         return Path.home() / ".sentinelforge" / "behavioral_receipts"
 
     def _prepare_root(self) -> Path:
-        root = self._root()
+        self._assert_storage_anchor()
+        root = self._root().expanduser()
+        if not root.is_absolute():
+            root = Path.cwd() / root
+        missing_directories: list[Path] = []
+        cursor = root
+        while not cursor.exists():
+            missing_directories.append(cursor)
+            parent = cursor.parent
+            if parent == cursor:
+                break
+            cursor = parent
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
         if root.is_symlink():
             raise ReceiptStoreError("behavioral receipt root cannot be a symlink")
@@ -4441,12 +4567,93 @@ class BehavioralReceiptStore:
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
             raise ReceiptStoreError("behavioral receipt root ownership is invalid")
         os.chmod(root, 0o700)
+        for created_directory in reversed(missing_directories):
+            parent_descriptor = os.open(
+                created_directory.parent,
+                self._directory_flags(),
+            )
+            try:
+                os.fsync(parent_descriptor)
+            finally:
+                os.close(parent_descriptor)
+        self._assert_storage_anchor(seal=True)
         return root
+
+    @staticmethod
+    def _directory_flags() -> int:
+        return (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+
+    def _open_root(self, *, create: bool = True) -> int:
+        if create:
+            root = self._prepare_root()
+        else:
+            self._assert_storage_anchor()
+            root = self._root().expanduser()
+            if not root.is_absolute():
+                root = Path.cwd() / root
+        self._assert_storage_anchor()
+        descriptor = os.open(root, self._directory_flags())
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o077
+        ):
+            os.close(descriptor)
+            raise ReceiptStoreError("behavioral receipt root attributes are unsafe")
+        identity = (metadata.st_dev, metadata.st_ino)
+        location = root.resolve(strict=True)
+        if self._root_identity is None:
+            self._root_identity = identity
+            self._root_location = location
+        elif identity != self._root_identity or location != self._root_location:
+            os.close(descriptor)
+            raise ReceiptStoreError("behavioral receipt root changed after admission")
+        return descriptor
+
+    def preflight(self) -> None:
+        """Verify durable receipt publication is available without reserving work."""
+
+        root_descriptor = self._open_root()
+        temporary_name = f".receipt-preflight.{secrets.token_hex(16)}.tmp"
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                temporary_name,
+                self._exclusive_flags(),
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            os.fchmod(descriptor, 0o600)
+            os.fsync(descriptor)
+            os.close(descriptor)
+            descriptor = -1
+            os.unlink(temporary_name, dir_fd=root_descriptor)
+            os.fsync(root_descriptor)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary_name, dir_fd=root_descriptor)
+            except FileNotFoundError:
+                pass
+            os.close(root_descriptor)
 
     def _path(self, fingerprint: str) -> Path:
         if not re_full_sha256(fingerprint):
             raise ValueError("fingerprint must be a lowercase SHA-256 hex digest")
         return self._root() / f"behavioral-{fingerprint}.json"
+
+    @staticmethod
+    def _filename(fingerprint: str) -> str:
+        if not re_full_sha256(fingerprint):
+            raise ValueError("fingerprint must be a lowercase SHA-256 hex digest")
+        return f"behavioral-{fingerprint}.json"
 
     @staticmethod
     def _fsync_directory(root: Path) -> None:
@@ -4465,55 +4672,6 @@ class BehavioralReceiptStore:
             | getattr(os, "O_CLOEXEC", 0)
             | getattr(os, "O_NOFOLLOW", 0)
         )
-
-    @classmethod
-    def _write_exclusive(cls, path: Path, payload: str) -> None:
-        descriptor = os.open(path, cls._exclusive_flags(), 0o600)
-        try:
-            handle = os.fdopen(descriptor, "w", encoding="utf-8")
-            descriptor = -1
-            with handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except BaseException:
-            if descriptor >= 0:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-            try:
-                path.unlink()
-            except OSError:
-                pass
-            raise
-
-    @classmethod
-    def _atomic_replace(cls, path: Path, payload: str) -> None:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-        )
-        temporary = Path(temporary_name)
-        try:
-            os.fchmod(descriptor, 0o600)
-            handle = os.fdopen(descriptor, "w", encoding="utf-8")
-            descriptor = -1
-            with handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        except BaseException:
-            if descriptor >= 0:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
-            raise
 
     @classmethod
     def _link_exclusive(cls, path: Path, payload: str) -> None:
@@ -4544,6 +4702,120 @@ class BehavioralReceiptStore:
             except OSError:
                 pass
 
+    @classmethod
+    def _write_exclusive_at(
+        cls,
+        root_descriptor: int,
+        name: str,
+        payload: str,
+    ) -> None:
+        descriptor = os.open(
+            name,
+            cls._exclusive_flags(),
+            0o600,
+            dir_fd=root_descriptor,
+        )
+        try:
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
+            with handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except BaseException:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            try:
+                os.unlink(name, dir_fd=root_descriptor)
+            except OSError:
+                pass
+            raise
+
+    @classmethod
+    def _atomic_replace_at(
+        cls,
+        root_descriptor: int,
+        name: str,
+        payload: str,
+    ) -> None:
+        temporary_name = f".{name}.{secrets.token_hex(16)}.tmp"
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                temporary_name,
+                cls._exclusive_flags(),
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
+            with handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(
+                temporary_name,
+                name,
+                src_dir_fd=root_descriptor,
+                dst_dir_fd=root_descriptor,
+            )
+        except BaseException:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            try:
+                os.unlink(temporary_name, dir_fd=root_descriptor)
+            except OSError:
+                pass
+            raise
+
+    @classmethod
+    def _link_exclusive_at(
+        cls,
+        root_descriptor: int,
+        name: str,
+        payload: str,
+    ) -> None:
+        temporary_name = f".{name}.{secrets.token_hex(16)}.reserve"
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                temporary_name,
+                cls._exclusive_flags(),
+                0o600,
+                dir_fd=root_descriptor,
+            )
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
+            with handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.link(
+                temporary_name,
+                name,
+                src_dir_fd=root_descriptor,
+                dst_dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+        except BaseException:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            raise
+        finally:
+            try:
+                os.unlink(temporary_name, dir_fd=root_descriptor)
+            except OSError:
+                pass
+
     @staticmethod
     def _validate_file_info(info: os.stat_result) -> None:
         if (
@@ -4555,25 +4827,35 @@ class BehavioralReceiptStore:
             raise ReceiptStoreError("behavioral receipt file attributes are unsafe")
 
     def load(self, fingerprint: str) -> Optional[BehavioralExecutionReceipt]:
-        path = self._path(fingerprint)
+        name = self._filename(fingerprint)
+        root_descriptor = -1
         descriptor = -1
         try:
+            root_descriptor = self._open_root(create=False)
             descriptor = os.open(
-                path,
+                name,
                 os.O_RDONLY
                 | getattr(os, "O_CLOEXEC", 0)
                 | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=root_descriptor,
             )
         except FileNotFoundError:
+            if root_descriptor >= 0:
+                os.close(root_descriptor)
             return None
         except OSError as exc:
+            if root_descriptor >= 0:
+                os.close(root_descriptor)
             raise ReceiptStoreError("behavioral receipt cannot be opened safely") from exc
         try:
             self._validate_file_info(os.fstat(descriptor))
             handle = os.fdopen(descriptor, "r", encoding="utf-8")
             descriptor = -1
             with handle:
-                value = json.load(handle)
+                value = json.load(
+                    handle,
+                    object_pairs_hook=_reject_duplicate_json_keys,
+                )
         except ReceiptStoreError:
             raise
         except (OSError, ValueError, TypeError) as exc:
@@ -4584,6 +4866,8 @@ class BehavioralReceiptStore:
                     os.close(descriptor)
                 except OSError:
                     pass
+            if root_descriptor >= 0:
+                os.close(root_descriptor)
         if not isinstance(value, Mapping):
             raise ReceiptStoreError("behavioral receipt root is invalid")
         return BehavioralExecutionReceipt.from_dict(value)
@@ -4593,8 +4877,8 @@ class BehavioralReceiptStore:
     ) -> ReceiptReservation:
         if not isinstance(context, BehavioralReceiptContext):
             raise TypeError("context must be a BehavioralReceiptContext")
-        root = self._prepare_root()
-        path = self._path(fingerprint)
+        name = self._filename(fingerprint)
+        root_descriptor = self._open_root()
         now = time.time()
         reservation_token = secrets.token_hex(32)
         receipt = BehavioralExecutionReceipt(
@@ -4608,13 +4892,15 @@ class BehavioralReceiptStore:
         )
         payload = json.dumps(receipt.to_dict(), sort_keys=True, separators=(",", ":"))
         try:
-            self._link_exclusive(path, payload)
+            self._link_exclusive_at(root_descriptor, name, payload)
         except FileExistsError:
             existing = self.load(fingerprint)
             if existing is None:
                 raise ReceiptStoreError("behavioral receipt reservation disappeared")
             return ReceiptReservation(False, existing)
-        self._fsync_directory(root)
+        finally:
+            os.fsync(root_descriptor)
+            os.close(root_descriptor)
         return ReceiptReservation(True, receipt, reservation_token)
 
     def _advance(
@@ -4631,13 +4917,19 @@ class BehavioralReceiptStore:
             raise ValueError("receipt terminal state is invalid")
         if not isinstance(reservation_token, str) or not reservation_token:
             raise ReceiptStoreError("behavioral receipt reservation token is required")
-        path = self._path(fingerprint)
-        root = self._prepare_root()
-        lock_path = root / f".{path.name}.transition"
+        name = self._filename(fingerprint)
+        root_descriptor = self._open_root()
+        lock_name = f".{name}.transition"
         try:
-            self._write_exclusive(lock_path, "")
+            self._write_exclusive_at(root_descriptor, lock_name, "")
         except FileExistsError as exc:
-            raise ReceiptStoreError("behavioral receipt transition is already in progress") from exc
+            os.close(root_descriptor)
+            raise ReceiptStoreError(
+                "behavioral receipt transition is already in progress"
+            ) from exc
+        except BaseException:
+            os.close(root_descriptor)
+            raise
         try:
             current = self.load(fingerprint)
             if current is None:
@@ -4686,18 +4978,20 @@ class BehavioralReceiptStore:
                 abort_reason=normalized_reason,
                 terminal_evidence=normalized_terminal_evidence,
             )
-            self._atomic_replace(
-                path,
+            self._atomic_replace_at(
+                root_descriptor,
+                name,
                 json.dumps(updated.to_dict(), sort_keys=True, separators=(",", ":")),
             )
-            self._fsync_directory(root)
+            os.fsync(root_descriptor)
             return updated
         finally:
             try:
-                lock_path.unlink()
-                self._fsync_directory(root)
+                os.unlink(lock_name, dir_fd=root_descriptor)
+                os.fsync(root_descriptor)
             except FileNotFoundError:
                 pass
+            os.close(root_descriptor)
 
     def complete(
         self,

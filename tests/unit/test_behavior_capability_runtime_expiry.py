@@ -28,6 +28,7 @@ from core.behavior.capability_runtime_expiry import (
 )
 from core.behavior.experiment_sdk import ExperimentWorldBinding, ExperimentWorldKind
 from core.behavior.normalize import stable_hash
+from tests.import_contract import find_module_consumers
 
 
 ADMITTED_AT = 100.0
@@ -486,12 +487,12 @@ def test_runtime_expiry_module_has_no_io_clock_store_or_production_wiring():
     } & (imported_modules | imported_from)
 
     repository_root = Path(__file__).resolve().parents[2]
-    production_consumers = [
-        path
-        for path in (repository_root / "core").rglob("*.py")
-        if path != source_path
-        and "capability_runtime_expiry" in path.read_text(encoding="utf-8")
-    ]
+    production_consumers = find_module_consumers(
+        (repository_root / "core").rglob("*.py"),
+        "core.behavior.capability_runtime_expiry",
+        repository_root=repository_root,
+        exclude=(source_path,),
+    )
     assert set(production_consumers) == {
         source_path.with_name("capability_effect_one_click.py"),
         source_path.with_name("capability_execution_receipt.py"),

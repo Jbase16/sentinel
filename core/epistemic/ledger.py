@@ -12,7 +12,10 @@ It distinguishes between:
 import hashlib
 import json
 import logging
+import math
+import os
 import re
+import stat
 import time
 import uuid
 from dataclasses import dataclass, field, asdict
@@ -39,6 +42,7 @@ logger = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _BEHAVIORAL_RECEIPT_ID = re.compile(r"^behavioral-[0-9a-f]{64}$")
 _PROVENANCE_ROOT = re.compile(r"^(?:provenance:)?[0-9a-f]{64}$")
+_AUDIT_HEADER_MAX_BYTES = 4096
 
 
 class LifecycleState(str, Enum):
@@ -473,6 +477,7 @@ class FindingProposal:
     severity: str
     description: str
     citations: List[Citation]
+    remediation: Optional[str] = None
     source: str = "ai"
     metadata: Dict[str, Any] = field(default_factory=dict)
     confirmation_level: Optional[str] = None  # Derived by Ledger if not set
@@ -512,10 +517,7 @@ class EvidenceLedger:
         
         # 2b. Audit Persistence
         self._audit_path = self.config.storage.base_dir / "audit.jsonl"
-        # Ensure header exists
-        if not self._audit_path.exists():
-            with open(self._audit_path, "a") as f:
-                f.write(json.dumps({"type": "header", "version": "1.0", "created": time.time()}) + "\n")
+        self._ensure_audit_log()
         
         # 2c. Reactive Listeners
         self._listeners: List[Callable[[EpistemicEvent], None]] = []
@@ -523,6 +525,164 @@ class EvidenceLedger:
         # 3. Derived Views (The "Now")
         self._state_table: Dict[str, StateRecord] = {}
         self._restore_canonical_state()
+
+    def _ensure_audit_log(self) -> None:
+        """Atomically publish and validate one durable audit header."""
+
+        directory_descriptor = os.open(
+            self._audit_path.parent,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        temporary_name = (
+            f".{self._audit_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+        )
+        temporary_descriptor = -1
+        final_descriptor = -1
+        temporary_exists = False
+        try:
+            temporary_descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=directory_descriptor,
+            )
+            temporary_exists = True
+            self._validate_audit_descriptor(temporary_descriptor)
+            payload = (
+                json.dumps(
+                    {"type": "header", "version": "1.0", "created": time.time()}
+                )
+                + "\n"
+            ).encode("utf-8")
+            self._write_all(temporary_descriptor, payload)
+            os.fsync(temporary_descriptor)
+            os.close(temporary_descriptor)
+            temporary_descriptor = -1
+
+            try:
+                os.link(
+                    temporary_name,
+                    self._audit_path.name,
+                    src_dir_fd=directory_descriptor,
+                    dst_dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                pass
+
+            final_descriptor = os.open(
+                self._audit_path.name,
+                os.O_RDONLY
+                | getattr(os, "O_CLOEXEC", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=directory_descriptor,
+            )
+            self._validate_audit_descriptor(final_descriptor)
+            self._validate_audit_header(final_descriptor)
+            os.close(final_descriptor)
+            final_descriptor = -1
+
+            os.unlink(temporary_name, dir_fd=directory_descriptor)
+            temporary_exists = False
+            os.fsync(directory_descriptor)
+        finally:
+            if final_descriptor >= 0:
+                os.close(final_descriptor)
+            if temporary_descriptor >= 0:
+                os.close(temporary_descriptor)
+            if temporary_exists:
+                try:
+                    os.unlink(temporary_name, dir_fd=directory_descriptor)
+                except FileNotFoundError:
+                    pass
+            os.close(directory_descriptor)
+
+    @staticmethod
+    def _validate_audit_descriptor(descriptor: int) -> None:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o022
+        ):
+            raise ValueError("canonical audit path ownership or mode is unsafe")
+
+    @staticmethod
+    def _validate_audit_header(descriptor: int) -> None:
+        encoded = bytearray()
+        while len(encoded) <= _AUDIT_HEADER_MAX_BYTES:
+            chunk = os.read(
+                descriptor,
+                min(1024, _AUDIT_HEADER_MAX_BYTES + 1 - len(encoded)),
+            )
+            if not chunk:
+                break
+            encoded.extend(chunk)
+            if b"\n" in chunk:
+                break
+        newline = encoded.find(b"\n")
+        if newline < 0 or newline > _AUDIT_HEADER_MAX_BYTES:
+            raise ValueError("canonical audit header is missing or incomplete")
+
+        def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> Dict[str, Any]:
+            decoded: Dict[str, Any] = {}
+            for key, value in pairs:
+                if key in decoded:
+                    raise ValueError("canonical audit header has duplicate fields")
+                decoded[key] = value
+            return decoded
+
+        try:
+            header = json.loads(
+                bytes(encoded[:newline]).decode("utf-8"),
+                object_pairs_hook=reject_duplicate_keys,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("canonical audit header is invalid") from exc
+        created = header.get("created") if isinstance(header, dict) else None
+        if (
+            not isinstance(header, dict)
+            or set(header) != {"type", "version", "created"}
+            or header["type"] != "header"
+            or header["version"] != "1.0"
+            or isinstance(created, bool)
+            or not isinstance(created, (int, float))
+            or not math.isfinite(created)
+            or created <= 0
+        ):
+            raise ValueError("canonical audit header is invalid")
+
+    @staticmethod
+    def _write_all(descriptor: int, payload: bytes) -> None:
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise OSError("canonical audit write made no progress")
+            offset += written
+
+    def _append_audit_event(self, event: EpistemicEvent) -> None:
+        payload = (json.dumps(asdict(event)) + "\n").encode("utf-8")
+        descriptor = os.open(
+            self._audit_path,
+            os.O_WRONLY
+            | os.O_APPEND
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            self._validate_audit_descriptor(descriptor)
+            self._write_all(descriptor, payload)
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
 
     def _generate_deterministic_id(self, prefix: str, content: Any) -> str:
         """Generate a deterministic ID based on content hash."""
@@ -556,6 +716,7 @@ class EvidenceLedger:
                     observations=cited,
                     active_proof=entity.active_proof,
                 )
+                self._validate_capability_replay_finding(entity, cited)
                 self._findings[entity.id] = entity
             else:
                 raise ValueError("unsupported persisted epistemic entity")
@@ -801,6 +962,7 @@ class EvidenceLedger:
             severity=proposal.severity,
             description=proposal.description,
             citations=citations,
+            remediation=proposal.remediation,
             source=proposal.source,
             metadata=metadata,
             confirmation_level=confirmation,
@@ -843,6 +1005,14 @@ class EvidenceLedger:
         if len(sessions) != 1:
             raise ValueError("canonical finding cannot cross session identities")
         session_id = sessions.pop()
+        if any(
+            item.tool.name == "capability_effect_evidence"
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+        ):
+            raise ValueError(
+                "capability effect evidence requires typed replay-leak admission"
+            )
         normalized_active_proof = sorted(
             active_proof or [],
             key=lambda item: json.dumps(asdict(item), sort_keys=True),
@@ -886,6 +1056,225 @@ class EvidenceLedger:
             self._findings.pop(finding.id, None)
             raise
         return finding
+
+    def admit_capability_replay_finding(
+        self,
+        *,
+        evidence: Any,
+        admission_id: str,
+        event_timestamp: float,
+        event_run_id: Optional[str],
+    ) -> tuple[ObservationEnvelope, Finding]:
+        """Atomically admit the R5D10 observation, finding, events, and job result.
+
+        The caller must already have reloaded and validated the completed source
+        receipt.  CAS publication intentionally precedes the bounded SQLite
+        transaction; a crash may therefore leave an unreferenced immutable blob,
+        but can never expose only half of the canonical result.
+        """
+
+        from core.behavior.capability_effect_evidence import (
+            CapabilityEffectEvidence,
+            evaluate_replay_leak,
+            replay_leak_finding_material,
+        )
+        from core.behavior.compiler import OperationFamily, OperationInstance, OperationSafety
+
+        if type(evidence) is not CapabilityEffectEvidence:
+            raise TypeError("capability replay admission requires typed evidence")
+        evaluation = evaluate_replay_leak(evidence)
+        if not evaluation.eligible:
+            raise ValueError("capability replay evidence is not eligible")
+        if (
+            isinstance(event_timestamp, bool)
+            or not isinstance(event_timestamp, (int, float))
+            or event_timestamp <= 0
+        ):
+            raise ValueError("capability replay event timestamp is invalid")
+
+        identity = AssessmentIdentityContext.from_dict(evidence.identity_binding)
+        raw_evidence = evidence.to_json_bytes()
+        blob_hash = self.cas.store(raw_evidence)
+        source_ref = stable_hash(
+            "source_ref",
+            {
+                "source_receipt_id": evidence.source_receipt_id,
+                "evidence_root": evidence.evidence_root,
+            },
+        )
+        family = OperationFamily.build(
+            action_id=stable_hash(
+                "action",
+                {"kind": "capability_replay_leak_evidence_admission"},
+            ),
+            label="capability replay-leak evidence admission",
+            method="LOCAL",
+            requires=(),
+            safety=OperationSafety.READ_ONLY,
+            source_refs=(source_ref,),
+        )
+        instance = OperationInstance.build(
+            family_id=family.family_id,
+            source_ref=source_ref,
+            world_ref=(
+                identity.world_id
+                if identity.world_id.startswith("world:")
+                else stable_hash("world", identity.world_id)
+            ),
+            state_ref=stable_hash(
+                "state",
+                {
+                    "evidence_root": evidence.evidence_root,
+                    "source_receipt_id": evidence.source_receipt_id,
+                },
+            ),
+            response_status=200,
+            outputs=(),
+        )
+        tool = ToolContext(
+            name="capability_effect_evidence",
+            args=(evidence.source_receipt_id,),
+            version=evidence.adapter_contract_version,
+            exit_code=0,
+        )
+        observation_material = _observation_envelope_material(
+            tool=tool,
+            target=evidence.target_origin,
+            blob_hash=blob_hash,
+            identity=identity,
+            operation_family=family,
+            operation_instance=instance,
+        )
+        observation_commitment = stable_hash(
+            "observation_envelope",
+            observation_material,
+        )
+        observation = ObservationEnvelope(
+            id=f"obs-{observation_commitment.rsplit(':', 1)[-1]}",
+            timestamp=evidence.observed_at_epoch,
+            tool=tool,
+            target=evidence.target_origin,
+            blob_hash=blob_hash,
+            commitment=observation_commitment,
+            identity=identity,
+            operation_family=family,
+            operation_instance=instance,
+        )
+        claim = replay_leak_finding_material(evidence)
+        citation = Citation(observation_id=observation.id)
+        active_proof = ActiveProofCitation(
+            observation_id=observation.id,
+            receipt_id=evidence.source_receipt_id,
+            provenance_root=evidence.evidence_root,
+        )
+        finding = Finding(
+            id="",
+            title=claim["title"],
+            severity=claim["severity"],
+            citations=[citation],
+            description=claim["description"],
+            remediation=claim["remediation"],
+            metadata=claim["metadata"],
+            confirmation_level=claim["confirmation_level"],
+            session_id=identity.session_id,
+            active_proof=[active_proof],
+        )
+        finding.commitment = _canonical_finding_commitment(finding)
+        finding.id = f"find-{finding.commitment.rsplit(':', 1)[-1]}"
+
+        self._validate_active_proof(
+            evidence_citations=[citation],
+            observations=[observation],
+            active_proof=[active_proof],
+        )
+        self._validate_capability_replay_finding(
+            finding,
+            [observation],
+            require_committed_journal=False,
+        )
+
+        def event_for(event_type: EventType, entity: Any) -> EpistemicEvent:
+            payload = entity.to_dict()
+            content = {
+                "type": event_type,
+                "entity": entity.id,
+                "payload": payload,
+                "time": event_timestamp,
+            }
+            return EpistemicEvent(
+                id=self._generate_deterministic_id("evt", content),
+                event_type=event_type,
+                entity_id=entity.id,
+                payload=payload,
+                timestamp=float(event_timestamp),
+                run_id=event_run_id,
+            )
+
+        observation_event = event_for(EventType.OBSERVED, observation)
+        finding_event = event_for(EventType.PROMOTED, finding)
+        journal = self._repository.load_capability_effect_admission(admission_id)
+        if journal is None:
+            raise ValueError("capability replay admission journal is missing")
+
+        def event_value(event: EpistemicEvent) -> Dict[str, Any]:
+            return {
+                "id": event.id,
+                "event_type": event.event_type.value,
+                "entity_id": event.entity_id,
+                "payload": event.payload,
+                "timestamp": event.timestamp,
+                "run_id": event.run_id,
+            }
+
+        _committed, created = self._repository.commit_capability_effect_promotion(
+            admission_id=admission_id,
+            session_id=identity.session_id,
+            observation_id=observation.id,
+            observation_commitment=observation.commitment,
+            observation=observation.to_dict(),
+            observation_event=event_value(observation_event),
+            finding_id=finding.id,
+            finding_commitment=finding.commitment,
+            finding=finding.to_dict(),
+            finding_event=event_value(finding_event),
+            evidence_root=evidence.evidence_root,
+            cas_blob_hash=blob_hash,
+            source_receipt_id=evidence.source_receipt_id,
+            source_fingerprint=evidence.source_receipt_id.removeprefix(
+                "behavioral-"
+            ),
+            identity=evidence.identity_binding,
+            operation=journal["operation_data"],
+            producer=evidence.producer_identity,
+        )
+
+        if not created:
+            return observation, finding
+
+        existing_observation = self._observations.get(observation.id)
+        if existing_observation is not None and existing_observation != observation:
+            raise ValueError("capability observation in-memory collision")
+        existing_finding = self._findings.get(finding.id)
+        if existing_finding is not None and existing_finding != finding:
+            raise ValueError("capability finding in-memory collision")
+        self._observations[observation.id] = observation
+        self._findings[finding.id] = finding
+        existing_event_ids = {item.id for item in self._event_log}
+        for event in (observation_event, finding_event):
+            if event.id in existing_event_ids:
+                continue
+            self._event_log.append(event)
+            try:
+                self._append_audit_event(event)
+            except OSError:
+                logger.exception("failed to append canonical capability audit event")
+            self._apply_event(event)
+            for listener in self._listeners:
+                try:
+                    listener(event)
+                except Exception:
+                    logger.exception("capability promotion listener failed")
+        return observation, finding
 
     @staticmethod
     def _contains_provenance_root(value: Any, expected: str) -> bool:
@@ -956,6 +1345,53 @@ class EvidenceLedger:
                 }
             ):
                 raise ValueError("active proof receipt identity does not match evidence")
+            if observation.tool.name == "capability_effect_evidence":
+                from core.behavior.capability_effect_evidence import (
+                    CapabilityEffectEvidence,
+                    evaluate_replay_leak,
+                )
+
+                evidence_value = receipt.outcome.get("capability_effect_evidence")
+                if not isinstance(evidence_value, Mapping):
+                    raise ValueError("capability active proof evidence is missing")
+                try:
+                    evidence = CapabilityEffectEvidence.from_mapping(evidence_value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("capability active proof evidence is invalid") from exc
+                blob = self.cas.load(observation.blob_hash)
+                journal = self._repository.load_capability_effect_admission(
+                    receipt.receipt_id
+                )
+                if (
+                    blob != evidence.to_json_bytes()
+                    or evidence.source_receipt_id != receipt.receipt_id
+                    or evidence.assessment_session_id != observation.session_id
+                    or evidence.identity_binding != observation.identity.to_dict()
+                    or proof.provenance_root != evidence.evidence_root
+                    or not evaluate_replay_leak(evidence).eligible
+                    or journal is None
+                    or journal["admission_id"] != evidence.execution_admission_ref
+                    or journal["session_id"] != evidence.assessment_session_id
+                    or journal["source_receipt_id"] != evidence.source_receipt_id
+                    or journal["source_fingerprint"] != receipt.fingerprint
+                    or journal["target_origin"] != evidence.target_origin
+                    or journal["identity_data"] != evidence.identity_binding
+                    or journal["operation_data"].get("specification_ref")
+                    != evidence.specification_ref
+                    or journal["operation_data"].get("operation_ref")
+                    != evidence.operation_ref
+                    or journal["operation_data"].get("execution_policy")
+                    != evidence.execution_policy
+                    or journal["producer_data"] != evidence.producer_identity
+                    or journal.get("evidence_root")
+                    not in {None, evidence.evidence_root}
+                    or journal.get("cas_blob_hash")
+                    not in {None, observation.blob_hash}
+                    or journal.get("observation_id")
+                    not in {None, observation.id}
+                ):
+                    raise ValueError("capability active proof evidence does not match")
+                continue
             if not self._contains_provenance_root(
                 receipt.outcome, proof.provenance_root
             ):
@@ -966,6 +1402,76 @@ class EvidenceLedger:
                 raise ValueError("completed receipt does not support an active finding")
             if receipt.outcome.get("oracle_verdict") in {"refuted", "inconclusive"}:
                 raise ValueError("completed receipt does not support an active finding")
+
+    def _validate_capability_replay_finding(
+        self,
+        finding: Finding,
+        observations: List[Optional[Observation]],
+        *,
+        require_committed_journal: bool = True,
+    ) -> None:
+        """Validate the special R5D10 claim on admission and every restore."""
+
+        capability_observations = [
+            item
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+            and item.tool.name == "capability_effect_evidence"
+        ]
+        declared = finding.metadata.get("finding_class") == (
+            "capability_replay_leak_v1"
+        )
+        if not declared and not capability_observations:
+            return
+        if not declared or len(capability_observations) != 1:
+            raise ValueError("capability replay finding class is invalid")
+        if (
+            len(observations) != 1
+            or not isinstance(observations[0], ObservationEnvelope)
+            or observations[0].tool.name != "capability_effect_evidence"
+            or len(finding.active_proof) != 1
+        ):
+            raise ValueError("capability replay finding evidence shape is invalid")
+        observation = observations[0]
+        blob = self.cas.load(observation.blob_hash)
+        if blob is None:
+            raise ValueError("capability replay finding evidence is unavailable")
+        from core.behavior.capability_effect_evidence import (
+            CapabilityEffectEvidence,
+            replay_leak_finding_material,
+        )
+
+        try:
+            evidence = CapabilityEffectEvidence.from_json_bytes(blob)
+            material = replay_leak_finding_material(evidence)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("capability replay finding evidence is invalid") from exc
+        if (
+            finding.title != material["title"]
+            or finding.severity != material["severity"]
+            or finding.description != material["description"]
+            or finding.remediation != material["remediation"]
+            or finding.confirmation_level != material["confirmation_level"]
+            or finding.metadata != material["metadata"]
+            or finding.citations != [Citation(observation_id=observation.id)]
+            or finding.active_proof[0].observation_id != observation.id
+            or finding.active_proof[0].receipt_id != evidence.source_receipt_id
+            or finding.active_proof[0].provenance_root != evidence.evidence_root
+        ):
+            raise ValueError("capability replay finding template mismatch")
+        if require_committed_journal:
+            journal = self._repository.load_capability_effect_admission(
+                evidence.source_receipt_id
+            )
+            if (
+                journal is None
+                or journal["state"] != "promoted"
+                or journal["evidence_root"] != evidence.evidence_root
+                or journal["cas_blob_hash"] != observation.blob_hash
+                or journal["observation_id"] != observation.id
+                or journal["finding_id"] != finding.id
+            ):
+                raise ValueError("capability replay promotion journal mismatch")
 
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
         """
@@ -1031,6 +1537,7 @@ class EvidenceLedger:
             citations=valid_citations,
             description=proposal.description,
             confirmation_level=derived_confirmation,
+            remediation=proposal.remediation,
             **metadata
         )
 
@@ -1093,15 +1600,23 @@ class EvidenceLedger:
         if related_id not in self._observations and related_id not in self._findings:
             logger.warning(f"[EvidenceLedger] Suppressing unknown entity {related_id}")
             
-        # Emit SUPPRESSED event
+        entity = self._observations.get(related_id) or self._findings.get(related_id)
+        canonical_session_id = getattr(entity, "session_id", None)
+        payload = {
+            "reason_code": reason_code,
+            "notes": notes,
+        }
+        if canonical_session_id is not None:
+            payload["session_id"] = canonical_session_id
+
+        # Canonical suppression must survive restart.  Legacy/global entities
+        # retain their historical audit-only behavior.
         self._emit_event(
             event_type=EventType.SUPPRESSED,
             entity_id=related_id,
-            payload={
-                "reason_code": reason_code,
-                "notes": notes
-            },
-            timestamp_override=timestamp_override
+            payload=payload,
+            timestamp_override=timestamp_override,
+            canonical_session_id=canonical_session_id,
         )
         
         # Return the new state record
@@ -1253,8 +1768,7 @@ class EvidenceLedger:
         
         # Persist to Audit Log
         try:
-            with open(self._audit_path, "a") as f:
-                f.write(json.dumps(asdict(event)) + "\n")
+            self._append_audit_event(event)
         except Exception as e:
             logger.error(f"[EvidenceLedger] Failed to persist event {event_id}: {e}")
             

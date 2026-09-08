@@ -29,6 +29,7 @@ class BehavioralOneClickProfile(BaseModel):
     mode: Literal[
         "paired_persona",
         "role_monotonicity",
+        "capability_effect",
         "anonymous_passive",
     ] = "paired_persona"
     completion: Literal["continue_scan", "behavioral_phase_only"] = "continue_scan"
@@ -46,9 +47,18 @@ class BehavioralOneClickProfile(BaseModel):
         max_length=20_000,
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
+    capability_effect: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_profile_shape(self) -> "BehavioralOneClickProfile":
+        if (
+            self.role_monotonicity is not None
+            and self.capability_effect is not None
+        ):
+            raise ValueError(
+                "role monotonicity and capability effect profiles are mutually "
+                "exclusive"
+            )
         if self.mode == "anonymous_passive":
             if (
                 self.source_persona_id is not None
@@ -56,6 +66,7 @@ class BehavioralOneClickProfile(BaseModel):
                 or self.prior_source_records is not None
                 or self.prior_peer_records is not None
                 or self.role_monotonicity is not None
+                or self.capability_effect is not None
             ):
                 raise ValueError(
                     "anonymous passive one-click forbids persona identities "
@@ -83,6 +94,21 @@ class BehavioralOneClickProfile(BaseModel):
         elif self.role_monotonicity is not None:
             raise ValueError(
                 "role-monotonicity specification requires role_monotonicity mode"
+            )
+        if self.mode == "capability_effect":
+            if self.capability_effect is None:
+                raise ValueError(
+                    "capability-effect one-click requires an exact capability "
+                    "specification"
+                )
+            if self.completion != "behavioral_phase_only":
+                raise ValueError(
+                    "capability-effect one-click requires behavioral_phase_only "
+                    "completion"
+                )
+        elif self.capability_effect is not None:
+            raise ValueError(
+                "capability-effect specification requires capability_effect mode"
             )
         return self
 
@@ -116,12 +142,20 @@ def _bounded_behavioral_phase_summary(
     adaptive = adaptive if isinstance(adaptive, dict) else {}
     independent = result.get("independent_proof")
     independent = independent if isinstance(independent, dict) else {}
+    canonical_result = _capability_effect_canonical_result(result)
 
-    finding_id = (
-        finding.get("id")
-        or result.get("finding_ref")
-        or result.get("finding_candidate_ref")
-    )
+    if canonical_result:
+        finding_id = (
+            canonical_result.get("canonical_finding_id")
+            if canonical_result.get("promotion_state") == "promoted"
+            else None
+        )
+    else:
+        finding_id = (
+            finding.get("id")
+            or result.get("finding_ref")
+            or result.get("finding_candidate_ref")
+        )
     finding_type = finding.get("type")
     if not isinstance(finding_id, str):
         finding_id = None
@@ -166,6 +200,22 @@ def _bounded_behavioral_phase_summary(
         "result_status": bounded_string(result.get("status"), limit=64),
         "finding_id": bounded_string(finding_id, limit=256),
         "finding_type": bounded_string(finding_type, limit=256),
+        "assessment_session_id": bounded_string(
+            canonical_result.get("assessment_session_id"),
+            limit=256,
+        ),
+        "promotion_state": bounded_string(
+            canonical_result.get("promotion_state"),
+            limit=64,
+        ),
+        "canonical_observation_id": bounded_string(
+            canonical_result.get("canonical_observation_id"),
+            limit=256,
+        ),
+        "canonical_finding_id": bounded_string(
+            canonical_result.get("canonical_finding_id"),
+            limit=256,
+        ),
         "receipt_id": bounded_string(receipt.get("receipt_id"), limit=256),
         "receipt_state": bounded_string(receipt.get("state"), limit=64),
         "receipt_reused": (
@@ -191,6 +241,34 @@ def _bounded_behavioral_phase_summary(
         ),
         "reason": bounded_string(reason),
     }
+
+
+def _capability_effect_canonical_result(result: Any) -> Dict[str, Any]:
+    """Return a complete R5D10 canonical-result status, never a candidate."""
+
+    if not isinstance(result, dict):
+        return {}
+    if result.get("kind") != "capability_effect_one_click":
+        return {}
+    promotion = result.get("capability_effect_promotion")
+    if not isinstance(promotion, dict):
+        return {}
+    if (
+        promotion.get("schema_version") != 1
+        or promotion.get("slice") != "R5D10"
+        or promotion.get("promotion_state")
+        not in {"promoted", "canonical_result_inactive"}
+    ):
+        return {}
+    for field_name in (
+        "assessment_session_id",
+        "canonical_observation_id",
+        "canonical_finding_id",
+    ):
+        value = promotion.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            return {}
+    return promotion
 
 
 def _record_behavioral_phase_summary(
@@ -736,16 +814,19 @@ async def _run_behavioral_one_click_phase(
                 run_behavioral_authorization_from_url_endpoint,
             )
 
+            foundry_request = RunBehavioralAuthorizationFromURLRequest(
+                target_url=req.target,
+                envelope_id=profile.envelope_id,
+                source_persona_id=profile.source_persona_id,
+                peer_persona_id=profile.peer_persona_id,
+                prior_source_records=profile.prior_source_records,
+                prior_peer_records=profile.prior_peer_records,
+                role_monotonicity=profile.role_monotonicity,
+                capability_effect=profile.capability_effect,
+            )
+            foundry_request._assessment_session_id = session.id
             result = await run_behavioral_authorization_from_url_endpoint(
-                RunBehavioralAuthorizationFromURLRequest(
-                    target_url=req.target,
-                    envelope_id=profile.envelope_id,
-                    source_persona_id=profile.source_persona_id,
-                    peer_persona_id=profile.peer_persona_id,
-                    prior_source_records=profile.prior_source_records,
-                    prior_peer_records=profile.prior_peer_records,
-                    role_monotonicity=profile.role_monotonicity,
-                ),
+                foundry_request,
                 _=True,
             )
     except HTTPException as exc:
@@ -902,8 +983,15 @@ async def _run_behavioral_one_click_phase(
     execution_status = (
         execution.get("status") if isinstance(execution, dict) else None
     )
+    canonical_result = _capability_effect_canonical_result(result)
     if result.get("kind") == "passive_visibility_observation":
         phase_status = "passive_visibility_observed"
+    elif canonical_result:
+        phase_status = (
+            "confirmed_finding"
+            if canonical_result.get("promotion_state") == "promoted"
+            else "completed_no_finding"
+        )
     elif isinstance(finding, dict) or result.get("finding_confirmed") is True:
         phase_status = "confirmed_finding"
     elif "cleanup_failed" in {result_status, execution_status}:

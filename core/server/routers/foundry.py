@@ -35,9 +35,10 @@ from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
-from core.server.routers.auth import verify_sensitive_token
+from core.behavior.normalize import stable_hash
+from core.server.routers.auth import verify_sensitive_token, verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ class RunBehavioralAuthorizationRequest(BaseModel):
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
     capability_effect: Optional[Dict[str, Any]] = None
+    _assessment_session_id: Optional[str] = PrivateAttr(default=None)
+    _capability_intake_id: Optional[str] = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def validate_prior_capture_pair(self) -> "RunBehavioralAuthorizationRequest":
@@ -181,6 +184,7 @@ class RunBehavioralAuthorizationFromURLRequest(BaseModel):
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
     capability_effect: Optional[Dict[str, Any]] = None
+    _assessment_session_id: Optional[str] = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def validate_prior_capture_pair(
@@ -772,11 +776,29 @@ def _graph_bound_capture_selection_descriptor(run) -> Dict[str, Any]:
 
 def _capability_effect_receipt_projection(
     response: Mapping[str, Any],
+    *,
+    retain_authoritative_evidence: bool = False,
 ) -> Mapping[str, Any]:
-    """Project R5D9 to a dedup marker without persisting a finding claim."""
+    """Keep evidence only on the authoritative inner execution receipt."""
 
     if response.get("kind") != "capability_effect_one_click":
         return response
+    if retain_authoritative_evidence and "capability_effect_evidence" in response:
+        return response
+    promotion = response.get("capability_effect_promotion")
+    source_receipt = response.get("receipt")
+    if (
+        isinstance(promotion, Mapping)
+        and isinstance(source_receipt, Mapping)
+        and isinstance(promotion.get("assessment_session_id"), str)
+        and isinstance(source_receipt.get("receipt_id"), str)
+    ):
+        return {
+            "kind": "capability_effect_orchestration",
+            "status": "completed",
+            "source_receipt_id": source_receipt["receipt_id"],
+            "assessment_session_id": promotion["assessment_session_id"],
+        }
     projected = {
         "status": "no_executable_candidate",
         "plan": {"selected_proposal_id": None},
@@ -789,6 +811,88 @@ def _capability_effect_receipt_projection(
         if field_name in response:
             projected[field_name] = response[field_name]
     return projected
+
+
+def _capability_execution_policy_snapshot(policy_digest: str) -> Mapping[str, Any]:
+    """Seal the already-admitted execution boundary without adding authority."""
+
+    from core.behavior.capability_effect_evidence import (
+        CapabilityEffectExecutionPolicySnapshot,
+    )
+
+    if isinstance(policy_digest, str) and policy_digest.startswith("sha256:"):
+        policy_digest = policy_digest.removeprefix("sha256:")
+    if (
+        not isinstance(policy_digest, str)
+        or len(policy_digest) != 64
+        or any(character not in "0123456789abcdef" for character in policy_digest)
+    ):
+        raise ValueError("capability execution policy digest is invalid")
+    return CapabilityEffectExecutionPolicySnapshot.build(
+        policy_ref=f"capability_effect_execution_policy:{policy_digest}",
+        primary_execution_gate_enabled=True,
+        capability_effect_execution_gate_enabled=True,
+        authorization_admitted=True,
+        persona_admitted=True,
+        ownership_admitted=True,
+        origin_admitted=True,
+        policy_admitted=True,
+        budget_admitted=True,
+        receipt_admitted=True,
+        cleanup_required=True,
+    ).to_dict()
+
+
+@router.get("/capability-effect/executions/{execution_id}")
+async def get_capability_effect_execution_endpoint(
+    execution_id: str,
+    _: bool = Depends(verify_token),
+):
+    """Read one retained execution/promotion state without target access."""
+
+    from core.behavior.capability_effect_promotion import (
+        CapabilityEffectPromotionError,
+        CapabilityEffectPromotionService,
+    )
+
+    try:
+        status = CapabilityEffectPromotionService().status(execution_id)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if isinstance(exc, CapabilityEffectPromotionError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="capability evidence store unavailable",
+        ) from exc
+    if status.reason_code == "execution_not_found":
+        raise HTTPException(status_code=404, detail=status.to_dict())
+    return status.to_dict()
+
+
+@router.post("/capability-effect/executions/{execution_id}/promote")
+async def promote_capability_effect_execution_endpoint(
+    execution_id: str,
+    _: bool = Depends(verify_sensitive_token),
+):
+    """Retry one existing source locally; replacement evidence is not accepted."""
+
+    from core.behavior.capability_effect_promotion import (
+        CapabilityEffectPromotionError,
+        CapabilityEffectPromotionService,
+    )
+
+    try:
+        status = CapabilityEffectPromotionService().promote(execution_id)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        if isinstance(exc, CapabilityEffectPromotionError):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="capability evidence store unavailable",
+        ) from exc
+    if status.reason_code == "execution_not_found":
+        raise HTTPException(status_code=404, detail=status.to_dict())
+    return status.to_dict()
 
 
 @router.post("/behavioral-authorization")
@@ -985,6 +1089,13 @@ async def run_behavioral_authorization_endpoint(
         CapabilityEffectOneClickRun,
         CapabilityEffectOneClickSpecification,
     )
+    from core.behavior.capability_effect_evidence import (
+        build_capability_effect_evidence,
+    )
+    from core.behavior.capability_effect_promotion import (
+        CapabilityEffectPromotionService,
+        runtime_evidence_classification,
+    )
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import (
         DENIED_STATUS,
@@ -992,6 +1103,10 @@ async def run_behavioral_authorization_endpoint(
         PolicyExecutor,
     )
     from core.foundry.authorization import get_envelope
+    from core.foundry.identity_adapter import (
+        authorization_envelope_binding,
+        stable_identity_source_ref,
+    )
     from core.foundry.vault import PersonaVault
     from core.safety.provenance import ProvenanceSink
     from core.safety.proof_budget import ProofBudget
@@ -1442,6 +1557,12 @@ async def run_behavioral_authorization_endpoint(
     graph_bound_prerequisite_executor = None
     role_monotonicity_executor = None
     capability_effect_executor = None
+    capability_effect_policy = None
+    capability_effect_provenance = None
+    capability_effect_policy_snapshot = None
+    capability_effect_admission = None
+    capability_effect_promotion_service = None
+    capability_effect_runtime_classification = None
     fresh_boundary_executor = None
     omission_confirmation_admission = None
     executors = None
@@ -1764,6 +1885,31 @@ async def run_behavioral_authorization_endpoint(
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
 
         receipt_store = BehavioralReceiptStore()
+        if capability_effect_profile_selected:
+            try:
+                capability_effect_promotion_service = (
+                    CapabilityEffectPromotionService(
+                        receipt_store=receipt_store,
+                    )
+                )
+                capability_effect_runtime_classification = (
+                    runtime_evidence_classification()
+                )
+                if capability_effect_policy is None:
+                    raise ValueError("capability execution policy is unavailable")
+                capability_effect_policy_snapshot = (
+                    _capability_execution_policy_snapshot(
+                        capability_effect_policy.digest()
+                    )
+                )
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "capability evidence persistence unavailable; "
+                        "execution refused"
+                    ),
+                ) from exc
         try:
             receipt_fingerprint = request_fingerprint({
                 "schema_version": 2,
@@ -1859,6 +2005,52 @@ async def run_behavioral_authorization_endpoint(
                 status_code=503,
                 detail="behavioral receipt store unavailable; execution refused",
             ) from exc
+        receipt_reservation_token = reservation.reservation_token
+        if capability_effect_profile_selected:
+            try:
+                if (
+                    capability_effect_specification is None
+                    or capability_effect_promotion_service is None
+                    or capability_effect_policy_snapshot is None
+                ):
+                    raise ValueError("capability evidence admission is unavailable")
+                envelope_id, envelope_ref = authorization_envelope_binding(
+                    envelope,
+                    target_origin=target_origin,
+                )
+                intake_id = req._capability_intake_id or stable_hash(
+                    "capability_effect_intake",
+                    {"source_fingerprint": receipt_fingerprint},
+                )
+                capability_effect_admission = (
+                    capability_effect_promotion_service.reserve_execution(
+                        intake_id=intake_id,
+                        target_origin=target_origin,
+                        authorization_envelope_id=envelope_id,
+                        authorization_envelope_ref=envelope_ref,
+                        persona_id=source_persona.persona_id,
+                        persona_source_ref=stable_identity_source_ref(
+                            "persona_vault",
+                            {
+                                "persona_id": source_persona.persona_id,
+                                "created_at": source_persona.created_at,
+                            },
+                        ),
+                        specification=capability_effect_specification.to_dict(),
+                        execution_policy=capability_effect_policy_snapshot,
+                        requested_session_id=req._assessment_session_id,
+                        source_fingerprint=receipt_fingerprint,
+                    )
+                )
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                abort_reserved_root_receipt("capability_evidence_admission_failed")
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "capability evidence admission unavailable; "
+                        "execution refused"
+                    ),
+                ) from exc
         if not reservation.created:
             if reservation.receipt.state == COMPLETED and reservation.receipt.outcome:
                 cached = dict(reservation.receipt.outcome)
@@ -1868,6 +2060,15 @@ async def run_behavioral_authorization_endpoint(
                     "state": reservation.receipt.state,
                     "reused": True,
                 }
+                if (
+                    capability_effect_profile_selected
+                    and capability_effect_promotion_service is not None
+                ):
+                    cached["capability_effect_promotion"] = (
+                        capability_effect_promotion_service.status(
+                            reservation.receipt.receipt_id
+                        ).to_dict()
+                    )
                 return cached
             if (
                 reservation.receipt.state == ABORTED
@@ -1888,13 +2089,11 @@ async def run_behavioral_authorization_endpoint(
                     f"state={reservation.receipt.state})"
                 ),
             )
-        receipt_reservation_token = reservation.reservation_token
         if receipt_reservation_token is None:
             raise HTTPException(
                 status_code=503,
                 detail="behavioral receipt reservation token unavailable; execution refused",
             )
-
         source_executor = executors[source_persona.persona_id]
         for script_url in (
             () if capability_effect_profile_selected else script_urls
@@ -4052,6 +4251,57 @@ async def run_behavioral_authorization_endpoint(
         interaction_acquisition[
             "independent_proof"
         ] = cross_persona_independent_proof
+    if (
+        capability_effect_one_click_run is not None
+        and capability_effect_one_click_run.dispatched
+    ):
+        try:
+            execution_result = capability_effect_one_click_run.execution
+            if (
+                execution_result is None
+                or capability_effect_admission is None
+                or capability_effect_policy_snapshot is None
+                or capability_effect_provenance is None
+                or capability_effect_runtime_classification is None
+                or receipt_fingerprint is None
+            ):
+                raise ValueError("capability evidence source context is unavailable")
+            execution_export = execution_result.evidence_export()
+            observed_at_epoch = max(
+                float(item["observed_epoch"])
+                for item in execution_export["terminal_receipts"]
+            )
+            conduct_provenance_root = capability_effect_provenance.root()
+            if conduct_provenance_root is None:
+                raise ValueError("capability conduct provenance is unavailable")
+            capability_evidence = build_capability_effect_evidence(
+                execution_export=execution_export,
+                source_receipt_id=f"behavioral-{receipt_fingerprint}",
+                execution_admission_ref=capability_effect_admission.admission_id,
+                assessment_session_id=capability_effect_admission.session_id,
+                identity_binding=capability_effect_admission.identity_binding,
+                target_origin=capability_effect_admission.target_origin,
+                specification_ref=capability_effect_admission.specification_ref,
+                operation_ref=capability_effect_admission.operation_ref,
+                execution_policy=capability_effect_policy_snapshot,
+                conduct_provenance_root=conduct_provenance_root,
+                producer_identity=capability_effect_admission.producer_identity,
+                observed_at_epoch=observed_at_epoch,
+                runtime_evidence_classification=(
+                    capability_effect_runtime_classification
+                ),
+            )
+            response["capability_effect_evidence"] = capability_evidence.to_dict()
+            response["assessment_session_id"] = capability_effect_admission.session_id
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            abort_reserved_root_receipt("capability_evidence_publication_failed")
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "capability execution completed but durable evidence "
+                    "could not be constructed"
+                ),
+            ) from exc
     attach_adaptive_proof_handoff(
         response,
         adaptive_proof_handoff,
@@ -4066,7 +4316,10 @@ async def run_behavioral_authorization_endpoint(
                 receipt_fingerprint,
                 reservation_token=receipt_reservation_token,
                 outcome=redacted_outcome(
-                    _capability_effect_receipt_projection(response)
+                    _capability_effect_receipt_projection(
+                        response,
+                        retain_authoritative_evidence=True,
+                    )
                 ),
             )
         except (OSError, ReceiptStoreError) as exc:
@@ -4082,6 +4335,42 @@ async def run_behavioral_authorization_endpoint(
             "state": completed_receipt.state,
             "reused": False,
         }
+        if (
+            capability_effect_one_click_run is not None
+            and capability_effect_one_click_run.dispatched
+            and capability_effect_promotion_service is not None
+        ):
+            try:
+                response["capability_effect_promotion"] = (
+                    capability_effect_promotion_service.promote(
+                        completed_receipt.receipt_id
+                    ).to_dict()
+                )
+            except Exception:
+                # The completed inner receipt is the recovery boundary.  A
+                # local interpretation failure must not erase that source or
+                # cause the matrix to run again.
+                logger.exception(
+                    "capability source persisted but local promotion failed"
+                )
+                response["capability_effect_promotion"] = {
+                    "schema_version": 1,
+                    "slice": "R5D10",
+                    "execution_id": completed_receipt.receipt_id,
+                    "assessment_session_id": (
+                        capability_effect_admission.session_id
+                        if capability_effect_admission is not None
+                        else None
+                    ),
+                    "source_receipt_id": completed_receipt.receipt_id,
+                    "execution_state": "completed",
+                    "evidence_classification": "unavailable",
+                    "promotion_state": "retryable_local_persistence_failure",
+                    "reason_code": "retryable_local_persistence_failure",
+                    "canonical_observation_id": None,
+                    "canonical_finding_id": None,
+                    "permitted_next_local_action": "retry_promotion",
+                }
         attach_adaptive_proof_handoff(
             response,
             adaptive_proof_handoff,
@@ -4283,8 +4572,17 @@ async def run_behavioral_authorization_from_url_endpoint(
         CapabilityEffectOneClickRun,
         CapabilityEffectOneClickSpecification,
     )
+    from core.behavior.capability_effect_promotion import (
+        CapabilityEffectPromotionService,
+    )
+    from core.cortex.execution_policy import ExecutionPolicy
     from core.foundry.authorization import get_envelope
+    from core.foundry.identity_adapter import (
+        authorization_envelope_binding,
+        stable_identity_source_ref,
+    )
     from core.foundry.vault import PersonaVault
+    from core.safety.proof_budget import ProofBudget
     from core.server.routers.driver import (
         CaptureConflict,
         DriverBridgeError,
@@ -4766,6 +5064,39 @@ async def run_behavioral_authorization_from_url_endpoint(
         ) from exc
 
     receipt_store = BehavioralReceiptStore()
+    capability_effect_promotion_service = None
+    capability_effect_intake_admission = None
+    capability_effect_intake_id = None
+    capability_effect_policy_snapshot = None
+    if capability_effect_profile_selected:
+        try:
+            capability_effect_promotion_service = CapabilityEffectPromotionService(
+                receipt_store=receipt_store,
+            )
+            capability_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=6,
+                    max_requests_per_endpoint=5,
+                    max_cross_object_reads=0,
+                    max_privilege_mutations=0,
+                    max_creates=0,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+            )
+            capability_effect_policy_snapshot = (
+                _capability_execution_policy_snapshot(capability_policy.digest())
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "capability evidence persistence unavailable; "
+                    "capture refused"
+                ),
+            ) from exc
 
     def duplicate_response(receipt):
         if receipt.state == ABORTED and receipt.terminal_evidence is not None:
@@ -4784,6 +5115,23 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "state": receipt.state,
                 "reused": True,
             }
+            if (
+                capability_effect_profile_selected
+                and capability_effect_promotion_service is not None
+            ):
+                status_identifier = cached.get("source_receipt_id")
+                if not isinstance(status_identifier, str):
+                    status_identifier = stable_hash(
+                        "capability_effect_intake",
+                        {"outer_fingerprint": fingerprint},
+                    )
+                intake_status = capability_effect_promotion_service.status(
+                    status_identifier
+                )
+                cached["assessment_session_id"] = (
+                    intake_status.assessment_session_id
+                )
+                cached["capability_effect_promotion"] = intake_status.to_dict()
             return cached
         raise HTTPException(
             status_code=409,
@@ -4852,14 +5200,57 @@ async def run_behavioral_authorization_from_url_endpoint(
             logger.exception("failed to terminate one-click behavioral receipt")
             return None
 
+    if capability_effect_profile_selected:
+        try:
+            if (
+                capability_effect_specification is None
+                or capability_effect_promotion_service is None
+                or capability_effect_policy_snapshot is None
+            ):
+                raise ValueError("capability intake admission is unavailable")
+            envelope_id, envelope_ref = authorization_envelope_binding(
+                envelope,
+                target_origin=target_origin,
+            )
+            capability_effect_intake_id = stable_hash(
+                "capability_effect_intake",
+                {"outer_fingerprint": fingerprint},
+            )
+            capability_effect_intake_admission = (
+                capability_effect_promotion_service.reserve_execution(
+                    intake_id=capability_effect_intake_id,
+                    target_origin=target_origin,
+                    authorization_envelope_id=envelope_id,
+                    authorization_envelope_ref=envelope_ref,
+                    persona_id=source_persona.persona_id,
+                    persona_source_ref=stable_identity_source_ref(
+                        "persona_vault",
+                        {
+                            "persona_id": source_persona.persona_id,
+                            "created_at": source_persona.created_at,
+                        },
+                    ),
+                    specification=capability_effect_specification.to_dict(),
+                    execution_policy=capability_effect_policy_snapshot,
+                    requested_session_id=req._assessment_session_id,
+                )
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            abort_receipt("capability_evidence_admission_failed")
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "capability evidence admission unavailable; capture refused"
+                ),
+            ) from exc
+
     try:
         source_capture, peer_capture, script_urls = await capture_persona_pair(
             target_url=target_url,
             source_persona_id=source_persona.persona_id,
             peer_persona_id=peer_persona.persona_id,
         )
-        response = await run_behavioral_authorization_endpoint(
-            RunBehavioralAuthorizationRequest(
+        inner_request = RunBehavioralAuthorizationRequest(
                 target_origin=target_origin,
                 envelope_id=req.envelope_id,
                 source_persona_id=source_persona.persona_id,
@@ -4882,7 +5273,14 @@ async def run_behavioral_authorization_from_url_endpoint(
                     if capability_effect_specification is not None
                     else None
                 ),
-            ),
+            )
+        if capability_effect_intake_admission is not None:
+            inner_request._assessment_session_id = (
+                capability_effect_intake_admission.session_id
+            )
+            inner_request._capability_intake_id = capability_effect_intake_id
+        response = await run_behavioral_authorization_endpoint(
+            inner_request,
             _=True,
         )
     except asyncio.CancelledError:

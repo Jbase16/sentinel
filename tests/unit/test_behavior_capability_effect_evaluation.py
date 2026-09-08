@@ -30,6 +30,7 @@ from core.behavior.capability_execution_receipt import (
     CapabilityExecutionOutcome,
 )
 from core.behavior.normalize import stable_hash
+from tests.import_contract import find_module_consumers
 from tests.unit.test_behavior_capability_execution_receipt import (
     ADMITTED_AT,
     EXPIRES_AT,
@@ -1427,9 +1428,12 @@ def test_module_has_exact_operator_consumer_and_exports_exact_public_surface():
     repository_root = Path(__file__).resolve().parents[2]
     production_consumers = sorted(
         path.relative_to(repository_root).as_posix()
-        for path in (repository_root / "core").rglob("*.py")
-        if path != source_path
-        and "capability_effect_evaluation" in path.read_text(encoding="utf-8")
+        for path in find_module_consumers(
+            (repository_root / "core").rglob("*.py"),
+            "core.behavior.capability_effect_evaluation",
+            repository_root=repository_root,
+            exclude=(source_path,),
+        )
     )
 
     assert production_consumers == ["core/behavior/capability_effect_one_click.py"]

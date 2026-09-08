@@ -17,7 +17,10 @@ that correctly invalidate downstream events.
 import unittest
 from unittest.mock import MagicMock, patch
 import json
+from pathlib import Path
+import tempfile
 
+from core.base.config import SentinelConfig, StorageConfig
 from core.replay.models import MerkleBlock, CapsuleManifest, CAPSULE_VERSION
 from core.replay.merkle import MerkleEngine
 from core.replay.hypervisor import ReplayEngine, ReplayContext
@@ -32,10 +35,11 @@ class TestButterflyEffect(unittest.TestCase):
             mock_gsa.run_id = "run-butterfly"
             mock_gsa_cls.instance.return_value = mock_gsa
             
-            mock_config = MagicMock()
-            mock_config.storage_path = "/tmp/sentinel_test_butterfly"
-            import os
-            os.makedirs(mock_config.storage_path, exist_ok=True)
+            storage = tempfile.TemporaryDirectory(prefix="sentinel-test-butterfly-")
+            self.addCleanup(storage.cleanup)
+            mock_config = SentinelConfig(
+                storage=StorageConfig(base_dir=Path(storage.name))
+            )
             
             # --- SCENE 1: Constructing Meaning (The Past) ---
             

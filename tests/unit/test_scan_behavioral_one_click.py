@@ -20,6 +20,10 @@ from core.server.state import ApplicationState
 ENVELOPE_ID = "1" * 32
 SOURCE_PERSONA_ID = "2" * 32
 PEER_PERSONA_ID = "3" * 32
+CAPABILITY_EFFECT_SPECIFICATION = {
+    "schema_version": 1,
+    "test_ref": "exact-capability-effect-specification",
+}
 
 
 class _FindingStore:
@@ -283,6 +287,88 @@ def test_paired_persona_profile_rejects_role_specification():
         )
 
 
+def test_capability_effect_profile_requires_exact_specification():
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "capability-effect one-click requires an exact capability "
+            "specification"
+        ),
+    ):
+        BehavioralOneClickProfile(
+            mode="capability_effect",
+            completion="behavioral_phase_only",
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+        )
+
+    profile = BehavioralOneClickProfile(
+        mode="capability_effect",
+        completion="behavioral_phase_only",
+        envelope_id=ENVELOPE_ID,
+        source_persona_id=SOURCE_PERSONA_ID,
+        peer_persona_id=PEER_PERSONA_ID,
+        capability_effect=CAPABILITY_EFFECT_SPECIFICATION,
+    )
+
+    assert profile.capability_effect == CAPABILITY_EFFECT_SPECIFICATION
+    assert profile.is_behavioral_phase_only is True
+
+
+def test_capability_effect_profile_requires_phase_only_completion():
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "capability-effect one-click requires behavioral_phase_only "
+            "completion"
+        ),
+    ):
+        BehavioralOneClickProfile(
+            mode="capability_effect",
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+            capability_effect=CAPABILITY_EFFECT_SPECIFICATION,
+        )
+
+
+def test_capability_effect_specification_requires_matching_mode():
+    with pytest.raises(
+        ValidationError,
+        match="capability-effect specification requires capability_effect mode",
+    ):
+        BehavioralOneClickProfile(
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+            capability_effect=CAPABILITY_EFFECT_SPECIFICATION,
+        )
+
+
+@pytest.mark.parametrize(
+    "mode",
+    ["role_monotonicity", "capability_effect"],
+)
+def test_role_and_capability_effect_payloads_are_mutually_exclusive(mode):
+    with pytest.raises(
+        ValidationError,
+        match=(
+            "role monotonicity and capability effect profiles are mutually "
+            "exclusive"
+        ),
+    ):
+        BehavioralOneClickProfile(
+            mode=mode,
+            completion="behavioral_phase_only",
+            envelope_id=ENVELOPE_ID,
+            source_persona_id=SOURCE_PERSONA_ID,
+            peer_persona_id=PEER_PERSONA_ID,
+            role_monotonicity={"schema_version": 1},
+            capability_effect=CAPABILITY_EFFECT_SPECIFICATION,
+        )
+
+
 def test_behavioral_phase_summary_is_bounded_and_redacted():
     summary = _bounded_behavioral_phase_summary(
         phase_status="confirmed_finding",
@@ -313,6 +399,10 @@ def test_behavioral_phase_summary_is_bounded_and_redacted():
         "result_status": "completed",
         "finding_id": "finding-1",
         "finding_type": "cross_principal_object_access",
+        "assessment_session_id": None,
+        "promotion_state": None,
+        "canonical_observation_id": None,
+        "canonical_finding_id": None,
         "receipt_id": "receipt:abc",
         "receipt_state": "completed",
         "receipt_reused": True,
@@ -365,6 +455,170 @@ async def test_behavioral_one_click_runs_exact_profile_and_adds_finding(
     assert session.findings.added == [(finding, True)]
     assert "before ordinary scan traffic" in session.logs[0]
     assert "behavioral-finding" in session.logs[1]
+
+
+@pytest.mark.asyncio
+async def test_capability_effect_profile_forwards_private_scan_context(
+    monkeypatch,
+):
+    from core.server.routers import foundry
+
+    session = _Session()
+
+    async def execute(request, _):
+        assert request.capability_effect == CAPABILITY_EFFECT_SPECIFICATION
+        assert request.role_monotonicity is None
+        assert request._assessment_session_id == session.id
+        assert "_assessment_session_id" not in request.model_dump()
+        assert _ is True
+        return {
+            "kind": "capability_effect_one_click",
+            "status": "completed",
+            "finding": None,
+            "finding_confirmed": False,
+        }
+
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        execute,
+    )
+
+    request = ScanRequest(
+        target="https://example.test/app",
+        mode="bug_bounty",
+        behavioral_one_click={
+            "mode": "capability_effect",
+            "completion": "behavioral_phase_only",
+            "envelope_id": ENVELOPE_ID,
+            "source_persona_id": SOURCE_PERSONA_ID,
+            "peer_persona_id": PEER_PERSONA_ID,
+            "capability_effect": CAPABILITY_EFFECT_SPECIFICATION,
+            "_assessment_session_id": "attacker-supplied",
+        },
+    )
+
+    result = await _run_behavioral_one_click_phase(request, session=session)
+
+    assert result["kind"] == "capability_effect_one_click"
+    assert session.findings.added == []
+
+
+@pytest.mark.parametrize(
+    ("promotion_state", "expected_phase_status", "expected_finding_id"),
+    [
+        ("promoted", "confirmed_finding", f"finding:{'6' * 64}"),
+        ("canonical_result_inactive", "completed_no_finding", None),
+    ],
+)
+@pytest.mark.asyncio
+async def test_gate_on_capability_scan_reports_only_canonical_result(
+    monkeypatch,
+    promotion_state,
+    expected_phase_status,
+    expected_finding_id,
+):
+    from core.server.routers import foundry, scans
+
+    monkeypatch.setenv(
+        "SENTINELFORGE_BEHAVIOR_CAPABILITY_FINDING_PROMOTION",
+        "1",
+    )
+    state = ApplicationState()
+    monkeypatch.setattr(ApplicationState, "_instance", state)
+    session = _Session()
+    state.scan_state = {"session_id": session.id}
+
+    original_session_id = "original-assessment-session"
+    source_receipt_id = f"behavioral-{'4' * 64}"
+    canonical_observation_id = f"observation:{'5' * 64}"
+    canonical_finding_id = f"finding:{'6' * 64}"
+    legacy_candidate_id = f"capability_effect_candidate:{'7' * 64}"
+
+    async def execute(request, _):
+        assert request.capability_effect == CAPABILITY_EFFECT_SPECIFICATION
+        assert request.role_monotonicity is None
+        assert request._assessment_session_id == session.id
+        assert "_assessment_session_id" not in request.model_dump()
+        assert _ is True
+        return {
+            "kind": "capability_effect_one_click",
+            "status": "already_executed",
+            "assessment_session_id": original_session_id,
+            "finding": None,
+            "finding_confirmed": False,
+            "finding_candidate_ref": legacy_candidate_id,
+            "finding_candidate": {
+                "schema_version": 1,
+                "candidate_id": legacy_candidate_id,
+                "adversarial_triage_required": True,
+                "promotion_authority": False,
+                "finding_authority": False,
+            },
+            "capability_effect_promotion": {
+                "schema_version": 1,
+                "slice": "R5D10",
+                "execution_id": source_receipt_id,
+                "assessment_session_id": original_session_id,
+                "source_receipt_id": source_receipt_id,
+                "execution_state": "completed",
+                "evidence_classification": "eligible_replay_leak",
+                "promotion_state": promotion_state,
+                "reason_code": promotion_state,
+                "canonical_observation_id": canonical_observation_id,
+                "canonical_finding_id": canonical_finding_id,
+                "permitted_next_local_action": None,
+            },
+            "orchestration_receipt": {
+                "receipt_id": f"behavioral-{'8' * 64}",
+                "state": "completed",
+                "reused": True,
+            },
+        }
+
+    legacy_route = AsyncMock(
+        side_effect=AssertionError("legacy capability candidate was routed")
+    )
+    monkeypatch.setattr(
+        foundry,
+        "run_behavioral_authorization_from_url_endpoint",
+        execute,
+    )
+    monkeypatch.setattr(
+        scans,
+        "_route_completed_behavioral_finding",
+        legacy_route,
+    )
+
+    request = ScanRequest(
+        target="https://example.test/app",
+        mode="bug_bounty",
+        behavioral_one_click={
+            "mode": "capability_effect",
+            "completion": "behavioral_phase_only",
+            "envelope_id": ENVELOPE_ID,
+            "source_persona_id": SOURCE_PERSONA_ID,
+            "peer_persona_id": PEER_PERSONA_ID,
+            "capability_effect": CAPABILITY_EFFECT_SPECIFICATION,
+        },
+    )
+
+    result = await _run_behavioral_one_click_phase(request, session=session)
+
+    legacy_route.assert_not_awaited()
+    assert session.findings.added == []
+    assert (
+        result["capability_effect_promotion"]["assessment_session_id"]
+        == original_session_id
+    )
+    summary = state.scan_state["behavioral_one_click"]
+    assert summary["status"] == expected_phase_status
+    assert summary["assessment_session_id"] == original_session_id
+    assert summary["promotion_state"] == promotion_state
+    assert summary["canonical_observation_id"] == canonical_observation_id
+    assert summary["canonical_finding_id"] == canonical_finding_id
+    assert summary["finding_id"] == expected_finding_id
+    assert legacy_candidate_id not in str(summary)
 
 
 @pytest.mark.asyncio
@@ -817,6 +1071,10 @@ async def test_behavioral_one_click_denial_fails_before_scan_traffic(
         "result_status": None,
         "finding_id": None,
         "finding_type": None,
+        "assessment_session_id": None,
+        "promotion_state": None,
+        "canonical_observation_id": None,
+        "canonical_finding_id": None,
         "receipt_id": None,
         "receipt_state": None,
         "receipt_reused": None,
@@ -969,9 +1227,30 @@ async def test_anonymous_passive_scan_skips_reasoning_tools_and_verification(
     assert reasoning_called is False
 
 
+@pytest.mark.parametrize(
+    "behavioral_profile",
+    [
+        {
+            "completion": "behavioral_phase_only",
+            "envelope_id": ENVELOPE_ID,
+            "source_persona_id": SOURCE_PERSONA_ID,
+            "peer_persona_id": PEER_PERSONA_ID,
+        },
+        {
+            "mode": "capability_effect",
+            "completion": "behavioral_phase_only",
+            "envelope_id": ENVELOPE_ID,
+            "source_persona_id": SOURCE_PERSONA_ID,
+            "peer_persona_id": PEER_PERSONA_ID,
+            "capability_effect": CAPABILITY_EFFECT_SPECIFICATION,
+        },
+    ],
+    ids=["paired-persona", "capability-effect"],
+)
 @pytest.mark.asyncio
-async def test_paired_behavioral_phase_only_scan_skips_post_proof_authority(
+async def test_behavioral_phase_only_scan_skips_post_proof_authority(
     monkeypatch,
+    behavioral_profile,
 ):
     state = ApplicationState()
     monkeypatch.setattr(ApplicationState, "_instance", state)
@@ -1015,6 +1294,23 @@ async def test_paired_behavioral_phase_only_scan_skips_post_proof_authority(
         forbidden_reasoning,
     )
 
+    def active_verification_decision(_mode, *, passive_only):
+        assert passive_only is True
+        return False
+
+    monkeypatch.setattr(
+        "core.server.routers.scans._should_run_active_verification",
+        active_verification_decision,
+    )
+
+    async def forbidden_finding_gate(*_args, **_kwargs):
+        raise AssertionError("phase-only scan must not run the finding verifier")
+
+    monkeypatch.setattr(
+        "core.toolkit.finding_verifier.gate",
+        forbidden_finding_gate,
+    )
+
     def forbidden_connect(*_args):
         raise AssertionError("phase-only scan must not connect ActionDispatcher")
 
@@ -1035,12 +1331,7 @@ async def test_paired_behavioral_phase_only_scan_skips_post_proof_authority(
             mode="bug_bounty",
             scope=["example.test"],
             scope_strict=True,
-            behavioral_one_click={
-                "completion": "behavioral_phase_only",
-                "envelope_id": ENVELOPE_ID,
-                "source_persona_id": SOURCE_PERSONA_ID,
-                "peer_persona_id": PEER_PERSONA_ID,
-            },
+            behavioral_one_click=behavioral_profile,
         )
     )
     await state.active_scan_task
@@ -1054,6 +1345,7 @@ async def test_paired_behavioral_phase_only_scan_skips_post_proof_authority(
     assert event_bus.scan_starts == [
         ("https://example.test/", [], "behavioral-scan-session")
     ]
+    assert state.scan_state["_dispatch_tool"] is None
     assert any(
         "Behavioral phase-only profile completed" in message
         for message in session.logs

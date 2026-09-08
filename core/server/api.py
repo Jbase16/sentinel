@@ -123,6 +123,25 @@ async def lifespan(app: FastAPI):
     await db.init()
     app.state.boot_status["db_ready"] = True
 
+    # R5D10 recovery is intentionally local-only: it inspects completed
+    # behavioral receipts and retries bounded canonical writes.  Failure keeps
+    # the API available for diagnosis but does not grant execution authority.
+    try:
+        from core.behavior.capability_effect_promotion import (
+            CapabilityEffectPromotionService,
+        )
+
+        reconciled = CapabilityEffectPromotionService(config).reconcile()
+        app.state.boot_status["capability_effect_reconciliation"] = {
+            "state": "complete",
+            "sources_inspected": len(reconciled),
+        }
+    except Exception as exc:
+        logger.error("[Startup] capability evidence reconciliation failed: %s", exc)
+        app.state.boot_status["capability_effect_reconciliation"] = {
+            "state": "unavailable",
+        }
+
     # Initialize global event sequence counter
     from core.cortex.events import initialize_event_sequence_from_db, set_strict_contract_mode
     await initialize_event_sequence_from_db()

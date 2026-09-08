@@ -32,6 +32,7 @@ from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.authorization import create_envelope
 from core.foundry.vault import PersonaVault
 from core.safety.proof_budget import ProofBudget
+from tests.import_contract import find_module_consumers, source_imports_module
 
 
 ORIGIN = "https://api.example.test"
@@ -625,9 +626,12 @@ def test_new_module_has_exactly_one_core_consumer_and_no_lab_import():
     repository_root = Path(__file__).resolve().parents[2]
     production_consumers = sorted(
         path.relative_to(repository_root).as_posix()
-        for path in (repository_root / "core").rglob("*.py")
-        if path.resolve() != source_path
-        and "capability_effect_one_click" in path.read_text(encoding="utf-8")
+        for path in find_module_consumers(
+            (repository_root / "core").rglob("*.py"),
+            "core.behavior.capability_effect_one_click",
+            repository_root=repository_root,
+            exclude=(source_path,),
+        )
     )
     assert production_consumers == ["core/server/routers/foundry.py"]
 
@@ -638,20 +642,12 @@ def test_new_module_has_exactly_one_core_consumer_and_no_lab_import():
             if ".venv" in path.parts:
                 continue
             source = path.read_text(encoding="utf-8")
-            tree = ast.parse(source)
-            import_roots = {
-                alias.name.split(".", 1)[0]
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Import)
-                for alias in node.names
-            } | {
-                (node.module or "").split(".", 1)[0]
-                for node in ast.walk(tree)
-                if isinstance(node, ast.ImportFrom)
-            }
-            if (
-                "capability_effect_one_click" in source
-                or {"core", "sentinelforge"} & import_roots
+            if any(
+                source_imports_module(source, forbidden_module)
+                for forbidden_module in (
+                    "core",
+                    "sentinelforge",
+                )
             ):
                 lab_consumers.append(path)
     assert lab_consumers == []

@@ -4,9 +4,12 @@ Status: detailed capability contract and staged backlog; current program status 
 execution order are authoritative in
 [`ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md`](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md)
 
-Baseline: `f9d3607950885953ab620b973723044d342e7925`
+Historical reconciliation baseline: `f9d3607950885953ab620b973723044d342e7925`
 
-Last reconciled: 2026-09-02
+R5D10 source baseline: clean `main` at
+`cb3e9267d887e68007b804277b00f50929ba7786`
+
+Last reconciled: 2026-09-08
 
 ## Purpose
 
@@ -110,9 +113,9 @@ planner, and a URL without meaningful accounts must not be forced into that topo
 | Paired-persona authorization oracle | Implemented, narrow | Controlled cross-object reads use owned identities and independent proof before finding promotion. | Generalize object location, role relationships, operations, and proof matrices. |
 | State-machine prerequisite oracles | Production-wired and externally passed for bounded omission and adjacent reordering | Exact same-world lineage preserves a content-addressed DAG; one payout-selected terminal can execute sealed baseline, treatment, and independent control across three fresh owned worlds, compare canonical effects, verify family-specific evidence, clean up, persist redacted denial/completion state, and revalidate current capture before rebuilding the admitted plan. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Define replay and stale-state capability/freshness semantics before adding those counterfactuals. |
 | Role/membership monotonicity oracle | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel Acceptance parity are suite-proved; R5C9 current-SHA acceptance is mediator-verified, while broader membership-creation, role-assignment, and administrative-boundary shapes remain open and deferred | An exact operator-supplied role specification binds two owned personas, three retained sessions, active and revoked generations, eight in-origin actions, independent protected-effect evaluation, completed/aborted receipts, cleanup, and canonical positive-proof routing. Native `OCB-S16` passed three pair-level fresh vulnerable/secure cycles at Sentinel `5f03c35` / verifier `3511bf6`, with real app-restart receipt reuse and zero additional governed role actions on retry; the R5D1 work-order handoff records the separate R5C9 renewal at Sentinel `dfccecc`. | Preserve the exact R5C9 claim and repository boundary; the broader Family-C shapes remain open and deferred and are not part of Family D. |
-| Issued-capability contracts through concrete effect evaluation and cleanup | R5D1-R5D8 retain their suite-proved bounded layers; R5D9 is production-wired to an exact default-off Foundry profile and controlled-target suite-proved | R5D9 composes R5D8's frozen executor and oracle with genuine R5D5/R5D6 outcomes, a concrete PolicyExecutor transport, one proposal-claimed witness, four refusal probes, and one mandatory same-origin cleanup. The root receipt blocks duplicate execution while persisting only a generic no-candidate projection. Raw target effect/resource/session content is not retained, and the same oracle confirms the secure controlled target while refuting replay leakage. A confirmed result remains a triage candidate with `promotion_authority=False` and `finding_authority=False`. The final suite checkpoint is `3171 passed, 1 skipped, 5 warnings in 36.73s`. | Run a separately authorized operator-attested exact-SHA matrix and accept `OCB-S17`; add finding promotion/durable claim only in a later slice; no later slice identifier is assigned. |
+| Issued-capability contracts through durable evidence and canonical replay-leak promotion | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and focused-tested for strict durable inner evidence, default-off local promotion/recovery, and phase-only Scan selection; its single full-suite run was non-green, so it is not suite-proved | R5D10 preserves R5D9's controlled-twin target-request count/order, five outcomes, oracle and confinement/consumption decisions, cleanup, and failures. Each authoritative inner receipt may retain one versioned redacted evidence source bounded to 256 KiB. A journal binds it to the original assessment, producer, identity, operation, and source receipt; one service applies the strict replay predicate and atomically commits the Observation, replay-leak Finding, events, and successful result. Secure/non-matching evidence remains a non-finding. All production DB/WAL/SHM, receipt, CAS, journal, audit, and reconciliation paths must resolve outside every Git worktree before dispatch. Gate state and bounded attempt history live only in journal/audit. Status, explicit promotion, retry, and bounded restart reconciliation have no target-transport dependency and add zero requests. | Obtain one complete green suite at a resulting SHA before claiming suite-proved. `OCB-S17` is already local operator-native and `native_proven` for Sentinel `cb3e926` only by artifact `c1239945…`; it does not attest R5D10. Independently counted effect occurrence and report/submission evidence remain later work. |
 | Bounded adaptive safe-read exploration | Implemented, narrow | Receipt-chained same-origin GET transitions can expose and hand off one newly actionable obligation. | Add topology-aware acquisition without creating a free-form browser agent. |
-| Ordinary one-click behavioral bridge | Implemented for family A and bounded family-B/family-C paths, plus an API-only default-off Family-D profile | The native Scan UI retains the exact phase-only role profile. R5D9 adds an explicit mutually exclusive `capability_effect` request to the Foundry behavioral-authorization API. Only the existing primary and capability-effect gates plus signed workflow, owned persona, scope, policy, budget, and root receipt can reach its concrete transport. It does not route the candidate to a finding and is not selected by the native Scan UI. | Attest the exact-SHA R5D9 API path under `OCB-S17`; any native Scan selection and finding-promotion contract require separate authorization and proof. |
+| Ordinary one-click behavioral bridge | Implemented for family A, bounded family-B/family-C paths, and an explicit phase-only default-off Family-D Scan/API profile | R5D10 adds symmetric Scan request validation: capability evidence payload is present if and only if capability mode is selected, capability mode requires `behavioral_phase_only`, remains mutually exclusive with other behavioral profiles, and suppresses ordinary follow-on scan and verification work. Direct Foundry and scan-triggered runs share the same original-assessment admission, evidence, and promotion service; a later scan references an existing source's original session rather than reminting it. Local promotion can expose the committed result through that canonical session's read model. | Obtain one complete green R5D10 suite. Native UI selection and changed-build acceptance still require separate authorization and exact-build proof; the accepted `cb3e926` OCB-S17 artifact does not cross that SHA boundary. |
 | Proof topology selector | Implemented and bounded for the closed Family-B scope | `PayoutGoalTopologyPlanner` binds the graph backend to the exact compiled terminal; ordinary click selects one unique omission or, when omission is not uniquely selectable, one unique adjacent reordering. Graph-absent v1 identities remain stable. | Add only separately admitted executable topologies. |
 | Payout-grade goal language | Implemented as an initial passive ontology | `PayoutSink`, `SecurityWitnessGoal`, `SecurityProperty`, `WorldRequirement`, and `GoalBlocker` describe ranked goals without granting authority or claiming a finding. | Add program-specific impact, cleanup, and broader proof requirements in R4-R6; R3 constraints already bind to these goals. |
 | Failure-derived constraint learning | Implemented, passive and evidence-gated | `StructuredConstraintExtractor` recognizes bounded machine-readable prerequisite failures; `ConstraintLedger` keeps structured or independently controlled facts separate from untrusted-text hypotheses. | Add source adapters only when their structured semantics can be validated without promoting prose to fact. |
@@ -1298,12 +1301,48 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   route emits only a triage candidate and persists no finding or durable candidate
   claim. The detailed contract is in
   [`ONE_CLICK_BOUNTY_R5D9_CAPABILITY_EFFECT_WIRING_PLAN.md`](ONE_CLICK_BOUNTY_R5D9_CAPABILITY_EFFECT_WIRING_PLAN.md).
-- [ ] Prove object-bound, account-bound, tenant-bound, single-use, and expiry properties
-  through an externally attested admitted runtime. R5D1-R5D8 define the bounded
-  contracts and injected oracle; R5D9 can now reach a controlled target through the
-  default-off Foundry API path. That suite proof is not a lab attestation or external
-  observation. Any `OCB-S17` run must be separately authorized, operator-attested,
-  and bound to the exact Sentinel SHA. No Family-D path promotes a finding.
+- [x] R5D10 retains a strict, versioned, redacted evidence export on the authoritative
+  completed inner receipt and binds it to immutable original-assessment admission in
+  the canonical SQLite journal. Its frozen engineering contract is SHA-256
+  `6fa7710a920be6bc490e0c9a5b44fdc64033e48dc7de2aadba82253f88718c43`; addendum
+  SHA-256 `6dd5a71ca6dffe7418b1e63576fecca00e560c4a59c502316c330dcf2bad5643`
+  governs only the additional program boundaries. The evidence record is bounded to
+  256 KiB, admits only `controlled_in_memory_twin`, `controlled_owned_lab`, or
+  `unknown` runtime classifications, rejects duplicate or unknown fields and internal
+  inconsistencies, and is content-addressed into the existing CAS. The distinct
+  `SENTINELFORGE_BEHAVIOR_CAPABILITY_FINDING_PROMOTION` gate is default-off and
+  evaluated per local admission; its state, timestamps, and bounded attempt
+  history stay in journal/audit records and never enter finding identity. One shared
+  service independently reloads and validates the receipt, journal, CAS bytes,
+  producer, identity, operation, and exact replay-leak predicate, then commits the
+  Observation, replay-leak Finding, canonical events, and successful journal result in
+  one SQLite transaction. Its result belongs to the execution's original assessment,
+  including after restart or when a later scan encounters the same source.
+- [x] R5D10 wires that service into direct Foundry and the ordinary Scan API. Scan
+  capability mode is payload-exact, mutually exclusive, requires
+  `behavioral_phase_only`, and suppresses ordinary continuation and verification. The
+  authenticated status route and sensitive explicit-promotion route accept an existing
+  execution identity only; they cannot replace the receipt, target, assessment,
+  identity, or verdict. Startup reconciliation is local and bounded to 256 journal
+  sources per default invocation. Promotion attempt history retains at most 32 entries,
+  with each entry bounded to 4 KiB. Status, promotion, retry, and reconciliation have
+  no transport, browser, capture, credential-refresh, or cleanup dependency and make
+  zero target requests.
+- [x] Every effective production database, WAL/SHM, CAS blob and temporary publication,
+  behavioral receipt, promotion journal/audit artifact, and reconciliation artifact
+  must resolve outside every Git worktree. Admission refuses a violating root before
+  constructing the target dispatcher. Test stores remain permitted in isolated
+  temporary directories.
+- [x] `OCB-S17` object/account/tenant confinement, single use, expiry, replay refusal,
+  and cleanup acceptance completed 2026-09-06 against Sentinel
+  `cb3e9267d887e68007b804277b00f50929ba7786`. The accepted local operator-native
+  artifact SHA-256 is
+  `c12399451df489228af180f4555631a6b1b9d02b966271ae015e8980fdcd9a5e` and carries
+  the bounded `native_proven` label. R5D10 preserves the attested target-request order,
+  five-phase outcomes, oracle/confinement/consumption decisions, cleanup, and failure
+  behavior, but its additive evidence, persistence, promotion, and Scan changes create
+  a new build. The accepted artifact does not attest R5D10 and grants it no lab,
+  native, live, external-target, report, submission, or payout status.
 - [x] R5D1 keeps bearer tokens and keys ephemeral; public contract and fixture evidence
   contains only typed hashes, including `secret_digest` rather than raw material.
 - [x] R5D1 requires a callback reference to bind an SDK callback-receiver world and
@@ -1330,10 +1369,22 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   deduplication, and real cleanup. Raw effect/resource/session material is not retained,
   the visual-acceptance lab imports no Sentinel module, and only a future attested SHA
   may cross that repository boundary.
-- [ ] Accept `OCB-S17` for confinement, expiry, one-time use, replay refusal, and
-  cleanup. No R5D1-R5D9 unit or suite result satisfies this external gate.
-- [ ] Add finding promotion or a durable claim only in a later, separately authorized
-  slice; R5D9's candidate does not carry either authority.
+- [x] R5D10 adds the durable source and strict replay-leak predicate, original-session
+  canonical promotion, authenticated local status/promotion, restart reconciliation,
+  and phase-only Scan production caller. The secure control and every non-matching
+  refuted shape remain non-findings. Production evidence-root admission is pre-dispatch
+  and outside-worktree only. The integrated checkpoint passed `465` tests and the final
+  durability checkpoint passed `56`. The required single full-suite run reported
+  `3370 passed`, `1 skipped`, `3 warnings`, and `9 failed` in `57.58s`; after the
+  process-harness and mock-storage-fixture repairs, all nine failed cases passed in a
+  `12 passed in 1.32s` targeted checkpoint. The resulting tree is focused-tested, not
+  suite-proved, because the full suite was not rerun.
+- [x] R5D10 execution remains restricted to the existing controlled secure/replay-leak
+  twins and an explicitly owned controlled lab. This slice performs no external-target
+  run, native run, lab attestation, report generation, or submission.
+- [x] Bank OCB-S17 as local operator-native `native_proven` evidence for `cb3e926` only.
+  Any native claim for the changed R5D10 build requires its own separately authorized,
+  exact-build acceptance.
 
 #### R5E — Owned-data integrity relations
 

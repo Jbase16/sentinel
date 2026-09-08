@@ -258,6 +258,7 @@ class TaskRouter(Observable):
                     severity=behavioral_proposal.severity,
                     citations=list(behavioral_proposal.citations),
                     description=behavioral_proposal.description,
+                    remediation=behavioral_proposal.remediation,
                     confirmation_level=ConfirmationLevel.CONFIRMED.value,
                     metadata=behavioral_proposal.metadata,
                     active_proof=[citation],
@@ -312,6 +313,7 @@ class TaskRouter(Observable):
                     severity=proposal.severity,
                     description=proposal.description,
                     citations=[Citation(observation_id=observation.id)],
+                    remediation=proposal.remediation,
                     source=proposal.source,
                     metadata=proposal.metadata,
                     confirmation_level=proposal.confirmation_level,
@@ -405,6 +407,11 @@ class TaskRouter(Observable):
             severity=severity,
             description=description,
             citations=[Citation(observation_id=observation_id)],
+            remediation=(
+                str(finding["remediation"])
+                if finding.get("remediation") is not None
+                else None
+            ),
             source=source,
             metadata={
                 "tool": tool_name,

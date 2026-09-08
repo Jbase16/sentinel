@@ -63,6 +63,8 @@ def _isolate(monkeypatch, tmp_path):
         "SENTINELFORGE_BEHAVIOR_ROLE_MEMBERSHIP_LIFECYCLE",
         "SENTINELFORGE_BEHAVIOR_ROLE_PROTECTED_EFFECT_EXECUTION",
         "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
+        "SENTINELFORGE_BEHAVIOR_CAPABILITY_FINDING_PROMOTION",
+        "SENTINELFORGE_CAPABILITY_EVIDENCE_CLASSIFICATION",
     ):
         monkeypatch.delenv(name, raising=False)
     _reset_bus_for_tests()
@@ -533,6 +535,17 @@ class TestBehavioralAuthorizationEndpoint:
             capability_effect,
         )
 
+    @staticmethod
+    def _isolated_r5d10_config(monkeypatch, tmp_path):
+        from core.base.config import SentinelConfig, StorageConfig
+        from core.behavior import capability_effect_promotion as promotion_module
+
+        config = SentinelConfig(
+            storage=StorageConfig(base_dir=tmp_path / "canonical-evidence")
+        )
+        monkeypatch.setattr(promotion_module, "get_config", lambda: config)
+        return config
+
     def _one_click_request(self, *, graph_bound=False):
         from core.server.routers.foundry import (
             RunBehavioralAuthorizationFromURLRequest,
@@ -972,6 +985,485 @@ class TestBehavioralAuthorizationEndpoint:
         assert "raw-foundry-session" not in repr(result)
         assert duplicate["status"] == "already_executed"
         assert len(calls) == 6
+
+    def test_r5d10_vulnerable_twin_promotes_and_duplicate_reuses_source_owner(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from core.behavior.capability_effect_promotion import (
+            CAPABILITY_FINDING_PROMOTION_ENV,
+            CapabilityEffectPromotionService,
+        )
+        from core.behavior.normalize import stable_hash
+        from core.behavior.receipts import BehavioralReceiptStore
+        from core.epistemic.ledger import EvidenceLedger
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        config = self._isolated_r5d10_config(monkeypatch, tmp_path)
+        request, source_persona, _, capability_effect = (
+            self._capability_effect_request()
+        )
+        first_intake_id = stable_hash(
+            "capability_effect_intake",
+            {"stage_1_capture": "first"},
+        )
+        second_intake_id = stable_hash(
+            "capability_effect_intake",
+            {"stage_1_capture": "duplicate"},
+        )
+        request._capability_intake_id = first_intake_id
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
+            "1",
+        )
+        monkeypatch.setenv(CAPABILITY_FINDING_PROMOTION_ENV, "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_CAPABILITY_EVIDENCE_CLASSIFICATION",
+            "controlled_in_memory_twin",
+        )
+        raw_effect = {
+            "effect": "R5D10RawTwinEffectMustNotSurvive",
+            "resource": "r5d10-raw-twin-resource",
+            "session": "r5d10-raw-twin-session",
+        }
+        calls = []
+        admission_calls = []
+
+        original_reserve_execution = CapabilityEffectPromotionService.reserve_execution
+
+        def tracked_reserve_execution(service, **kwargs):
+            admission = original_reserve_execution(service, **kwargs)
+            admission_calls.append((kwargs["intake_id"], admission))
+            return admission
+
+        async def fake_send(_transport, persona_id, replay_request):
+            assert persona_id == source_persona.persona_id
+            body = json.loads(replay_request.body)
+            phase = body.get("observation_kind", "cleanup")
+            calls.append((replay_request.url, phase))
+            if phase == "cleanup":
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "cleanup_verified": True,
+                            "orphaned_owned_state_possible": False,
+                            "target_projection_observed": True,
+                        }
+                    ),
+                )
+            if phase in {
+                "valid_capability_effect_witness",
+                "replayed_capability_probe",
+            }:
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "access_decision": "allowed",
+                            "effect": raw_effect,
+                            "target_projection_observed": True,
+                        }
+                    ),
+                )
+            return ReplayResponse(
+                403,
+                json.dumps(
+                    {
+                        "access_decision": "denied",
+                        "effect": None,
+                        "target_projection_observed": True,
+                    }
+                ),
+            )
+
+        monkeypatch.setattr(
+            CapabilityEffectPromotionService,
+            "reserve_execution",
+            tracked_reserve_execution,
+        )
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+
+        result = _run(run_behavioral_authorization_endpoint(request, _=True))
+        calls_after_first = list(calls)
+        request._capability_intake_id = second_intake_id
+        duplicate = _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        expected_phases = [
+            "no_capability_baseline",
+            "valid_capability_effect_witness",
+            "replayed_capability_probe",
+            "expired_capability_probe",
+            "inadmissible_capability_probe",
+            "cleanup",
+        ]
+        assert [phase for _, phase in calls_after_first] == expected_phases
+        assert [url for url, _ in calls_after_first] == [
+            *([capability_effect["target_url"]] * 5),
+            capability_effect["cleanup_url"],
+        ]
+        assert calls == calls_after_first
+        assert result["kind"] == "capability_effect_one_click"
+        assert result["status"] == "refuted"
+        assert result["capability_effect_one_click"]["cleanup"] == {
+            "status": "verified",
+            "target_requests_sent": 6,
+            "target_request_may_have_been_sent": False,
+            "orphaned_owned_state_possible": False,
+        }
+        assert (
+            result["capability_effect_evidence"]["runtime_evidence_classification"]
+            == "controlled_in_memory_twin"
+        )
+        assert result["capability_effect_evidence"]["oracle"]["verdict"] == ("refuted")
+        assert result["receipt"]["state"] == "completed"
+        promotion = result["capability_effect_promotion"]
+        assert promotion["promotion_state"] == "promoted"
+        assert promotion["reason_code"] == "promoted"
+        assert promotion["assessment_session_id"] == result["assessment_session_id"]
+        assert promotion["canonical_observation_id"]
+        assert promotion["canonical_finding_id"]
+
+        assert duplicate["status"] == "already_executed"
+        assert duplicate["receipt"] == {
+            "receipt_id": result["receipt"]["receipt_id"],
+            "state": "completed",
+            "reused": True,
+        }
+        assert duplicate["capability_effect_promotion"] == promotion
+        assert [item[0] for item in admission_calls] == [
+            first_intake_id,
+            second_intake_id,
+        ]
+        assert admission_calls[0][1].admission_id == (
+            admission_calls[1][1].admission_id
+        )
+        assert admission_calls[0][1].session_id == promotion["assessment_session_id"]
+        assert admission_calls[1][1].session_id == promotion["assessment_session_id"]
+
+        receipt_store = BehavioralReceiptStore()
+        read_model = EvidenceLedger(
+            config,
+            receipt_store=receipt_store,
+        ).session_read_model(promotion["assessment_session_id"])
+        assert [item.id for item in read_model.observations] == [
+            promotion["canonical_observation_id"]
+        ]
+        assert [item.id for item in read_model.findings] == [
+            promotion["canonical_finding_id"]
+        ]
+        assert read_model.findings[0].session_id == promotion["assessment_session_id"]
+        assert read_model.findings[0].metadata["finding_class"] == (
+            "capability_replay_leak_v1"
+        )
+        assert "promotion_state" not in read_model.findings[0].metadata
+        serialized = json.dumps(result, sort_keys=True)
+        assert raw_effect["effect"] not in serialized
+        assert raw_effect["resource"] not in serialized
+        assert raw_effect["session"] not in serialized
+
+    def test_r5d10_persistence_failure_refuses_before_transport(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from fastapi import HTTPException
+
+        from core.behavior.capability_effect_promotion import (
+            CapabilityEffectPromotionService,
+        )
+        from core.server.routers.foundry import (
+            run_behavioral_authorization_endpoint,
+        )
+        from core.wraith.bola_replay import SNDReplayTransport
+
+        self._isolated_r5d10_config(monkeypatch, tmp_path)
+        request, _, _, _ = self._capability_effect_request()
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
+            "1",
+        )
+        transport_calls = []
+
+        def fail_local_preflight(_service):
+            raise OSError("injected local persistence failure")
+
+        async def forbidden_transport(*_args, **_kwargs):
+            transport_calls.append(True)
+            raise AssertionError("persistence refusal reached target transport")
+
+        monkeypatch.setattr(
+            CapabilityEffectPromotionService,
+            "preflight_local_persistence",
+            fail_local_preflight,
+        )
+        monkeypatch.setattr(SNDReplayTransport, "send", forbidden_transport)
+
+        with pytest.raises(HTTPException) as error:
+            _run(run_behavioral_authorization_endpoint(request, _=True))
+
+        assert error.value.status_code == 503
+        assert error.value.detail == (
+            "capability evidence admission unavailable; execution refused"
+        )
+        assert transport_calls == []
+
+    def test_r5d10_from_url_binds_two_stage_source_and_reuses_outer_receipt(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        from core.behavior.capability_effect_promotion import (
+            CAPABILITY_FINDING_PROMOTION_ENV,
+            CapabilityEffectPromotionService,
+        )
+        from core.behavior.receipts import BehavioralReceiptStore
+        from core.server.routers import driver
+        from core.server.routers.foundry import (
+            RunBehavioralAuthorizationFromURLRequest,
+            run_behavioral_authorization_from_url_endpoint,
+        )
+        from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+        self._isolated_r5d10_config(monkeypatch, tmp_path)
+        direct_request, source_persona, peer_persona, capability_effect = (
+            self._capability_effect_request()
+        )
+        request = RunBehavioralAuthorizationFromURLRequest(
+            target_url=f"{self.ORIGIN}/app",
+            envelope_id=direct_request.envelope_id,
+            source_persona_id=source_persona.persona_id,
+            peer_persona_id=peer_persona.persona_id,
+            capability_effect=capability_effect,
+        )
+        monkeypatch.setenv("SENTINELFORGE_BEHAVIOR_PRIMARY", "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_BEHAVIOR_CAPABILITY_EFFECT_EXECUTION",
+            "1",
+        )
+        monkeypatch.setenv(CAPABILITY_FINDING_PROMOTION_ENV, "1")
+        monkeypatch.setenv(
+            "SENTINELFORGE_CAPABILITY_EVIDENCE_CLASSIFICATION",
+            "controlled_in_memory_twin",
+        )
+        events = []
+        captures = 0
+        window_checks = 0
+        admissions = []
+        transport_calls = []
+        raw_effect = {
+            "effect": "R5D10TwoStageRawEffectMustNotSurvive",
+            "resource": "r5d10-two-stage-raw-resource",
+            "session": "r5d10-two-stage-raw-session",
+        }
+
+        original_reserve_execution = CapabilityEffectPromotionService.reserve_execution
+
+        def tracked_reserve_execution(service, **kwargs):
+            admission = original_reserve_execution(service, **kwargs)
+            stage = "inner" if kwargs.get("source_fingerprint") else "outer"
+            admissions.append((stage, admission, dict(kwargs)))
+            events.append(f"admit:{stage}")
+            return admission
+
+        async def validate_windows(persona_ids):
+            nonlocal window_checks
+            window_checks += 1
+            events.append("validate_windows")
+            assert tuple(persona_ids) == (
+                source_persona.persona_id,
+                peer_persona.persona_id,
+            )
+
+        async def capture_pair(**kwargs):
+            nonlocal captures
+            captures += 1
+            events.append("capture")
+            assert kwargs == {
+                "target_url": f"{self.ORIGIN}/app",
+                "source_persona_id": source_persona.persona_id,
+                "peer_persona_id": peer_persona.persona_id,
+            }
+            assert admissions[-1][0] == "outer"
+            assert admissions[-1][1].source_receipt_id is None
+            return (
+                driver.PersonaCaptureArtifact(
+                    persona_id=source_persona.persona_id,
+                    path="/private/r5d10-source-capture.jsonl",
+                    records=tuple(direct_request.source_records),
+                    captured_bytes=321,
+                    limit_reached=False,
+                    page_url=f"{self.ORIGIN}/app",
+                ),
+                driver.PersonaCaptureArtifact(
+                    persona_id=peer_persona.persona_id,
+                    path="/private/r5d10-peer-capture.jsonl",
+                    records=tuple(direct_request.peer_records),
+                    captured_bytes=123,
+                    limit_reached=False,
+                    page_url=f"{self.ORIGIN}/app",
+                ),
+                (),
+            )
+
+        async def fake_send(_transport, persona_id, replay_request):
+            assert persona_id == source_persona.persona_id
+            body = json.loads(replay_request.body)
+            phase = body.get("observation_kind", "cleanup")
+            if not transport_calls:
+                assert admissions[-1][0] == "inner"
+                assert admissions[-1][1].source_receipt_id is not None
+                assert events[-1] == "admit:inner"
+            transport_calls.append((replay_request.url, phase))
+            events.append(f"transport:{phase}")
+            if phase == "cleanup":
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "cleanup_verified": True,
+                            "orphaned_owned_state_possible": False,
+                            "target_projection_observed": True,
+                        }
+                    ),
+                )
+            if phase in {
+                "valid_capability_effect_witness",
+                "replayed_capability_probe",
+            }:
+                return ReplayResponse(
+                    200,
+                    json.dumps(
+                        {
+                            "access_decision": "allowed",
+                            "effect": raw_effect,
+                            "target_projection_observed": True,
+                        }
+                    ),
+                )
+            return ReplayResponse(
+                403,
+                json.dumps(
+                    {
+                        "access_decision": "denied",
+                        "effect": None,
+                        "target_projection_observed": True,
+                    }
+                ),
+            )
+
+        monkeypatch.setattr(
+            CapabilityEffectPromotionService,
+            "reserve_execution",
+            tracked_reserve_execution,
+        )
+        monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+        monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+        monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+
+        first = _run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+        counts_after_first = (
+            window_checks,
+            captures,
+            len(admissions),
+            len(transport_calls),
+        )
+        duplicate = _run(
+            run_behavioral_authorization_from_url_endpoint(request, _=True)
+        )
+
+        assert events[:4] == [
+            "validate_windows",
+            "admit:outer",
+            "capture",
+            "admit:inner",
+        ]
+        assert [item[0] for item in admissions] == ["outer", "inner"]
+        outer_admission = admissions[0][1]
+        inner_admission = admissions[1][1]
+        assert outer_admission.admission_id == inner_admission.admission_id
+        assert outer_admission.session_id == inner_admission.session_id
+        assert outer_admission.source_receipt_id is None
+        assert inner_admission.source_receipt_id == first["receipt"]["receipt_id"]
+        assert first["assessment_session_id"] == outer_admission.session_id
+        assert first["capability_effect_promotion"]["promotion_state"] == ("promoted")
+        assert [phase for _, phase in transport_calls] == [
+            "no_capability_baseline",
+            "valid_capability_effect_witness",
+            "replayed_capability_probe",
+            "expired_capability_probe",
+            "inadmissible_capability_probe",
+            "cleanup",
+        ]
+        assert counts_after_first == (1, 1, 2, 6)
+        assert (
+            window_checks,
+            captures,
+            len(admissions),
+            len(transport_calls),
+        ) == counts_after_first
+
+        receipt_store = BehavioralReceiptStore()
+        inner_receipt = receipt_store.load(
+            first["receipt"]["receipt_id"].removeprefix("behavioral-")
+        )
+        outer_receipt = receipt_store.load(
+            first["orchestration_receipt"]["receipt_id"].removeprefix("behavioral-")
+        )
+        assert inner_receipt is not None
+        assert outer_receipt is not None
+        assert inner_receipt.receipt_id != outer_receipt.receipt_id
+        assert "capability_effect_evidence" in inner_receipt.outcome
+        assert outer_receipt.outcome == {
+            "kind": "capability_effect_orchestration",
+            "status": "completed",
+            "source_receipt_id": inner_receipt.receipt_id,
+            "assessment_session_id": outer_admission.session_id,
+        }
+        assert "capability_effect_evidence" not in outer_receipt.outcome
+        assert "finding" not in outer_receipt.outcome
+        assert "promotion_authority" not in outer_receipt.outcome
+
+        assert duplicate["status"] == "already_executed"
+        assert duplicate["source_receipt_id"] == inner_receipt.receipt_id
+        assert duplicate["assessment_session_id"] == outer_admission.session_id
+        assert (
+            duplicate["capability_effect_promotion"]
+            == first["capability_effect_promotion"]
+        )
+        assert duplicate["orchestration_receipt"] == {
+            "receipt_id": outer_receipt.receipt_id,
+            "state": "completed",
+            "reused": True,
+        }
+        assert raw_effect["effect"] not in json.dumps(first, sort_keys=True)
+        assert raw_effect["resource"] not in json.dumps(first, sort_keys=True)
+        assert raw_effect["session"] not in json.dumps(first, sort_keys=True)
+
+    def test_r5d10_status_routes_use_read_and_sensitive_auth(self):
+        from core.server.routers.auth import verify_sensitive_token, verify_token
+        from core.server.routers.foundry import router
+
+        routes = {route.path: route for route in router.routes}
+        status_route = routes["/capability-effect/executions/{execution_id}"]
+        promote_route = routes["/capability-effect/executions/{execution_id}/promote"]
+
+        assert status_route.methods == {"GET"}
+        assert status_route.body_field is None
+        assert [
+            dependency.call for dependency in status_route.dependant.dependencies
+        ] == [verify_token]
+        assert promote_route.methods == {"POST"}
+        assert promote_route.body_field is None
+        assert [
+            dependency.call for dependency in promote_route.dependant.dependencies
+        ] == [verify_sensitive_token]
 
     def test_capability_effect_execution_denial_returns_http_200_status_zero(
         self,
