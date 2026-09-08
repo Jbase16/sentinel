@@ -187,6 +187,13 @@ def test_gate_off_then_on_promotes_saved_source_once_in_original_session(
     assert promoted.canonical_finding_id
     assert (len(twin.calls), len(twin.cleanup_calls)) == calls_before
 
+    monkeypatch.delenv(CAPABILITY_FINDING_PROMOTION_ENV, raising=False)
+    committed_with_gate_off = CapabilityEffectPromotionService(
+        config,
+        receipt_store=receipts,
+    ).promote(receipt.receipt_id)
+    assert committed_with_gate_off.to_dict() == promoted.to_dict()
+
     read_model = EvidenceLedger(
         config,
         receipt_store=receipts,
@@ -266,6 +273,65 @@ def test_legacy_completed_receipt_loads_without_claiming_r5d10_evidence(tmp_path
     assert status.assessment_session_id is None
     assert status.canonical_observation_id is None
     assert status.canonical_finding_id is None
+
+
+def test_duplicate_source_preserves_owner_and_refuses_context_substitution(tmp_path):
+    _config, _receipts, service, admission, receipt, _evidence, _twin = (
+        _completed_source(tmp_path, leak=True)
+    )
+    common = {
+        "target_origin": admission.target_origin,
+        "authorization_envelope_id": admission.identity_binding[
+            "authorization_envelope_id"
+        ],
+        "authorization_envelope_ref": admission.operation[
+            "authorization_envelope_ref"
+        ],
+        "persona_id": admission.identity_binding["persona_id"],
+        "persona_source_ref": admission.identity_binding["credential_source_ref"],
+        "specification": admission.operation["specification"],
+        "execution_policy": admission.execution_policy,
+        "source_fingerprint": receipt.fingerprint,
+        "observed_at": 1_788_800_100.0,
+        "producer_identity": admission.producer_identity,
+    }
+
+    cross_session = service.reserve_execution(
+        intake_id=stable_hash("capability_effect_intake", "cross-session"),
+        requested_session_id="substituted-session",
+        **common,
+    )
+    assert cross_session.admission_id == admission.admission_id
+    assert cross_session.session_id == admission.session_id
+
+    with pytest.raises(ValueError, match="source owner context collision"):
+        service.reserve_execution(
+            intake_id=stable_hash("capability_effect_intake", "cross-persona"),
+            requested_session_id="substituted-session",
+            **{
+                **common,
+                "persona_id": "substituted-persona",
+                "persona_source_ref": stable_hash(
+                    "persona_vault",
+                    "substituted-persona",
+                ),
+            },
+        )
+
+    substituted_specification = dict(admission.operation["specification"])
+    substituted_specification["specification_id"] = stable_hash(
+        "capability_effect_one_click_specification",
+        "substituted-capability",
+    )
+    with pytest.raises(ValueError, match="source owner context collision"):
+        service.reserve_execution(
+            intake_id=stable_hash("capability_effect_intake", "cross-capability"),
+            requested_session_id="substituted-session",
+            **{
+                **common,
+                "specification": substituted_specification,
+            },
+        )
 
 
 def test_suppression_survives_restart_and_cannot_be_repromoted(

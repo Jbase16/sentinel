@@ -1166,6 +1166,17 @@ class TestBehavioralAuthorizationEndpoint:
         assert raw_effect["effect"] not in serialized
         assert raw_effect["resource"] not in serialized
         assert raw_effect["session"] not in serialized
+        persisted = b"".join(
+            path.read_bytes()
+            for root in (
+                config.storage.base_dir,
+                tmp_path / "behavioral_receipts",
+            )
+            for path in root.rglob("*")
+            if path.is_file()
+        )
+        for canary in raw_effect.values():
+            assert canary.encode() not in persisted
 
     def test_r5d10_persistence_failure_refuses_before_transport(
         self,

@@ -1374,7 +1374,7 @@ does not close broader R5C shapes or establish public-target or payout evidence.
   and phase-only Scan production caller. The secure control and every non-matching
   refuted shape remain non-findings. Production evidence-root admission is pre-dispatch
   and outside-worktree only. The integrated checkpoint passed `465` tests and the final
-  durability checkpoint passed `57`. The required single full-suite run reported
+  durability checkpoint passed `58`. The required single full-suite run reported
   `3370 passed`, `1 skipped`, `3 warnings`, and `9 failed` in `57.58s`; after the
   process-harness and mock-storage-fixture repairs, all nine failed cases passed in a
   `12 passed in 1.32s` targeted checkpoint. The resulting tree is focused-tested, not
