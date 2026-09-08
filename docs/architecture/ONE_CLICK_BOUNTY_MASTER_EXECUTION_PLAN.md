@@ -11,7 +11,7 @@ surfaces, and phase-only capability selection in the ordinary Scan API. Its evid
 root is refused before target dispatch when any effective production evidence path
 resolves inside a Git worktree. Promotion, status, retry, and startup reconciliation
 operate only on retained local evidence and add zero target requests. The integrated
-R5D10 checkpoint passed `465` tests; the final durability checkpoint passed `56` tests.
+R5D10 checkpoint passed `465` tests; the final durability checkpoint passed `57` tests.
 The required single full-suite run reported `3370 passed`, `1 skipped`, `3 warnings`,
 and `9 failed` in `57.58s`. After replacing one process-pool race harness and two stale
 mock-storage fixtures, all nine failed cases passed in a `12 passed in 1.32s` targeted

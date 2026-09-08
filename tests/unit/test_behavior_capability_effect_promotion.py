@@ -23,6 +23,7 @@ from core.behavior.capability_effect_promotion import (
 from core.behavior.normalize import stable_hash
 from core.behavior.receipts import (
     BehavioralReceiptStore,
+    redacted_outcome,
     redacted_receipt_context,
 )
 from core.epistemic.ledger import EvidenceLedger, LifecycleState
@@ -38,6 +39,7 @@ from tests.unit.test_behavior_capability_effect_evidence import (
     _producer,
     _run_result,
 )
+from tests.unit.test_behavior_receipts import _response as _legacy_response
 
 
 def _promote_in_fresh_process(
@@ -229,6 +231,41 @@ def test_secure_completed_source_is_retained_without_finding(tmp_path, monkeypat
         .findings
         == ()
     )
+
+
+def test_legacy_completed_receipt_loads_without_claiming_r5d10_evidence(tmp_path):
+    config = SentinelConfig(storage=StorageConfig(base_dir=tmp_path / "data"))
+    receipts = BehavioralReceiptStore(tmp_path / "receipts")
+    fingerprint = "9" * 64
+    reservation = receipts.reserve(
+        fingerprint,
+        context=redacted_receipt_context(
+            target_origin=ORIGIN,
+            envelope_id="legacy-authorization",
+            source_persona_id="legacy-source",
+            peer_persona_id="legacy-peer",
+        ),
+    )
+    assert reservation.reservation_token is not None
+    legacy = receipts.complete(
+        fingerprint,
+        reservation_token=reservation.reservation_token,
+        outcome=redacted_outcome(_legacy_response()),
+    )
+
+    service = CapabilityEffectPromotionService(config, receipt_store=receipts)
+    status = service.status(legacy.receipt_id)
+    repeated = service.promote(legacy.receipt_id)
+
+    assert receipts.load(fingerprint) == legacy
+    assert status.to_dict() == repeated.to_dict()
+    assert status.execution_state == "completed"
+    assert status.evidence_classification == "legacy_unavailable"
+    assert status.promotion_state == "not_eligible"
+    assert status.reason_code == "legacy_evidence_unavailable"
+    assert status.assessment_session_id is None
+    assert status.canonical_observation_id is None
+    assert status.canonical_finding_id is None
 
 
 def test_suppression_survives_restart_and_cannot_be_repromoted(
