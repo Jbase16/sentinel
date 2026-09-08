@@ -478,6 +478,15 @@ def test_mapping_parser_rejects_unknown_missing_bad_root_and_effect_flags():
     with pytest.raises(ValueError, match="response status"):
         CapabilityEffectEvidence.from_mapping(bad_number)
 
+    reordered = deepcopy(value)
+    reordered["observations"][1], reordered["observations"][2] = (
+        reordered["observations"][2],
+        reordered["observations"][1],
+    )
+    reordered["evidence_root"] = _independent_root(reordered)
+    with pytest.raises(ValueError, match="source bindings are invalid"):
+        CapabilityEffectEvidence.from_mapping(reordered)
+
     wrong_ref = deepcopy(value)
     wrong_ref["capability_ref"] = stable_hash("world", "wrong-prefix")
     wrong_ref["evidence_root"] = _independent_root(wrong_ref)
