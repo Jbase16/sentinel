@@ -61,8 +61,17 @@ R5D10 exact-build native acceptance completed on 2026-09-17 for Sentinel
 SHA-256 `2168dcd1b32d93bf2a027d124cb98d878eabd29fec250b182f75dc2e5697c6ef`, run
 `val-r5d10-native-20260917034132`, carries the bounded `native_proven` label for that
 Sentinel SHA only. It is local operator-native evidence and is not live-observed,
-external-target, report, submission, or payout proof. It does not renew `OCB-S17`,
-which remains native-proven for `cb3e926` only.
+external-target, report, submission, or payout proof. It does not itself renew
+`OCB-S17`; that renewal completed separately on 2026-09-17 (recorded next).
+
+`OCB-S17` acceptance renewal completed on 2026-09-17 for Sentinel
+`f45e037475d312c22f8915f35e2dc34bede777f5`. Accepted local operator-native artifact
+SHA-256 `b0edf717ac9c7ff255585cba7ae2c743504f109904836568c4f4989c28370dbb`, run
+`val-s17-native-20260918020600` with observe-only lab attestation `6d8fe5f`, carries the
+bounded `native_proven` label and re-proves the confinement, expiry, one-time-use,
+replay-refusal, and cleanup clauses at the shipping build. The prior `cb3e926` artifact
+`c12399451df489228af180f4555631a6b1b9d02b966271ae015e8980fdcd9a5e` remains the
+historical proof for that earlier SHA.
 
 Last reconciled: 2026-09-17
 
@@ -159,8 +168,11 @@ submission occurred. The separately authorized R5D10 exact-build native run and 
 attestation completed on 2026-09-17 against Sentinel
 `f45e037475d312c22f8915f35e2dc34bede777f5`, accepted as local operator-native artifact
 SHA-256 `2168dcd1b32d93bf2a027d124cb98d878eabd29fec250b182f75dc2e5697c6ef`. The
-accepted 2026-09-06 OCB-S17 artifact remains native-proven only for Sentinel `cb3e926`
-and is not evidence for the changed R5D10 build.
+accepted 2026-09-06 OCB-S17 artifact is native-proven for Sentinel `cb3e926`; its
+confinement, expiry, one-time-use, replay-refusal, and cleanup clauses are separately
+native-proven at `f45e037` by the 2026-09-17 renewal artifact
+`b0edf717ac9c7ff255585cba7ae2c743504f109904836568c4f4989c28370dbb`, run
+`val-s17-native-20260918020600`.
 Payout evidence remains open.
 The external `OCB-S15` gates pass against vulnerable and secure loopback twins,
 including capture freshness, durable denial replay, ordinary-Scan persistence, and an
@@ -401,7 +413,12 @@ exact-build acceptance. That acceptance completed on 2026-09-17 as artifact SHA-
 `2168dcd1b32d93bf2a027d124cb98d878eabd29fec250b182f75dc2e5697c6ef` for Sentinel
 `f45e037475d312c22f8915f35e2dc34bede777f5`, and covers the R5D10 gate clauses only. It
 does not re-prove the `OCB-S17` confinement, expiry, one-time-use, replay-refusal, and
-cleanup clauses at the changed build; that renewal remains unclaimed.
+cleanup clauses at the changed build. That renewal completed separately on 2026-09-17 as
+local operator-native artifact SHA-256
+`b0edf717ac9c7ff255585cba7ae2c743504f109904836568c4f4989c28370dbb`, run
+`val-s17-native-20260918020600` with observe-only lab attestation `6d8fe5f`, carrying the
+bounded `native_proven` label for Sentinel `f45e037` and re-banking the controlled
+secure/vulnerable twin behavior at the changed build.
 
 Family-C external and native evidence was generated and inspected on 2026-08-24. Its
 accepted baseline remains the Family-C checkpoint described below.
@@ -464,13 +481,13 @@ accepted baseline remains the Family-C checkpoint described below.
 | OCB-R5 family A: authorization monotonicity | Complete for the bounded controlled-read slice and production-wired | Path, query, JSON, form, and persisted-GraphQL ownership locators; paired owned reads; independent oracle; ordinary one-click selection and gated dispatch | Treat this as one closed proof slice, not completion of all authorization testing; keep current lab evidence SHA-qualified |
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
 | OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; the R5C9 current-SHA acceptance renewal is mediator-verified, while broader membership-creation, role-assignment, and administrative-boundary shapes remain open and deferred | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, generated Acceptance parity, three prior pair-level fresh vulnerable/secure Swift/WKWebView cycles, and the separately recorded current-SHA renewal | Preserve the exact R5C9 acceptance claim and boundaries; the broader Family-C shapes remain open and deferred and are not part of Family D |
-| OCB-R5 family D: capability safety | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and suite-proved for strict durable inner evidence, default-off local replay-leak promotion/recovery, and phase-only Scan selection by the complementary repository gate recorded above | R5D10 preserves the accepted `cb3e926` five-phase controlled-twin execution behavior while retaining a versioned, redacted evidence source no larger than 256 KiB. One journaled service validates the strict replay predicate and atomically commits one original-session canonical Observation/Finding result. Production evidence paths must resolve outside every Git worktree. Status, promotion, retry, and bounded reconciliation inspect only local evidence and add zero target requests; the secure control and every non-matching refuted shape remain non-findings. | Preserve the suite-proved repository gate and the accepted 2026-09-17 exact-build native result for `f45e037`, local operator-native artifact `2168dcd1…`, which covers the R5D10 gate clauses only. `OCB-S17` remains native-proven only for `cb3e926` by local operator-native artifact `c1239945…`; its renewal at `f45e037` is unclaimed. Independent effect-occurrence proof and submission material remain later work. |
+| OCB-R5 family D: capability safety | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and suite-proved for strict durable inner evidence, default-off local replay-leak promotion/recovery, and phase-only Scan selection by the complementary repository gate recorded above | R5D10 preserves the accepted `cb3e926` five-phase controlled-twin execution behavior while retaining a versioned, redacted evidence source no larger than 256 KiB. One journaled service validates the strict replay predicate and atomically commits one original-session canonical Observation/Finding result. Production evidence paths must resolve outside every Git worktree. Status, promotion, retry, and bounded reconciliation inspect only local evidence and add zero target requests; the secure control and every non-matching refuted shape remain non-findings. | Preserve the suite-proved repository gate and the accepted 2026-09-17 exact-build native result for `f45e037`, local operator-native artifact `2168dcd1…`, which covers the R5D10 gate clauses only. `OCB-S17` is native-proven at `cb3e926` (local operator-native artifact `c1239945…`) and, by its 2026-09-17 renewal, at `f45e037` (local operator-native artifact `b0edf717…`, run `val-s17-native-20260918020600`, S17 clauses). Independent effect-occurrence proof and submission material remain later work. |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Partial and narrow | Ranked obligations, payout-guided frontier choice, continuation receipts, and deterministic replanning exist | Build the high-value sink ledger, marginal-value scheduler, family-aware coverage, and honest stop certificate; prove `OCB-S18` |
 | OCB-R7 Submission-grade candidate assembly | Partial but production-wired for completed proofs | Completed positive receipt to canonical finding, Verify workbench, deterministic receipt-bound `SubmissionCandidate`, and candidate-only report routes | Generalize minimization/replay, impact binding, sanitized reproduction, invalidation behavior, and end-to-end `OCB-S19` across supported families |
 | OCB-R8 Operational one-click completion | Partial for OCB-R5 families A-C plus a phase-only default-off Family-D scan profile | Direct Foundry and ordinary Scan capability executions now share one evidence/admission/promotion service. Capability mode requires its payload, excludes other profiles, suppresses normal follow-on scan/verification work, and returns the canonical result in the original assessment when local promotion is enabled. This does not make capability mode a native UI selection or complete acquisition, stopping, report, or submission handoff. | Preserve the suite-proved R5D10 repository gate while completing acquisition, replanning, stop status, and report handoff; prove `OCB-S20` without treating the prior-SHA OCB-S17 artifact as changed-build evidence. |
-| OCB-R9 Real-target validation and payout acceptance | Evidence in progress | Family C retains exact-SHA native loopback evidence; Family D has local operator-native `OCB-S17` evidence at `cb3e926` only and local operator-native R5D10 exact-build evidence at `f45e037` (artifact `2168dcd1…`, run `val-r5d10-native-20260917034132`, R5D10 gate clauses only); LAB-S01 through LAB-S10 have operator-attested passes; DB-S15 is live-observed on loopback at Sentinel `375137f`. No external-target, report, submission, or payout evidence exists, and the `OCB-S17` renewal at `f45e037` is unclaimed. | Resolve or baseline the remaining release-gate debt at a release SHA, run separately authorized exact-build acceptance where required, then conduct separately authorized real-program validation; only an accepted or paid finding earns payout-proven status. |
+| OCB-R9 Real-target validation and payout acceptance | Evidence in progress | Family C retains exact-SHA native loopback evidence; Family D has local operator-native `OCB-S17` evidence at `cb3e926` (artifact `c1239945…`) and at `f45e037` (2026-09-17 renewal artifact `b0edf717…`, run `val-s17-native-20260918020600`), plus local operator-native R5D10 exact-build evidence at `f45e037` (artifact `2168dcd1…`, run `val-r5d10-native-20260917034132`, R5D10 gate clauses only); LAB-S01 through LAB-S10 have operator-attested passes; DB-S15 is live-observed on loopback at Sentinel `375137f`. No external-target, report, submission, or payout evidence exists. | Resolve or baseline the remaining release-gate debt at a release SHA, run separately authorized exact-build acceptance where required, then conduct separately authorized real-program validation; only an accepted or paid finding earns payout-proven status. |
 
 ### What DB-R1 actually changed in this map
 
@@ -872,21 +889,23 @@ callback provisioning, finding promotion, or new execution authority.
   evidence label is `native_proven`. R5D10 preserves the attested target behavior but
   changes the build, so that artifact supplies no native, lab, live, external-target,
   report, submission, or payout evidence for R5D10.
-- [ ] `OCB-S17` acceptance renewal at Sentinel
-  `f45e037475d312c22f8915f35e2dc34bede777f5` is unclaimed. The R5D10 acceptance above
-  proves the R5D10 gate clauses at that build; it does not carry the `OCB-S17` clauses
-  forward. The six commits from `cb3e926` to `f45e037` change
-  `core/server/routers/foundry.py`, `core/server/routers/scans.py`, `core/server/api.py`,
-  `core/behavior/receipts.py`, and the epistemic persistence, ledger, CAS, and
-  storage-boundary modules, so the prior-SHA artifact cannot be treated as changed-build
-  evidence. A renewal requires its own separately authorized exact-build run.
+- [x] `OCB-S17` acceptance renewal completed 2026-09-17 for Sentinel
+  `f45e037475d312c22f8915f35e2dc34bede777f5`. The accepted local operator-native artifact
+  SHA-256 is `b0edf717ac9c7ff255585cba7ae2c743504f109904836568c4f4989c28370dbb`, run
+  `val-s17-native-20260918020600` with observe-only lab attestation `6d8fe5f`; its bounded
+  evidence label is `native_proven`. It re-proves the confinement, expiry, one-time-use,
+  replay-refusal, and cleanup clauses at the shipping build, which the six commits from
+  `cb3e926` to `f45e037` had changed across `core/server/routers/foundry.py`,
+  `core/server/routers/scans.py`, `core/server/api.py`, `core/behavior/receipts.py`, and
+  the epistemic persistence, ledger, CAS, and storage-boundary modules. The prior-SHA
+  artifact `c1239945…` remains the historical proof for `cb3e926`.
 
 Exit gate: `OCB-S17` proves confinement, expiry, one-time use, replay refusal, and
 cleanup without treating bearer material as ambient authority. That gate is banked for
-`cb3e926` only; any changed-build native claim requires separately authorized,
-exact-build evidence. The 2026-09-17 R5D10 acceptance at `f45e037` is such evidence for
-the R5D10 gate clauses only and does not renew this gate, which remains unbanked at the
-current `main`.
+`cb3e926` and, by the 2026-09-17 renewal, for the current `main` build `f45e037`
+(artifact `b0edf717…`, run `val-s17-native-20260918020600`); any further changed-build
+native claim requires separately authorized, exact-build evidence. The 2026-09-17 R5D10
+acceptance at `f45e037` separately banks the R5D10 gate clauses at that build.
 
 ### Workstream 4 — Complete OCB-R6 search and honest stopping
 
@@ -1011,8 +1030,10 @@ root is rejected before dispatch if any covered path resolves inside a Git workt
 
 The controlled secure and replay-leaking twins and explicitly owned controlled-lab
 targets remain the execution boundary. The 2026-09-06 local operator-native OCB-S17
-artifact is `native_proven` only for Sentinel `cb3e926`; it does not attest this changed
-R5D10 build. That changed build has its own separately authorized exact-build evidence:
+artifact is `native_proven` for Sentinel `cb3e926`; the OCB-S17 clauses at this changed
+R5D10 build are separately native-proven by the 2026-09-17 renewal (artifact
+`b0edf717…`, run `val-s17-native-20260918020600`). That changed build also has its own
+separately authorized exact-build R5D10 evidence:
 the 2026-09-17 operator-native run `val-r5d10-native-20260917034132` and its
 observe-only lab attestation, accepted as local artifact SHA-256
 `2168dcd1b32d93bf2a027d124cb98d878eabd29fec250b182f75dc2e5697c6ef` for Sentinel
@@ -1039,7 +1060,7 @@ implemented sub-slices.
 | [x] | OCB-R5 family A controlled authorization read | Closed narrow slice | Preserve regression and exact-SHA live evidence |
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
 | [x] | OCB-R5 family C roles/membership | Prior-SHA bounded revocation survival is native-proven; R5C7/R5C8 are suite-proved; R5C9 current-SHA acceptance is mediator-verified; broader Family-C shapes remain open and deferred | Preserve the exact R5C9 claim and keep membership creation, role assignment, and administrative boundaries outside Family D |
-| [ ] | OCB-R5 family D capabilities | R5D1-R5D9 retain their bounded layers; R5D10 is suite-proved for strict durable inner evidence, original-session canonical replay-leak promotion, bounded local recovery/status, and phase-only ordinary Scan reachability behind a separate default-off promotion gate, and is exact-build native-accepted for `f45e037` by local operator-native artifact `2168dcd1…` (R5D10 gate clauses only). `OCB-S17` is local operator-native and native-proven for `cb3e926` only, not the changed build; its renewal at `f45e037` is unclaimed. | Preserve the suite-proved repository gate, the accepted R5D10 exact-build result, zero-target promotion/recovery, and the controlled-twin-only execution boundary. Independent effect-occurrence proof and report/submission material remain later work. |
+| [ ] | OCB-R5 family D capabilities | R5D1-R5D9 retain their bounded layers; R5D10 is suite-proved for strict durable inner evidence, original-session canonical replay-leak promotion, bounded local recovery/status, and phase-only ordinary Scan reachability behind a separate default-off promotion gate, and is exact-build native-accepted for `f45e037` by local operator-native artifact `2168dcd1…` (R5D10 gate clauses only). `OCB-S17` is local operator-native and native-proven for `cb3e926` (artifact `c1239945…`) and, by its 2026-09-17 renewal, for the changed build `f45e037` (artifact `b0edf717…`, run `val-s17-native-20260918020600`). | Preserve the suite-proved repository gate, the accepted R5D10 exact-build result, zero-target promotion/recovery, and the controlled-twin-only execution boundary. Independent effect-occurrence proof and report/submission material remain later work. |
 | [ ] | OCB-R6 search/stopping | Queued after OCB-R5 families A-D | `OCB-S18` |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |
