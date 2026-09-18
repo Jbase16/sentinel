@@ -1,8 +1,11 @@
 # OCB-R6 Coverage Search and Honest Stopping
 
-Status: implemented as a passive, unwired planning slice; mediator verification and
-Jason's separate merge authorization remain open. The pushed implementation SHA is
-recorded in the master ledger after delivery. This document does not accept the slice.
+Status: suite-proved as a passive, unwired planning slice. Implementation commit:
+`36f3749db8570ff2dbce8ad6a3b371be3cc8c1bc`. The commit is local: publishing was rejected
+by the task execution approval policy, and no remote branch was present on the
+subsequent read-only check. The pushed-SHA delivery requirement, mediator
+verification, and Jason's separate merge authorization remain open. This document
+does not accept the slice.
 
 Base: SentinelForge `origin/main` at
 `0743106f6aac4227e83ad05cdcc468661424de2d`.
@@ -176,6 +179,24 @@ re-derives the complete payload from its private, non-serialized plan context; e
 a rehashed false partition is rejected. `verify(plan)` checks the certificate against
 retained input state. A hash proves content integrity, not target truth or acceptance.
 
+One actual confirmed `OCB-S18` specimen from the full checkpoint is retained at:
+
+```text
+/tmp/sentinel-ocb-r6-checkpoint-20260918/test_ocb_s18_recorded_outcomes0/search-stop-certificate.json
+/tmp/sentinel-ocb-r6-checkpoint-20260918/test_ocb_s18_recorded_outcomes0/search-inputs.json
+```
+
+Its generated identity is
+`search_stop_certificate:855bde36f146336c8938d90197a447e0d338af4f6636b6f7c36752f16dd2d7c8`.
+It records one admitted family-A candidate proved by the existing local oracle,
+zero candidates in families B-D, four existing execution request units consumed,
+zero planner requests, and `frontier_exhausted`. This says nothing about unadmitted
+candidates or target-wide coverage. The input digest and certificate content address
+were independently recomputed from these retained JSON files. The other scenario's
+certificate records a blocked A candidate and never-explored A/C/D candidates.
+These files are local temporary checkpoint outputs; rerunning the scenario generates
+new specimens, with fresh execution identities in the actual-outcome cases.
+
 The planner persists nothing and has no teardown obligation or orphaned resources.
 Test executors create only their owned disposable `tmp_path` stores; planner calls
 leave those receipts and budgets unchanged. Scenario certificates/input snapshots
@@ -184,7 +205,7 @@ outputs are operator evidence files, not a live evidence root or native artifact
 
 ## 7. Proof surface and checkpoint
 
-Focused tests:
+Focused tests: **41 passed in 0.46s** on Python 3.12.14.
 
 ```text
 .venv/bin/python -m pytest -q tests/unit/test_behavior_search_stopping.py tests/unit/test_behavior_search_execution.py

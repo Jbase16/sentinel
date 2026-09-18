@@ -950,8 +950,13 @@ and runtime bindings are required for schedulable costs; missing proof budgets a
 unsupported receipt formats cannot manufacture coverage. Root receipt identities,
 reconstructed oracle hashes, and exact family partitions bind recorded outcomes.
 
-Delivery: branch `ocb/r6-search-stopping`; the pushed implementation identity is
-recorded by the delivery follow-up. This is suite proof only. No native/external
+Delivery: local branch `ocb/r6-search-stopping`, implementation commit
+`36f3749db8570ff2dbce8ad6a3b371be3cc8c1bc`. Publication is blocked: automatic execution
+approval rejected `git push -u origin ocb/r6-search-stopping` because approval is
+required while the task approval policy is `Never`. A subsequent read-only
+`git ls-remote --heads origin refs/heads/ocb/r6-search-stopping` returned no branch.
+There is therefore **no pushed slice SHA** at this handoff. The required pushed
+branch and exact-pushed-SHA delivery gate remain open. This is suite proof only. No native/external
 run is required for the passive slice; mediator verification and merge authorization
 remain open. The next separately authorized slice is OCB-R7 / OCB-S19.
 
@@ -1098,7 +1103,7 @@ implemented sub-slices.
 | [x] | OCB-R5 family B lifecycle/state manufacture | Closed bounded scope | Preserve omission and reordering regressions |
 | [x] | OCB-R5 family C roles/membership | Prior-SHA bounded revocation survival is native-proven; R5C7/R5C8 are suite-proved; R5C9 current-SHA acceptance is mediator-verified; broader Family-C shapes remain open and deferred | Preserve the exact R5C9 claim and keep membership creation, role assignment, and administrative boundaries outside Family D |
 | [ ] | OCB-R5 family D capabilities | R5D1-R5D9 retain their bounded layers; R5D10 is suite-proved for strict durable inner evidence, original-session canonical replay-leak promotion, bounded local recovery/status, and phase-only ordinary Scan reachability behind a separate default-off promotion gate, and is exact-build native-accepted for `f45e037` by local operator-native artifact `2168dcd1…` (R5D10 gate clauses only). `OCB-S17` is local operator-native and native-proven for `cb3e926` (artifact `c1239945…`) and, by its 2026-09-17 renewal, for the changed build `f45e037` (artifact `b0edf717…`, run `val-s17-native-20260918020600`). | Preserve the suite-proved repository gate, the accepted R5D10 exact-build result, zero-target promotion/recovery, and the controlled-twin-only execution boundary. Independent effect-occurrence proof and report/submission material remain later work. |
-| [ ] | OCB-R6 search/stopping | Passive/unwired bounded implementation and OCB-S18 are suite-proved; delivery branch `ocb/r6-search-stopping` | Mediator verification of the pushed slice and Jason's separate merge go remain open; no native evidence claim |
+| [ ] | OCB-R6 search/stopping | Passive/unwired bounded implementation and OCB-S18 are suite-proved; local branch `ocb/r6-search-stopping`; push blocked by execution approval policy | Publish the implementation commit, then mediator verification of the pushed slice and Jason's separate merge go remain open; no native evidence claim |
 | [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |
 | [ ] | OCB-R5 families E and F expansion | Deferred | New registered scenarios after OCB-R8 |
