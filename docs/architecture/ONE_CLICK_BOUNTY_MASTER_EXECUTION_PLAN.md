@@ -79,8 +79,12 @@ suite-proved on branch `ocb/r6-search-stopping`, based on
 OCB-R6 workstream below. The new planner orders only admitted candidates with complete
 bound proof costs; it adds no traffic or execution authority. `OCB-S18` covers exact
 family accounting, deterministic ordering, failure-driven replanning, and immutable
-input-bound stop certificates. Mediator verification and Jason's separate merge go
-remain open. The implementation does not renew prior-build native evidence.
+input-bound stop certificates. Mediator verification is complete — independent focused-suite
+reproduction on 3.12.14 (41 passed), hashlib recomputation of the content-addressed,
+input-bound stop certificates, and the full repository gate reproduced via the marked/unmarked
+split (3396 + 26 = 3422 passed, 1 skipped, 3423 collected). Jason pushed the branch and the
+slice is merged to `main` by fast-forward at `7d135bc`. The implementation does not renew
+prior-build native evidence.
 
 The current complete checkpoint on Python **3.12.14** used the same complementary
 commands recorded above (the unmarked invocation also retained its generated test
@@ -508,7 +512,7 @@ accepted baseline remains the Family-C checkpoint described below.
 | OCB-R5 family D: capability safety | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and suite-proved for strict durable inner evidence, default-off local replay-leak promotion/recovery, and phase-only Scan selection by the complementary repository gate recorded above | R5D10 preserves the accepted `cb3e926` five-phase controlled-twin execution behavior while retaining a versioned, redacted evidence source no larger than 256 KiB. One journaled service validates the strict replay predicate and atomically commits one original-session canonical Observation/Finding result. Production evidence paths must resolve outside every Git worktree. Status, promotion, retry, and bounded reconciliation inspect only local evidence and add zero target requests; the secure control and every non-matching refuted shape remain non-findings. | Preserve the suite-proved repository gate and the accepted 2026-09-17 exact-build native result for `f45e037`, local operator-native artifact `2168dcd1…`, which covers the R5D10 gate clauses only. `OCB-S17` is native-proven at `cb3e926` (local operator-native artifact `c1239945…`) and, by its 2026-09-17 renewal, at `f45e037` (local operator-native artifact `b0edf717…`, run `val-s17-native-20260918020600`, OCB-S17 clauses). Independent effect-occurrence proof and submission material remain later work. |
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
-| OCB-R6 Coverage-guided search and stopping | Suite-proved passive/unwired bounded slice; mediator verification open | High-value sink ledger, exact marginal-value ordering, complete proof-budget bounds, typed-constraint and recorded-outcome replanning, A-D coverage accounting, and immutable input-bound stop certificate; `OCB-S18` focused proof is included in the full checkpoint | Mediator verifies the pushed implementation and Jason separately authorizes merge. No production caller; unsupported proof costs/outcomes remain explicit. Live orchestration is OCB-R8 / OCB-S20 |
+| OCB-R6 Coverage-guided search and stopping | Suite-proved passive/unwired bounded slice; mediator-verified and merged to `main` at `7d135bc` | High-value sink ledger, exact marginal-value ordering, complete proof-budget bounds, typed-constraint and recorded-outcome replanning, A-D coverage accounting, and immutable input-bound stop certificate; `OCB-S18` focused proof is included in the full checkpoint | Mediator-verified against the real repo, suite, and recomputed certificates; merged by fast-forward. No production caller; unsupported proof costs/outcomes remain explicit. Live orchestration is OCB-R8 / OCB-S20 |
 | OCB-R7 Submission-grade candidate assembly | Partial but production-wired for completed proofs | Completed positive receipt to canonical finding, Verify workbench, deterministic receipt-bound `SubmissionCandidate`, and candidate-only report routes | Generalize minimization/replay, impact binding, sanitized reproduction, invalidation behavior, and end-to-end `OCB-S19` across supported families |
 | OCB-R8 Operational one-click completion | Partial for OCB-R5 families A-C plus a phase-only default-off Family-D scan profile | Direct Foundry and ordinary Scan capability executions now share one evidence/admission/promotion service. Capability mode requires its payload, excludes other profiles, suppresses normal follow-on scan/verification work, and returns the canonical result in the original assessment when local promotion is enabled. This does not make capability mode a native UI selection or complete acquisition, stopping, report, or submission handoff. | Preserve the suite-proved R5D10 repository gate while completing acquisition, replanning, stop status, and report handoff; prove `OCB-S20` without treating the prior-SHA OCB-S17 artifact as changed-build evidence. |
 | OCB-R9 Real-target validation and payout acceptance | Evidence in progress | Family C retains exact-SHA native loopback evidence; Family D has local operator-native `OCB-S17` evidence at `cb3e926` (artifact `c1239945…`) and at `f45e037` (2026-09-17 renewal artifact `b0edf717…`, run `val-s17-native-20260918020600`), plus local operator-native R5D10 exact-build evidence at `f45e037` (artifact `2168dcd1…`, run `val-r5d10-native-20260917034132`, R5D10 gate clauses only); LAB-S01 through LAB-S10 have operator-attested passes; DB-S15 is live-observed on loopback at Sentinel `375137f`. No external-target, report, submission, or payout evidence exists. | Resolve or baseline the remaining release-gate debt at a release SHA, run separately authorized exact-build acceptance where required, then conduct separately authorized real-program validation; only an accepted or paid finding earns payout-proven status. |
@@ -934,7 +938,7 @@ acceptance at `f45e037` separately banks the R5D10 gate clauses at that build.
 ### Workstream 4 — Complete OCB-R6 search and honest stopping
 
 The bounded implementation is documented in
-[OCB-R6 slice plan](ONE_CLICK_BOUNTY_%526_SEARCH_STOPPING_PLAN.md) and implemented in
+[OCB-R6 slice plan](ONE_CLICK_BOUNTY_R6_SEARCH_STOPPING_PLAN.md) and implemented in
 `core/behavior/search_stopping.py`. Its `HighValueSinkLedger` indexes OCB-R1 goals
 and OCB-R2 operations. The default-off, unwired scheduler chooses only
 among already-authorized candidates using payout relevance, reachability gain,
@@ -950,15 +954,15 @@ and runtime bindings are required for schedulable costs; missing proof budgets a
 unsupported receipt formats cannot manufacture coverage. Root receipt identities,
 reconstructed oracle hashes, and exact family partitions bind recorded outcomes.
 
-Delivery: local branch `ocb/r6-search-stopping`, implementation commit
-`36f3749db8570ff2dbce8ad6a3b371be3cc8c1bc`. Publication is blocked: automatic execution
-approval rejected `git push -u origin ocb/r6-search-stopping` because approval is
-required while the task approval policy is `Never`. A subsequent read-only
-`git ls-remote --heads origin refs/heads/ocb/r6-search-stopping` returned no branch.
-There is therefore **no pushed slice SHA** at this handoff. The required pushed
-branch and exact-pushed-SHA delivery gate remain open. This is suite proof only. No native/external
-run is required for the passive slice; mediator verification and merge authorization
-remain open. The next separately authorized slice is OCB-R7 / OCB-S19.
+Delivery: branch `ocb/r6-search-stopping`, implementation commit
+`36f3749db8570ff2dbce8ad6a3b371be3cc8c1bc`, doc-record commit `7d135bc`. Jason pushed the
+branch to `origin`; a read-only `git ls-remote --heads origin ocb/r6-search-stopping`
+confirmed it at `7d135bc`. The mediator verified the slice against the real repository —
+clean base `0743106`, passivity/authority envelope, 41 focused tests on 3.12.14,
+hashlib-recomputed input-bound stop certificates, and the 3422-pass repository gate — and
+the slice is merged to `main` by fast-forward at `7d135bc`. This is suite proof only; no
+native/external run is required for the passive slice. The next separately authorized slice
+is OCB-R7 / OCB-S19.
 
 ### Workstream 5 — Close generalized OCB-R7 candidate assembly
 

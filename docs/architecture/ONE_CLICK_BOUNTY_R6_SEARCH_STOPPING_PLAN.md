@@ -1,11 +1,11 @@
 # OCB-R6 Coverage Search and Honest Stopping
 
-Status: suite-proved as a passive, unwired planning slice. Implementation commit:
-`36f3749db8570ff2dbce8ad6a3b371be3cc8c1bc`. The commit is local: publishing was rejected
-by the task execution approval policy, and no remote branch was present on the
-subsequent read-only check. The pushed-SHA delivery requirement, mediator
-verification, and Jason's separate merge authorization remain open. This document
-does not accept the slice.
+Status: suite-proved as a passive, unwired planning slice — mediator-verified and merged to
+`main` by fast-forward at `7d135bc`. Implementation commit:
+`36f3749db8570ff2dbce8ad6a3b371be3cc8c1bc`; doc-record commit `7d135bc`. The branch was
+pushed to `origin` by Jason (confirmed at `7d135bc`), and the mediator verified the slice
+against the real repository, suite, and recomputed certificates before merge. Acceptance is
+suite-proved; no native artifact applies to this passive slice.
 
 Base: SentinelForge `origin/main` at
 `0743106f6aac4227e83ad05cdcc468661424de2d`.
