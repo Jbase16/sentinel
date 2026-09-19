@@ -1,6 +1,7 @@
 # OCB-R7 Submission-Grade Candidate Assembly
 
-Status: suite-proved implementation; mediator verification and Jason's separate merge go pending.
+Status: suite-proved local implementation; push blocked by execution approval policy.
+Mediator verification and Jason's separate merge go remain pending.
 
 Base: `493f76f681cbdf3598e09cbe20448bcb46b080c9`.
 Branch: `ocb/r7-candidate-assembly`.
@@ -153,7 +154,7 @@ render may reconstruct a disposable draft from the retained source.
 - **Focused proof:** [OCB-S19 scenario](../../tests/unit/test_ocb_s19_candidate_assembly.py), [sanitizer tests](../../tests/unit/test_candidate_sanitization.py), and existing candidate/Verify/lineage/canonical-reader regressions.
 - **Repository gate:** Python 3.12.14, complementary unmarked and `subprocess_spawn` invocations; final results recorded in section 8.
 - **External gate:** none; assembly sends zero target requests. Existing in-memory proof setup precedes request-denying assembly checks.
-- **Documentation:** this slice record and [master ledger](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md), with delivery identity recorded after publication.
+- **Documentation:** this slice record and [master ledger](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md), with the local delivery identity and push blocker recorded in section 8.
 - **Branch:** `ocb/r7-candidate-assembly`, solely this slice, from the exact base above.
 - **Delivery:** focused branch handed to mediator; local proof is not acceptance or merge authority.
 
@@ -246,11 +247,19 @@ inherited baseline. All 10 files matching its prohibited-operation or secret pat
 are byte-identical to base `493f76f`; this slice adds no pattern match. Targeted Ruff
 checks passed for all changed production modules and the two new test modules.
 `git diff --check` passed. All 25 relative Markdown links in this slice record and
-the master ledger resolve, with no URL-escaped paths. The six web-schema drift snapshots were neither rerun nor
-changed. No native, lab, external-target, transport, or submission check was required
+the master ledger resolve, with no URL-escaped paths. The six web-schema drift
+snapshots were neither rerun nor changed. No native, lab, external-target, transport, or submission check was required
 or performed for this deterministic assembly slice.
 
-Branch delivery: `ocb/r7-candidate-assembly`. The implementation SHA and verified
-remote identity are recorded after the branch push in the documentation checkpoint.
-Mediator verification and Jason's separate explicit go remain the only acceptance
-and merge authority.
+Branch delivery: `ocb/r7-candidate-assembly`. Local implementation commit:
+`38ba94de532bec187a9576664c7743ffbc3d2fe1`. The exact authorized command
+`git push -u origin ocb/r7-candidate-assembly` was rejected before execution:
+`approval required by policy, but AskForApproval is set to Never`.
+There is **no verified pushed SHA** for this slice. No alternate publication path
+was attempted. A following documentation-only commit records this local identity
+and delivery blocker; its SHA is included in the operator handoff.
+
+The completed implementation and repository gate are suite proof, not acceptance.
+Publication, mediator verification, and Jason's separate explicit merge go remain
+outstanding. The work order explicitly permits this local-SHA handoff when execution
+approval policy blocks the push.
