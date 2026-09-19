@@ -2741,12 +2741,11 @@ async def get_session_bounty_report(
     """Render only receipt-bound SubmissionCandidates for one session."""
 
     from core.behavior.receipts import ReceiptStoreError
-    from core.data.db import Database
     from core.epistemic.ledger import load_canonical_session_read_model
     from core.reporting.submission_candidate import (
-        build_submission_candidate,
         candidate_report_payload,
         render_submission_candidate,
+        resolve_submission_candidate,
     )
     from core.verify.workbench import CandidateWorkbenchStore
 
@@ -2760,35 +2759,41 @@ async def get_session_bounty_report(
     minimum = min_severity.upper()
     if minimum not in severity_order:
         raise HTTPException(status_code=400, detail="Unsupported minimum severity")
-    db = Database.instance()
-    read_model = load_canonical_session_read_model(session_id)
-    session_data = await db.get_session(session_id)
-    target = (session_data or {}).get("target", session_id)
+    report_format = format.lower()
+    if report_format not in {"markdown", "json"}:
+        raise HTTPException(status_code=400, detail="Unsupported report format")
+    if platform not in {"hackerone", "bugcrowd", "intigriti"}:
+        raise HTTPException(status_code=400, detail="Unsupported report platform")
+    try:
+        read_model = load_canonical_session_read_model(session_id)
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        raise HTTPException(
+            status_code=409,
+            detail="Candidate unavailable: active proof could not be verified.",
+        ) from None
     store = CandidateWorkbenchStore()
     report_dicts: List[Dict[str, Any]] = []
     held: List[Dict[str, str]] = []
     filtered = 0
     for finding in sorted(read_model.findings, key=lambda item: item.id):
         try:
-            workbench_id = store.workbench_id_for(
+            candidate = resolve_submission_candidate(
                 read_model,
                 finding_id=finding.id,
-            )
-            candidate = build_submission_candidate(
-                read_model,
-                workbench_id=workbench_id,
                 workbench_store=store,
             )
-        except (ValueError, ReceiptStoreError) as exc:
-            held.append({"finding_id": finding.id, "reason": str(exc)})
+            rendered = render_submission_candidate(candidate)
+            payload = candidate_report_payload(candidate, rendered=rendered)
+        except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+            held.append({
+                "finding_id": finding.id,
+                "reason": "Candidate unavailable: active proof could not be verified.",
+            })
             continue
         if severity_order.get(candidate.severity.upper(), -1) < severity_order[minimum]:
             filtered += 1
             continue
-        rendered = render_submission_candidate(candidate)
-        report_dicts.append(
-            candidate_report_payload(candidate, rendered=rendered)
-        )
+        report_dicts.append(payload)
 
     if report_dicts:
         markdown = "\n\n---\n\n".join(
@@ -2797,8 +2802,8 @@ async def get_session_bounty_report(
     else:
         markdown = (
             "# Submission candidates: none\n\n"
-            "No canonical finding currently has a persisted, receipt-bound "
-            "Candidate Workbench selection.\n"
+            "No canonical finding currently has an eligible receipt-bound "
+            "recipe or evidence attestation.\n"
         )
     triage_summary = {
         "route": "submission_candidate",
@@ -2810,9 +2815,9 @@ async def get_session_bounty_report(
     return {
         "session_id": session_id,
         "canonical_revision": read_model.revision,
-        "target": target,
+        "target": report_dicts[0]["target"] if report_dicts else "",
         "count": len(report_dicts),
-        "format": format.lower(),
+        "format": report_format,
         "platform": platform,
         "candidate_digests": [item["candidate_digest"] for item in report_dicts],
         "markdown": markdown,

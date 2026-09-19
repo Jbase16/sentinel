@@ -21,8 +21,6 @@ the rendered curl + markdown.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
 
@@ -40,7 +38,6 @@ from core.verify.promoter import (
     sanitize_headers,
     _sanitize_cookie_value,
 )
-from core.verify.workbench import CandidateWorkbench, ReproEvidenceSelection
 
 
 def _run(coro):
@@ -77,90 +74,26 @@ def _mk_step(
     return step
 
 
-def _candidate_session(monkeypatch):
+def _candidate_session(tmp_path, monkeypatch, *, dependency=False):
     from core.epistemic import ledger as ledger_module
+    from tests.unit.test_ocb_s19_candidate_assembly import _family_r
 
-    observation_id = "obs-" + "1" * 64
-    receipt_id = "behavioral-" + "2" * 64
-    workbench = CandidateWorkbench(
-        workbench_id="verify_workbench:" + "3" * 64,
-        canonical_session_id="candidate-session",
-        finding_id="find-" + "4" * 64,
-        finding_commitment="evidence_finding:" + "5" * 64,
-        target_url="https://h.example/",
-        target_origin="https://h.example",
-    )
-    proof = SimpleNamespace(
-        observation_id=observation_id,
-        receipt_id=receipt_id,
-        provenance_root="6" * 64,
-    )
-    finding = SimpleNamespace(
-        id=workbench.finding_id,
-        commitment=workbench.finding_commitment,
-        title="Cross-account read",
-        severity="HIGH",
-        description="A peer can read another account's record.",
-        remediation="Enforce ownership.",
-        confirmation_level="confirmed",
-        citations=[SimpleNamespace(observation_id=observation_id)],
-        active_proof=[proof],
-    )
-    read_model = SimpleNamespace(
-        session_id=workbench.canonical_session_id,
-        revision="canonical_session_read_model:" + "7" * 64,
-        observations=(SimpleNamespace(id=observation_id),),
-        findings=(finding,),
-    )
-
-    class SelectingStore:
-        def __init__(self):
-            self.current = workbench
-            self.receipt_store = SimpleNamespace(
-                load=lambda fingerprint: SimpleNamespace(state="completed")
-            )
-
-        def select_exchanges(
-            self,
-            current,
-            *,
-            exchanges,
-            read_model,
-            replace_existing=False,
-        ):
-            selections = {} if replace_existing else {
-                item.exchange_index: item for item in current.selections
-            }
-            for exchange_index, step, observation_id, receipt_id in exchanges:
-                selections[exchange_index] = ReproEvidenceSelection.build(
-                    exchange_index=exchange_index,
-                    step=step,
-                    observation_id=observation_id,
-                    receipt_id=receipt_id,
-                    provenance_root="6" * 64,
-                )
-            self.current = replace(
-                current,
-                selections=tuple(selections[index] for index in sorted(selections)),
-            )
-            return self.current
-
-        def load(self, workbench_id, *, read_model):
-            assert workbench_id == self.current.workbench_id
-            return self.current
-
+    proof = _family_r(tmp_path, monkeypatch, dependency=dependency)
+    read_model = proof.read_model()
+    store = proof.store()
+    workbench = store.open(read_model, finding_id=proof.finding_id)
     session = create_session_from_workbench(
         workbench,
-        target_url="https://h.example/",
-        original_finding={"id": workbench.finding_id},
+        target_url=proof.captured[-1].url,
+        original_finding=read_model.findings[0].to_dict(),
     )
-    session.candidate_workbench_store = SelectingStore()
+    session.candidate_workbench_store = store
     monkeypatch.setattr(
         ledger_module,
         "load_canonical_session_read_model",
-        lambda session_id: read_model,
+        proof.read_model,
     )
-    return session, observation_id, receipt_id
+    return session, proof
 
 
 # ─────────────────────────── sanitization ───────────────────────────
@@ -262,7 +195,7 @@ class TestRenderCurl:
     def test_url_with_single_quotes_handled(self):
         """Shell-escape robustness: a URL with a single quote in it
         must not produce a broken curl."""
-        step = _mk_step(url="https://h.example/search?q=O'Brien")
+        step = _mk_step(url="https://h.example/search/O'Brien?q=private-value")
         curl, _ = render_curl(step)
         # The escaped URL appears verbatim somewhere in the output.
         # shlex.quote will quote it with single-quote-escape sequences.
@@ -272,6 +205,8 @@ class TestRenderCurl:
         # And the apostrophe is shell-escaped (shlex.quote does
         # `O'"'"'Brien` style).
         assert "Brien" in curl
+        assert "private-value" not in curl
+        assert "q=$VALUE" in curl
 
 
 # ─────────────────────────── ReproEntry markdown ───────────────────────────
@@ -427,7 +362,7 @@ class TestPromoteEndpoint:
             ))
         assert ei.value.status_code == 404
 
-    def test_full_promotion_shape(self, monkeypatch):
+    def test_full_promotion_shape(self, tmp_path, monkeypatch):
         from core.server.routers.verify import (
             EvidenceBindingRequest,
             PromoteRequest,
@@ -435,32 +370,32 @@ class TestPromoteEndpoint:
             promote_to_repro,
         )
 
-        sess, observation_id, receipt_id = _candidate_session(monkeypatch)
-        sess.append_exchange(_mk_step(
-            method="GET", url="https://h.example/users/1",
-            headers={"Authorization": "Bearer REAL-TOKEN-XYZ"},
-            resp_status=200, resp_body='{"id": 1, "name": "alice"}',
-        ))
+        sess, proof = _candidate_session(tmp_path, monkeypatch)
+        sess.append_exchange(proof.captured[0])
+        receipt_id = proof.read_model().findings[0].active_proof[0].receipt_id
 
         result = _run(promote_to_repro(
             sess.session_id,
             PromoteRequest(evidence_bindings=[EvidenceBindingRequest(
                 exchange_index=0,
-                observation_id=observation_id,
+                observation_id=proof.observation_ids[0],
                 receipt_id=receipt_id,
             )]),
             _=True,
         ))
         # Top-level shape.
         assert result.finding_id == sess.finding_id
-        assert result.target_url == "https://h.example/"
+        assert result.target_url == sess.candidate_workbench.target_url
+        assert result.reproduction_kind == "replayable_recipe"
+        assert result.replayable is True
+        assert result.attestation is None
         assert result.entry_count == 1
         # Both representations populated.
         assert len(result.steps_to_reproduce) == 1
         assert len(result.entries) == 1
         # Sanitization default ON: real token not in any rendered output.
         flat = result.steps_to_reproduce[0]
-        assert "REAL-TOKEN-XYZ" not in flat
+        assert "ocb-operator-token" not in flat
         assert "$TOKEN" in flat
         # Legend includes $TOKEN.
         assert "$TOKEN" in result.placeholder_legend
@@ -471,17 +406,19 @@ class TestPromoteEndpoint:
         assert reopened.render_digest == result.render_digest
         assert reopened.submission_markdown == result.submission_markdown
 
-    def test_subset_selection_via_indices(self, monkeypatch):
+    def test_subset_selection_via_indices(self, tmp_path, monkeypatch):
         from core.server.routers.verify import (
             EvidenceBindingRequest, PromoteRequest, promote_to_repro,
         )
 
-        sess, observation_id, receipt_id = _candidate_session(monkeypatch)
-        for i in range(4):
+        sess, proof = _candidate_session(tmp_path, monkeypatch, dependency=True)
+        receipt_id = proof.read_model().findings[0].active_proof[0].receipt_id
+        for index, step in enumerate(proof.captured):
             sess.append_exchange(_mk_step(
-                url=f"https://h.example/step{i}",
-                resp_body=f"resp {i}",
+                url=f"https://owned.example.test/noise{index}",
+                resp_body=f"unrelated response {index}",
             ))
+            sess.append_exchange(step)
 
         # Pick exchanges 1 and 3.
         result = _run(promote_to_repro(
@@ -494,7 +431,7 @@ class TestPromoteEndpoint:
                         observation_id=observation_id,
                         receipt_id=receipt_id,
                     )
-                    for index in (1, 3)
+                    for index, observation_id in zip((1, 3), proof.observation_ids)
                 ],
             ),
             _=True,
@@ -502,7 +439,10 @@ class TestPromoteEndpoint:
         assert result.entry_count == 2
         # Re-numbered 1 + 2 in the rendered output.
         urls = [e["url"] for e in result.entries]
-        assert urls == ["https://h.example/step1", "https://h.example/step3"]
+        assert urls[0].endswith("/api/invoices")
+        assert urls[1].endswith("/export")
+        assert all("noise" not in url for url in urls)
+        assert [entry["method"] for entry in result.entries] == ["POST", "GET"]
 
     def test_unsanitized_candidate_persistence_is_rejected(self):
         from core.server.routers.verify import (

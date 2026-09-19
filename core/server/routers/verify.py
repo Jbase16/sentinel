@@ -13,7 +13,7 @@ All endpoints gated by the sensitive token (operator-only).
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -107,6 +107,7 @@ async def create_session(
 
     Both canonical_session_id and finding_id are mandatory. The former
     target-only/global fallback is intentionally refused."""
+    from core.behavior.receipts import ReceiptStoreError
     from core.epistemic.ledger import load_canonical_session_read_model
     from core.verify.console import create_session_from_workbench
     from core.verify.workbench import CandidateWorkbenchStore
@@ -143,8 +144,11 @@ async def create_session(
             session.identity_authority = IdentityAuthorityBinding.from_identity(
                 observation.identity
             )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate Workbench requires a finding in the exact session with verifiable canonical proof.",
+        ) from None
 
     return CreateSessionResponse(
         session_id=session.session_id,
@@ -649,6 +653,10 @@ class PromoteResponse(BaseModel):
     render_digest: str
     finding_id: Optional[str]
     target_url: str
+    reproduction_kind: str
+    replayable: bool
+    lineage_digest: str
+    attestation: Optional[Dict[str, Any]]
     entry_count: int
     # The List[str] shape BountyReport expects directly.
     steps_to_reproduce: List[str]
@@ -660,9 +668,15 @@ class PromoteResponse(BaseModel):
     submission_markdown: str
 
 
+class DiscardCandidateResponse(BaseModel):
+    status: Literal["removed", "absent", "failed"]
+    orphaned_owned_state_possible: bool
+
+
 def _render_candidate_response(sess, read_model) -> PromoteResponse:
     from core.reporting.submission_candidate import (
         build_submission_candidate,
+        candidate_report_payload,
         render_submission_candidate,
     )
 
@@ -676,11 +690,16 @@ def _render_candidate_response(sess, read_model) -> PromoteResponse:
         workbench_store=store,
     )
     rendered = render_submission_candidate(candidate)
+    payload = candidate_report_payload(candidate, rendered=rendered)
     return PromoteResponse(
         candidate_digest=candidate.candidate_digest,
         render_digest=rendered.render_digest,
         finding_id=candidate.finding_id,
         target_url=candidate.target_url,
+        reproduction_kind=payload["reproduction_kind"],
+        replayable=payload["replayable"],
+        lineage_digest=payload["lineage_digest"],
+        attestation=payload["attestation"],
         entry_count=len(rendered.steps),
         steps_to_reproduce=list(rendered.steps_to_reproduce),
         placeholder_legend=dict(rendered.placeholder_legend),
@@ -697,24 +716,56 @@ async def get_submission_candidate(
     """Render the persisted draft without replaying any target traffic."""
 
     from core.epistemic.ledger import load_canonical_session_read_model
+    from core.behavior.receipts import ReceiptStoreError
     from core.verify.console import get_session
 
     sess = get_session(session_id)
     if sess is None:
         raise HTTPException(
             status_code=404,
-            detail=f"session {session_id!r} not found",
+            detail="Verify session not found",
         )
     if not sess.canonical_session_id:
         raise HTTPException(
             status_code=400,
             detail="Legacy/global Verify sessions have no SubmissionCandidate.",
         )
-    read_model = load_canonical_session_read_model(sess.canonical_session_id)
     try:
+        read_model = load_canonical_session_read_model(sess.canonical_session_id)
         return _render_candidate_response(sess, read_model)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate unavailable: active proof could not be verified.",
+        ) from None
+
+
+@router.delete("/sessions/{session_id}/candidate", response_model=DiscardCandidateResponse)
+async def discard_submission_candidate(
+    session_id: str,
+    _: bool = Depends(verify_sensitive_token),
+) -> DiscardCandidateResponse:
+    """Remove only the session's owned disposable draft, retaining source proof."""
+    from core.behavior.receipts import ReceiptStoreError
+    from core.verify.console import get_session
+
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Verify session not found")
+    workbench = sess.candidate_workbench
+    store = sess.candidate_workbench_store
+    if workbench is None or store is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Verify session has no owned candidate draft.",
+        )
+    try:
+        return DiscardCandidateResponse(**store.discard(workbench.workbench_id))
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        return DiscardCandidateResponse(
+            status="failed",
+            orphaned_owned_state_possible=True,
+        )
 
 
 @router.post("/sessions/{session_id}/promote", response_model=PromoteResponse)
@@ -730,21 +781,13 @@ async def promote_to_repro(
     endpoint has no platform submission capability.
     """
     from core.epistemic.ledger import load_canonical_session_read_model
+    from core.behavior.receipts import ReceiptStoreError
     from core.verify.console import get_session
 
     sess = get_session(session_id)
     if sess is None:
         raise HTTPException(
-            status_code=404, detail=f"session {session_id!r} not found"
-        )
-
-    if not sess.transcript:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Session transcript is empty — capture at least one "
-                "exchange via /exchange before promoting to repro."
-            ),
+            status_code=404, detail="Verify session not found"
         )
 
     if not req.sanitize:
@@ -754,6 +797,25 @@ async def promote_to_repro(
         )
     workbench = sess.candidate_workbench
     store = sess.candidate_workbench_store
+    if not sess.transcript:
+        if (
+            workbench is not None
+            and store is not None
+            and sess.canonical_session_id
+            and not req.exchange_indices
+            and not req.evidence_bindings
+        ):
+            try:
+                read_model = load_canonical_session_read_model(sess.canonical_session_id)
+                response = _render_candidate_response(sess, read_model)
+                if response.reproduction_kind == "evidence_attestation":
+                    return response
+            except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+                pass
+        raise HTTPException(
+            status_code=400,
+            detail="Session transcript is empty and no eligible evidence attestation is available.",
+        )
     if workbench is None or store is None or not sess.canonical_session_id:
         raise HTTPException(
             status_code=400,
@@ -778,8 +840,8 @@ async def promote_to_repro(
             detail="Every selected exchange requires one exact observation/receipt binding.",
         )
 
-    read_model = load_canonical_session_read_model(sess.canonical_session_id)
     try:
+        read_model = load_canonical_session_read_model(sess.canonical_session_id)
         workbench = store.select_exchanges(
             workbench,
             exchanges=tuple(
@@ -793,11 +855,22 @@ async def promote_to_repro(
             ),
             read_model=read_model,
             replace_existing=True,
+            capture_steps=tuple(sess.transcript),
+            sensitive_values=(
+                tuple(sess.persona_headers.values())
+                + tuple(sess.persona_cookies.values())
+            ),
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate unavailable: selected evidence could not be verified.",
+        ) from None
     sess.candidate_workbench = workbench
     try:
         return _render_candidate_response(sess, read_model)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        raise HTTPException(
+            status_code=400,
+            detail="Candidate unavailable: active proof could not be verified.",
+        ) from None

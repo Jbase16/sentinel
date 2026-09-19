@@ -1,21 +1,28 @@
 """Deterministic, receipt-gated reporting owner for one canonical finding.
 
 ``SubmissionCandidate`` is a draft artifact only.  It has no transport and no
-submission authority.  Its claim surface comes exclusively from one canonical
-finding, while its reproduction steps come exclusively from one persisted
-Candidate Workbench.
+submission authority. Its claim surface comes exclusively from one canonical
+finding. Reproduction uses retained captured requests or an explicitly
+non-replayable evidence attestation, projected through the disposable Workbench.
 """
 
 from __future__ import annotations
 
 import json
 import shlex
-from dataclasses import dataclass
+import hashlib
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from core.behavior.normalize import stable_hash
-from core.behavior.receipts import COMPLETED, ReceiptStoreError, re_full_sha256
-from core.epistemic.ledger import CanonicalSessionReadModel
+from core.behavior.receipts import (
+    COMPLETED, BehavioralExecutionReceipt, ReceiptStoreError, re_full_sha256,
+)
+from core.epistemic.ledger import (
+    CanonicalSessionReadModel, ObservationEnvelope, _canonical_finding_commitment,
+)
+from core.identity import CredentialFreshness
+from core.verify.promoter import ArtifactSanitizer
 from core.verify.workbench import (
     CandidateWorkbenchStore,
     ReproEvidenceSelection,
@@ -62,6 +69,9 @@ class CandidateStep:
     response_body_sha256: str
     proof: CandidateProofBinding
     selection_commitment: str
+    request_body_template: str = ""
+    capture_commitment: str = ""
+    dependency_refs: Tuple[str, ...] = ()
 
     @classmethod
     def from_selection(cls, selection: ReproEvidenceSelection) -> "CandidateStep":
@@ -88,6 +98,9 @@ class CandidateStep:
                 provenance_root=selection.provenance_root,
             ),
             selection_commitment=selection.selection_commitment,
+            request_body_template=selection.request_body_template,
+            capture_commitment=selection.capture_commitment,
+            dependency_refs=selection.dependency_refs,
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -102,6 +115,9 @@ class CandidateStep:
             "response_body_sha256": self.response_body_sha256,
             "proof": self.proof.to_dict(),
             "selection_commitment": self.selection_commitment,
+            "request_body_template": self.request_body_template,
+            "capture_commitment": self.capture_commitment,
+            "dependency_refs": list(self.dependency_refs),
         }
 
 
@@ -122,10 +138,27 @@ class SubmissionCandidate:
     citation_observation_ids: Tuple[str, ...]
     active_proof: Tuple[CandidateProofBinding, ...]
     steps: Tuple[CandidateStep, ...]
+    reproduction_kind: str
+    lineage_digest: str
+    attestation_json: Optional[str]
+    impact: str
+    effect_class: str
+
+    @property
+    def replayable(self) -> bool:
+        return self.reproduction_kind == "replayable_recipe"
+
+    @property
+    def attestation(self) -> Optional[Dict[str, Any]]:
+        return json.loads(self.attestation_json) if self.attestation_json else None
 
     def __post_init__(self) -> None:
         if self.canonical_session_id == "global_scan":
             raise ValueError("SubmissionCandidate cannot use global_scan")
+        if self.reproduction_kind not in {"replayable_recipe", "evidence_attestation"}:
+            raise ValueError("SubmissionCandidate reproduction kind is invalid")
+        if self.replayable != bool(self.steps) or self.replayable == bool(self.attestation_json):
+            raise ValueError("SubmissionCandidate reproduction shape is invalid")
         expected = stable_hash("submission_candidate", _candidate_material(self))
         if self.candidate_digest != expected:
             raise ValueError("SubmissionCandidate digest mismatch")
@@ -153,12 +186,17 @@ def _candidate_material(candidate: SubmissionCandidate) -> Dict[str, Any]:
         "citation_observation_ids": candidate.citation_observation_ids,
         "active_proof": candidate.active_proof,
         "steps": candidate.steps,
+        "reproduction_kind": candidate.reproduction_kind,
+        "lineage_digest": candidate.lineage_digest,
+        "attestation_json": candidate.attestation_json,
+        "impact": candidate.impact,
+        "effect_class": candidate.effect_class,
     })
 
 
 def _candidate_material_from_values(values: Mapping[str, Any]) -> Dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "canonical_session_id": values["canonical_session_id"],
         "canonical_revision": values["canonical_revision"],
         "finding_id": values["finding_id"],
@@ -175,7 +213,125 @@ def _candidate_material_from_values(values: Mapping[str, Any]) -> Dict[str, Any]
         "citation_observation_ids": list(values["citation_observation_ids"]),
         "active_proof": [item.to_dict() for item in values["active_proof"]],
         "steps": [item.to_dict() for item in values["steps"]],
+        "reproduction_kind": values["reproduction_kind"],
+        "replayable": values["reproduction_kind"] == "replayable_recipe",
+        "lineage_digest": values["lineage_digest"],
+        "attestation": json.loads(values["attestation_json"]) if values["attestation_json"] else None,
+        "impact": values["impact"],
+        "effect_class": values["effect_class"],
     }
+
+
+def _contains(value: Any, key: str, expected: Any) -> bool:
+    if isinstance(value, Mapping):
+        return value.get(key) == expected or any(
+            _contains(item, key, expected) for item in value.values()
+        )
+    if isinstance(value, (tuple, list)):
+        return any(_contains(item, key, expected) for item in value)
+    return False
+
+
+def _proof_source(read_model, finding, store):
+    """Read existing claim eligibility; never promote or reinterpret an oracle."""
+    if (
+        finding.session_id != read_model.session_id
+        or finding.confirmation_level != "confirmed"
+        or finding.commitment != _canonical_finding_commitment(finding)
+    ):
+        raise ValueError("SubmissionCandidate canonical claim is invalid")
+    proofs = tuple(finding.active_proof)
+    lineages = {(item.receipt_id, item.provenance_root) for item in proofs}
+    if len(lineages) != 1:
+        raise ValueError("SubmissionCandidate requires exactly one active receipt lineage")
+    if len(proofs) != len(set(proofs)):
+        raise ValueError("SubmissionCandidate proof bindings are ambiguous")
+    cited_ids = {item.observation_id for item in finding.citations}
+    if cited_ids != {item.observation_id for item in proofs}:
+        raise ValueError("SubmissionCandidate citations require complete proof binding")
+    observations = tuple(sorted(
+        (item for item in read_model.observations if item.id in cited_ids),
+        key=lambda item: item.id,
+    ))
+    if len(observations) != len(cited_ids) or not observations:
+        raise ValueError("SubmissionCandidate finding citations are inactive")
+    receipt_id, provenance = next(iter(lineages))
+    try:
+        loaded = store.receipt_store.load(receipt_id.removeprefix("behavioral-"))
+        if not isinstance(loaded, BehavioralExecutionReceipt):
+            raise ValueError("SubmissionCandidate active proof receipt is unavailable")
+        receipt = BehavioralExecutionReceipt.from_dict(loaded.to_dict())
+    except (OSError, ReceiptStoreError, TypeError, KeyError) as exc:
+        raise ValueError("SubmissionCandidate active proof receipt is unavailable") from exc
+    if receipt.state != COMPLETED or not receipt.outcome or receipt.receipt_id != receipt_id:
+        raise ValueError("SubmissionCandidate active proof receipt is not completed")
+    for observation in observations:
+        if (
+            not isinstance(observation, ObservationEnvelope)
+            or observation.session_id != read_model.session_id
+            or observation.identity.credential_freshness is CredentialFreshness.STALE
+            or (
+                observation.operation_family.method != "LOCAL"
+                and observation.identity.credential_freshness is not CredentialFreshness.FRESH
+            )
+        ):
+            raise ValueError("SubmissionCandidate proof identity is stale or cross-session")
+        identity = observation.identity
+        if (
+            receipt.context.target_ref != stable_hash("behavioral_receipt_target", identity.target_origin)
+            or receipt.context.envelope_ref != stable_hash("behavioral_receipt_envelope", identity.authorization_envelope_id)
+            or stable_hash("behavioral_receipt_persona", identity.persona_id) not in {
+                receipt.context.source_persona_ref, receipt.context.peer_persona_ref,
+            }
+        ):
+            raise ValueError("SubmissionCandidate receipt identity does not match")
+
+    local = any(item.operation_family.method == "LOCAL" for item in observations)
+    evidence = None
+    if local:
+        from core.behavior.capability_effect_evidence import (
+            CapabilityEffectEvidence, evaluate_replay_leak, replay_leak_finding_material,
+        )
+        if len(observations) != 1 or observations[0].tool.name != "capability_effect_evidence":
+            raise ValueError("SubmissionCandidate LOCAL proof has no supported attestation")
+        try:
+            evidence = CapabilityEffectEvidence.from_mapping(
+                receipt.outcome["capability_effect_evidence"]
+            )
+            eligible = evaluate_replay_leak(evidence).eligible
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("SubmissionCandidate attestation evidence is unavailable") from exc
+        observation = observations[0]
+        if (
+            not eligible
+            or evidence.source_receipt_id != receipt_id
+            or evidence.evidence_root != provenance
+            or evidence.assessment_session_id != read_model.session_id
+            or evidence.identity_binding != observation.identity.to_dict()
+            or hashlib.sha256(evidence.to_json_bytes()).hexdigest() != observation.blob_hash
+        ):
+            raise ValueError("SubmissionCandidate attestation is not eligible")
+        material = replay_leak_finding_material(evidence)
+        if any(getattr(finding, key) != material[key] for key in (
+            "title", "severity", "description", "remediation", "confirmation_level", "metadata",
+        )):
+            raise ValueError("SubmissionCandidate attestation claim differs from canonical evidence")
+    else:
+        outcome = receipt.outcome
+        if (
+            not _contains(outcome, "provenance_root", provenance)
+            or _contains(outcome, "finding_confirmed", False)
+            or _contains(outcome, "oracle_verdict", "refuted")
+            or _contains(outcome, "oracle_verdict", "inconclusive")
+            or _contains(outcome, "orphaned_owned_state_possible", True)
+            or not (
+                _contains(outcome, "finding_confirmed", True)
+                or _contains(outcome, "oracle_verdict", "confirmed")
+                or _contains(outcome, "status", "confirmed")
+            )
+        ):
+            raise ValueError("SubmissionCandidate receipt does not support this claim")
+    return receipt, observations, evidence
 
 
 def build_submission_candidate(
@@ -184,91 +340,115 @@ def build_submission_candidate(
     workbench_id: str,
     workbench_store: CandidateWorkbenchStore,
 ) -> SubmissionCandidate:
-    """Build one immutable draft from current canonical and workbench state."""
-
+    """Assemble a minimized draft from one currently eligible receipt lineage."""
     if read_model.session_id == "global_scan":
         raise ValueError("SubmissionCandidate forbids global_scan")
     workbench = workbench_store.load(workbench_id, read_model=read_model)
     finding = next(
-        (item for item in read_model.findings if item.id == workbench.finding_id),
-        None,
+        (item for item in read_model.findings if item.id == workbench.finding_id), None,
     )
     if finding is None or not finding.commitment:
         raise ValueError("SubmissionCandidate canonical finding is unavailable")
-    if not workbench.selections:
-        raise ValueError("SubmissionCandidate requires receipt-bound workbench steps")
-
-    observation_ids = {item.id for item in read_model.observations}
+    receipt, observations, evidence = _proof_source(read_model, finding, workbench_store)
+    if evidence is None:
+        # A draft is disposable, not a second evidence authority. Reproject the
+        # retained capture each time so edits or stale draft selections cannot
+        # turn into a different request attributed to the same receipt.
+        workbench = workbench_store.populate_from_recorded(workbench, read_model=read_model)
+    sanitizer = ArtifactSanitizer(secret_fingerprints=workbench.secret_fingerprints)
+    proof_bindings = tuple(sorted((
+        CandidateProofBinding(item.observation_id, item.receipt_id, item.provenance_root)
+        for item in finding.active_proof
+    ), key=lambda item: (item.observation_id, item.receipt_id, item.provenance_root)))
     cited_ids = tuple(sorted({item.observation_id for item in finding.citations}))
-    if not cited_ids or any(item not in observation_ids for item in cited_ids):
-        raise ValueError("SubmissionCandidate finding citations are inactive")
-
-    proof_bindings = tuple(
-        sorted(
-            (
-                CandidateProofBinding(
-                    observation_id=item.observation_id,
-                    receipt_id=item.receipt_id,
-                    provenance_root=item.provenance_root,
-                )
-                for item in finding.active_proof
+    proof_set = {(item.observation_id, item.receipt_id, item.provenance_root) for item in proof_bindings}
+    attestation = None
+    steps = ()
+    if evidence is not None:
+        if workbench.selections:
+            raise ValueError("SubmissionCandidate attestation cannot contain replay steps")
+        # All five phases and verified cleanup support the canonical D claim.
+        # Omit producer/runtime/identity detail; retain their evidence-root binding.
+        attestation = {
+            "replayable": False,
+            "label": "Receipt-bound evidence attestation (non-replayable)",
+            "source_receipt_id": evidence.source_receipt_id,
+            "evidence_root": evidence.evidence_root,
+            "source_execution_id": evidence.source_execution_id,
+            "observations": evidence.to_dict()["observations"],
+            "oracle": evidence.to_dict()["oracle"],
+            "cleanup": evidence.to_dict()["cleanup"],
+            "limitation": (
+                "Attests retained target-reported protected-effect exposure only; "
+                "does not independently prove distinct backend state mutations. "
+                "No request endpoint or replay recipe is retained."
             ),
-            key=lambda item: (
-                item.observation_id,
-                item.receipt_id,
-                item.provenance_root,
-            ),
-        )
-    )
-    if not proof_bindings:
-        raise ValueError("SubmissionCandidate requires active canonical proof")
-    for proof in proof_bindings:
-        receipt = workbench_store.receipt_store.load(
-            proof.receipt_id.removeprefix("behavioral-")
-        )
-        if receipt is None or receipt.state != COMPLETED:
-            raise ValueError("SubmissionCandidate active proof receipt is not completed")
-
-    proof_set = {
-        (item.observation_id, item.receipt_id, item.provenance_root)
-        for item in proof_bindings
-    }
-    steps = tuple(
-        CandidateStep.from_selection(item) for item in workbench.selections
-    )
-    if any(
-        (
-            item.proof.observation_id,
-            item.proof.receipt_id,
-            item.proof.provenance_root,
-        )
-        not in proof_set
-        for item in steps
-    ):
-        raise ValueError("SubmissionCandidate step is not active-proof bound")
-
+        }
+        attestation = sanitizer.value(attestation)
+    else:
+        if not workbench.selections:
+            raise ValueError("SubmissionCandidate requires receipt-bound workbench steps")
+        retained = []
+        seen = set()
+        for selection in workbench.selections:
+            key = (selection.observation_id, selection.receipt_id, selection.provenance_root)
+            if key not in proof_set or not selection.capture_commitment:
+                raise ValueError("SubmissionCandidate step is not active-proof bound")
+            # A repeated rendering selection is disposable, but distinct captured
+            # requests or distinct proof observations must never be merged.
+            identity = (*key, selection.capture_commitment)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            step = CandidateStep.from_selection(selection)
+            material = step.to_dict()
+            material.pop("exchange_index")
+            material.pop("selection_commitment")
+            retained.append(replace(
+                step, exchange_index=len(retained),
+                selection_commitment=stable_hash("candidate_minimal_step", material),
+            ))
+        steps = tuple(retained)
+        if {item.proof.observation_id for item in steps} != set(cited_ids):
+            raise ValueError("SubmissionCandidate reproduction omits cited proof evidence")
+    lineage_digest = stable_hash("candidate_receipt_lineage", {
+        "session_id": read_model.session_id,
+        "receipt": receipt.to_dict(),
+        "active_proof": [item.to_dict() for item in proof_bindings],
+        "observations": [item.commitment for item in observations],
+    })
+    # Unrelated session events do not change this minimal claim's revision.
+    revision = stable_hash("candidate_canonical_revision", {
+        "finding": finding.commitment, "lineage": lineage_digest,
+    })
+    impact = finding.metadata.get("impact") or finding.metadata.get("impact_assessment")
+    effect_class = finding.metadata.get("finding_class")
     values = {
         "canonical_session_id": read_model.session_id,
-        "canonical_revision": read_model.revision,
+        "canonical_revision": revision,
         "finding_id": finding.id,
         "finding_commitment": finding.commitment,
         "workbench_id": workbench.workbench_id,
-        "title": finding.title,
-        "severity": finding.severity,
-        "summary": finding.description,
-        "remediation": finding.remediation,
+        "title": sanitizer.text(finding.title),
+        "severity": sanitizer.text(finding.severity),
+        "summary": sanitizer.text(finding.description),
+        "remediation": sanitizer.text(finding.remediation) if finding.remediation else None,
         "confirmation_level": finding.confirmation_level,
-        "target_url": workbench.target_url,
+        "target_url": sanitizer.url(workbench.target_url),
         "citation_observation_ids": cited_ids,
         "active_proof": proof_bindings,
         "steps": steps,
+        "reproduction_kind": "evidence_attestation" if evidence is not None else "replayable_recipe",
+        "lineage_digest": lineage_digest,
+        "attestation_json": json.dumps(attestation, sort_keys=True, separators=(",", ":")) if attestation else None,
+        "impact": sanitizer.text(impact) if isinstance(impact, str) and impact else "unknown",
+        "effect_class": sanitizer.text(effect_class) if isinstance(effect_class, str) and effect_class else "unknown",
     }
+    material = _candidate_material_from_values(values)
+    if sanitizer.contains_secret(material):
+        raise ValueError("SubmissionCandidate artifact sanitization refused")
     return SubmissionCandidate(
-        candidate_digest=stable_hash(
-            "submission_candidate",
-            _candidate_material_from_values(values),
-        ),
-        **values,
+        candidate_digest=stable_hash("submission_candidate", material), **values,
     )
 
 
@@ -281,12 +461,16 @@ def resolve_submission_candidate(
     """Resolve one explicit candidate, or the sole valid session candidate."""
 
     store = workbench_store or CandidateWorkbenchStore()
+    def workbench_for(finding_id: str) -> str:
+        finding = next((item for item in read_model.findings if item.id == finding_id), None)
+        if finding is None:
+            raise ValueError("SubmissionCandidate canonical finding is unavailable")
+        _receipt, _observations, evidence = _proof_source(read_model, finding, store)
+        return store.open(read_model, finding_id=finding_id).workbench_id
+
     if finding_id:
         try:
-            workbench_id = store.workbench_id_for(
-                read_model,
-                finding_id=finding_id,
-            )
+            workbench_id = workbench_for(finding_id)
             return build_submission_candidate(
                 read_model,
                 workbench_id=workbench_id,
@@ -300,10 +484,7 @@ def resolve_submission_candidate(
     candidates = []
     for finding in sorted(read_model.findings, key=lambda item: item.id):
         try:
-            workbench_id = store.workbench_id_for(
-                read_model,
-                finding_id=finding.id,
-            )
+            workbench_id = workbench_for(finding.id)
             candidates.append(build_submission_candidate(
                 read_model,
                 workbench_id=workbench_id,
@@ -373,14 +554,13 @@ class SubmissionCandidateRender:
 
 
 def _render_step(step: CandidateStep, *, index: int) -> RenderedCandidateStep:
-    lines = [f"curl -X {step.method}"]
+    lines = [f"curl -X {shlex.quote(step.method)}"]
     for name, value in step.sanitized_headers:
         lines.append(f"  -H {shlex.quote(f'{name}: {value}')}")
-    request_shape = json.loads(step.request_shape_json)
-    if request_shape.get("kind") != "none":
+    if step.request_body_template:
         lines.append(
             "  --data "
-            + shlex.quote(json.dumps(request_shape, sort_keys=True))
+            + shlex.quote(step.request_body_template)
         )
     lines.append(f"  {shlex.quote(step.sanitized_url)}")
     curl = " \\\n".join(lines)
@@ -449,9 +629,14 @@ def render_submission_candidate(
         "",
         candidate.summary,
         "",
-        "## Steps to Reproduce",
+        "## Steps to Reproduce" if candidate.replayable else "## Evidence Attestation (non-replayable)",
         "",
     ]
+    if not candidate.replayable:
+        lines.extend((
+            "This draft attests recorded evidence. It contains no replayable request recipe.",
+            "", "```json", json.dumps(candidate.attestation, sort_keys=True, indent=2), "```", "",
+        ))
     for step in steps:
         lines.extend((f"### {step.index}.", "", step.markdown, ""))
     lines.extend(("## Evidence Bindings", ""))
@@ -462,6 +647,8 @@ def render_submission_candidate(
         )
     if candidate.remediation:
         lines.extend(("", "## Suggested Remediation", "", candidate.remediation))
+    lines.extend(("", "## Impact", "", candidate.impact,
+                  "", f"Effect class: {candidate.effect_class}"))
     markdown = "\n".join(lines).strip() + "\n"
     material = {
         "candidate_digest": candidate.candidate_digest,
@@ -502,7 +689,12 @@ def candidate_report_payload(
         "asset": candidate.target_url,
         "summary": candidate.summary,
         "steps_to_reproduce": list(rendered.steps_to_reproduce),
-        "impact": None,
+        "impact": candidate.impact,
+        "effect_class": candidate.effect_class,
+        "reproduction_kind": candidate.reproduction_kind,
+        "replayable": candidate.replayable,
+        "lineage_digest": candidate.lineage_digest,
+        "attestation": candidate.attestation,
         "remediation": candidate.remediation,
         "evidence": [item.to_dict() for item in candidate.active_proof],
         "markdown": rendered.markdown,
@@ -521,6 +713,8 @@ def candidate_section_content(
     if section == "executive_summary":
         return f"## Executive Summary\n\n{candidate.summary}"
     if section == "attack_narrative":
+        if not candidate.replayable:
+            return rendered.markdown
         steps = "\n\n".join(rendered.steps_to_reproduce)
         return f"## Evidence-Bound Reproduction\n\n{steps}"
     if section == "technical_findings":

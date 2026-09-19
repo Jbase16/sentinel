@@ -148,6 +148,10 @@ class ReportGenerateResponse(BaseModel):
     candidate_digest: str
     render_digest: str
     canonical_revision: str
+    reproduction_kind: str
+    replayable: bool
+    lineage_digest: str
+    attestation: Optional[Dict[str, Any]]
     target: str
     scope: Optional[str]
     format: str
@@ -202,6 +206,7 @@ async def generate_report(
     import json
 
     from core.data.db import Database
+    from core.behavior.receipts import ReceiptStoreError
     from core.reporting.submission_candidate import (
         candidate_report_payload,
         render_submission_candidate,
@@ -223,16 +228,19 @@ async def generate_report(
     if report_format not in {"markdown", "json"}:
         raise HTTPException(status_code=400, detail="Unsupported report format")
 
-    read_model = load_canonical_session_read_model(req.session_id)
     try:
+        read_model = load_canonical_session_read_model(req.session_id)
         candidate = resolve_submission_candidate(
             read_model,
             finding_id=req.finding_id,
         )
         rendered = render_submission_candidate(candidate)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    payload = candidate_report_payload(candidate, rendered=rendered)
+        payload = candidate_report_payload(candidate, rendered=rendered)
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
+        raise HTTPException(
+            status_code=409,
+            detail="Candidate unavailable: active proof could not be verified.",
+        ) from None
     content = (
         json.dumps(payload, sort_keys=True, indent=2)
         if report_format == "json"
@@ -245,6 +253,10 @@ async def generate_report(
         candidate_digest=candidate.candidate_digest,
         render_digest=rendered.render_digest,
         canonical_revision=candidate.canonical_revision,
+        reproduction_kind=payload["reproduction_kind"],
+        replayable=payload["replayable"],
+        lineage_digest=payload["lineage_digest"],
+        attestation=payload["attestation"],
         target=candidate.target_url,
         scope=None,
         format=report_format,

@@ -201,6 +201,10 @@ async def generate_report(
         "candidate_digest": candidate.candidate_digest,
         "render_digest": rendered.render_digest,
         "canonical_revision": candidate.canonical_revision,
+        "reproduction_kind": payload["reproduction_kind"],
+        "replayable": payload["replayable"],
+        "lineage_digest": payload["lineage_digest"],
+        "attestation": payload["attestation"],
         "type": report_type,
         "format": report_format,
         "claims": payload["claims"],
@@ -213,6 +217,7 @@ async def _candidate_report_state(
     *,
     finding_id: str | None,
 ):
+    from core.behavior.receipts import ReceiptStoreError
     from core.reporting.submission_candidate import (
         candidate_report_payload,
         render_submission_candidate,
@@ -224,24 +229,25 @@ async def _candidate_report_state(
     if await db.get_session(session_id) is None:
         raise SentinelError(
             ErrorCode.SESSION_NOT_FOUND,
-            f"Session {session_id} not found",
+            "Session not found",
         )
-    read_model = load_canonical_session_read_model(session_id)
     try:
+        read_model = load_canonical_session_read_model(session_id)
         candidate = resolve_submission_candidate(
             read_model,
             finding_id=finding_id,
         )
         rendered = render_submission_candidate(candidate)
-    except ValueError as exc:
+        payload = candidate_report_payload(candidate, rendered=rendered)
+    except (ValueError, TypeError, KeyError, ReceiptStoreError, OSError):
         raise SentinelError(
             ErrorCode.SESSION_INVALID_STATE,
-            str(exc),
-        ) from exc
+            "Candidate unavailable: active proof could not be verified.",
+        ) from None
     return (
         candidate,
         rendered,
-        candidate_report_payload(candidate, rendered=rendered),
+        payload,
     )
 
 @router.post("/generate-section", dependencies=[Depends(verify_token)])
@@ -265,11 +271,11 @@ async def generate_section(
         from core.reporting.submission_candidate import candidate_section_content
 
         content = candidate_section_content(candidate, section=section)
-    except ValueError as exc:
+    except (ValueError, TypeError, KeyError):
         raise SentinelError(
             ErrorCode.SESSION_INVALID_STATE,
-            str(exc),
-        ) from exc
+            "Candidate report section is unavailable.",
+        ) from None
 
     return {
         "session_id": session_id,
@@ -277,6 +283,10 @@ async def generate_section(
         "candidate_digest": candidate.candidate_digest,
         "render_digest": rendered.render_digest,
         "canonical_revision": candidate.canonical_revision,
+        "reproduction_kind": payload["reproduction_kind"],
+        "replayable": payload["replayable"],
+        "lineage_digest": payload["lineage_digest"],
+        "attestation": payload["attestation"],
         "section": section,
         "claims": payload["claims"],
         "content": content,

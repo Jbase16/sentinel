@@ -86,7 +86,7 @@ split (3396 + 26 = 3422 passed, 1 skipped, 3423 collected). Jason pushed the bra
 slice is merged to `main` by fast-forward at `7d135bc`. The implementation does not renew
 prior-build native evidence.
 
-The current complete checkpoint on Python **3.12.14** used the same complementary
+The OCB-R6 checkpoint on Python **3.12.14** used the same complementary
 commands recorded above (the unmarked invocation also retained its generated test
 outputs with `--basetemp=/tmp/sentinel-ocb-r6-checkpoint-20260918`):
 
@@ -101,7 +101,18 @@ outputs with `--basetemp=/tmp/sentinel-ocb-r6-checkpoint-20260918`):
   to the base SHA. New files add no matching prohibited operation. The six web-schema
   drift snapshots were not rerun or changed. Both governance debts remain separate.
 
-Last reconciled: 2026-09-18
+OCB-R7 Rev 2 implementation checkpoint (2026-09-19): the production-wired candidate
+assembler supports captured-request recipes and Family-D LOCAL evidence attestations.
+The [slice record](ONE_CLICK_BOUNTY_R7_CANDIDATE_ASSEMBLY_PLAN.md) defines the exact
+source boundary and claim-specific refusal semantics. OCB-S19 is suite-proved on Python 3.12.14: the exact unmarked invocation passed
+3451 tests with 1 skip and 26 deselections (3 warnings, 36.16s); the separate
+`subprocess_spawn` invocation passed all 26 tests with 3452 deselections (2 warnings,
+16.83s). The coverage union is **3477 passed, 1 skipped, 3478 collected**. All 34
+OCB-S19 cases are included. The branch delivery identity is recorded in Workstream 5;
+mediator verification and Jason's separate merge go remain required. This introduces no execution authority or target traffic and does
+not renew native evidence.
+
+Last reconciled: 2026-09-19
 
 ## 1. Purpose
 
@@ -513,7 +524,7 @@ accepted baseline remains the Family-C checkpoint described below.
 | OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Suite-proved passive/unwired bounded slice; mediator-verified and merged to `main` at `7d135bc` | High-value sink ledger, exact marginal-value ordering, complete proof-budget bounds, typed-constraint and recorded-outcome replanning, A-D coverage accounting, and immutable input-bound stop certificate; `OCB-S18` focused proof is included in the full checkpoint | Mediator-verified against the real repo, suite, and recomputed certificates; merged by fast-forward. No production caller; unsupported proof costs/outcomes remain explicit. Live orchestration is OCB-R8 / OCB-S20 |
-| OCB-R7 Submission-grade candidate assembly | Partial but production-wired for completed proofs | Completed positive receipt to canonical finding, Verify workbench, deterministic receipt-bound `SubmissionCandidate`, and candidate-only report routes | Generalize minimization/replay, impact binding, sanitized reproduction, invalidation behavior, and end-to-end `OCB-S19` across supported families |
+| OCB-R7 Submission-grade candidate assembly | Rev 2 suite-proved; mediator acceptance pending | One-lineage immutable `SubmissionCandidate` on Verify, Cortex, AI, and scans: Shape R from actually retained request commitments, Shape A from eligible Family-D LOCAL evidence; minimized proof, honest impact, sanitization, deduplication, claim-specific refusal, and owned-draft teardown | Complete the pushed-branch handoff, then mediator verification and Jason's separate merge go; automatic upstream captured-proof promotion, native/external submission, and payout remain outside this slice |
 | OCB-R8 Operational one-click completion | Partial for OCB-R5 families A-C plus a phase-only default-off Family-D scan profile | Direct Foundry and ordinary Scan capability executions now share one evidence/admission/promotion service. Capability mode requires its payload, excludes other profiles, suppresses normal follow-on scan/verification work, and returns the canonical result in the original assessment when local promotion is enabled. This does not make capability mode a native UI selection or complete acquisition, stopping, report, or submission handoff. | Preserve the suite-proved R5D10 repository gate while completing acquisition, replanning, stop status, and report handoff; prove `OCB-S20` without treating the prior-SHA OCB-S17 artifact as changed-build evidence. |
 | OCB-R9 Real-target validation and payout acceptance | Evidence in progress | Family C retains exact-SHA native loopback evidence; Family D has local operator-native `OCB-S17` evidence at `cb3e926` (artifact `c1239945…`) and at `f45e037` (2026-09-17 renewal artifact `b0edf717…`, run `val-s17-native-20260918020600`), plus local operator-native R5D10 exact-build evidence at `f45e037` (artifact `2168dcd1…`, run `val-r5d10-native-20260917034132`, R5D10 gate clauses only); LAB-S01 through LAB-S10 have operator-attested passes; DB-S15 is live-observed on loopback at Sentinel `375137f`. No external-target, report, submission, or payout evidence exists. | Resolve or baseline the remaining release-gate debt at a release SHA, run separately authorized exact-build acceptance where required, then conduct separately authorized real-program validation; only an accepted or paid finding earns payout-proven status. |
 
@@ -966,13 +977,21 @@ is OCB-R7 / OCB-S19.
 
 ### Workstream 5 — Close generalized OCB-R7 candidate assembly
 
-Use the existing canonical finding and `SubmissionCandidate` path. Add only the missing
-family-neutral proof minimization, replay binding, impact derivation, sanitized
-reproduction, invalidation, and duplicate handling.
+Rev 2 extends the existing canonical finding and `SubmissionCandidate` path with
+two proof-derived shapes: a sanitized replayable recipe when the canonical proof
+retains request commitments, and an explicitly non-replayable Family-D LOCAL evidence
+attestation. The [OCB-R7 slice record](ONE_CLICK_BOUNTY_R7_CANDIDATE_ASSEMBLY_PLAN.md)
+defines minimization, receipt binding, honest impact, sanitization, duplicate handling,
+owned-draft cleanup, and the existing Ghost-capture source boundary. Response-only and
+synthetic summaries refuse; this slice does not change automatic A-C promotion.
 
-Exit gate: `OCB-S19` proves that one and only one active receipt lineage renders the
-same candidate across Verify, Cortex, AI report, restart, and deduplication, while
-negative, stale, cross-session, or invalidated proof cannot render a claim.
+Exit gate: `OCB-S19` covers one active lineage rendering the identical candidate
+across Verify, Cortex, AI, scans, restart, and deduplication. Claim-specific refusal
+rejects negative, stale, cross-session, or invalidated proof while retaining the
+required `refuted` oracle verdict of an eligible Family-D replay-leak finding.
+No producer, oracle, admission, receipt schema, or raw durable capture is changed.
+The branch is `ocb/r7-candidate-assembly`, based on
+`493f76f681cbdf3598e09cbe20448bcb46b080c9`; delivery identity is recorded after push.
 
 ### Workstream 6 — Complete OCB-R8 ordinary-click orchestration
 
@@ -1108,7 +1127,7 @@ implemented sub-slices.
 | [x] | OCB-R5 family C roles/membership | Prior-SHA bounded revocation survival is native-proven; R5C7/R5C8 are suite-proved; R5C9 current-SHA acceptance is mediator-verified; broader Family-C shapes remain open and deferred | Preserve the exact R5C9 claim and keep membership creation, role assignment, and administrative boundaries outside Family D |
 | [ ] | OCB-R5 family D capabilities | R5D1-R5D9 retain their bounded layers; R5D10 is suite-proved for strict durable inner evidence, original-session canonical replay-leak promotion, bounded local recovery/status, and phase-only ordinary Scan reachability behind a separate default-off promotion gate, and is exact-build native-accepted for `f45e037` by local operator-native artifact `2168dcd1…` (R5D10 gate clauses only). `OCB-S17` is local operator-native and native-proven for `cb3e926` (artifact `c1239945…`) and, by its 2026-09-17 renewal, for the changed build `f45e037` (artifact `b0edf717…`, run `val-s17-native-20260918020600`). | Preserve the suite-proved repository gate, the accepted R5D10 exact-build result, zero-target promotion/recovery, and the controlled-twin-only execution boundary. Independent effect-occurrence proof and report/submission material remain later work. |
 | [ ] | OCB-R6 search/stopping | Passive/unwired bounded implementation and OCB-S18 are suite-proved; local branch `ocb/r6-search-stopping`; push blocked by execution approval policy | Publish the implementation commit, then mediator verification of the pushed slice and Jason's separate merge go remain open; no native evidence claim |
-| [ ] | OCB-R7 generalized candidate | Partial | `OCB-S19` |
+| [ ] | OCB-R7 generalized candidate | Rev 2 and `OCB-S19` suite-proved: captured-request Shape R and non-replayable Family-D Shape A; no new authority | Pushed-branch delivery record, mediator verification, then Jason's separate merge go |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |
 | [ ] | OCB-R5 families E and F expansion | Deferred | New registered scenarios after OCB-R8 |
 | [ ] | OCB-R9 release/payout evidence | Evidence in progress | Resolve or baseline remaining release gates, then separately authorized real-program evidence |

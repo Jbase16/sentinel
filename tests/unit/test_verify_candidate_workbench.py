@@ -74,7 +74,7 @@ def test_verify_workbench_is_session_finding_receipt_bound_and_restart_safe(
             "X-Custom-Secret": "custom-secret-value",
             "Content-Type": "application/json",
         },
-        request_body='{"documentId":"raw-body-secret","include":"owner"}',
+        request_body='{"documentId":"owned-document","token":"raw-body-secret","include":"owner"}',
         request_content_type="application/json",
     )
     step.set_response(
@@ -108,6 +108,8 @@ def test_verify_workbench_is_session_finding_receipt_bound_and_restart_safe(
     assert dict(selection.sanitized_headers)["authorization"] == "Bearer $TOKEN"
     assert dict(selection.sanitized_headers)["x-custom-secret"] == "$REDACTED"
     assert dict(selection.sanitized_headers)["content-type"] == "application/json"
+    assert "owned-document" in selection.request_body_template
+    assert "raw-body-secret" not in selection.request_body_template
 
     persisted = next((tmp_path / "workbenches").glob("*.json")).read_text()
     for secret in (
@@ -142,6 +144,7 @@ def test_verify_workbench_is_session_finding_receipt_bound_and_restart_safe(
                 ),
             ),
             read_model=read_model,
+            capture_steps=(step,),
         )
     after_failed_batch = store.load(selected.workbench_id, read_model=read_model)
     assert tuple(item.exchange_index for item in after_failed_batch.selections) == (0,)

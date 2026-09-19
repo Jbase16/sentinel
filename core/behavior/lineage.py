@@ -719,6 +719,33 @@ class ValueLineageLedger:
             if item.operation_id == operation_id and item.world_ref == world_ref
         )
 
+    def required_sources(self, source_refs: Iterable[str]) -> Tuple[str, ...]:
+        """Conservative recorded dependency closure for draft reproduction.
+
+        This does not infer an execution plan or authorize a replay. Every chosen
+        evidence source survives; an exact recorded producer is added recursively.
+        Ambiguity prevents minimization instead of silently dropping a prerequisite.
+        """
+        required = set(source_refs)
+        known = {item.source_ref for item in self.observations}
+        if not required or not required <= known:
+            raise RehydrationDenied("reproduction source capture is unavailable")
+        if self.ambiguous_consumers:
+            raise RehydrationDenied("reproduction capture lineage is ambiguous")
+        while True:
+            expanded = required | {
+                item.producer_source_ref
+                for item in self.bindings
+                if item.consumer_source_ref in required
+            }
+            if expanded == required:
+                break
+            required = expanded
+        return tuple(
+            item.source_ref for item in self.observations
+            if item.source_ref in required
+        )
+
     def bindings_for(
         self,
         *,

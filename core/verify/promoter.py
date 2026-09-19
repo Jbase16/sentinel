@@ -31,11 +31,14 @@ to do with them: draft a report, copy to clipboard, write to disk, etc.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 import shlex
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from urllib.parse import parse_qsl, quote, quote_plus, urlencode, urlsplit, urlunsplit
 
 from core.ghost.flow import FlowStep
 from core.verify.console import VerificationSession
@@ -51,8 +54,328 @@ logger = logging.getLogger(__name__)
 # include auth via per-request headers — those still need sanitizing.
 _AUTH_HEADER_NAMES = {
     "authorization", "cookie", "x-csrf-token", "x-xsrf-token",
-    "x-auth-token", "x-api-key", "x-session-token",
+    "x-auth-token", "x-api-key", "x-session-token", "proxy-authorization",
 }
+
+_SECRET_NAMES = frozenset({
+    "authorization", "proxyauthorization", "cookie", "setcookie", "password",
+    "passwd", "secret", "clientsecret", "apikey", "xapikey", "token", "authtoken",
+    "accesstoken", "refreshtoken", "idtoken", "session", "sessionid", "sessiontoken",
+    "sid", "csrf", "csrftoken", "xcsrftoken", "xsrf", "xsrftoken", "xxsrftoken",
+    "credential", "credentials", "bearertoken",
+})
+_PLACEHOLDER = re.compile(r"\$[A-Z][A-Z0-9_]*\Z")
+_SECRET_NAME_PATTERN = (
+    r"(?:proxy[-_ ]?authorization|authorization|set[-_ ]?cookie|cookie|password|passwd|"
+    r"(?:client[-_]?)?secret|(?:x[-_]?)?api[-_]?key|(?:access|refresh|id|auth|bearer)[-_]?token|"
+    r"session(?:[-_]?(?:id|token))?|sid|(?:x[-_]?)?(?:csrf|xsrf)(?:[-_]?token)?|"
+    r"token|credentials?)"
+)
+_SECRET_PAIR = re.compile(
+    rf"(?i)(?<![\w-])(?P<key>{_SECRET_NAME_PATTERN})(?P<sep>[\"']?\s*[:=]\s*)"
+    r"(?P<value>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^&;\s,}\]<>`]+)"
+)
+_AUTH_VALUE = re.compile(r"(?i)\b(Bearer|Basic)\s+([^\s\"'`,;<>]+)")
+_COOKIE_LINE = re.compile(r"(?im)\b((?:set-)?cookie\s*:\s*)([^\r\n]+)")
+_MEDIA_VALUE = re.compile(
+    r"(?:application/(?:json|xml|x-www-form-urlencoded|octet-stream|problem\+json|vnd\.api\+json|\*)"
+    r"|text/(?:plain|html|xml|csv|\*)|multipart/form-data|\*/\*)"
+    r"(?:\s*;\s*(?:charset=(?:utf-8|us-ascii|iso-8859-1)|q=(?:0(?:\.\d{1,3})?|1(?:\.0{1,3})?)))*",
+    re.IGNORECASE,
+)
+
+
+def _secret_name(name: str) -> bool:
+    return not _PLACEHOLDER.fullmatch(name) and re.sub(r"[^a-z0-9]", "", name.lower()) in _SECRET_NAMES
+
+
+def _safe_media_header(name: str, value: str) -> bool:
+    return name.lower() in {"accept", "content-type"} and all(
+        _MEDIA_VALUE.fullmatch(part.strip()) is not None for part in value.split(",")
+    )
+
+
+class ArtifactSanitizer:
+    """In-memory credential redaction shared by both candidate artifact shapes.
+
+    Captures and credential values never enter this object's repr or a durable
+    export. Only length/hash deny-checks may be retained in an owned workbench;
+    these also redact reflected credentials when the workbench is reopened.
+    No method dispatches a request or mutates a capture.
+    """
+
+    __slots__ = ("_values", "_secret_fingerprints")
+
+    def __init__(
+        self,
+        records: Iterable[Any] = (),
+        *,
+        sensitive_values: Iterable[str] = (),
+        secret_fingerprints: Iterable[Tuple[int, str]] = (),
+        redact_response_values: bool = False,
+    ) -> None:
+        self._values: set[str] = set()
+        self._secret_fingerprints: set[Tuple[int, str]] = set()
+        for length, digest in secret_fingerprints:
+            if (
+                isinstance(length, bool) or not isinstance(length, int) or length < 1
+                or not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                raise ValueError("Artifact credential fingerprint is invalid")
+            self._secret_fingerprints.add((length, digest))
+        for value in sensitive_values:
+            self._remember(value)
+            if isinstance(value, str):
+                self._collect_text(value)
+        for record in records:
+            if isinstance(record, Mapping):
+                self._collect_value(record)
+                if redact_response_values:
+                    self._collect_response_values(record.get("response_body", ""))
+                continue
+            for name in ("headers", "response_headers"):
+                self._collect_headers(getattr(record, name, {}) or {})
+            for value in (getattr(record, "cookies_after_step", {}) or {}).values():
+                self._remember(value)
+            self._collect_url(str(getattr(record, "url", "")))
+            for name in ("request_body", "response_body"):
+                self._collect_text(str(getattr(record, name, "") or ""))
+            if redact_response_values:
+                self._collect_response_values(getattr(record, "response_body", "") or "")
+            self._collect_value(getattr(record, "params", {}) or {})
+
+    def __repr__(self) -> str:
+        return "ArtifactSanitizer(credentials=<redacted>)"
+
+    def __reduce_ex__(self, protocol: int) -> Any:
+        raise TypeError("Artifact credentials cannot be serialized")
+
+    def _remember(self, value: Any) -> None:
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            return
+        raw = str(value)
+        if not raw or _PLACEHOLDER.fullmatch(raw):
+            return
+        variants = {
+            raw, quote(raw, safe=""), quote_plus(raw, safe=""),
+            json.dumps(raw, ensure_ascii=True)[1:-1],
+        }
+        self._values.update(variants | {
+            re.sub(r"%[0-9A-F]{2}", lambda match: match.group(0).lower(), item)
+            for item in variants
+        })
+
+    def _collect_headers(self, headers: Mapping[str, Any]) -> None:
+        for name, value in headers.items():
+            name, value = str(name).lower(), str(value)
+            if _safe_media_header(name, value):
+                continue
+            if name in {"cookie", "set-cookie"}:
+                parts = value.split(";") if name == "cookie" else value.split(";", 1)[:1]
+                for part in parts:
+                    self._remember(part.split("=", 1)[-1].strip())
+            elif name in {"authorization", "proxy-authorization"}:
+                self._remember(value.split(" ", 1)[-1].strip())
+            else:
+                self._remember(value)
+                self._collect_text(value)
+
+    def _collect_url(self, value: str) -> None:
+        try:
+            parts = urlsplit(value)
+        except ValueError:
+            return
+        self._remember(parts.username or "")
+        self._remember(parts.password or "")
+        for name, item in parse_qsl(parts.query, keep_blank_values=True):
+            if _secret_name(name):
+                self._remember(item)
+
+    def _collect_value(self, value: Any) -> None:
+        if isinstance(value, Mapping):
+            for name, item in value.items():
+                key = str(name).lower()
+                if key in {"headers", "request_headers", "response_headers"} and isinstance(item, Mapping):
+                    self._collect_headers(item)
+                elif key in {"cookies", "cookies_after_step", "persona_cookies"} and isinstance(item, Mapping):
+                    for cookie in item.values():
+                        self._remember(cookie)
+                elif _secret_name(key):
+                    self._remember(item)
+                    if isinstance(item, str):
+                        self._collect_text(item)
+                elif key in {"url", "target_url"} and isinstance(item, str):
+                    self._collect_url(item)
+                elif isinstance(item, str):
+                    self._collect_text(item)
+                else:
+                    self._collect_value(item)
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                self._collect_value(item)
+
+    def _collect_text(self, value: str) -> None:
+        for match in _AUTH_VALUE.finditer(value):
+            self._remember(match.group(2))
+        for match in _SECRET_PAIR.finditer(value):
+            raw = match.group("value").strip("\"'")
+            if not (
+                "authorization" in match.group("key").lower()
+                and raw.lower() in {"bearer", "basic"}
+            ):
+                self._remember(raw)
+        if "=" in value and "\n" not in value:
+            for name, item in parse_qsl(value, keep_blank_values=True):
+                if _secret_name(name):
+                    self._remember(item)
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return
+        if isinstance(parsed, (dict, list)):
+            self._collect_value(parsed)
+
+    def _collect_response_values(self, value: Any) -> None:
+        """Draft recipes retain response shapes, never protected response data."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (ValueError, TypeError):
+                self._remember(value)
+                return
+            if isinstance(parsed, str):
+                self._remember(parsed)
+                return
+            self._collect_response_values(parsed)
+        elif isinstance(value, Mapping):
+            for item in value.values():
+                self._collect_response_values(item)
+        elif isinstance(value, (tuple, list)):
+            for item in value:
+                self._collect_response_values(item)
+
+    def fingerprints(self) -> Tuple[Tuple[int, str], ...]:
+        return tuple(sorted(self._secret_fingerprints | {
+            (len(value), hashlib.sha256(value.encode("utf-8")).hexdigest())
+            for value in self._values
+        }))
+
+    @staticmethod
+    def _fingerprint_spans(value: str, fingerprints: Iterable[Tuple[int, str]]) -> list[Tuple[int, int]]:
+        by_length: Dict[int, set[str]] = {}
+        for length, digest in fingerprints:
+            if length <= len(value):
+                by_length.setdefault(length, set()).add(digest)
+        spans = []
+        for length, digests in by_length.items():
+            for start in range(len(value) - length + 1):
+                if hashlib.sha256(value[start:start + length].encode("utf-8")).hexdigest() in digests:
+                    spans.append((start, start + length))
+        return spans
+
+    def contains_secret(self, value: Any) -> bool:
+        if isinstance(value, Mapping):
+            return any(self.contains_secret(str(key)) or self.contains_secret(item) for key, item in value.items())
+        if isinstance(value, (tuple, list)):
+            return any(self.contains_secret(item) for item in value)
+        if not isinstance(value, (str, int, float)) or isinstance(value, bool):
+            return False
+        text = str(value)
+        return any(item in text for item in self._values) or bool(
+            self._fingerprint_spans(text, self._secret_fingerprints)
+        )
+
+    def text(self, value: str) -> str:
+        result = str(value)
+        spans = self._fingerprint_spans(result, self._secret_fingerprints)
+        for secret in self._values:
+            start = result.find(secret)
+            while start >= 0:
+                spans.append((start, start + len(secret)))
+                start = result.find(secret, start + 1)
+        if spans:
+            merged: list[Tuple[int, int]] = []
+            for start, end in sorted(spans):
+                if merged and start < merged[-1][1]:
+                    merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+                else:
+                    merged.append((start, end))
+            for start, end in reversed(merged):
+                result = result[:start] + "$REDACTED" + result[end:]
+        result = _AUTH_VALUE.sub(
+            lambda match: f"{match.group(1)} " + (
+                "$CREDENTIALS_B64" if match.group(1).lower() == "basic" else "$TOKEN"
+            ), result,
+        )
+        result = _COOKIE_LINE.sub(lambda match: match.group(1) + _sanitize_cookie_value(match.group(2)), result)
+
+        def redact_pair(match: re.Match[str]) -> str:
+            current = match.group("value")
+            wrapper = current[0] if current.startswith(("\"", "'")) else ""
+            raw = current.strip("\"'")
+            if raw.lower() in {"bearer", "basic"}:
+                return match.group(0)
+            replacement = raw if _PLACEHOLDER.fullmatch(raw) else "$REDACTED"
+            return match.group("key") + match.group("sep") + wrapper + replacement + wrapper
+
+        return _SECRET_PAIR.sub(redact_pair, result)
+
+    def value(self, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            result = {}
+            for key, item in value.items():
+                safe_key = self.text(str(key))
+                if safe_key in result:
+                    raise ValueError("Artifact field names collide after sanitization")
+                result[safe_key] = "$REDACTED" if _secret_name(str(key)) else self.value(item)
+            return result
+        if isinstance(value, (tuple, list)):
+            return [self.value(item) for item in value]
+        if isinstance(value, str):
+            return self.text(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and self.contains_secret(value):
+            return "$REDACTED"
+        return value
+
+    def headers(self, headers: Mapping[str, str]) -> Tuple[Dict[str, str], Dict[str, str]]:
+        sanitized, legend = sanitize_headers(headers)
+        result = {}
+        for name, value in sanitized.items():
+            safe_name = self.text(name)
+            if safe_name in result:
+                raise ValueError("Artifact header names collide after sanitization")
+            if name == "cookie" or name in _AUTH_HEADER_NAMES:
+                result[safe_name] = self.text(value)
+            elif _safe_media_header(name, value):
+                result[safe_name] = self.text(value)
+            else:
+                result[safe_name] = "$REDACTED"
+        return result, self.value(legend)
+
+    def url(self, value: str) -> str:
+        try:
+            parts = urlsplit(value)
+        except ValueError:
+            raise ValueError("Artifact URL is invalid") from None
+        if parts.scheme.lower() not in {"http", "https"} or not parts.hostname:
+            raise ValueError("Artifact URL must use HTTP(S)")
+        if parts.username is not None or parts.password is not None:
+            raise ValueError("Artifact URL must not contain credentials")
+        query = urlencode([
+            (self.text(name), "$VALUE")
+            for name, _value in parse_qsl(parts.query, keep_blank_values=True)
+        ], safe="$")
+        return urlunsplit((parts.scheme.lower(), self.text(parts.netloc), self.text(parts.path), query, ""))
+
+    def body(self, value: str) -> str:
+        if not value:
+            return value
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError):
+            return self.text(value)
+        sanitized = self.value(parsed)
+        return value if parsed == sanitized else json.dumps(sanitized, sort_keys=True, ensure_ascii=True)
 
 
 def _placeholder_for(header_name: str, value: str) -> str:
@@ -65,7 +388,7 @@ def _placeholder_for(header_name: str, value: str) -> str:
         Cookie: sid=...; csrf=... → handled by _sanitize_cookie_value
     """
     name = header_name.lower()
-    if name == "authorization":
+    if name in {"authorization", "proxy-authorization"}:
         # Detect scheme so we emit the right placeholder.
         scheme = value.split(" ", 1)[0] if " " in value else ""
         if scheme.lower() == "bearer":
@@ -93,7 +416,7 @@ def _sanitize_cookie_value(cookie_header: str) -> str:
     out_parts = []
     for p in parts:
         if "=" not in p:
-            out_parts.append(p)
+            out_parts.append("$REDACTED")
             continue
         name, _val = p.split("=", 1)
         name = name.strip()
@@ -154,7 +477,12 @@ def sanitize_headers(
 # ─────────────────────── curl rendering ───────────────────────
 
 
-def render_curl(step: FlowStep, sanitize: bool = True) -> Tuple[str, Dict[str, str]]:
+def render_curl(
+    step: FlowStep,
+    sanitize: bool = True,
+    *,
+    sanitizer: Optional[ArtifactSanitizer] = None,
+) -> Tuple[str, Dict[str, str]]:
     """Render `step` as a multi-line curl command. Returns (curl, legend).
 
     The curl is produced as:
@@ -164,30 +492,34 @@ def render_curl(step: FlowStep, sanitize: bool = True) -> Tuple[str, Dict[str, s
           -d 'body' \\
           'URL'
 
-    `sanitize=True` replaces auth header values with placeholders;
+    `sanitize=True` sanitizes the entire request with placeholders;
     `sanitize=False` returns the raw captured values (operator's local
     debugging only).
     """
     if sanitize:
-        sanitized_headers, legend = sanitize_headers(step.headers)
+        sanitizer = sanitizer or ArtifactSanitizer((step,))
+        sanitized_headers, legend = sanitizer.headers(step.headers)
+        method = sanitizer.text(step.method)
+        body = sanitizer.body(step.request_body)
+        url = sanitizer.url(step.url)
     else:
         sanitized_headers = {str(k).lower(): str(v) for k, v in step.headers.items()}
         legend = {}
+        method, body, url = step.method, step.request_body, step.url
 
-    lines = [f"curl -X {step.method}"]
+    lines = [f"curl -X {shlex.quote(method)}"]
     for k, v in sorted(sanitized_headers.items()):
         # shlex.quote handles single-quoted escapes; we wrap manually
         # so the formatting stays consistent line-to-line.
         header_line = f"{k}: {v}"
         lines.append(f"  -H {shlex.quote(header_line)}")
-    if step.request_body:
-        # Sanitization of request body is a future improvement (would
-        # need JSON-aware redaction). For V1 we ship the raw body —
-        # most repro request bodies are not secret in themselves
-        # (they're the payload being tested).
-        lines.append(f"  -d {shlex.quote(step.request_body)}")
-    lines.append(f"  {shlex.quote(step.url)}")
-    return " \\\n".join(lines), legend
+    if body:
+        lines.append(f"  -d {shlex.quote(body)}")
+    lines.append(f"  {shlex.quote(url)}")
+    rendered = " \\\n".join(lines)
+    if sanitize and sanitizer is not None and sanitizer.contains_secret((rendered, legend)):
+        raise ValueError("Artifact credential redaction is incomplete")
+    return rendered, legend
 
 
 # ─────────────────────── prose rendering ───────────────────────
@@ -302,8 +634,8 @@ def promote_transcript_to_repro(
         Operators select the meaningful subset in the UI (often just
         the one or two requests that demonstrate the bug, not every
         exploratory probe).
-      sanitize: If True (default), auth headers/cookies in the rendered
-        curl are replaced with placeholders. Set False only for
+      sanitize: If True (default), credential values throughout the rendered
+        entries are replaced with placeholders. Set False only for
         operator-local debug renders.
 
     Returns:
@@ -327,22 +659,32 @@ def promote_transcript_to_repro(
                 selected.append((raw_idx, session.transcript[raw_idx]))
             else:
                 logger.warning(
-                    f"[promoter] session {session.session_id[:8]}: "
-                    f"skipping out-of-range exchange index {raw_idx}"
+                    "[promoter] skipping out-of-range exchange index"
                 )
 
+    sanitizer = ArtifactSanitizer(
+        session.transcript,
+        sensitive_values=(
+            *session.persona_headers.values(),
+            *session.persona_cookies.values(),
+        ),
+    ) if sanitize else None
     entries: List[ReproEntry] = []
     combined_legend: Dict[str, str] = {}
     for one_based_i, (_orig_idx, step) in enumerate(selected, start=1):
-        curl, legend = render_curl(step, sanitize=sanitize)
+        curl, legend = render_curl(step, sanitize=sanitize, sanitizer=sanitizer)
         prose = _build_prose_for_step(
             step, index=one_based_i, finding_summary=finding_summary
         )
-        excerpt = _excerpt_response_body(step.response_body)
+        if sanitizer is not None:
+            prose = sanitizer.text(prose)
+            excerpt = _excerpt_response_body(sanitizer.body(step.response_body))
+        else:
+            excerpt = _excerpt_response_body(step.response_body)
         entries.append(ReproEntry(
             index=one_based_i,
-            method=step.method,
-            url=step.url,
+            method=sanitizer.text(step.method) if sanitizer is not None else step.method,
+            url=sanitizer.url(step.url) if sanitizer is not None else step.url,
             prose=prose,
             curl=curl,
             response_status=step.response_status,
@@ -367,6 +709,14 @@ def promote_transcript_to_repro(
         first = entries[0]
         first.prose = f"{legend_block}\n\n{first.prose}"
 
+    if sanitizer is not None and sanitizer.contains_secret([
+        {
+            "method": entry.method, "url": entry.url, "markdown": entry.markdown,
+            "response_excerpt": entry.response_excerpt, "legend": entry.placeholder_legend,
+        }
+        for entry in entries
+    ]):
+        raise ValueError("Artifact credential redaction is incomplete")
     return entries, combined_legend
 
 

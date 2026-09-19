@@ -185,7 +185,13 @@ class TestEndpointSessionScoping:
         monkeypatch.setattr(
             candidate_module,
             "candidate_report_payload",
-            lambda value, rendered=None: {"claims": claims},
+            lambda value, rendered=None: {
+                "claims": claims,
+                "reproduction_kind": "replayable_recipe",
+                "replayable": True,
+                "lineage_digest": "candidate_lineage:" + "d" * 64,
+                "attestation": None,
+            },
         )
         req = cortex.ReportGenerateRequest(
             target=_TARGET,

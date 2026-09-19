@@ -7,8 +7,6 @@ import pytest
 
 from core.ai.scan_briefing import build_scan_briefing
 from core.base.config import SentinelConfig, StorageConfig
-from core.behavior.compiler import operation_atoms_from_records
-from core.behavior.normalize import stable_hash
 from core.behavior.receipts import (
     BehavioralReceiptStore,
     redacted_receipt_context,
@@ -24,8 +22,9 @@ from core.epistemic.ledger import (
     EvidenceLedger,
     LifecycleState,
 )
-from core.ghost.flow import FlowStep
-from core.identity import AssessmentIdentityContext, CredentialFreshness
+from core.foundry.authorization import AuthorizationEnvelope
+from core.ghost.canonical_evidence import GhostCanonicalEvidenceAdapter
+from core.ghost.flow import FlowMapper
 from core.reporting.submission_candidate import (
     build_submission_candidate,
     render_submission_candidate,
@@ -37,25 +36,6 @@ ORIGIN = "https://owned.example.test"
 SESSION_ID = "session-wo09"
 PROVENANCE_ROOT = "d" * 64
 TITLE = "Cross-persona owned note disclosure"
-
-
-def _identity() -> AssessmentIdentityContext:
-    return AssessmentIdentityContext(
-        session_id=SESSION_ID,
-        authorization_envelope_id="envelope-wo09",
-        authorization_envelope_ref=f"authorization_envelope:{'a' * 64}",
-        target_origin=ORIGIN,
-        target_reset_epoch=1,
-        world_id="alice",
-        persona_id="persona-alice",
-        target_actor_id="actor-alice",
-        tenant_id="tenant-owned",
-        credential_source_ref="credential:alice",
-        credential_epoch=1,
-        credential_freshness=CredentialFreshness.FRESH,
-        resource_id="resource:owned-note",
-        representation_id="representation:http-json-v1",
-    )
 
 
 def _receipt_response() -> dict:
@@ -116,37 +96,48 @@ def _triage_count(findings: list[dict]) -> int:
 
 def test_invalidating_one_observation_changes_every_canonical_reader(
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
-    families, instances = operation_atoms_from_records(
-        (
-            {
-                "id": "owned-cross-read",
-                "persona_id": "alice",
-                "method": "GET",
-                "url": f"{ORIGIN}/notes/peer-owned",
-                "response_status": 200,
-                "response_body": '{"marker":"peer-owned"}',
-            },
-        )
+    monkeypatch.setenv("SENTINELFORGE_FLOW_STORE", str(tmp_path / "captured-flows"))
+    mapper = FlowMapper()
+    flow_id = mapper.start_recording("owned cross-persona note")
+    step_id = mapper.record_request(
+        flow_id, method="GET", url=f"{ORIGIN}/notes/peer-owned",
+        headers={"Authorization": "Bearer owned-fixture-credential"},
     )
-    instance = next(
-        item for item in instances if item.world_ref == stable_hash("world", "alice")
+    assert step_id is not None
+    assert mapper.finalize_step(
+        step_id,
+        status=200,
+        headers={"Content-Type": "application/json"},
+        body='{"marker":"peer-owned"}',
+        content_type="application/json",
     )
+    assert mapper.persist(flow_id) is not None
+    flow = FlowMapper().load_persisted(flow_id)
+    assert flow is not None
+    step = flow.steps[0]
+    envelope = AuthorizationEnvelope(
+        envelope_id="envelope-wo09",
+        researcher_identity="owned-fixture-researcher",
+        target_handle="owned-notes",
+        authorized_origins=[ORIGIN],
+        authorization_basis="owned in-memory test evidence",
+        disclosure_attestation=True,
+        created_at=1_700_000_000.0,
+        expires_at=4_000_000_000.0,
+    )
+    envelope.sign()
     config = SentinelConfig(storage=StorageConfig(base_dir=tmp_path))
     receipt_store = BehavioralReceiptStore(tmp_path / "receipts")
 
     with patch("core.base.sequence.GlobalSequenceAuthority") as sequence:
         sequence.instance.return_value.run_id = "run-wo09"
         ledger = EvidenceLedger(config, receipt_store=receipt_store)
-        observation = ledger.record_canonical_observation(
-            tool_name="owned-lab-http",
-            tool_args=["GET", "/notes/peer-owned"],
-            target=f"{ORIGIN}/notes/peer-owned",
-            raw_output=b'{"marker":"peer-owned"}',
-            identity=_identity(),
-            operation_family=families[0],
-            operation_instance=instance,
+        captured = GhostCanonicalEvidenceAdapter(ledger).record_flow(
+            flow, session_id=SESSION_ID, envelope=envelope,
         )
+        observation = ledger.get_observation(captured.observation_ids[0])
         fingerprint = request_fingerprint(
             {"session_id": SESSION_ID, "observation_id": observation.id}
         )
@@ -154,8 +145,8 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
             fingerprint,
             context=redacted_receipt_context(
                 target_origin=ORIGIN,
-                envelope_id=_identity().authorization_envelope_id,
-                source_persona_id=_identity().persona_id,
+                envelope_id=observation.identity.authorization_envelope_id,
+                source_persona_id=observation.identity.persona_id,
                 peer_persona_id="persona-peer",
             ),
         )
@@ -206,15 +197,9 @@ def test_invalidating_one_observation_changes_every_canonical_reader(
         workbench_store = CandidateWorkbenchStore(
             tmp_path / "workbenches",
             receipt_store=receipt_store,
+            config=config,
         )
         workbench = workbench_store.open(before, finding_id=finding.id)
-        step = FlowStep("GET", f"{ORIGIN}/notes/peer-owned")
-        step.set_response(
-            status=200,
-            headers={"Content-Type": "application/json"},
-            body='{"marker":"peer-owned"}',
-            content_type="application/json",
-        )
         workbench = workbench_store.select_exchange(
             workbench,
             exchange_index=0,
