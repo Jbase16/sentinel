@@ -1003,6 +1003,22 @@ OCB-S19 evidence, and Jason's separate merge go remain outstanding. This is the
 work order's permitted local-SHA delivery boundary; no alternate publication path
 was attempted.
 
+**Mediator closeout (2026-09-20).** The delivery blocker above is resolved. The
+mediator independently verified the real branch — not the operator summary — against
+the repository: the boundary held (zero lines changed in every producer, oracle,
+receipt, ledger, admission, or canonical-ID-registry surface), both reproduction
+shapes and claim-specific invalidation behave as specified (an eligible Family-D
+`refuted` finding renders as a non-replayable evidence attestation, while negative,
+stale, cross-session, and invalidated proof render nothing on every surface), and the
+shared `ArtifactSanitizer` refuses on a genuine leak (negative control fails red). The
+repository gate was independently reproduced on Python 3.12.14 as the two-invocation
+`subprocess_spawn` split: `3451 passed, 1 skipped, 26 deselected` and `26 passed`
+(union `3477 passed, 1 skipped, 3478 collected`). On Jason's explicit go, branch
+`ocb/r7-candidate-assembly` (implementation `38ba94de532bec187a9576664c7743ffbc3d2fe1`,
+operator docs `732add5cc02cc6b85bff782506e646cb971ac811`) was pushed to `origin` and
+fast-forwarded onto `main`; this documentation-only commit is the new `main` tip. The
+OCB-R7 / `OCB-S19` slice is now canonical on `origin/main`.
+
 ### Workstream 6 — Complete OCB-R8 ordinary-click orchestration
 
 Make the existing Scan entry point coordinate OCB-R2 acquisition, OCB-R1 topology

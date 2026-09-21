@@ -259,6 +259,15 @@ There is **no verified pushed SHA** for this slice. No alternate publication pat
 was attempted. A following documentation-only commit records this local identity
 and delivery blocker; its SHA is included in the operator handoff.
 
+**Mediator closeout (2026-09-20).** The delivery blocker is resolved. After the
+mediator independently verified the real branch against the repository and reproduced
+the two-invocation gate on Python 3.12.14 (`3451 passed, 1 skipped, 26 deselected` and
+`26 passed`; union `3477 passed, 1 skipped, 3478 collected`), and on Jason's explicit
+go, branch `ocb/r7-candidate-assembly` (implementation
+`38ba94de532bec187a9576664c7743ffbc3d2fe1`) was pushed to `origin` and fast-forwarded
+onto `main`. Publication and merge are complete; the slice is canonical on
+`origin/main`.
+
 The completed implementation and repository gate are suite proof, not acceptance.
 Publication, mediator verification, and Jason's separate explicit merge go remain
 outstanding. The work order explicitly permits this local-SHA handoff when execution
