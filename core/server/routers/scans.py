@@ -776,118 +776,10 @@ async def _route_completed_behavioral_finding(
     return canonical_findings[0]
 
 
-async def _run_behavioral_one_click_phase(
-    req: ScanRequest,
-    *,
-    session: Any,
+def _behavioral_result_finding(
+    result: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
-    """Run the exact Foundry URL boundary before ordinary scan traffic."""
-
-    profile = req.behavioral_one_click
-    if profile is None:
-        return None
-
-    _record_behavioral_phase_summary(
-        session,
-        _bounded_behavioral_phase_summary(phase_status="running"),
-    )
-
-    if profile.is_anonymous_passive:
-        session.log(
-            "[behavior] Running an envelope-gated anonymous passive capture; "
-            "adaptive execution and ordinary scan tools are disabled."
-        )
-    else:
-        session.log(
-            "[behavior] Running the pre-authorized one-click URL phase before "
-            "ordinary scan traffic."
-        )
-    try:
-        if profile.is_anonymous_passive:
-            result = await _run_anonymous_passive_one_click_phase(
-                req,
-                session=session,
-            )
-        else:
-            from core.server.routers.foundry import (
-                RunBehavioralAuthorizationFromURLRequest,
-                run_behavioral_authorization_from_url_endpoint,
-            )
-
-            foundry_request = RunBehavioralAuthorizationFromURLRequest(
-                target_url=req.target,
-                envelope_id=profile.envelope_id,
-                source_persona_id=profile.source_persona_id,
-                peer_persona_id=profile.peer_persona_id,
-                prior_source_records=profile.prior_source_records,
-                prior_peer_records=profile.prior_peer_records,
-                role_monotonicity=profile.role_monotonicity,
-                capability_effect=profile.capability_effect,
-            )
-            foundry_request._assessment_session_id = session.id
-            result = await run_behavioral_authorization_from_url_endpoint(
-                foundry_request,
-                _=True,
-            )
-    except HTTPException as exc:
-        phase_status = (
-            "refused"
-            if exc.status_code in {401, 403, 404, 409}
-            else "failed"
-        )
-        _record_behavioral_phase_summary(
-            session,
-            _bounded_behavioral_phase_summary(
-                phase_status=phase_status,
-                reason=str(exc.detail),
-            ),
-        )
-        error_code = (
-            ErrorCode.AUTH_PERMISSION_DENIED
-            if exc.status_code in {401, 403, 404, 409}
-            else ErrorCode.SCAN_INITIALIZATION_ERROR
-        )
-        raise SentinelError(
-            error_code,
-            "Behavioral one-click phase was refused before ordinary scan traffic",
-            details={
-                "phase": "behavioral_one_click",
-                "status_code": exc.status_code,
-                "reason": str(exc.detail)[:512],
-            },
-        ) from exc
-    except asyncio.CancelledError:
-        _record_behavioral_phase_summary(
-            session,
-            _bounded_behavioral_phase_summary(
-                phase_status="aborted",
-                reason="scan cancelled during behavioral execution",
-            ),
-        )
-        raise
-    except Exception:
-        _record_behavioral_phase_summary(
-            session,
-            _bounded_behavioral_phase_summary(
-                phase_status="failed",
-                reason="unexpected behavioral orchestration failure",
-            ),
-        )
-        raise
-
-    if not isinstance(result, dict):
-        _record_behavioral_phase_summary(
-            session,
-            _bounded_behavioral_phase_summary(
-                phase_status="failed",
-                reason="behavioral phase returned an invalid result",
-            ),
-        )
-        raise SentinelError(
-            ErrorCode.SCAN_INITIALIZATION_ERROR,
-            "Behavioral one-click phase returned an invalid result",
-            details={"phase": "behavioral_one_click"},
-        )
+    """Restore a public native result's finding without inventing authority."""
 
     finding = result.get("finding")
     if (
@@ -956,6 +848,259 @@ async def _run_behavioral_one_click_phase(
                 "Cached role-monotonicity finding failed validation",
                 details={"phase": "behavioral_one_click"},
             ) from exc
+    return finding if isinstance(finding, dict) else None
+
+
+async def _handoff_ordinary_orchestration_result(
+    req: ScanRequest,
+    *,
+    session: Any,
+    family: Any,
+    result: Dict[str, Any],
+) -> Any:
+    """Route one confirmed native result and call the existing R7 resolver."""
+
+    from core.server.ordinary_orchestration import (
+        OrdinaryClickFamily,
+        resolve_submission_candidate_handoff,
+    )
+
+    finding = _behavioral_result_finding(result)
+    if isinstance(finding, dict):
+        canonical_finding = await _route_completed_behavioral_finding(
+            req,
+            session=session,
+            result=result,
+            finding=finding,
+        )
+        if canonical_finding is not None:
+            finding = canonical_finding
+        await session.findings.add_finding_async(finding, persist=True)
+        finding_id = finding.get("id")
+        if not isinstance(finding_id, str) or not finding_id:
+            raise ValueError("confirmed behavioral finding has no canonical id")
+        session.log(
+            "[behavior] Added the confirmed behavioral finding to this scan "
+            f"session ({finding_id})."
+        )
+        return resolve_submission_candidate_handoff(
+            session_id=session.id,
+            finding_id=finding_id,
+        )
+
+    canonical_result = _capability_effect_canonical_result(result)
+    if (
+        family is OrdinaryClickFamily.D
+        and canonical_result.get("promotion_state") == "promoted"
+    ):
+        return resolve_submission_candidate_handoff(
+            session_id=canonical_result["assessment_session_id"],
+            finding_id=canonical_result["canonical_finding_id"],
+        )
+    return None
+
+
+async def _run_behavioral_one_click_phase(
+    req: ScanRequest,
+    *,
+    session: Any,
+) -> Optional[Dict[str, Any]]:
+    """Run the exact Foundry URL boundary before ordinary scan traffic."""
+
+    profile = req.behavioral_one_click
+    if profile is None:
+        return None
+
+    ordinary_orchestration_config = None
+    if not profile.is_anonymous_passive:
+        from core.server.ordinary_orchestration import (
+            OrdinaryClickOrchestrationConfig,
+        )
+
+        ordinary_orchestration_config = (
+            OrdinaryClickOrchestrationConfig.from_environment()
+        )
+    ordinary_orchestration_enabled = bool(
+        ordinary_orchestration_config is not None
+        and ordinary_orchestration_config.enabled
+    )
+    _record_behavioral_phase_summary(
+        session,
+        _bounded_behavioral_phase_summary(
+            phase_status=(
+                "observing" if ordinary_orchestration_enabled else "running"
+            )
+        ),
+    )
+
+    if profile.is_anonymous_passive:
+        session.log(
+            "[behavior] Running an envelope-gated anonymous passive capture; "
+            "adaptive execution and ordinary scan tools are disabled."
+        )
+    else:
+        session.log(
+            "[behavior] Running the pre-authorized one-click URL phase before "
+            "ordinary scan traffic."
+        )
+    try:
+        if profile.is_anonymous_passive:
+            result = await _run_anonymous_passive_one_click_phase(
+                req,
+                session=session,
+            )
+        else:
+            from core.server.routers.foundry import (
+                RunBehavioralAuthorizationFromURLRequest,
+                run_behavioral_authorization_from_url_endpoint,
+            )
+
+            foundry_request = RunBehavioralAuthorizationFromURLRequest(
+                target_url=req.target,
+                envelope_id=profile.envelope_id,
+                source_persona_id=profile.source_persona_id,
+                peer_persona_id=profile.peer_persona_id,
+                prior_source_records=profile.prior_source_records,
+                prior_peer_records=profile.prior_peer_records,
+                role_monotonicity=profile.role_monotonicity,
+                capability_effect=profile.capability_effect,
+            )
+            foundry_request._assessment_session_id = session.id
+            if ordinary_orchestration_enabled:
+                from core.server.ordinary_orchestration import (
+                    run_ordinary_click_orchestration,
+                )
+
+                def observe_state(state: Any) -> None:
+                    _record_behavioral_phase_summary(
+                        session,
+                        _bounded_behavioral_phase_summary(
+                            phase_status=state.value,
+                        ),
+                    )
+
+                async def handle_result(
+                    family: Any,
+                    native_result: Any,
+                ) -> Any:
+                    return await _handoff_ordinary_orchestration_result(
+                        req,
+                        session=session,
+                        family=family,
+                        result=dict(native_result),
+                    )
+
+                orchestration = await run_ordinary_click_orchestration(
+                    foundry_request,
+                    assessment_session_id=session.id,
+                    handle_result=handle_result,
+                    observe_state=observe_state,
+                    config=ordinary_orchestration_config,
+                )
+                result = orchestration.to_dict()
+            else:
+                result = await run_behavioral_authorization_from_url_endpoint(
+                    foundry_request,
+                    _=True,
+                )
+    except HTTPException as exc:
+        phase_status = "incomplete"
+        if ordinary_orchestration_enabled:
+            if exc.status_code in {401, 403, 404, 409}:
+                phase_status = "blocked"
+        else:
+            phase_status = (
+                "refused"
+                if exc.status_code in {401, 403, 404, 409}
+                else "failed"
+            )
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status=phase_status,
+                reason=str(exc.detail),
+            ),
+        )
+        error_code = (
+            ErrorCode.AUTH_PERMISSION_DENIED
+            if exc.status_code in {401, 403, 404, 409}
+            else ErrorCode.SCAN_INITIALIZATION_ERROR
+        )
+        raise SentinelError(
+            error_code,
+            "Behavioral one-click phase was refused before ordinary scan traffic",
+            details={
+                "phase": "behavioral_one_click",
+                "status_code": exc.status_code,
+                "reason": str(exc.detail)[:512],
+            },
+        ) from exc
+    except asyncio.CancelledError:
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status=(
+                    "incomplete" if ordinary_orchestration_enabled else "aborted"
+                ),
+                reason="scan cancelled during behavioral execution",
+            ),
+        )
+        raise
+    except Exception:
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status=(
+                    "incomplete" if ordinary_orchestration_enabled else "failed"
+                ),
+                reason="unexpected behavioral orchestration failure",
+            ),
+        )
+        raise
+
+    if not isinstance(result, dict):
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status=(
+                    "incomplete" if ordinary_orchestration_enabled else "failed"
+                ),
+                reason="behavioral phase returned an invalid result",
+            ),
+        )
+        raise SentinelError(
+            ErrorCode.SCAN_INITIALIZATION_ERROR,
+            "Behavioral one-click phase returned an invalid result",
+            details={"phase": "behavioral_one_click"},
+        )
+
+    if ordinary_orchestration_enabled:
+        phase_status = result.get("status")
+        if phase_status not in {
+            "observing",
+            "acquiring",
+            "blocked",
+            "proving",
+            "cleaning",
+            "confirmed",
+            "exhausted",
+            "incomplete",
+        }:
+            phase_status = "incomplete"
+        _record_behavioral_phase_summary(
+            session,
+            _bounded_behavioral_phase_summary(
+                phase_status=phase_status,
+                result=result,
+            ),
+        )
+        session.log(
+            "[behavior] Ordinary-click family sequence reached its bounded "
+            f"terminal state (status={phase_status})."
+        )
+        return result
+
+    finding = _behavioral_result_finding(result)
 
     if isinstance(finding, dict):
         canonical_finding = await _route_completed_behavioral_finding(
