@@ -113,7 +113,26 @@ implementation identity and exact blocker are recorded in Workstream 5. Mediator
 verification and Jason's separate merge go remain required. This introduces no
 execution authority or target traffic and does not renew native evidence.
 
-Last reconciled: 2026-09-19
+OCB-R8 / OCB-S20 implementation checkpoint (2026-09-22): the default-off ordinary-click
+orchestration coordinator (Option B) landed canonical on `origin/main`. Behind the
+`SENTINELFORGE_ORDINARY_CLICK_ORCHESTRATION` gate (default off), the ordinary Scan
+sequences one always-A pass plus one pass per profile-selected family among B-D through
+the public Foundry URL endpoint, aggregates each family's native terminal state into
+eight bounded coordinator states, reports each family's own cleanup outcome, and hands
+confirmed findings to the existing OCB-R7 builder. The
+[slice record](ONE_CLICK_BOUNTY_R8_ORDINARY_ORCHESTRATION_PLAN.md) defines the exact
+source boundary. It wires no OCB-R6 coverage-guided stopping and touches zero frozen
+surfaces. OCB-S20 is suite-proved on Python 3.12.14: the unmarked invocation passed
+3461 tests with 1 skip and 26 deselections, and the separate `subprocess_spawn`
+invocation passed all 26 with 3462 deselections, for a union of **3487 passed, 1
+skipped, 3488 collected** (base 3477 plus 10 OCB-S20 cases). The implementer's own push
+was blocked by execution approval policy; after independent mediator verification
+against the real repository and Jason's separate explicit go, the branch was pushed and
+`main` fast-forwarded to it. This introduces no new identity, execution authority, or
+target-traffic class, and does not complete the live vulnerable/secure native OCB-S20
+journey, which remains a separate post-merge acceptance.
+
+Last reconciled: 2026-09-22
 
 ## 1. Purpose
 

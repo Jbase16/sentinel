@@ -1,7 +1,10 @@
 # OCB-R8 Ordinary-Click Orchestration (Option B)
 
-Status: suite-proved local implementation; push rejected by execution approval policy.
-Mediator verification and Jason's separate merge go remain pending.
+Status: mediator-verified PASS and LANDED canonical on `origin/main` (2026-09-22).
+Suite-proved, default-off. The implementer's own push was blocked by its execution
+approval policy; after independent mediator verification against the real repository
+and Jason's separate explicit go, the mediator pushed the branch and fast-forwarded
+`main` to it. A live native OCB-S20 journey remains a separate post-merge acceptance.
 
 Base: `0988a4de51ee80e5f9da56f9083a4c02dd143b81`.
 Branch: `ocb/r8-ordinary-orchestration`.
@@ -143,9 +146,11 @@ generic confirmation.
 - **Documentation:** this slice record. The canonical-ID registry is frozen.
 - **Branch:** `ocb/r8-ordinary-orchestration`, solely this slice, from the exact base
   above.
-- **Delivery:** the repository gate is green, but the authorized push was rejected
-  before execution by the local approval policy. Mediator verification and Jason's
-  separate go remain the acceptance boundary.
+- **Delivery:** the repository gate is green. The implementer's own authorized push
+  was rejected before execution by its local approval policy; after independent
+  mediator verification against the real repository and Jason's separate explicit go
+  (2026-09-22), the mediator pushed `ocb/r8-ordinary-orchestration` to origin and
+  fast-forwarded `main` to it. Recorded SHAs are in section 7.
 
 The inherited repository security-check baseline and six web-schema drift snapshots
 remain separate governance debts. This slice neither suppresses nor changes them.
@@ -211,10 +216,16 @@ this record pass, with no URL-escaped paths. Commit identities and remote push s
 are recorded below. No native journey or `make accept-*` command is authorized or run
 for this slice.
 
-Branch delivery: `ocb/r8-ordinary-orchestration`. Local implementation commit:
-`b827fdbca438e999e53973d7ab3541689c4674f6`. The exact authorized command
-`git push -u origin ocb/r8-ordinary-orchestration` was rejected before execution:
-`approval required by policy, but AskForApproval is set to Never`. There is **no
-verified pushed SHA** for this slice, and no alternate publication path was attempted.
-A following documentation-only local commit records this implementation identity and
-delivery blocker; that commit's SHA is reported in the operator handoff.
+Branch delivery: `ocb/r8-ordinary-orchestration`. Implementation commit
+`b827fdbca438e999e53973d7ab3541689c4674f6`; suite-proof documentation commit
+`e1d7fdf2786ec3849e7c3c95f9d3d70487729064`. When the implementer built this slice, its
+own authorized `git push -u origin ocb/r8-ordinary-orchestration` was rejected before
+execution (`approval required by policy, but AskForApproval is set to Never`), so at
+build time there was no pushed SHA. After independent mediator verification against the
+real repository — four-file footprint, zero-byte diff across the frozen surfaces, a
+self-reproduced two-invocation gate of 3487 passed / 1 skipped / 3488 collected on
+Python 3.12.14, and an inherited-only `local-security-check` baseline — and Jason's
+separate explicit go on 2026-09-22, the mediator pushed the branch to origin and
+fast-forwarded `main` (`0988a4d..e1d7fdf`). This documentation-only closeout commit,
+which records the landing, is the new `main` tip; its SHA and the resulting
+`origin/main` advance are reported in the operator handoff.
