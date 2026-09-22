@@ -1,6 +1,6 @@
 # OCB-R8 Ordinary-Click Orchestration (Option B)
 
-Status: suite-proved local implementation; remote delivery pending.
+Status: suite-proved local implementation; push rejected by execution approval policy.
 Mediator verification and Jason's separate merge go remain pending.
 
 Base: `0988a4de51ee80e5f9da56f9083a4c02dd143b81`.
@@ -143,8 +143,9 @@ generic confirmation.
 - **Documentation:** this slice record. The canonical-ID registry is frozen.
 - **Branch:** `ocb/r8-ordinary-orchestration`, solely this slice, from the exact base
   above.
-- **Delivery:** focused commits are pushed to `origin` when the repository gate is
-  green; mediator verification and Jason's separate go remain the acceptance boundary.
+- **Delivery:** the repository gate is green, but the authorized push was rejected
+  before execution by the local approval policy. Mediator verification and Jason's
+  separate go remain the acceptance boundary.
 
 The inherited repository security-check baseline and six web-schema drift snapshots
 remain separate governance debts. This slice neither suppresses nor changes them.
@@ -207,5 +208,13 @@ unrelated findings. Neither changed production module matches the prohibited
 `shell=True`, `eval(`, `exec(`, or `os.system(` patterns or the script's hardcoded-
 secret pattern; targeted Ruff is clean. `git diff --check` and all relative links in
 this record pass, with no URL-escaped paths. Commit identities and remote push status
-are recorded after delivery. No native journey or `make accept-*` command is
-authorized or run for this slice.
+are recorded below. No native journey or `make accept-*` command is authorized or run
+for this slice.
+
+Branch delivery: `ocb/r8-ordinary-orchestration`. Local implementation commit:
+`b827fdbca438e999e53973d7ab3541689c4674f6`. The exact authorized command
+`git push -u origin ocb/r8-ordinary-orchestration` was rejected before execution:
+`approval required by policy, but AskForApproval is set to Never`. There is **no
+verified pushed SHA** for this slice, and no alternate publication path was attempted.
+A following documentation-only local commit records this implementation identity and
+delivery blocker; that commit's SHA is reported in the operator handoff.
