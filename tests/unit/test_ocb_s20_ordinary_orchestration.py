@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from unittest.mock import AsyncMock
 
 from fastapi import HTTPException
@@ -13,8 +14,10 @@ from core.behavior.capability_effect_evidence import evaluate_replay_leak
 from core.server.ordinary_orchestration import (
     BOUNDED_ORCHESTRATION_STATES,
     CandidateHandoff,
+    FamilyCoverageProjection,
     OrdinaryClickFamily,
     OrdinaryClickOrchestrationConfig,
+    _terminal_state,
     resolve_submission_candidate_handoff,
     run_ordinary_click_orchestration,
 )
@@ -206,6 +209,39 @@ async def test_ocb_s20_sequences_only_a_and_selected_b_c_families():
         "candidate": None,
     }
     _assert_no_coverage_claim(payload)
+
+
+@pytest.mark.asyncio
+async def test_ocb_s20_carries_family_a_coverage_without_control_authority():
+    projection = {
+        "certificate_id": f"search_stop_certificate:{'a' * 64}",
+        "stop_reason": "frontier_exhausted",
+        "admitted_candidate_count": 1,
+        "explored_candidate_count": 1,
+        "execution_authority": False,
+        "finding_authority": False,
+    }
+
+    async def execute(request):
+        result = _completed_result(_family_for_request(request))
+        if _family_for_request(request) is OrdinaryClickFamily.A:
+            result["family_a_coverage"] = projection
+        return result
+
+    result = await run_ordinary_click_orchestration(
+        _foundry_request(),
+        assessment_session_id="ocb-s20-family-a-coverage",
+        execute_family=execute,
+        config=OrdinaryClickOrchestrationConfig(enabled=True),
+    )
+    payload = result.to_dict()
+    family_a = result.families[0]
+
+    assert family_a.coverage == FamilyCoverageProjection.from_mapping(projection)
+    assert payload["families"][0]["coverage"] == projection
+    without_coverage = (replace(family_a, coverage=None), *result.families[1:])
+    assert _terminal_state(result.families) is _terminal_state(without_coverage)
+    assert payload["status"] == "exhausted"
 
 
 @pytest.mark.asyncio

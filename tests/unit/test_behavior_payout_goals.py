@@ -20,6 +20,8 @@ from core.behavior.payout_goals import (
     PayoutGoalTopologyPlanner,
     PayoutSink,
     ProofTopology,
+    SecurityProperty,
+    SecurityWitnessGoal,
 )
 from core.foundry.authorization import AuthorizationEnvelope
 
@@ -111,6 +113,40 @@ def _operation(name: str, label: str):
 
 def _blocker_codes(candidate):
     return {item.code for item in candidate.blockers}
+
+
+def test_security_witness_goal_derivation_recomputes_the_canonical_hash():
+    operation = _operation("derived-goal", "ReadPrivateFile")
+    planning_refs = (stable_hash("source_ref", "planning"),)
+    execution_refs = (
+        stable_hash("action", "derived-goal"),
+        stable_hash("source_ref", "execution"),
+    )
+    goal = SecurityWitnessGoal.build(
+        operation=operation,
+        sink=PayoutSink.FILE_ACCESS,
+        security_property=SecurityProperty.OBJECT_AUTHORIZATION,
+        evidence_refs=planning_refs,
+    )
+    execution_goal = SecurityWitnessGoal.build(
+        operation=operation,
+        sink=PayoutSink.FILE_ACCESS,
+        security_property=SecurityProperty.OBJECT_AUTHORIZATION,
+        evidence_refs=execution_refs,
+    )
+
+    assert SecurityWitnessGoal.derived_goal_id(
+        base=goal,
+        evidence_refs=goal.evidence_refs,
+    ) == goal.goal_id
+    assert (
+        SecurityWitnessGoal.derived_goal_id(
+            base=goal,
+            evidence_refs=execution_refs,
+        )
+        == execution_goal.goal_id
+        != goal.goal_id
+    )
 
 
 def test_graph_absent_context_preserves_v1_identity_payload():

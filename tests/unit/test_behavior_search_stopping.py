@@ -392,6 +392,25 @@ def test_default_off_never_invokes_replanner(monkeypatch):
     assert all(x.status == "never_explored" for x in plan.entries)
 
 
+def test_derivation_binding_default_preserves_base_certificate_bytes():
+    implicit = _plan(_ledger(("files", "documents")))
+    explicit = _plan(
+        _ledger(("files", "documents")),
+        derivation_binding=False,
+    )
+
+    assert implicit == explicit
+    assert implicit.input_dict() == explicit.input_dict()
+    assert implicit.input_id == (
+        "search_inputs:4325730af7addf34c1a745defac9ce35d2f3887fff409fc6b28fcdf24dba68fd"
+    )
+    assert implicit.certificate().certificate_id == (
+        "search_stop_certificate:56d0be8ea464a614f3f43d99ad5bc7e88bbbcfa663b5959e3bd8f6290ac7906d"
+    )
+    with pytest.raises(TypeError, match="invalid search inputs"):
+        _plan(derivation_binding=1)
+
+
 @pytest.mark.parametrize(
     "authorized,world,selected", [(False, "alice", "alice"), (True, "bob", "alice")]
 )

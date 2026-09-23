@@ -120,6 +120,74 @@ class CandidateHandoff:
 
 
 @dataclass(frozen=True)
+class FamilyCoverageProjection:
+    certificate_id: str
+    stop_reason: str
+    admitted_candidate_count: int
+    explored_candidate_count: int
+    execution_authority: bool = False
+    finding_authority: bool = False
+
+    def __post_init__(self) -> None:
+        digest = (
+            self.certificate_id.removeprefix("search_stop_certificate:")
+            if isinstance(self.certificate_id, str)
+            else ""
+        )
+        if (
+            not isinstance(self.certificate_id, str)
+            or not self.certificate_id.startswith("search_stop_certificate:")
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or self.stop_reason
+            not in {
+                "frontier_remaining",
+                "proof_budget_unavailable",
+                "budget_exhausted",
+                "frontier_exhausted",
+            }
+            or any(
+                type(value) is not int or value < 0
+                for value in (
+                    self.admitted_candidate_count,
+                    self.explored_candidate_count,
+                )
+            )
+            or self.admitted_candidate_count < 1
+            or not 1
+            <= self.explored_candidate_count
+            <= self.admitted_candidate_count
+            or self.execution_authority
+            or self.finding_authority
+        ):
+            raise ValueError("ordinary-click family coverage projection is invalid")
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "FamilyCoverageProjection":
+        fields = {
+            "certificate_id",
+            "stop_reason",
+            "admitted_candidate_count",
+            "explored_candidate_count",
+            "execution_authority",
+            "finding_authority",
+        }
+        if set(value) != fields:
+            raise ValueError("ordinary-click family coverage fields are invalid")
+        return cls(**{key: value[key] for key in fields})
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "certificate_id": self.certificate_id,
+            "stop_reason": self.stop_reason,
+            "admitted_candidate_count": self.admitted_candidate_count,
+            "explored_candidate_count": self.explored_candidate_count,
+            "execution_authority": False,
+            "finding_authority": False,
+        }
+
+
+@dataclass(frozen=True)
 class FamilyPassResult:
     family: OrdinaryClickFamily
     applicable: bool
@@ -133,6 +201,7 @@ class FamilyPassResult:
     incomplete: bool = False
     failure_code: Optional[str] = None
     candidate: Optional[CandidateHandoff] = None
+    coverage: Optional[FamilyCoverageProjection] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.family, OrdinaryClickFamily):
@@ -167,17 +236,24 @@ class FamilyPassResult:
             or self.incomplete
             or self.failure_code is not None
             or self.candidate is not None
+            or self.coverage is not None
         ):
             raise ValueError("non-applicable family cannot claim execution")
         if self.candidate is not None and not self.attempted:
             raise ValueError("candidate handoff requires an attempted family")
+        if self.coverage is not None and (
+            not isinstance(self.coverage, FamilyCoverageProjection)
+            or self.family is not OrdinaryClickFamily.A
+            or not self.attempted
+        ):
+            raise ValueError("coverage requires an attempted Family-A pass")
 
     @property
     def finding_confirmed(self) -> bool:
         return self.candidate is not None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "family": self.family.value,
             "applicable": self.applicable,
             "attempted": self.attempted,
@@ -192,6 +268,9 @@ class FamilyPassResult:
                 self.candidate.to_dict() if self.candidate is not None else None
             ),
         }
+        if self.coverage is not None:
+            result["coverage"] = self.coverage.to_dict()
+        return result
 
 
 @dataclass(frozen=True)
@@ -403,6 +482,13 @@ def _classify_native_result(
     )
     if not terminal:
         incomplete = True
+    coverage = None
+    raw_coverage = result.get("family_a_coverage")
+    if family is OrdinaryClickFamily.A and isinstance(raw_coverage, Mapping):
+        try:
+            coverage = FamilyCoverageProjection.from_mapping(raw_coverage)
+        except (TypeError, ValueError):
+            coverage = None
     return FamilyPassResult(
         family=family,
         applicable=True,
@@ -415,6 +501,7 @@ def _classify_native_result(
         blocked=blocked,
         incomplete=incomplete,
         failure_code=("native_terminal_unknown" if not terminal else None),
+        coverage=coverage,
     )
 
 
@@ -680,6 +767,7 @@ __all__ = [
     "BoundedOrchestrationState",
     "CandidateHandoff",
     "CleanupReport",
+    "FamilyCoverageProjection",
     "FamilyPassResult",
     "OrdinaryClickFamily",
     "OrdinaryClickOrchestrationConfig",

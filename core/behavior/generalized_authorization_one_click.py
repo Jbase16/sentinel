@@ -124,6 +124,11 @@ class GeneralizedAuthorizationOneClickRun:
     selected_pair_ref: Optional[str] = None
     payout_candidate_id: Optional[str] = None
     manifest_id: Optional[str] = None
+    manifest: Optional[ProofExperimentManifest] = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
     ownership_proof_id: Optional[str] = None
     ownership_admission_id: Optional[str] = None
     disabled_gates: Tuple[str, ...] = ()
@@ -168,6 +173,14 @@ class GeneralizedAuthorizationOneClickRun:
             or self.disabled_gates
             != tuple(dict.fromkeys(self.disabled_gates))
             or any(not isinstance(item, str) or not item for item in self.disabled_gates)
+            or (
+                self.manifest is not None
+                and (
+                    type(self.manifest) is not ProofExperimentManifest
+                    or self.manifest.manifest_id != self.manifest_id
+                    or self.execution is None
+                )
+            )
             or (
                 self.status == "no_eligible_candidate"
                 and (any(item is not None for item in selected_refs) or self.execution)
@@ -1040,6 +1053,7 @@ class GeneralizedAuthorizationOneClickDispatcher:
         return GeneralizedAuthorizationOneClickRun(
             status=execution.status,
             execution=execution,
+            manifest=selection.manifest,
             **common,
         )
 

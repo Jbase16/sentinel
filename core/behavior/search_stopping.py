@@ -30,7 +30,13 @@ from .experiment_sdk import (
     ProofExperimentManifest,
 )
 from .normalize import stable_hash
-from .payout_goals import PayoutGoalPlan, SecurityProperty, _candidate_blockers
+from .payout_goals import (
+    PayoutGoalCandidate,
+    PayoutGoalPlan,
+    SecurityProperty,
+    SecurityWitnessGoal,
+    _candidate_blockers,
+)
 from .receipts import BehavioralExecutionReceipt, COMPLETED
 from .replanning import ConstraintReplanner
 from .semantic_catalog import TargetSemanticCatalog
@@ -259,6 +265,25 @@ class HighValueSinkLedger:
                 return candidate
         raise ValueError("non-admitted candidate refused")
 
+    def _derive_frontier_candidate(
+        self,
+        manifest: ProofExperimentManifest,
+    ) -> PayoutGoalCandidate:
+        matches = tuple(
+            candidate
+            for candidate in self.candidates
+            if SecurityWitnessGoal.derived_goal_id(
+                base=candidate.goal,
+                evidence_refs=manifest.backend.source_evidence_refs,
+            )
+            == manifest.goal_id
+        )
+        if len(matches) != 1:
+            raise ValueError(
+                "manifest does not derive from exactly one admitted candidate"
+            )
+        return matches[0]
+
 
 @dataclass(frozen=True)
 class RecordedSearchExecution:
@@ -271,10 +296,21 @@ class RecordedSearchExecution:
 
     manifest: ProofExperimentManifest
     receipt_json: str
+    accepted_kinds: frozenset[str] = field(
+        default=frozenset({"proof_experiment_authorization"}),
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         if type(self.manifest) is not ProofExperimentManifest:
             raise TypeError("existing experiment manifest required")
+        if (
+            type(self.accepted_kinds) is not frozenset
+            or not self.accepted_kinds
+            or any(type(item) is not str or not item for item in self.accepted_kinds)
+        ):
+            raise TypeError("accepted receipt kinds must be a non-empty frozenset")
         self.manifest.__post_init__()
         value = json.loads(self.receipt_json)
         receipt = BehavioralExecutionReceipt.from_dict(value)
@@ -283,7 +319,7 @@ class RecordedSearchExecution:
             self.receipt_json != _json(receipt.to_dict())
             or receipt.state != COMPLETED
             or outcome is None
-            or outcome.get("kind") != "proof_experiment_authorization"
+            or outcome.get("kind") not in self.accepted_kinds
             or outcome["manifest_id"] != self.manifest.manifest_id
             or outcome["oracle_id"] != self.manifest.oracle.oracle_id
             or outcome["backend_receipt_ref"]
@@ -434,6 +470,7 @@ class SearchPlan:
     constraints_valid: bool = True
     proofs: tuple[SearchProof, ...] = ()
     compiler_limits: CompilerLimits = CompilerLimits()
+    derivation_binding: bool = field(default=False, repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -445,6 +482,7 @@ class SearchPlan:
             or type(self.compiler_limits) is not CompilerLimits
             or type(self.enabled) is not bool
             or type(self.constraints_valid) is not bool
+            or type(self.derivation_binding) is not bool
         ):
             raise TypeError("invalid search inputs")
         self.ledger.__post_init__()
@@ -455,6 +493,7 @@ class SearchPlan:
         for proof in self.proofs:
             proof.__post_init__()
             self._validate_manifest(proof.manifest)
+            proof_candidate = self._candidate_for_manifest(proof.manifest)
             world_identities = {
                 world.binding_id: world.world_ref.replace(
                     "world:", "experiment_runtime_identity:", 1
@@ -516,9 +555,14 @@ class SearchPlan:
                     raise ValueError(
                         "proof endpoint is outside admitted origin or budget bucket"
                     )
-            if proof.manifest.candidate_id in proof_ids:
+            proof_candidate_id = (
+                proof_candidate.candidate_id
+                if self.derivation_binding
+                else proof.manifest.candidate_id
+            )
+            if proof_candidate_id in proof_ids:
                 raise ValueError("duplicate candidate proof")
-            proof_ids.add(proof.manifest.candidate_id)
+            proof_ids.add(proof_candidate_id)
         if len(self.executions) > len(self.ledger.candidates) or len(self.proofs) > len(
             self.ledger.candidates
         ):
@@ -527,16 +571,24 @@ class SearchPlan:
         for record in self.executions:
             record.__post_init__()
             manifest = record.manifest
-            candidate = self.ledger.require_candidate(manifest.candidate_id)
+            candidate = self._candidate_for_manifest(manifest)
             self._validate_manifest(manifest)
             receipt_id = json.loads(record.receipt_json)["receipt_id"]
-            if manifest.candidate_id in ids or receipt_id in receipts:
+            execution_candidate_id = (
+                candidate.candidate_id
+                if self.derivation_binding
+                else manifest.candidate_id
+            )
+            if execution_candidate_id in ids or receipt_id in receipts:
                 raise ValueError("duplicate candidate execution or receipt")
-            ids.add(manifest.candidate_id)
+            ids.add(execution_candidate_id)
             receipts.add(receipt_id)
             worlds = {x.world_ref for x in manifest.world_manifest.bindings}
             if (
-                manifest.goal_id != candidate.goal.goal_id
+                (
+                    not self.derivation_binding
+                    and manifest.goal_id != candidate.goal.goal_id
+                )
                 or manifest.target_ref != self.ledger.payout_plan.target_ref
                 or not worlds <= set(self.ledger.payout_plan.context.owned_world_refs)
                 or candidate.goal.security_property
@@ -553,18 +605,32 @@ class SearchPlan:
         ):
             raise ValueError("execution evidence exceeds recorded consumed budget")
 
+    def _candidate_for_manifest(
+        self,
+        manifest: ProofExperimentManifest,
+    ) -> PayoutGoalCandidate:
+        if self.derivation_binding:
+            return self.ledger._derive_frontier_candidate(manifest)
+        return self.ledger.require_candidate(manifest.candidate_id)
+
     def _validate_manifest(self, manifest: ProofExperimentManifest) -> None:
-        candidate = self.ledger.require_candidate(manifest.candidate_id)
+        candidate = self._candidate_for_manifest(manifest)
         if (
-            manifest.goal_id != candidate.goal.goal_id
+            (
+                not self.derivation_binding
+                and manifest.goal_id != candidate.goal.goal_id
+            )
             or manifest.target_ref != self.ledger.payout_plan.target_ref
             or manifest.world_manifest.requirement != candidate.world_requirement
             or manifest.backend.backend.value != candidate.backend
             or manifest.oracle.security_property != candidate.goal.security_property
             or manifest.oracle.witness_requirements
             != candidate.goal.witness_requirements
-            or not set(manifest.backend.source_evidence_refs)
-            & set(candidate.goal.evidence_refs)
+            or (
+                not self.derivation_binding
+                and not set(manifest.backend.source_evidence_refs)
+                & set(candidate.goal.evidence_refs)
+            )
             or not {x.world_ref for x in manifest.world_manifest.bindings}
             <= set(self.ledger.payout_plan.context.owned_world_refs)
             or not {x.operation_id for x in manifest.actions}
@@ -585,8 +651,18 @@ class SearchPlan:
         replanner = ConstraintReplanner(
             admitted_operations, compiler_limits=self.compiler_limits
         )
-        records = {x.manifest.candidate_id: x for x in self.executions}
-        proofs = {x.manifest.candidate_id: x for x in self.proofs}
+        if self.derivation_binding:
+            records = {
+                self._candidate_for_manifest(item.manifest).candidate_id: item
+                for item in self.executions
+            }
+            proofs = {
+                self._candidate_for_manifest(item.manifest).candidate_id: item
+                for item in self.proofs
+            }
+        else:
+            records = {x.manifest.candidate_id: x for x in self.executions}
+            proofs = {x.manifest.candidate_id: x for x in self.proofs}
         entries = []
         for candidate in candidates:
             record = records.get(candidate.candidate_id)
@@ -683,7 +759,13 @@ class SearchPlan:
         endpoints = {
             key: spent + reserved for key, spent, reserved in self.budget.endpoints
         }
-        proofs = {x.manifest.candidate_id: x for x in self.proofs}
+        if self.derivation_binding:
+            proofs = {
+                self._candidate_for_manifest(item.manifest).candidate_id: item
+                for item in self.proofs
+            }
+        else:
+            proofs = {x.manifest.candidate_id: x for x in self.proofs}
         ordered = []
         for item in frontier:
             proof = proofs[item.candidate_id]
@@ -711,7 +793,7 @@ class SearchPlan:
         return tuple(ordered)
 
     def input_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "ledger": self.ledger.to_dict(),
             "constraints": self.constraints.to_dict(),
             "budget": self.budget.to_dict(),
@@ -721,6 +803,9 @@ class SearchPlan:
             "compiler_limits": vars(self.compiler_limits),
             "executions": [x.to_dict() for x in self.executions],
         }
+        if self.derivation_binding:
+            payload["derivation_binding"] = True
+        return payload
 
     @property
     def input_id(self) -> str:
@@ -828,6 +913,7 @@ class MarginalValueScheduler:
         executions: tuple[RecordedSearchExecution, ...] = (),
         proofs: tuple[SearchProof, ...] = (),
         compiler_limits: CompilerLimits = CompilerLimits(),
+        derivation_binding: bool = False,
         previous: SearchPlan | None = None,
     ) -> SearchPlan:
         result = SearchPlan(
@@ -839,11 +925,14 @@ class MarginalValueScheduler:
             constraints_valid,
             tuple(sorted(proofs, key=lambda x: x.manifest.candidate_id)),
             compiler_limits,
+            derivation_binding,
         )
         if previous is not None:
             previous.__post_init__()
             if ledger.ledger_id != previous.ledger.ledger_id:
                 raise ValueError("replanning cannot change admitted authority")
+            if derivation_binding != previous.derivation_binding:
+                raise ValueError("replanning cannot change derivation binding")
             budget.require_continuation_of(previous.budget)
             if result.proofs != previous.proofs or any(
                 getattr(compiler_limits, key) > value

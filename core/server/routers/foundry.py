@@ -44,6 +44,270 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["foundry"])
 
+FAMILY_A_COVERAGE_ENV = "SENTINELFORGE_FAMILY_A_COVERAGE"
+R6_DERIVATION_BINDING_ENV = "SENTINELFORGE_R6_DERIVATION_BINDING"
+_ORDINARY_CLICK_ORCHESTRATION_ENV = (
+    "SENTINELFORGE_ORDINARY_CLICK_ORCHESTRATION"
+)
+_TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _family_a_coverage_enabled(environment: Mapping[str, str]) -> bool:
+    return all(
+        str(environment.get(name, "")).strip().lower() in _TRUE_ENV_VALUES
+        for name in (
+            _ORDINARY_CLICK_ORCHESTRATION_ENV,
+            FAMILY_A_COVERAGE_ENV,
+        )
+    )
+
+
+def _r6_derivation_binding_enabled(environment: Mapping[str, str]) -> bool:
+    return _family_a_coverage_enabled(environment) and (
+        str(environment.get(R6_DERIVATION_BINDING_ENV, "")).strip().lower()
+        in _TRUE_ENV_VALUES
+    )
+
+
+def _read_exact_behavioral_receipt_json(
+    receipt_store: Any,
+    receipt_id: str,
+) -> str:
+    """Read the validated receipt's persisted bytes without re-serializing it."""
+
+    import os
+
+    from core.behavior.receipts import BehavioralReceiptStore
+
+    prefix = "behavioral-"
+    if not isinstance(receipt_store, BehavioralReceiptStore):
+        raise TypeError("Family-A coverage requires the behavioral receipt store")
+    if (
+        not isinstance(receipt_id, str)
+        or not receipt_id.startswith(prefix)
+        or len(receipt_id) != len(prefix) + 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in receipt_id[len(prefix) :]
+        )
+    ):
+        raise ValueError("Family-A coverage receipt identity is invalid")
+    fingerprint = receipt_id[len(prefix) :]
+    receipt = receipt_store.load(fingerprint)
+    if receipt is None or receipt.receipt_id != receipt_id:
+        raise ValueError("Family-A coverage receipt is unavailable")
+
+    root_descriptor = -1
+    descriptor = -1
+    try:
+        root_descriptor = receipt_store._open_root(create=False)
+        descriptor = os.open(
+            receipt_store._filename(fingerprint),
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=root_descriptor,
+        )
+        receipt_store._validate_file_info(os.fstat(descriptor))
+        handle = os.fdopen(descriptor, "r", encoding="utf-8")
+        descriptor = -1
+        with handle:
+            return handle.read()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if root_descriptor >= 0:
+            os.close(root_descriptor)
+
+
+def _family_a_search_budget(manifest: Any, requests_sent: int) -> Any:
+    from core.behavior.experiment_sdk import (
+        ExperimentActionClass,
+        ProofExperimentManifest,
+    )
+    from core.behavior.normalize import stable_hash
+    from core.behavior.search_stopping import SearchBudget
+
+    if type(manifest) is not ProofExperimentManifest:
+        raise TypeError("Family-A coverage requires a proof manifest")
+    manifest.__post_init__()
+    claims = manifest.budget.claims
+    total = manifest.budget.total_request_units
+    if type(requests_sent) is not int or not 0 <= requests_sent <= total:
+        raise ValueError("Family-A coverage request accounting is invalid")
+
+    def counts(values: Any) -> tuple[int, int, int]:
+        return (
+            sum(
+                item.action_class is ExperimentActionClass.CROSS_OBJECT_READ
+                for item in values
+            ),
+            sum(
+                item.action_class is ExperimentActionClass.PRIVILEGE_MUTATION
+                for item in values
+            ),
+            sum(
+                item.action_class is ExperimentActionClass.OWNED_CREATE
+                for item in values
+            ),
+        )
+
+    endpoint_limits: dict[str, int] = {}
+    for claim in claims:
+        endpoint_limits[claim.endpoint_ref] = (
+            endpoint_limits.get(claim.endpoint_ref, 0) + claim.request_units
+        )
+    endpoint_consumed: dict[str, int] = {}
+    for claim in claims[:requests_sent]:
+        endpoint_consumed[claim.endpoint_ref] = (
+            endpoint_consumed.get(claim.endpoint_ref, 0) + claim.request_units
+        )
+    return SearchBudget(
+        limits=(
+            total,
+            max(endpoint_limits.values()),
+            *counts(claims),
+        ),
+        consumed=(requests_sent, *counts(claims[:requests_sent])),
+        reserved=(0, 0, 0, 0),
+        endpoints=tuple(
+            sorted(
+                (
+                    stable_hash("experiment_endpoint_key", endpoint_ref),
+                    count,
+                    0,
+                )
+                for endpoint_ref, count in endpoint_consumed.items()
+            )
+        ),
+        permissions=(False, False),
+    )
+
+
+def _family_a_coverage_certificate(
+    *,
+    payout_plan: Any,
+    catalog: Any,
+    manifest: Any,
+    receipt_json: str,
+    derivation_binding: bool = False,
+) -> Any:
+    from core.behavior.constraints import ConstraintLedgerBuilder
+    from core.behavior.payout_goals import SecurityProperty
+    from core.behavior.search_stopping import (
+        HighValueSinkLedger,
+        MarginalValueScheduler,
+        RecordedSearchExecution,
+    )
+
+    ledger = HighValueSinkLedger(payout_plan=payout_plan, catalog=catalog)
+    if type(derivation_binding) is not bool:
+        raise TypeError("R6 derivation binding flag must be a bool")
+    candidate = (
+        ledger._derive_frontier_candidate(manifest)
+        if derivation_binding
+        else ledger.require_candidate(manifest.candidate_id)
+    )
+    if candidate.goal.security_property is not SecurityProperty.OBJECT_AUTHORIZATION:
+        raise ValueError("Family-A coverage executed a non-Family-A candidate")
+    if any(
+        item.goal.security_property is not SecurityProperty.OBJECT_AUTHORIZATION
+        for item in ledger.candidates
+    ):
+        raise ValueError("Family-A coverage frontier contains another family")
+    recorded = RecordedSearchExecution(
+        manifest=manifest,
+        receipt_json=receipt_json,
+        accepted_kinds=frozenset(
+            {
+                "proof_experiment_authorization",
+                "proof_experiment_generalized_authorization",
+            }
+        ),
+    )
+    plan = MarginalValueScheduler().plan(
+        ledger=ledger,
+        constraints=ConstraintLedgerBuilder().build(),
+        budget=_family_a_search_budget(
+            manifest,
+            recorded.outcome["requests_sent"],
+        ),
+        enabled=True,
+        executions=(recorded,),
+        derivation_binding=derivation_binding,
+    )
+    return plan.certificate()
+
+
+def _family_a_coverage_projection(
+    *,
+    payout_plan: Any,
+    catalog: Any,
+    manifest: Any,
+    receipt_json: str,
+    derivation_binding: bool = False,
+) -> Dict[str, Any]:
+    certificate = _family_a_coverage_certificate(
+        payout_plan=payout_plan,
+        catalog=catalog,
+        manifest=manifest,
+        receipt_json=receipt_json,
+        derivation_binding=derivation_binding,
+    )
+    payload = certificate.to_dict()
+    explored = sum(
+        item.get("reason", "").startswith("recorded_oracle_")
+        for item in payload["entries"]
+    )
+    if explored != 1:
+        raise ValueError("Family-A coverage must describe one native execution")
+    return {
+        "certificate_id": certificate.certificate_id,
+        "stop_reason": payload["stop_reason"],
+        "admitted_candidate_count": len(payload["admitted_candidate_ids"]),
+        "explored_candidate_count": explored,
+        "execution_authority": payload["execution_authority"],
+        "finding_authority": payload["finding_authority"],
+    }
+
+
+def _maybe_add_family_a_coverage(
+    *,
+    response: Dict[str, Any],
+    shadow_run: Any,
+    one_click_run: Any,
+    receipt_store: Any,
+    enabled: bool,
+    derivation_binding: bool = False,
+) -> None:
+    if (
+        not enabled
+        or one_click_run is None
+        or not one_click_run.dispatched
+        or one_click_run.manifest is None
+        or one_click_run.execution is None
+    ):
+        return
+    try:
+        receipt_json = _read_exact_behavioral_receipt_json(
+            receipt_store,
+            one_click_run.execution.receipt_id,
+        )
+        projection = _family_a_coverage_projection(
+            payout_plan=shadow_run.payout_goal_plan,
+            catalog=shadow_run.semantic_catalog,
+            manifest=one_click_run.manifest,
+            receipt_json=receipt_json,
+            derivation_binding=derivation_binding,
+        )
+    except Exception:
+        logger.warning(
+            "Family-A coverage measurement was unavailable",
+            exc_info=True,
+        )
+        return
+    response["family_a_coverage"] = projection
+
 
 # ─────────────────────────── models ───────────────────────────
 
@@ -3949,6 +4213,14 @@ async def run_behavioral_authorization_endpoint(
             generalized_one_click_run.dispatched
         ):
             response = generalized_one_click_run.execution_response()
+            _maybe_add_family_a_coverage(
+                response=response,
+                shadow_run=shadow_run,
+                one_click_run=generalized_one_click_run,
+                receipt_store=receipt_store,
+                enabled=_family_a_coverage_enabled(os.environ),
+                derivation_binding=_r6_derivation_binding_enabled(os.environ),
+            )
         elif (
             capability_effect_one_click_run is not None
             and capability_effect_one_click_run.selected

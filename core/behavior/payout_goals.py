@@ -205,6 +205,26 @@ class SecurityWitnessGoal:
     witness_requirements: Tuple[str, ...]
     evidence_refs: Tuple[str, ...]
 
+    @staticmethod
+    def derived_goal_id(
+        *,
+        base: "SecurityWitnessGoal",
+        evidence_refs: Sequence[str],
+    ) -> str:
+        """Return ``base``'s goal ID with only its evidence references replaced."""
+
+        refs = tuple(sorted(set(evidence_refs)))
+        payload = {
+            "terminal_operation_id": base.terminal_operation_id,
+            "operation_label_ref": base.operation_label_ref,
+            "sink": base.sink.value,
+            "security_property": base.security_property.value,
+            "impact_weight": base.impact_weight,
+            "witness_requirements": list(base.witness_requirements),
+            "evidence_refs": list(refs),
+        }
+        return stable_hash("security_witness_goal", payload)
+
     @classmethod
     def build(
         cls,
