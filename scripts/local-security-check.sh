@@ -16,56 +16,73 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 FAILED=0
+BASELINE_FILE="$(dirname "${BASH_SOURCE[0]}")/security-check-baseline.txt"
+
+if [[ ! -r "$BASELINE_FILE" ]]; then
+    echo -e "${RED}❌ Security-check baseline is missing or unreadable: $BASELINE_FILE${NC}"
+    exit 1
+fi
+
+baseline_entries=()
+while IFS= read -r entry || [[ -n "$entry" ]]; do
+    [[ -z "$entry" || "$entry" == \#* ]] && continue
+    baseline_entries+=("$entry")
+done < "$BASELINE_FILE"
+
+is_baselined() {
+    local candidate="$1" entry
+    for entry in "${baseline_entries[@]}"; do
+        [[ "$candidate" == "$entry" ]] && return 0
+    done
+    return 1
+}
+
+check_new_matches() {
+    local pattern="$1" label="$2" matches status=0 match path content candidate
+    local new_matches=()
+
+    matches=$(grep -rn "$pattern" core/ --include="*.py") || status=$?
+    if [[ $status -gt 1 ]]; then
+        echo -e "${RED}❌ Could not scan core/ for $label${NC}"
+        FAILED=1
+        return
+    fi
+
+    while IFS= read -r match; do
+        [[ -z "$match" ]] && continue
+        path=${match%%:*}
+        content=${match#*:}
+        content=${content#*:}
+        content=$(printf '%s' "$content" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        candidate="$path"$'\t'"$content"
+        if ! is_baselined "$candidate"; then
+            new_matches+=("$match")
+        fi
+    done <<< "$matches"
+
+    if [[ ${#new_matches[@]} -gt 0 ]]; then
+        echo -e "${RED}❌ NEW $label violation(s) found${NC}"
+        printf '  → %s\n' "${new_matches[@]}"
+        FAILED=1
+    else
+        echo -e "${GREEN}✅ No new $label found${NC}"
+    fi
+}
 
 # Check 1: shell=True
 echo "📍 Checking for shell=True (command injection)..."
-if grep -r "shell=True" core/ --include="*.py" > /dev/null 2>&1; then
-    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${RED}❌ BLOCKED: shell=True found${NC}"
-    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    echo "VULNERABILITY DETAILS:"
-    echo "This is a command injection vulnerability."
-    echo "Use shell=False with list arguments instead."
-    echo ""
-    echo "LOCATIONS (file:line):"
-    grep -rn "shell=True" core/ --include="*.py" | sed 's/^/  → /'
-    echo ""
-    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    FAILED=1
-else
-    echo -e "${GREEN}✅ No shell=True found${NC}"
-fi
+check_new_matches "shell=True" "shell=True"
 echo ""
 
 # Check 2: eval/exec
 echo "📍 Checking for eval()/exec()..."
-if grep -r "eval(" core/ --include="*.py" > /dev/null 2>&1; then
-    echo -e "${RED}❌ eval() found${NC}"
-    grep -rn "eval(" core/ --include="*.py"
-    FAILED=1
-else
-    echo -e "${GREEN}✅ No eval() found${NC}"
-fi
-
-if grep -r "exec(" core/ --include="*.py" > /dev/null 2>&1; then
-    echo -e "${RED}❌ exec() found${NC}"
-    grep -rn "exec(" core/ --include="*.py"
-    FAILED=1
-else
-    echo -e "${GREEN}✅ No exec() found${NC}"
-fi
+check_new_matches "eval(" "eval()"
+check_new_matches "exec(" "exec()"
 echo ""
 
 # Check 3: os.system
 echo "📍 Checking for os.system()..."
-if grep -r "os.system(" core/ --include="*.py" > /dev/null 2>&1; then
-    echo -e "${RED}❌ os.system() found${NC}"
-    grep -rn "os.system(" core/ --include="*.py"
-    FAILED=1
-else
-    echo -e "${GREEN}✅ No os.system() found${NC}"
-fi
+check_new_matches "os.system(" "os.system()"
 echo ""
 
 # Check 4: Hardcoded secrets (loose check)

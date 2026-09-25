@@ -1,0 +1,23 @@
+# Reviewed false positives for checks 1-3 of local-security-check.sh.
+# Each entry is a repo-relative path, one TAB, and matched source line with
+# leading/trailing whitespace removed. Line numbers are intentionally omitted.
+# These 17 unique keys cover 18 reviewed matches (two identical installer lines).
+# To regenerate or extend: run the script, review every NEW match, then add only
+# confirmed false positives in this format. Do not bulk-accept scanner output.
+core/ai/ai_engine.py	def _try_dispatch_exec(self, line: str) -> Optional[str]:
+core/ai/ai_engine.py	exec_result = self._try_dispatch_exec(line)
+core/ai/ai_engine.py	exec_result = self._try_dispatch_exec(line_buffer)
+core/engine/scanner_engine.py	proc = await asyncio.create_subprocess_exec(
+core/forge/compiler.py	"- Never use os.system() - use subprocess.run() with shell=False "
+core/forge/sandbox.py	proc = await asyncio.create_subprocess_exec(
+core/forge/validator.py	# - Dangerous Python patterns (os.system, subprocess.shell=True)
+core/forge/validator.py	(r'eval\s*\(', "Code injection risk: eval()"),
+core/forge/validator.py	(r'exec\s*\(', "Code injection risk: exec()"),
+core/forge/validator.py	(r'subprocess\..*shell\s*=\s*True', "Shell injection risk: shell=True"),
+core/forge/validator.py	if any("shell=True" in str(v) for v in violations):
+core/forge/validator.py	recommendations.append("Replace os.system() with subprocess.run() with shell=False")
+core/forge/validator.py	recommendations.append("Use ast.literal_eval() instead of eval() for data parsing")
+core/foundry/driver_native.py	async def eval(self, js: str) -> Any:
+core/sentient/mimic/ast_parser.py	- Parsing only - no eval() or code execution
+core/toolkit/installer.py	proc = await asyncio.create_subprocess_exec(
+core/toolkit/installer.py	verify_proc = await asyncio.create_subprocess_exec(
