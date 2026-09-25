@@ -74,7 +74,12 @@
         "sqli",
         "idor",
         "ssrf",
-        "general"
+        "general",
+        "xss",
+        "path_traversal",
+        "open_redirect",
+        "generic",
+        "command_injection"
       ],
       "title": "VulnerabilityClass",
       "type": "string"
