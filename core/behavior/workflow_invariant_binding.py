@@ -13,7 +13,7 @@ fixtures create no target residue, require no cleanup, and have orphan-risk fals
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 from .experiment_sdk import ExperimentWorldBinding, ExperimentWorldKind, _hash_ref
@@ -27,6 +27,7 @@ from .workflow_invariant_contract import (
     WorkflowOwnedFixture,
     _fields,
     _integer,
+    _revalidate,
     classify_sequence,
 )
 
@@ -178,8 +179,8 @@ class WorkflowInvariantBinding:
             or type(capture) is not WorkflowCaptureProvenance
         ):
             raise WorkflowBindingDenied("workflow_binding_types_invalid")
-        replace(fixture)
-        replace(capture)
+        _revalidate(fixture)
+        _revalidate(capture)
         origin_ref = stable_hash(
             "behavioral_capture_target", _canonical_origin(target_origin)
         )
@@ -206,8 +207,8 @@ class WorkflowInvariantBinding:
             or type(self.capture) is not WorkflowCaptureProvenance
         ):
             raise WorkflowBindingDenied("workflow_binding_types_invalid")
-        replace(self.fixture)
-        replace(self.capture)
+        _revalidate(self.fixture)
+        _revalidate(self.capture)
         contract, world, capture = (
             self.fixture.contract,
             self.fixture.world,
@@ -296,8 +297,8 @@ def validate_current_capture(
         or type(current_capture) is not WorkflowCaptureProvenance
     ):
         raise WorkflowBindingDenied("workflow_offline_context_invalid")
-    replace(binding)
-    replace(current_capture)
+    _revalidate(binding)
+    _revalidate(current_capture)
     if (
         not _integer(at_index)
         or current_capture.capture_id != binding.capture.capture_id
@@ -319,7 +320,7 @@ class WorkflowOfflineEvaluation:
         validate_current_capture(self.binding, self.current_capture, self.at_index)
         if type(self.decision) is not WorkflowInvariantDecision:
             raise WorkflowBindingDenied("workflow_offline_decision_invalid")
-        replace(self.decision)
+        _revalidate(self.decision)
         contract = self.binding.fixture.contract
         expected = classify_sequence(
             contract, contract.initial_state, contract.operations

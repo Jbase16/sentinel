@@ -14,7 +14,7 @@ independent evidence of an observed target-side effect.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
 
@@ -32,6 +32,7 @@ from .workflow_invariant_contract import (
     _fields,
     _hash_ref,
     _integer,
+    _revalidate,
     classify_sequence,
     operation_precondition,
     transition_state,
@@ -68,8 +69,8 @@ class WorkflowTransitionEntry:
             or type(self.after_state) is not WorkflowState
         ):
             raise WorkflowLedgerDenied("workflow_transition_entry_invalid")
-        replace(self.before_state)
-        replace(self.after_state)
+        _revalidate(self.before_state)
+        _revalidate(self.after_state)
 
     def _payload(self) -> dict[str, Any]:
         return {
@@ -123,7 +124,7 @@ class WorkflowTransitionLedger:
             or type(self.entries) is not tuple
         ):
             raise WorkflowLedgerDenied("workflow_ledger_types_invalid")
-        replace(self.binding)
+        _revalidate(self.binding)
         contract = self.binding.fixture.contract
         if len(self.entries) > min(contract.max_operations, len(contract.operations)):
             raise WorkflowLedgerDenied("workflow_ledger_budget_invalid")
@@ -131,7 +132,7 @@ class WorkflowTransitionLedger:
         for index, entry in enumerate(self.entries):
             if type(entry) is not WorkflowTransitionEntry:
                 raise WorkflowLedgerDenied("workflow_ledger_entry_type_invalid")
-            replace(entry)
+            _revalidate(entry)
             operation = contract.operations[index]
             if (
                 entry.index != index
@@ -211,7 +212,7 @@ class WorkflowTransitionResult:
             or type(self.ledger) is not WorkflowTransitionLedger
         ):
             raise WorkflowLedgerDenied("workflow_transition_result_invalid")
-        replace(self.ledger)
+        _revalidate(self.ledger)
 
 
 def evaluate_operation(
@@ -228,8 +229,8 @@ def evaluate_operation(
         or type(operation) is not WorkflowOperation
     ):
         raise WorkflowLedgerDenied("workflow_transition_types_invalid")
-    replace(ledger)
-    replace(operation)
+    _revalidate(ledger)
+    _revalidate(operation)
     contract = binding.fixture.contract
     if (
         ledger.binding.binding_id != binding.binding_id
@@ -280,8 +281,8 @@ class WorkflowSequenceResult:
             or type(self.decision) is not WorkflowInvariantDecision
         ):
             raise WorkflowLedgerDenied("workflow_sequence_result_invalid")
-        replace(self.ledger)
-        replace(self.decision)
+        _revalidate(self.ledger)
+        _revalidate(self.decision)
         binding = self.ledger.binding
         validate_current_capture(binding, binding.capture, self.at_index)
         contract = binding.fixture.contract
@@ -323,7 +324,7 @@ def evaluate_sequence(
     current = WorkflowTransitionLedger(binding) if ledger is None else ledger
     if type(current) is not WorkflowTransitionLedger:
         raise WorkflowLedgerDenied("workflow_sequence_ledger_invalid")
-    replace(current)
+    _revalidate(current)
     if current.binding.binding_id != binding.binding_id:
         raise WorkflowLedgerDenied("workflow_sequence_context_mismatch")
     contract = binding.fixture.contract

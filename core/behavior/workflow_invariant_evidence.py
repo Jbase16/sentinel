@@ -16,7 +16,7 @@ effect. Running-workflow effect proof and OCB-S21 are deferred to the active tai
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -32,6 +32,7 @@ from .workflow_invariant_contract import (
     WorkflowInvariantOutcome,
     _fields,
     _hash_ref,
+    _revalidate,
     classify_sequence,
 )
 from .workflow_invariant_ledger import WorkflowSequenceResult, WorkflowTransitionLedger
@@ -85,7 +86,7 @@ class StoredWorkflowInvariantEvidence:
             raise WorkflowInvariantEvidenceError(
                 "workflow_evidence_not_retained_by_store"
             )
-        replace(self._result)
+        _revalidate(self._result)
         if self.evidence_id != _evidence_id(self._result):
             raise WorkflowInvariantEvidenceError("workflow_evidence_address_mismatch")
 
@@ -118,7 +119,7 @@ class WorkflowEvidencePersistence:
             raise WorkflowInvariantEvidenceError(
                 "workflow_evidence_persistence_invalid"
             )
-        replace(self.evidence)
+        _revalidate(self.evidence)
 
 
 def _decode_result(value: Mapping[str, Any]) -> WorkflowSequenceResult:
@@ -255,7 +256,7 @@ class WorkflowInvariantEvidenceStore:
             raise WorkflowInvariantEvidenceError(
                 "workflow_evidence_requires_completed_offline_result"
             )
-        replace(result)
+        _revalidate(result)
         evidence_id = _evidence_id(result)
         payload = _canonical_json(
             {
@@ -315,7 +316,7 @@ def offline_promotion_eligibility(
     if type(evidence) is not StoredWorkflowInvariantEvidence:
         return WorkflowPromotionEligibility(False, None, "retained_evidence_required")
     try:
-        replace(evidence)
+        _revalidate(evidence)
         validate_current_capture(
             evidence._result.ledger.binding, current_capture, at_index
         )

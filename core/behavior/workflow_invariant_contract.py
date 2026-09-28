@@ -42,6 +42,17 @@ def _fields(value: object, expected: set[str]) -> Mapping[str, Any]:
     return value
 
 
+def _revalidate(value: Any) -> None:
+    """Defensively re-run a frozen dataclass's ``__post_init__`` validation.
+
+    ``dataclasses.replace`` with no field overrides rebuilds the instance, which
+    re-invokes ``__post_init__``; the rebuilt copy is intentionally discarded. This
+    guards a nested dataclass that may have reached this object without passing its
+    own checked constructor, re-raising that dataclass's error if it is now invalid.
+    """
+    replace(value)
+
+
 class WorkflowStateSchema(str, Enum):
     AGGREGATE_LIMIT = "aggregate_limit_v1"
 
@@ -114,7 +125,7 @@ def evaluate_invariant(
         raise ValueError("unsupported workflow invariant")
     if type(terminal_state) is not WorkflowState:
         raise ValueError("invalid terminal state")
-    replace(terminal_state)
+    _revalidate(terminal_state)
     return terminal_state.consumed <= terminal_state.declared_limit
 
 
@@ -183,8 +194,8 @@ class WorkflowOperation:
 
 def operation_precondition(state: WorkflowState, operation: WorkflowOperation) -> bool:
     """Evaluate only the operation's declared guard, independently of the oracle."""
-    replace(state)
-    replace(operation)
+    _revalidate(state)
+    _revalidate(operation)
     return operation.amount <= state.per_op_cap and (
         operation.precondition is WorkflowPrecondition.PER_OPERATION_CAP
         or state.consumed + operation.amount <= state.declared_limit
@@ -290,11 +301,11 @@ class WorkflowInvariantContract:
             or self.mode != WORKFLOW_INVARIANT_CONTRACT_MODE
         ):
             raise ValueError("workflow invariant contract is invalid")
-        replace(self.initial_state)
+        _revalidate(self.initial_state)
         for operation in self.operations:
             if type(operation) is not WorkflowOperation:
                 raise ValueError("invalid workflow operation type")
-            replace(operation)
+            _revalidate(operation)
         if (
             not _hash_ref(self.workflow_ref, "workflow")
             or not _hash_ref(self.account_ref)
@@ -357,7 +368,7 @@ class WorkflowInvariantContract:
 def _owned_world(world: object) -> ExperimentWorldBinding:
     if type(world) is not ExperimentWorldBinding:
         raise ValueError("workflow requires an SDK owned account")
-    replace(world)
+    _revalidate(world)
     if (
         world.kind is not ExperimentWorldKind.OWNED_ACCOUNT
         or world.slot != "actor"
@@ -382,7 +393,7 @@ class WorkflowOwnedFixture:
     def __post_init__(self) -> None:
         if type(self.contract) is not WorkflowInvariantContract:
             raise ValueError("invalid workflow contract type")
-        replace(self.contract)
+        _revalidate(self.contract)
         world = _owned_world(self.world)
         if (
             not _hash_ref(self.contract.contract_id, "workflow_invariant_contract")
@@ -449,7 +460,7 @@ class WorkflowInvariantDecision:
             return
         if type(self.terminal_state) is not WorkflowState:
             raise ValueError("invalid workflow terminal state")
-        replace(self.terminal_state)
+        _revalidate(self.terminal_state)
         refused = self.outcome is WorkflowInvariantOutcome.OPERATION_REFUSED
         if (
             not _hash_ref(self.contract_ref, "workflow_invariant_contract")
@@ -525,8 +536,8 @@ def classify_sequence(
             or type(operations) is not tuple
         ):
             raise ValueError("invalid sequence types")
-        replace(contract)
-        replace(initial_state)
+        _revalidate(contract)
+        _revalidate(initial_state)
         if (
             not _hash_ref(contract.contract_id, "workflow_invariant_contract")
             or initial_state != contract.initial_state
@@ -534,7 +545,7 @@ def classify_sequence(
         ):
             raise ValueError("sequence does not match declared contract")
         for operation in operations:
-            replace(operation)
+            _revalidate(operation)
     except (TypeError, ValueError, AttributeError):
         return WorkflowInvariantDecision(
             None, WorkflowInvariantOutcome.MALFORMED, None, (), None, "invalid_input"
