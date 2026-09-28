@@ -132,7 +132,24 @@ against the real repository and Jason's separate explicit go, the branch was pus
 target-traffic class, and does not complete the live vulnerable/secure native OCB-S20
 journey, which remains a separate post-merge acceptance.
 
-Last reconciled: 2026-09-22
+OCB-R5 Family E passive-spine checkpoint (2026-09-27):
+`R5E1`–`R5E5` are implemented, focused-tested and suite-proved on
+`ocb/r5e-workflow-invariant-spine`, from canonical `main`
+`6a54d30df8488f4d8cdaa4fbafc7b7600d865a62`. The
+[slice record](ONE_CLICK_BOUNTY_R5E_WORKFLOW_INVARIANT_PLAN.md) defines the exact
+aggregate-limit shape, five layer contracts and declared E5 stop boundary. No
+production caller exists; E1–E3 are pure and E4–E5 perform local persistence only.
+The independent terminal predicate is a deterministic outcome evaluator, not
+independent evidence of an observed target-side effect. `OCB-S21` is registered and
+deferred. Python 3.12.14's complementary gate passed **3618 + 27 = 3645** tests
+with one skip, covering all **3646** collected items: exactly **147** new Family-E
+cases over the 3499-item base inventory. The marked command includes the existing
+tenth security-baseline file missing from the historical nine-file header command.
+All commits are local; branch push was rejected by execution approval policy and is
+left to Jason. Mediator verification and separate merge go remain open; no lab,
+native, live or payout claim is advanced.
+
+Last reconciled: 2026-09-27 (bounded Family E passive foundation)
 
 ## 1. Purpose
 
@@ -328,6 +345,29 @@ or live loopback result is not public-target or payout proof.
 
 ### Sentinel repository
 
+- Family-E code checkpoint: local `2fc28add4a5b6bf1e7bbd6c898d0e03953e4fcfc`
+  on `ocb/r5e-workflow-invariant-spine`, from `6a54d30`. All five passive layers are
+  focused-tested (42 + 25 + 22 + 29 + 29 = **147** new cases) and suite-proved.
+  Base full-tree collection was measured at **3499** before edits. The final
+  unmarked command passed **3618**, with **1 skipped, 27 deselected, 3 warnings in
+  39.78s**; the separate ten-file marked command passed **27**, with **115 deselected
+  in 16.64s**. Union: **3645 passed, 1 skipped, 0 failed**, all **3646** items,
+  exactly **3498 + 147** passing cases. The code identity plus additive registry/docs
+  change defines this checkpoint; no second full baseline run is claimed. Branch
+  push was rejected before execution: `approval required by policy, but AskForApproval
+  is set to Never`. All commits remain local and publication is left to Jason; no
+  alternate publication path or merge occurred. This does not renew native/live
+  evidence. The warnings remain the two ldap3/pyasn1 deprecations and one existing
+  scheduling-sensitive aiosqlite closed-event-loop worker warning.
+- The current marked set contains **27** tests, including the existing
+  `tests/unit/test_local_security_check_baseline.py` added after the historical
+  nine-file command in this header. Include that tenth file in the separate marked
+  invocation for complete two-invocation coverage. Family-E's fresh-exec process
+  proofs run in the unmarked invocation without importing the parent's extensions.
+- At this base the unmodified local security script actually exits **0** with no
+  new/Family-E violation; reviewed prohibited-pattern matches are now baselined.
+  Its existing repository-wide Ruff, example-secret and unavailable-Bandit warnings
+  remain debt. All ten new Python files pass targeted Ruff/format and syntax checks.
 - R5D9 source baseline: clean R5D8 tip at
   `852138cdd35a330d9204f957f38cee55e2e052f8`; this includes the suite-proved R5D8
   injected effect oracle and verified-cleanup executor, and the Sentinel-only R5C8
@@ -541,7 +581,7 @@ accepted baseline remains the Family-C checkpoint described below.
 | OCB-R5 family B: state-machine safety | Closed for the bounded omission and reordering scope | Exact-terminal payout selection, three fresh owned worlds, sealed baseline/treatment/control dispatch, canonical effect comparison, omission cross-world rejection, exact adjacent-order swap evidence, verified cleanup, receipt completion/replay refusal, ordinary-click coordination, receipt-bound finding construction, durable denial evidence, and prior/current capture freshness. Omission passed at Sentinel `23709f4` / lab `f9e8a76`; reordering passed at Sentinel `6a1895d` / lab `1e51d53`. | Preserve regressions; defer broader replay and stale-state capability/effect contracts until their positive effect semantics are defined |
 | OCB-R5 family C: role and membership safety | Accepted revocation-survival scenario is prior-SHA native-proven; R5C7 profile isolation and R5C8 Sentinel scheme parity are suite-proved; the R5C9 current-SHA acceptance renewal is mediator-verified, while broader membership-creation, role-assignment, and administrative-boundary shapes remain open and deferred | Typed role/membership fixture, monotonicity proof and admission, exact runtime/effect binding, atomic receipt/budget claim, eight-unit exact-session native replay, target-side active/revoked observations, independent protected-effect evaluation, verified cleanup, strict completed/aborted receipts, two-level retry deduplication, truthful default-off status, canonical routing of completed positive proof, mutually exclusive role-profile selection, generated Acceptance parity, three prior pair-level fresh vulnerable/secure Swift/WKWebView cycles, and the separately recorded current-SHA renewal | Preserve the exact R5C9 acceptance claim and boundaries; the broader Family-C shapes remain open and deferred and are not part of Family D |
 | OCB-R5 family D: capability safety | R5D1-R5D9 retain their bounded contracts; R5D10 is production-wired and suite-proved for strict durable inner evidence, default-off local replay-leak promotion/recovery, and phase-only Scan selection by the complementary repository gate recorded above | R5D10 preserves the accepted `cb3e926` five-phase controlled-twin execution behavior while retaining a versioned, redacted evidence source no larger than 256 KiB. One journaled service validates the strict replay predicate and atomically commits one original-session canonical Observation/Finding result. Production evidence paths must resolve outside every Git worktree. Status, promotion, retry, and bounded reconciliation inspect only local evidence and add zero target requests; the secure control and every non-matching refuted shape remain non-findings. | Preserve the suite-proved repository gate and the accepted 2026-09-17 exact-build native result for `f45e037`, local operator-native artifact `2168dcd1…`, which covers the R5D10 gate clauses only. `OCB-S17` is native-proven at `cb3e926` (local operator-native artifact `c1239945…`) and, by its 2026-09-17 renewal, at `f45e037` (local operator-native artifact `b0edf717…`, run `val-s17-native-20260918020600`, OCB-S17 clauses). Independent effect-occurrence proof and submission material remain later work. |
-| OCB-R5 family E: workflow and business-logic safety | Planned later | Some passive state/transition evidence is reusable | Add only after the ordinary A-D pipeline is operational and measured |
+| OCB-R5 family E: workflow and business-logic safety | R5E1–R5E5 suite-proved, passive/unwired at local code checkpoint 2fc28ad; push blocked by execution approval policy | Typed aggregate-limit contract and SDK owned fixture, exact operator capture binding, immutable sequential ledger, local atomic sequence store, retained inert offline evidence and fresh/positive eligibility; no production caller; 147 new cases in the 3645-pass split-suite union | Jason publishes the local branch; mediator review and separate merge go remain open. Running-workflow transport/effect oracle, promotion and OCB-S21 remain deferred; the A–D-loop-measured milestone stays open |
 | OCB-R5 family F: concurrency safety | Planned later | Existing budgets and receipts are prerequisites, not a concurrency oracle | Add bounded race scheduling, deterministic adjudication, and cleanup after OCB-R8 |
 | OCB-R6 Coverage-guided search and stopping | Suite-proved passive/unwired bounded slice; mediator-verified and merged to `main` at `7d135bc` | High-value sink ledger, exact marginal-value ordering, complete proof-budget bounds, typed-constraint and recorded-outcome replanning, A-D coverage accounting, and immutable input-bound stop certificate; `OCB-S18` focused proof is included in the full checkpoint | Mediator-verified against the real repo, suite, and recomputed certificates; merged by fast-forward. No production caller; unsupported proof costs/outcomes remain explicit. Live orchestration is OCB-R8 / OCB-S20 |
 | OCB-R7 Submission-grade candidate assembly | Rev 2 suite-proved locally; push blocked by execution approval policy; mediator acceptance pending | One-lineage immutable `SubmissionCandidate` on Verify, Cortex, AI, and scans: Shape R from actually retained request commitments, Shape A from eligible Family-D LOCAL evidence; minimized proof, honest impact, sanitization, deduplication, claim-specific refusal, and owned-draft teardown | Complete the pushed-branch handoff, then mediator verification and Jason's separate merge go; automatic upstream captured-proof promotion, native/external submission, and payout remain outside this slice |
@@ -1051,11 +1091,51 @@ receipt reuse, deduplication, cleanup, and a truthful no-finding stop result.
 OCB-R8 introduces no new traffic class. It coordinates only classes already admitted
 and proved in OCB-R2 through OCB-R6; the UI cannot manufacture authority.
 
-### Workstream 7 — Add OCB-R5 families E and F only after the ordinary A-D loop is measured
+### Workstream 7 — Passive Family E foundation reprioritized; active E and F remain gated
 
-Workflow/business-logic and concurrency families have larger state, oracle, cleanup,
-and reproducibility costs. Add them one bounded family at a time after OCB-R8 demonstrates
-that the common coordinator, receipts, stopping, and candidate path work in practice.
+By explicit program-authority decision in the Family-E work order, the passive
+R5E1–R5E5 foundation is built ahead of the ordinary A–D-loop-measured milestone.
+This reprioritizes the unwired foundation only; it does not close that milestone or
+authorize target execution. The work order overrides intermediate review stops for
+one continuous E1→E5 pass, with a focused proof and separate commit per layer.
+
+- [x] **R5E1 — workflow-invariant contract and owned fixture.** Local
+  `dcbd0b51ff5c679e2d6693a1cbd086aabac618b6`; 42 focused cases. Typed pure
+  terminal invariant and ordered consumes, exact SDK owned-account shape; unwired.
+- [x] **R5E2 — owned provenance/freshness binding and offline evaluation.** Local
+  `23f6abe7bc5715cd0e076938e6403fc8b88a6cd9`; 25 cases. Exact tenant/persona/origin,
+  ordered operation/source commitments and logical capture window; unwired.
+- [x] **R5E3 — immutable ledger and pure sequence semantics.** Local
+  `49533d47fd546d17757ca9e3f75f424b219c784e`; 22 cases. First application, replay
+  refusal, exact order and whole-sequence allowance; unwired.
+- [x] **R5E4 — durable atomic sequence store.** Local
+  `b7a58ac72c5311373e7266163401a225944902d1`; 29 cases. Append-only exclusive
+  publication, restart and real-process double-application refusal; local I/O only,
+  unwired. Capture renewal cannot reset the fixture's sequence history.
+- [x] **R5E5 — durable inert evidence and offline eligibility.** Local
+  `2fc28add4a5b6bf1e7bbd6c898d0e03953e4fcfc`; 29 cases. Retained/fresh/owned positive
+  result would be promotable offline; no finding/promotion authority; unwired.
+- [x] **Repository gate.** Python 3.12.14: 3618 passed / 1 skipped / 27 deselected,
+  then 27 passed / 115 deselected; union 3645 passed / 1 skipped / 3646 collected,
+  exactly 147 new Family-E cases. Canonical registry: 3 focused cases; all old
+  records/aliases unchanged and six IDs added. Targeted Ruff/format/syntax pass ten
+  files; the unmodified security script exits 0 with inherited warnings still open.
+- [ ] **Branch publication.** `git push -u origin ocb/r5e-workflow-invariant-spine`
+  was rejected before execution with `approval required by policy, but AskForApproval
+  is set to Never`. All five layer SHAs are local; the documentation-only branch tip
+  is recorded in the handoff. Jason owns publication under the work order's permitted
+  local-SHA delivery boundary; no alternate publication path is attempted.
+- [ ] Mediator verification against the real branch, followed by Jason's separate
+  merge go; no merge is authorized by this implementation work order.
+- [ ] Ordinary A–D loop measurement and full OCB-R8/OCB-S20 evidence remain open.
+- [ ] Separately authorize the active Family-E tail: bounded transport, genuine
+  independent effect-occurrence oracle, cleanup/receipt authority and OCB-S21.
+- [ ] Other Family-E numeric/relational shapes and Family-F concurrency stay deferred.
+
+The [detailed slice record](ONE_CLICK_BOUNTY_R5E_WORKFLOW_INVARIANT_PLAN.md) carries
+the exact contracts and proof boundary. Every layer adds no origin, identity, action
+class, budget, target traffic or execution authority. Disposable fixtures create no
+target residue; orphan-risk is false and no unrun cleanup is claimed.
 
 ### Workstream 8 — Earn OCB-R9 rather than declaring it
 
@@ -1107,6 +1187,16 @@ Stop the slice rather than weakening a gate when completion appears to require:
 - automatically submitting a finding to an external program.
 
 ## 11. Immediate next decision
+
+Family-E's current bounded work order stops at R5E5. Its five layers have local
+commits, 147 focused cases and the 3645-pass split repository gate. Push was rejected
+by execution approval policy, so next: Jason publishes the local branch, mediator
+verification against the real repository, and Jason's separate merge go. The planned substantive milestone remains the
+ordinary A–D loop measurement under OCB-S20. A separately authorized Family-E active
+tail must earn running-workflow
+effect proof before OCB-S21; no transport, finding promotion or lab/native work is
+authorized by the passive spine. The inherited Family-D record below remains
+SHA-qualified context and is not advanced by Family E.
 
 Family B remains closed for the bounded omission and adjacent-reordering scope. The
 2026-08-24 **Family-C closure review checkpoint and R5C7 server-profile repair are
@@ -1174,5 +1264,6 @@ implemented sub-slices.
 | [ ] | OCB-R6 search/stopping | Passive/unwired bounded implementation and OCB-S18 are suite-proved; local branch `ocb/r6-search-stopping`; push blocked by execution approval policy | Publish the implementation commit, then mediator verification of the pushed slice and Jason's separate merge go remain open; no native evidence claim |
 | [ ] | OCB-R7 generalized candidate | Rev 2 and `OCB-S19` suite-proved: captured-request Shape R and non-replayable Family-D Shape A; no new authority | Push blocked by execution approval policy; publish the local slice, then mediator verification and Jason's separate merge go |
 | [ ] | OCB-R8 full ordinary click | Partial | `OCB-S20` |
-| [ ] | OCB-R5 families E and F expansion | Deferred | New registered scenarios after OCB-R8 |
+| [ ] | OCB-R5 family E workflow/business-logic | R5E1–R5E5 suite-proved, passive/unwired; local code 2fc28ad, 147 new cases, 3645-pass split union; push blocked by execution approval policy | Jason publishes the branch, then real-repository mediator review and separate merge go; active transport/independent effect proof, promotion and registered OCB-S21 remain deferred |
+| [ ] | OCB-R5 family F concurrency | Deferred; no concurrency oracle added by Family E | Ordinary A–D loop measurement, then separately authorized bounded concurrency work |
 | [ ] | OCB-R9 release/payout evidence | Evidence in progress | Resolve or baseline remaining release gates, then separately authorized real-program evidence |
