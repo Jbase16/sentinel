@@ -27,6 +27,7 @@
     {"id": "R5E3", "kind": "slice", "description": "Immutable workflow transition ledger and pure sequential semantics"},
     {"id": "R5E4", "kind": "slice", "description": "Durable atomic local workflow sequence store"},
     {"id": "R5E5", "kind": "slice", "description": "Durable inert workflow evidence and offline promotion eligibility"},
+    {"id": "R5E6", "kind": "slice", "description": "Independent workflow-invariant effect-occurrence oracle over injected hermetic transport"},
     {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
     {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
     {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},
