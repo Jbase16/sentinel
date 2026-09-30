@@ -358,6 +358,7 @@ def _nested_mappings(result: Mapping[str, Any]) -> tuple[Mapping[str, Any], ...]
         "graph_bound_prerequisite_one_click",
         "role_monotonicity_one_click",
         "capability_effect_one_click",
+        "workflow_invariant_effect_one_click",
         "capability_effect_evidence",
     ):
         value = result.get(key)
@@ -526,6 +527,7 @@ def _request_for_family(
         common["role_monotonicity"] = request.role_monotonicity
     elif family is OrdinaryClickFamily.D:
         common["capability_effect"] = request.capability_effect
+        common["workflow_effect"] = request.workflow_effect
     family_request = RunBehavioralAuthorizationFromURLRequest(**common)
     family_request._assessment_session_id = assessment_session_id
     return family_request
@@ -544,7 +546,7 @@ def _applicable(
         )
     if family is OrdinaryClickFamily.C:
         return request.role_monotonicity is not None
-    return request.capability_effect is not None
+    return request.capability_effect is not None or request.workflow_effect is not None
 
 
 def _terminal_state(

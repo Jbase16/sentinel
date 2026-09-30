@@ -417,6 +417,7 @@ class RunBehavioralAuthorizationRequest(BaseModel):
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
     capability_effect: Optional[Dict[str, Any]] = None
+    workflow_effect: Optional[Dict[str, Any]] = None
     _assessment_session_id: Optional[str] = PrivateAttr(default=None)
     _capability_intake_id: Optional[str] = PrivateAttr(default=None)
 
@@ -448,6 +449,7 @@ class RunBehavioralAuthorizationFromURLRequest(BaseModel):
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
     capability_effect: Optional[Dict[str, Any]] = None
+    workflow_effect: Optional[Dict[str, Any]] = None
     _assessment_session_id: Optional[str] = PrivateAttr(default=None)
 
     @model_validator(mode="after")
@@ -1077,6 +1079,27 @@ def _capability_effect_receipt_projection(
     return projected
 
 
+def _workflow_effect_receipt_projection(
+    response: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Persist only a generic root status until workflow receipts exist."""
+
+    if response.get("kind") != "workflow_invariant_effect_one_click":
+        return response
+    projected = {
+        "status": "no_executable_candidate",
+        "plan": {"selected_proposal_id": None},
+        "execution": None,
+        "finding": None,
+        "finding_confirmed": False,
+        "graphql_resolution": response.get("graphql_resolution"),
+    }
+    for field_name in ("read_exploration", "interaction_acquisition"):
+        if field_name in response:
+            projected[field_name] = response[field_name]
+    return projected
+
+
 def _capability_execution_policy_snapshot(policy_digest: str) -> Mapping[str, Any]:
     """Seal the already-admitted execution boundary without adding authority."""
 
@@ -1353,6 +1376,13 @@ async def run_behavioral_authorization_endpoint(
         CapabilityEffectOneClickRun,
         CapabilityEffectOneClickSpecification,
     )
+    from core.behavior.workflow_invariant_effect_one_click import (
+        WorkflowEffectExecutionConfig,
+        WorkflowEffectOneClickDenied,
+        WorkflowEffectOneClickDispatcher,
+        WorkflowEffectOneClickRun,
+        WorkflowEffectOneClickSpecification,
+    )
     from core.behavior.capability_effect_evidence import (
         build_capability_effect_evidence,
     )
@@ -1437,6 +1467,7 @@ async def run_behavioral_authorization_endpoint(
             status_code=400,
             detail="prior paired captures have no in-scope records",
         )
+    workflow_effect_records = tuple(source_records)
     role_specification = None
     if req.role_monotonicity is not None:
         try:
@@ -1463,6 +1494,15 @@ async def run_behavioral_authorization_endpoint(
     capability_effect_profile_selected = (
         capability_effect_specification is not None
     )
+    workflow_effect_specification = None
+    if req.workflow_effect is not None:
+        try:
+            workflow_effect_specification = WorkflowEffectOneClickSpecification.from_mapping(
+                req.workflow_effect, target_origin=target_origin
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    workflow_effect_profile_selected = workflow_effect_specification is not None
     if role_profile_selected and capability_effect_profile_selected:
         raise HTTPException(
             status_code=409,
@@ -1471,8 +1511,17 @@ async def run_behavioral_authorization_endpoint(
                 "exclusive"
             ),
         )
-    exclusive_profile_selected = (
+    if workflow_effect_profile_selected and (
         role_profile_selected or capability_effect_profile_selected
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="active behavioral profiles are mutually exclusive",
+        )
+    exclusive_profile_selected = (
+        role_profile_selected
+        or capability_effect_profile_selected
+        or workflow_effect_profile_selected
     )
     source_controls = tuple(req.source_controls)
     peer_controls = tuple(req.peer_controls)
@@ -1506,6 +1555,7 @@ async def run_behavioral_authorization_endpoint(
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
     capability_effect_config = CapabilityEffectExecutionConfig.from_environment()
+    workflow_effect_config = WorkflowEffectExecutionConfig.from_environment()
     if (
         capability_effect_profile_selected
         and capability_effect_config.enabled
@@ -1517,6 +1567,15 @@ async def run_behavioral_authorization_endpoint(
                 "capability effect execution requires "
                 "SENTINELFORGE_BEHAVIOR_PRIMARY=1"
             ),
+        )
+    if (
+        workflow_effect_profile_selected
+        and workflow_effect_config.enabled
+        and not resolver_config.enabled
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="workflow effect execution requires SENTINELFORGE_BEHAVIOR_PRIMARY=1",
         )
     # The inner boundary owns this profile selection too, so direct callers
     # cannot re-enable unrelated interaction authorities alongside the stricter
@@ -1821,6 +1880,7 @@ async def run_behavioral_authorization_endpoint(
     graph_bound_prerequisite_executor = None
     role_monotonicity_executor = None
     capability_effect_executor = None
+    workflow_effect_executor = None
     capability_effect_policy = None
     capability_effect_provenance = None
     capability_effect_policy_snapshot = None
@@ -2001,6 +2061,34 @@ async def run_behavioral_authorization_endpoint(
                 source_persona.persona_id,
                 capability_effect_policy,
                 capability_effect_provenance,
+            )
+        if workflow_effect_profile_selected and workflow_effect_config.enabled:
+            workflow_request_limit = (
+                len(workflow_effect_specification.transport_spec.operation_urls) + 1
+            )
+            workflow_effect_policy = ExecutionPolicy(
+                "bounty_safe",
+                scope_filter=scope_filter,
+                budget=ProofBudget(
+                    max_total_requests=workflow_request_limit,
+                    max_requests_per_endpoint=workflow_request_limit,
+                    max_cross_object_reads=0,
+                    max_privilege_mutations=0,
+                    max_creates=0,
+                    allow_delete=False,
+                    allow_real_user_data_access=False,
+                ),
+            )
+            workflow_effect_provenance = ProvenanceSink()
+            workflow_effect_provenance.record_context(
+                target=target_origin,
+                proof_mode="bounty_safe_workflow_effect",
+                policy_digest=workflow_effect_policy.digest(),
+            )
+            workflow_effect_executor = make_executor(
+                source_persona.persona_id,
+                workflow_effect_policy,
+                workflow_effect_provenance,
             )
         boundary_policy = ExecutionPolicy(
             "bounty_safe",
@@ -2224,6 +2312,7 @@ async def run_behavioral_authorization_endpoint(
                     "capability_effect_execution": (
                         capability_effect_config.enabled
                     ),
+                    "workflow_effect_execution": workflow_effect_config.enabled,
                 },
                 "target_origin": target_origin,
                 "envelope_id": req.envelope_id,
@@ -2244,6 +2333,11 @@ async def run_behavioral_authorization_endpoint(
                 "capability_effect_specification_id": (
                     capability_effect_specification.specification_id
                     if capability_effect_specification is not None
+                    else None
+                ),
+                "workflow_effect_specification_id": (
+                    workflow_effect_specification.specification_id
+                    if workflow_effect_specification is not None
                     else None
                 ),
                 "script_urls": script_urls,
@@ -2360,7 +2454,7 @@ async def run_behavioral_authorization_endpoint(
             )
         source_executor = executors[source_persona.persona_id]
         for script_url in (
-            () if capability_effect_profile_selected else script_urls
+            () if exclusive_profile_selected else script_urls
         ):
             asset_resolution["attempted"] += 1
             try:
@@ -2407,6 +2501,7 @@ async def run_behavioral_authorization_endpoint(
         config.enabled
         and executors is not None
         and not capability_effect_profile_selected
+        and not workflow_effect_profile_selected
     ):
         preliminary_plan = scheduler.plan(
             source_records,
@@ -4066,6 +4161,12 @@ async def run_behavioral_authorization_endpoint(
         and not capability_effect_config.enabled
         else None
     )
+    workflow_effect_one_click_run = (
+        WorkflowEffectOneClickRun.disabled(workflow_effect_specification)
+        if workflow_effect_specification is not None
+        and not workflow_effect_config.enabled
+        else None
+    )
     generalized_one_click_run = None
     graph_bound_shadow_run = shadow_run
     try:
@@ -4094,8 +4195,29 @@ async def run_behavioral_authorization_endpoint(
                     config=capability_effect_config,
                 ).run()
             )
+        if workflow_effect_specification is not None and workflow_effect_config.enabled:
+            if (
+                workflow_effect_executor is None
+                or vault is None
+                or envelope is None
+                or receipt_store is None
+                or receipt_fingerprint is None
+                or receipt_reservation_token is None
+            ):
+                raise WorkflowEffectOneClickDenied("workflow_effect_execution_gate_unavailable")
+            workflow_effect_one_click_run = await WorkflowEffectOneClickDispatcher(
+                target_origin=target_origin,
+                persona_id=source_persona.persona_id,
+                specification=workflow_effect_specification,
+                authorization=envelope,
+                executor=workflow_effect_executor,
+                persona_vault=vault,
+                evidence_records=workflow_effect_records,
+                config=workflow_effect_config,
+            ).run()
         if (
             capability_effect_specification is None
+            and workflow_effect_specification is None
             and cross_persona_proof_run is None
             and graph_bound_shadow_run is not None
             and graph_bound_prerequisite_executor is not None
@@ -4130,6 +4252,7 @@ async def run_behavioral_authorization_endpoint(
             )
         if (
             capability_effect_specification is None
+            and workflow_effect_specification is None
             and cross_persona_proof_run is None
             and shadow_run is not None
             and role_specification is not None
@@ -4161,6 +4284,7 @@ async def run_behavioral_authorization_endpoint(
             )
         if (
             capability_effect_specification is None
+            and workflow_effect_specification is None
             and cross_persona_proof_run is None
             and shadow_run is not None
             and controlled_executor is not None
@@ -4197,7 +4321,12 @@ async def run_behavioral_authorization_endpoint(
                     ),
                 )
             )
-        if capability_effect_one_click_run is not None and (
+        if (
+            workflow_effect_one_click_run is not None
+            and workflow_effect_one_click_run.dispatched
+        ):
+            response = workflow_effect_one_click_run.execution_response()
+        elif capability_effect_one_click_run is not None and (
             capability_effect_one_click_run.dispatched
         ):
             response = capability_effect_one_click_run.execution_response()
@@ -4221,6 +4350,11 @@ async def run_behavioral_authorization_endpoint(
                 enabled=_family_a_coverage_enabled(os.environ),
                 derivation_binding=_r6_derivation_binding_enabled(os.environ),
             )
+        elif (
+            workflow_effect_one_click_run is not None
+            and workflow_effect_one_click_run.selected
+        ):
+            run = shadow_run
         elif (
             capability_effect_one_click_run is not None
             and capability_effect_one_click_run.selected
@@ -4317,6 +4451,7 @@ async def run_behavioral_authorization_endpoint(
         FreshOmissionDenied,
         GeneralizedAuthorizationOneClickDenied,
         CapabilityEffectOneClickDenied,
+        WorkflowEffectOneClickDenied,
         GraphBoundManifestAdmissionDenied,
         GraphBoundRequestBindingDenied,
         GraphBoundExecutionClaimDenied,
@@ -4440,6 +4575,10 @@ async def run_behavioral_authorization_endpoint(
         ) from exc
     if not (
         (
+            workflow_effect_one_click_run is not None
+            and workflow_effect_one_click_run.dispatched
+        )
+        or (
             capability_effect_one_click_run is not None
             and capability_effect_one_click_run.dispatched
         )
@@ -4457,6 +4596,9 @@ async def run_behavioral_authorization_endpoint(
         )
     ):
         if (
+            workflow_effect_one_click_run is not None
+            and workflow_effect_one_click_run.selected
+        ) or (
             capability_effect_one_click_run is not None
             and capability_effect_one_click_run.selected
         ) or (
@@ -4486,6 +4628,10 @@ async def run_behavioral_authorization_endpoint(
         if capability_effect_one_click_run is not None:
             response["capability_effect_one_click"] = (
                 capability_effect_one_click_run.to_dict()
+            )
+        if workflow_effect_one_click_run is not None:
+            response["workflow_invariant_effect_one_click"] = (
+                workflow_effect_one_click_run.to_dict()
             )
         if generalized_one_click_run is not None:
             response["generalized_authorization_one_click"] = (
@@ -4588,9 +4734,11 @@ async def run_behavioral_authorization_endpoint(
                 receipt_fingerprint,
                 reservation_token=receipt_reservation_token,
                 outcome=redacted_outcome(
-                    _capability_effect_receipt_projection(
-                        response,
-                        retain_authoritative_evidence=True,
+                    _workflow_effect_receipt_projection(
+                        _capability_effect_receipt_projection(
+                            response,
+                            retain_authoritative_evidence=True,
+                        )
                     )
                 ),
             )
@@ -4663,6 +4811,10 @@ async def run_behavioral_authorization_endpoint(
                     raise CapabilityEffectOneClickDenied(
                         "capability_effect_receipt_obligation_binding_unavailable"
                     )
+                if response.get("kind") == "workflow_invariant_effect_one_click":
+                    raise WorkflowEffectOneClickDenied(
+                        "workflow_effect_receipt_obligation_binding_unavailable"
+                    )
                 feedback = ReceiptDispositionAdapter().adapt(
                     effective_shadow_run.graph,
                     (completed_receipt,),
@@ -4715,6 +4867,7 @@ async def run_behavioral_authorization_endpoint(
                     "graph_bound_prerequisite_execution",
                     "role_protected_effect_execution",
                     "capability_effect_one_click",
+                    "workflow_invariant_effect_one_click",
                 }:
                     feedback_error_codes = {
                         "graph_bound_prerequisite_execution": (
@@ -4725,6 +4878,9 @@ async def run_behavioral_authorization_endpoint(
                         ),
                         "capability_effect_one_click": (
                             "capability_effect_receipt_obligation_binding_unavailable"
+                        ),
+                        "workflow_invariant_effect_one_click": (
+                            "workflow_effect_receipt_obligation_binding_unavailable"
                         ),
                     }
                     shadow_response["receipt_feedback"] = {
@@ -4844,6 +5000,11 @@ async def run_behavioral_authorization_from_url_endpoint(
         CapabilityEffectOneClickRun,
         CapabilityEffectOneClickSpecification,
     )
+    from core.behavior.workflow_invariant_effect_one_click import (
+        WorkflowEffectExecutionConfig,
+        WorkflowEffectOneClickRun,
+        WorkflowEffectOneClickSpecification,
+    )
     from core.behavior.capability_effect_promotion import (
         CapabilityEffectPromotionService,
     )
@@ -4897,6 +5058,15 @@ async def run_behavioral_authorization_from_url_endpoint(
     capability_effect_profile_selected = (
         capability_effect_specification is not None
     )
+    workflow_effect_specification = None
+    if req.workflow_effect is not None:
+        try:
+            workflow_effect_specification = WorkflowEffectOneClickSpecification.from_mapping(
+                req.workflow_effect, target_origin=target_origin
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    workflow_effect_profile_selected = workflow_effect_specification is not None
     if role_profile_selected and capability_effect_profile_selected:
         raise HTTPException(
             status_code=409,
@@ -4905,10 +5075,20 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "exclusive"
             ),
         )
-    exclusive_profile_selected = (
+    if workflow_effect_profile_selected and (
         role_profile_selected or capability_effect_profile_selected
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="active behavioral profiles are mutually exclusive",
+        )
+    exclusive_profile_selected = (
+        role_profile_selected
+        or capability_effect_profile_selected
+        or workflow_effect_profile_selected
     )
     capability_effect_config = CapabilityEffectExecutionConfig.from_environment()
+    workflow_effect_config = WorkflowEffectExecutionConfig.from_environment()
 
     if not PrimaryPlannerConfig.from_environment().enabled:
         raise HTTPException(
@@ -4947,6 +5127,16 @@ async def run_behavioral_authorization_from_url_endpoint(
                 status_code=409,
                 detail="capability_effect_authorization_denied",
             ) from exc
+    if workflow_effect_profile_selected and workflow_effect_config.enabled:
+        try:
+            envelope.authorize_action(
+                target_origin=target_origin,
+                workflow="behavioral_workflow_effect",
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409, detail="workflow_effect_authorization_denied"
+            ) from exc
     if capability_effect_specification is not None and not (
         capability_effect_config.enabled
     ):
@@ -4960,6 +5150,18 @@ async def run_behavioral_authorization_from_url_endpoint(
             "finding": None,
             "finding_confirmed": False,
             "capability_effect_one_click": disabled.to_dict(),
+            "promotion_authority": False,
+            "finding_authority": False,
+        }
+    if workflow_effect_specification is not None and not workflow_effect_config.enabled:
+        disabled = WorkflowEffectOneClickRun.disabled(workflow_effect_specification)
+        return {
+            "status": "no_executable_candidate",
+            "plan": {"selected_proposal_id": None},
+            "execution": None,
+            "finding": None,
+            "finding_confirmed": False,
+            "workflow_invariant_effect_one_click": disabled.to_dict(),
             "promotion_authority": False,
             "finding_authority": False,
         }
@@ -5303,6 +5505,7 @@ async def run_behavioral_authorization_from_url_endpoint(
                 "capability_effect_execution": (
                     capability_effect_config.enabled
                 ),
+                "workflow_effect_execution": workflow_effect_config.enabled,
             },
             "target_url": target_url,
             "envelope_id": req.envelope_id,
@@ -5316,6 +5519,11 @@ async def run_behavioral_authorization_from_url_endpoint(
             "capability_effect_specification_id": (
                 capability_effect_specification.specification_id
                 if capability_effect_specification is not None
+                else None
+            ),
+            "workflow_effect_specification_id": (
+                workflow_effect_specification.specification_id
+                if workflow_effect_specification is not None
                 else None
             ),
             "prior_capture_ref": (
@@ -5545,6 +5753,11 @@ async def run_behavioral_authorization_from_url_endpoint(
                     if capability_effect_specification is not None
                     else None
                 ),
+                workflow_effect=(
+                    req.workflow_effect
+                    if workflow_effect_specification is not None
+                    else None
+                ),
             )
         if capability_effect_intake_admission is not None:
             inner_request._assessment_session_id = (
@@ -5675,7 +5888,9 @@ async def run_behavioral_authorization_from_url_endpoint(
             fingerprint,
             reservation_token=reservation_token,
             outcome=redacted_outcome(
-                _capability_effect_receipt_projection(receiptable_response)
+                _workflow_effect_receipt_projection(
+                    _capability_effect_receipt_projection(receiptable_response)
+                )
             ),
         )
     except (OSError, ReceiptStoreError) as exc:

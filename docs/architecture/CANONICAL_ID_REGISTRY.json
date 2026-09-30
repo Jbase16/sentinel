@@ -29,6 +29,7 @@
     {"id": "R5E5", "kind": "slice", "description": "Durable inert workflow evidence and offline promotion eligibility"},
     {"id": "R5E6", "kind": "slice", "description": "Independent workflow-invariant effect-occurrence oracle over injected hermetic transport"},
     {"id": "R5E7", "kind": "slice", "description": "Bounded, admission-gated (default-off), origin-confined workflow-effect transport with verified compensating cleanup; unwired (no production caller)"},
+    {"id": "R5E8", "kind": "slice", "description": "Default-off, origin-confined real PolicyExecutor-backed workflow-effect client and Foundry composition for the R5E7 transport; wired into exactly one production consumer (core/server/routers/foundry.py); no finding-promotion authority; no live/native run"},
     {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
     {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
     {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},

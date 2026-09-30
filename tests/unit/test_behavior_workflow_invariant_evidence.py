@@ -292,6 +292,7 @@ def test_all_five_layers_are_unwired_and_have_no_target_imports():
     permitted_consumers = {
         "workflow_invariant_effect",
         "workflow_invariant_effect_transport",
+        "workflow_invariant_effect_one_click",
     }
     consumers = []
     for path in (repository / "core").rglob("*.py"):

@@ -30,6 +30,7 @@ class BehavioralOneClickProfile(BaseModel):
         "paired_persona",
         "role_monotonicity",
         "capability_effect",
+        "workflow_effect",
         "anonymous_passive",
     ] = "paired_persona"
     completion: Literal["continue_scan", "behavioral_phase_only"] = "continue_scan"
@@ -48,16 +49,20 @@ class BehavioralOneClickProfile(BaseModel):
     )
     role_monotonicity: Optional[Dict[str, Any]] = None
     capability_effect: Optional[Dict[str, Any]] = None
+    workflow_effect: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="after")
     def validate_profile_shape(self) -> "BehavioralOneClickProfile":
-        if (
-            self.role_monotonicity is not None
-            and self.capability_effect is not None
-        ):
+        if self.role_monotonicity is not None and self.capability_effect is not None:
             raise ValueError(
                 "role monotonicity and capability effect profiles are mutually "
                 "exclusive"
+            )
+        if self.workflow_effect is not None and (
+            self.role_monotonicity is not None or self.capability_effect is not None
+        ):
+            raise ValueError(
+                "active behavioral profiles are mutually exclusive"
             )
         if self.mode == "anonymous_passive":
             if (
@@ -67,6 +72,7 @@ class BehavioralOneClickProfile(BaseModel):
                 or self.prior_peer_records is not None
                 or self.role_monotonicity is not None
                 or self.capability_effect is not None
+                or self.workflow_effect is not None
             ):
                 raise ValueError(
                     "anonymous passive one-click forbids persona identities "
@@ -110,6 +116,15 @@ class BehavioralOneClickProfile(BaseModel):
             raise ValueError(
                 "capability-effect specification requires capability_effect mode"
             )
+        if self.mode == "workflow_effect":
+            if self.workflow_effect is None:
+                raise ValueError("workflow-effect one-click requires an exact specification")
+            if self.completion != "behavioral_phase_only":
+                raise ValueError(
+                    "workflow-effect one-click requires behavioral_phase_only completion"
+                )
+        elif self.workflow_effect is not None:
+            raise ValueError("workflow-effect specification requires workflow_effect mode")
         return self
 
     @property
@@ -964,6 +979,7 @@ async def _run_behavioral_one_click_phase(
                 prior_peer_records=profile.prior_peer_records,
                 role_monotonicity=profile.role_monotonicity,
                 capability_effect=profile.capability_effect,
+                workflow_effect=profile.workflow_effect,
             )
             foundry_request._assessment_session_id = session.id
             if ordinary_orchestration_enabled:
