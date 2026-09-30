@@ -605,6 +605,7 @@ def test_effect_is_unwired_and_has_no_production_or_transport_imports():
         f"workflow_invariant_{suffix}"
         for suffix in ("contract", "binding", "ledger", "store", "evidence", "effect")
     }
+    family.add("workflow_invariant_effect_transport")
     consumers = []
     for path in (repository / "core").rglob("*.py"):
         if path.stem in family:

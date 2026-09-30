@@ -289,7 +289,10 @@ def test_all_five_layers_are_unwired_and_have_no_target_imports():
             elif isinstance(node, ast.ImportFrom):
                 imports.update((node.module or "").split("."))
         assert not imports & forbidden
-    permitted_consumers = {"workflow_invariant_effect"}
+    permitted_consumers = {
+        "workflow_invariant_effect",
+        "workflow_invariant_effect_transport",
+    }
     consumers = []
     for path in (repository / "core").rglob("*.py"):
         if path.stem in names or path.stem in permitted_consumers:
