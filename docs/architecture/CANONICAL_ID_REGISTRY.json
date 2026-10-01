@@ -35,6 +35,7 @@
     {"id": "R5F3", "kind": "slice", "description": "Immutable concurrency micro-step schedule ledger and pure interleaving semantics"},
     {"id": "R5F4", "kind": "slice", "description": "Durable atomic local concurrency schedule/decision store"},
     {"id": "R5F5", "kind": "slice", "description": "Durable inert concurrency evidence and offline race-counterexample promotion eligibility"},
+    {"id": "R5F6", "kind": "slice", "description": "Independent concurrency-invariant effect-occurrence oracle over injected hermetic transport"},
     {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
     {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
     {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},

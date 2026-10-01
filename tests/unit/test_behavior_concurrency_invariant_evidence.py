@@ -35,6 +35,10 @@ TEST_PATHS = tuple(
     REPOSITORY / "tests/unit" / f"test_behavior_concurrency_invariant_{suffix}.py"
     for suffix in SUFFIXES
 )
+EFFECT_MODULE_PATH = REPOSITORY / "core/behavior/concurrency_invariant_effect.py"
+EFFECT_TEST_PATH = (
+    REPOSITORY / "tests/unit/test_behavior_concurrency_invariant_effect.py"
+)
 FORBIDDEN = {
     "threading",
     "asyncio",
@@ -253,7 +257,10 @@ def test_all_five_unwired_and_no_forbidden_primitives():
         }
         assert (
             find_module_consumers(
-                core_paths, name, repository_root=REPOSITORY, exclude=MODULE_PATHS
+                core_paths,
+                name,
+                repository_root=REPOSITORY,
+                exclude=(*MODULE_PATHS, EFFECT_MODULE_PATH),
             )
             == ()
         )
@@ -263,7 +270,7 @@ def test_each_f_module_has_only_family_consumers():
     paths = tuple((REPOSITORY / "core").rglob("*.py")) + tuple(
         (REPOSITORY / "tests").rglob("*.py")
     )
-    allowed = {*MODULE_PATHS, *TEST_PATHS}
+    allowed = {*MODULE_PATHS, *TEST_PATHS, EFFECT_MODULE_PATH, EFFECT_TEST_PATH}
     for name, own_path in zip(MODULE_NAMES, MODULE_PATHS):
         consumers = find_module_consumers(
             paths, name, repository_root=REPOSITORY, exclude=(own_path,)
@@ -329,14 +336,14 @@ def test_exact_stem_matching_ignores_lookalike_module_name():
     )
 
 
-def test_registry_has_exact_five_additive_slice_records():
+def test_registry_has_exact_six_additive_slice_records():
     from core.contracts.architecture_ids import (
         IdentifierRegistry,
         default_registry_path,
     )
 
     registry = IdentifierRegistry.load(default_registry_path(REPOSITORY))
-    assert all(f"R5F{index}" in registry.canonical_ids for index in range(1, 6))
+    assert all(f"R5F{index}" in registry.canonical_ids for index in range(1, 7))
     records = json.loads(
         (REPOSITORY / "docs/architecture/CANONICAL_ID_REGISTRY.json").read_text()
     )["canonical_ids"]
@@ -346,5 +353,6 @@ def test_registry_has_exact_five_additive_slice_records():
         "R5F3",
         "R5F4",
         "R5F5",
+        "R5F6",
     ]
     assert not any(record["id"] == "OCB-S22" for record in records)
