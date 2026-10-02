@@ -869,7 +869,7 @@ def test_registry_contains_the_exact_additive_slice_record():
     records = json.loads(path.read_text())["canonical_ids"]
     index = next(i for i, record in enumerate(records) if record["id"] == "R5F6")
     assert records[index - 1]["id"] == "R5F5"
-    assert records[index + 1]["id"] == "DB-R0"
+    assert records[index + 1]["id"] == "R5F7"
     assert records[index] == {
         "id": "R5F6",
         "kind": "slice",
