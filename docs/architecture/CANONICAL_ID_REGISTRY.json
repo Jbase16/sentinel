@@ -37,6 +37,7 @@
     {"id": "R5F5", "kind": "slice", "description": "Durable inert concurrency evidence and offline race-counterexample promotion eligibility"},
     {"id": "R5F6", "kind": "slice", "description": "Independent concurrency-invariant effect-occurrence oracle over injected hermetic transport"},
     {"id": "R5F7", "kind": "slice", "description": "Bounded, admission-gated (default-off), origin-confined concurrency-effect transport with verified compensating cleanup; unwired (no production caller)"},
+    {"id": "R5F8", "kind": "slice", "description": "Gated (default-off) concurrency-effect one-click: real PolicyExecutor-backed client + Foundry composition wired into one production consumer; triage-only, no finding/promotion/live-effect authority; owned-target origin binding deferred to OCB-S22 native"},
     {"id": "DB-R0", "kind": "phase", "description": "Daybreak containment"},
     {"id": "DB-R1", "kind": "phase", "description": "Daybreak epistemic and identity correction"},
     {"id": "DB-R2", "kind": "phase", "description": "Daybreak bounded acquisition"},

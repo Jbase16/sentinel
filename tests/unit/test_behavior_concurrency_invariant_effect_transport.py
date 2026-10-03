@@ -750,6 +750,7 @@ def test_transport_is_unwired_and_has_no_forbidden_imports():
             "evidence",
             "effect",
             "effect_transport",
+            "effect_one_click",
         )
     }
     consumers = []
@@ -764,7 +765,7 @@ def test_transport_is_unwired_and_has_no_forbidden_imports():
 
 
 @pytest.mark.parametrize(
-    "stem", ["unrelated_consumer", "concurrency_invariant_effect_transport_extra"]
+    "stem", ["unrelated_consumer", "concurrency_invariant_effect_transport_extra", "concurrency_invariant_effect_one_click_extra"]
 )
 @pytest.mark.parametrize(
     "audit,imported",

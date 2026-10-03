@@ -40,6 +40,8 @@ EFFECT_TEST_PATH = (
     REPOSITORY / "tests/unit/test_behavior_concurrency_invariant_effect.py"
 )
 EFFECT_TRANSPORT_MODULE_PATH = REPOSITORY / "core/behavior/concurrency_invariant_effect_transport.py"
+EFFECT_ONE_CLICK_MODULE_PATH = REPOSITORY / "core/behavior/concurrency_invariant_effect_one_click.py"
+EFFECT_ONE_CLICK_TEST_PATH = REPOSITORY / "tests/unit/test_behavior_concurrency_invariant_effect_one_click.py"
 EFFECT_TRANSPORT_TEST_PATH = REPOSITORY / "tests/unit/test_behavior_concurrency_invariant_effect_transport.py"
 FORBIDDEN = {
     "threading",
@@ -262,7 +264,12 @@ def test_all_five_unwired_and_no_forbidden_primitives():
                 core_paths,
                 name,
                 repository_root=REPOSITORY,
-                exclude=(*MODULE_PATHS, EFFECT_MODULE_PATH, EFFECT_TRANSPORT_MODULE_PATH),
+                exclude=(
+                    *MODULE_PATHS,
+                    EFFECT_MODULE_PATH,
+                    EFFECT_TRANSPORT_MODULE_PATH,
+                    EFFECT_ONE_CLICK_MODULE_PATH,
+                ),
             )
             == ()
         )
@@ -279,6 +286,8 @@ def test_each_f_module_has_only_family_consumers():
         EFFECT_TEST_PATH,
         EFFECT_TRANSPORT_MODULE_PATH,
         EFFECT_TRANSPORT_TEST_PATH,
+        EFFECT_ONE_CLICK_MODULE_PATH,
+        EFFECT_ONE_CLICK_TEST_PATH,
     }
     for name, own_path in zip(MODULE_NAMES, MODULE_PATHS):
         consumers = find_module_consumers(
@@ -345,14 +354,14 @@ def test_exact_stem_matching_ignores_lookalike_module_name():
     )
 
 
-def test_registry_has_exact_seven_additive_slice_records():
+def test_registry_has_exact_eight_additive_slice_records():
     from core.contracts.architecture_ids import (
         IdentifierRegistry,
         default_registry_path,
     )
 
     registry = IdentifierRegistry.load(default_registry_path(REPOSITORY))
-    assert all(f"R5F{index}" in registry.canonical_ids for index in range(1, 8))
+    assert all(f"R5F{index}" in registry.canonical_ids for index in range(1, 9))
     records = json.loads(
         (REPOSITORY / "docs/architecture/CANONICAL_ID_REGISTRY.json").read_text()
     )["canonical_ids"]
@@ -364,5 +373,6 @@ def test_registry_has_exact_seven_additive_slice_records():
         "R5F5",
         "R5F6",
         "R5F7",
+        "R5F8",
     ]
     assert not any(record["id"] == "OCB-S22" for record in records)
