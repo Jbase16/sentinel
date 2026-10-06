@@ -1413,6 +1413,8 @@ async def run_behavioral_authorization_endpoint(
         ConcurrencyEffectOneClickDispatcher,
         ConcurrencyEffectOneClickRun,
         ConcurrencyEffectOneClickSpecification,
+        build_concurrency_effect_specification,
+        parse_concurrency_effect_thin_body,
     )
     from core.behavior.capability_effect_evidence import (
         build_capability_effect_evidence,
@@ -1536,16 +1538,22 @@ async def run_behavioral_authorization_endpoint(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     workflow_effect_profile_selected = workflow_effect_specification is not None
     concurrency_effect_specification = None
+    concurrency_effect_thin_body = None
     if req.concurrency_effect is not None:
         try:
-            concurrency_effect_specification = (
-                ConcurrencyEffectOneClickSpecification.from_mapping(
+            if "binding" in req.concurrency_effect:
+                concurrency_effect_specification = (
+                    ConcurrencyEffectOneClickSpecification.from_mapping(
+                        req.concurrency_effect, target_origin=target_origin
+                    )
+                )
+            else:
+                concurrency_effect_thin_body = parse_concurrency_effect_thin_body(
                     req.concurrency_effect, target_origin=target_origin
                 )
-            )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    concurrency_effect_profile_selected = concurrency_effect_specification is not None
+    concurrency_effect_profile_selected = req.concurrency_effect is not None
     if role_profile_selected and capability_effect_profile_selected:
         raise HTTPException(
             status_code=409,
@@ -1605,11 +1613,35 @@ async def run_behavioral_authorization_endpoint(
             status_code=409,
             detail=f"authorization envelope does not permit {CONTROLLED_WORKFLOW!r}",
         )
+    if concurrency_effect_thin_body is not None:
+        try:
+            concurrency_effect_specification = build_concurrency_effect_specification(
+                target_origin=target_origin,
+                source_persona_id=req.source_persona_id,
+                peer_persona_id=req.peer_persona_id,
+                authorization=envelope,
+                source_evidence_records=concurrency_effect_records,
+                peer_evidence_records=peer_records,
+                thin_body=concurrency_effect_thin_body,
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     resolver_config = ClosedLoopResolverConfig.from_environment()
     capability_effect_config = CapabilityEffectExecutionConfig.from_environment()
     workflow_effect_config = WorkflowEffectExecutionConfig.from_environment()
     concurrency_effect_config = ConcurrencyEffectExecutionConfig.from_environment()
+    if concurrency_effect_thin_body is not None:
+        concurrency_effect_config = ConcurrencyEffectExecutionConfig(
+            enabled=all(
+                (
+                    concurrency_effect_config.enabled,
+                    resolver_config.enabled,
+                    ProofExperimentAdmissionConfig.from_environment().enabled,
+                    GeneralizedAuthorizationExecutionConfig.from_environment().enabled,
+                )
+            )
+        )
     if concurrency_effect_profile_selected and concurrency_effect_config.enabled:
         selected_actors = concurrency_effect_specification.binding.capture.actor_refs
         if selected_actors != (
@@ -5181,6 +5213,8 @@ async def run_behavioral_authorization_from_url_endpoint(
         ConcurrencyEffectExecutionConfig,
         ConcurrencyEffectOneClickRun,
         ConcurrencyEffectOneClickSpecification,
+        disabled_concurrency_effect_thin_selection,
+        parse_concurrency_effect_thin_body,
     )
     from core.behavior.capability_effect_promotion import (
         CapabilityEffectPromotionService,
@@ -5245,16 +5279,22 @@ async def run_behavioral_authorization_from_url_endpoint(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     workflow_effect_profile_selected = workflow_effect_specification is not None
     concurrency_effect_specification = None
+    concurrency_effect_thin_body = None
     if req.concurrency_effect is not None:
         try:
-            concurrency_effect_specification = (
-                ConcurrencyEffectOneClickSpecification.from_mapping(
+            if "binding" in req.concurrency_effect:
+                concurrency_effect_specification = (
+                    ConcurrencyEffectOneClickSpecification.from_mapping(
+                        req.concurrency_effect, target_origin=target_origin
+                    )
+                )
+            else:
+                concurrency_effect_thin_body = parse_concurrency_effect_thin_body(
                     req.concurrency_effect, target_origin=target_origin
                 )
-            )
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    concurrency_effect_profile_selected = concurrency_effect_specification is not None
+    concurrency_effect_profile_selected = req.concurrency_effect is not None
     if role_profile_selected and capability_effect_profile_selected:
         raise HTTPException(
             status_code=409,
@@ -5288,7 +5328,28 @@ async def run_behavioral_authorization_from_url_endpoint(
     capability_effect_config = CapabilityEffectExecutionConfig.from_environment()
     workflow_effect_config = WorkflowEffectExecutionConfig.from_environment()
     concurrency_effect_config = ConcurrencyEffectExecutionConfig.from_environment()
-    if concurrency_effect_profile_selected and concurrency_effect_config.enabled:
+    if concurrency_effect_thin_body is not None and not all(
+        (
+            concurrency_effect_config.enabled,
+            PrimaryPlannerConfig.from_environment().enabled,
+            ProofExperimentAdmissionConfig.from_environment().enabled,
+            GeneralizedAuthorizationExecutionConfig.from_environment().enabled,
+        )
+    ):
+        disabled = disabled_concurrency_effect_thin_selection(
+            concurrency_effect_thin_body, target_origin=target_origin
+        )
+        return {
+            "status": "no_executable_candidate",
+            "plan": {"selected_proposal_id": None},
+            "execution": None,
+            "finding": None,
+            "finding_confirmed": False,
+            "concurrency_invariant_effect_one_click": disabled.to_dict(),
+            "promotion_authority": False,
+            "finding_authority": False,
+        }
+    if concurrency_effect_specification is not None and concurrency_effect_config.enabled:
         selected_actors = concurrency_effect_specification.binding.capture.actor_refs
         if selected_actors != (
             experiment_persona_ref(req.source_persona_id),
@@ -5383,9 +5444,13 @@ async def run_behavioral_authorization_from_url_endpoint(
             "promotion_authority": False,
             "finding_authority": False,
         }
-    if concurrency_effect_specification is not None and not concurrency_effect_config.enabled:
-        disabled = ConcurrencyEffectOneClickRun.disabled(
-            concurrency_effect_specification
+    if concurrency_effect_profile_selected and not concurrency_effect_config.enabled:
+        disabled = (
+            ConcurrencyEffectOneClickRun.disabled(concurrency_effect_specification)
+            if concurrency_effect_specification is not None
+            else disabled_concurrency_effect_thin_selection(
+                concurrency_effect_thin_body, target_origin=target_origin
+            )
         )
         return {
             "status": "no_executable_candidate",
@@ -5762,7 +5827,13 @@ async def run_behavioral_authorization_from_url_endpoint(
             "concurrency_effect_specification_id": (
                 concurrency_effect_specification.specification_id
                 if concurrency_effect_specification is not None
-                else None
+                else (
+                    disabled_concurrency_effect_thin_selection(
+                        concurrency_effect_thin_body, target_origin=target_origin
+                    ).specification_id
+                    if concurrency_effect_thin_body is not None
+                    else None
+                )
             ),
             "prior_capture_ref": (
                 request_fingerprint(
@@ -5998,7 +6069,7 @@ async def run_behavioral_authorization_from_url_endpoint(
                 ),
                 concurrency_effect=(
                     req.concurrency_effect
-                    if concurrency_effect_specification is not None
+                    if concurrency_effect_profile_selected
                     else None
                 ),
             )

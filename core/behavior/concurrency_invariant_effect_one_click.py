@@ -32,7 +32,17 @@ from .concurrency_invariant_binding import (
     ConcurrencyInvariantBinding,
     validate_current_capture,
 )
-from .concurrency_invariant_contract import WorkflowSchedule
+from .concurrency_invariant_contract import (
+    MAX_RESOURCE_VALUE,
+    ConcurrencyGuardMode,
+    ConcurrencyInvariantContract,
+    ConcurrencyOperation,
+    ConcurrencyOwnedFixture,
+    MicroStep,
+    SharedWorkflowState,
+    StepKind,
+    WorkflowSchedule,
+)
 from .concurrency_invariant_effect_transport import (
     CONCURRENCY_EFFECT_EXECUTION_ENV,
     CONCURRENCY_EFFECT_EXECUTION_MODE,
@@ -41,6 +51,7 @@ from .concurrency_invariant_effect_transport import (
     ConcurrencyEffectTransportSpec,
     run_concurrency_effect_transport,
 )
+from .prerequisite_capture_freshness import graph_bound_capture_artifact_ref
 
 
 CONCURRENCY_EFFECT_ONE_CLICK_MODE = "behavioral_concurrency_effect_one_click_v1"
@@ -52,6 +63,162 @@ def _exact(value: object, keys: set[str], label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping) or set(value) != keys:
         raise ValueError(f"{label} fields are invalid")
     return value
+
+
+def parse_concurrency_effect_thin_body(
+    value: Mapping[str, Any], *, target_origin: str
+) -> Mapping[str, Any]:
+    """Validate the declared S22 contract before native capture or dispatch."""
+    raw = _exact(
+        value,
+        {
+            "schema_version",
+            "run_id",
+            "operation_urls",
+            "cleanup_url",
+            "guard_mode",
+            "declared_limit",
+        },
+        "concurrency effect thin specification",
+    )
+    run_id = raw["run_id"]
+    if type(raw["schema_version"]) is not int or raw["schema_version"] != 1:
+        raise ValueError("concurrency effect specification version is invalid")
+    if (
+        type(run_id) is not str
+        or not run_id
+        or run_id != run_id.strip()
+        or len(run_id) > 256
+        or any(ord(character) < 32 for character in run_id)
+    ):
+        raise ValueError("concurrency effect run id is invalid")
+    if type(raw["operation_urls"]) is not list or len(raw["operation_urls"]) != 2:
+        raise ValueError("concurrency effect operation urls are invalid")
+    if raw["guard_mode"] not in (
+        ConcurrencyGuardMode.OBSERVE_TIME_ONLY.value,
+        ConcurrencyGuardMode.COMMIT_TIME_CAS.value,
+    ):
+        raise ValueError("concurrency effect guard mode is invalid")
+    if (
+        type(raw["declared_limit"]) is not int
+        or not 1 <= raw["declared_limit"] <= MAX_RESOURCE_VALUE
+    ):
+        raise ValueError("concurrency effect declared limit is invalid")
+    # Reuse frozen F7's exact URL and distinct-cleanup checks. This temporary
+    # binding address is used only for preflight and never sent or serialized.
+    ConcurrencyEffectTransportSpec(
+        stable_hash("concurrency_invariant_binding", "thin_preflight"),
+        target_origin,
+        tuple(raw["operation_urls"]),
+        raw["cleanup_url"],
+    )
+    return raw
+
+
+def build_concurrency_effect_specification(
+    *,
+    target_origin: str,
+    source_persona_id: str,
+    peer_persona_id: str,
+    authorization: AuthorizationEnvelope,
+    source_evidence_records: Sequence[Mapping[str, Any]],
+    peer_evidence_records: Sequence[Mapping[str, Any]],
+    thin_body: Mapping[str, Any],
+) -> ConcurrencyEffectOneClickSpecification:
+    """Bind the declared S22 contract to both native owned captures locally."""
+    raw = parse_concurrency_effect_thin_body(thin_body, target_origin=target_origin)
+    if (
+        type(source_persona_id) is not str
+        or type(peer_persona_id) is not str
+        or not source_persona_id
+        or not peer_persona_id
+        or source_persona_id == peer_persona_id
+        or not isinstance(authorization, AuthorizationEnvelope)
+    ):
+        raise ValueError("concurrency effect owned context is invalid")
+    ownership_ref = stable_hash("ownership_proof", "concurrency")
+    tenant_ref = stable_hash("owned_tenant", "concurrency")
+    worlds = tuple(
+        ExperimentWorldBinding.build(
+            slot=f"actor_{label}",
+            kind=ExperimentWorldKind.OWNED_ACCOUNT,
+            world_ref=stable_hash("world", persona_id),
+            persona_ref=experiment_persona_ref(persona_id),
+            ownership_ref=ownership_ref,
+        )
+        for label, persona_id in zip(("a", "b"), (source_persona_id, peer_persona_id))
+    )
+    source_refs = tuple(
+        graph_bound_capture_artifact_ref(
+            records, target_origin=target_origin, world_id=world.binding_id
+        )
+        for records, world in zip(
+            (source_evidence_records, peer_evidence_records), worlds
+        )
+    )
+    operations = tuple(
+        ConcurrencyOperation(
+            operation_ref=stable_hash("concurrency_operation", label),
+            actor_ref=world.persona_ref,
+            op_index=0,
+            amount=1,
+            guard_mode=ConcurrencyGuardMode(raw["guard_mode"]),
+        )
+        for label, world in zip(("a", "b"), worlds)
+    )
+    contract = ConcurrencyInvariantContract.build(
+        resource_ref=stable_hash("owned_resource", "shared-cap"),
+        tenant_ref=tenant_ref,
+        tenant_ownership_ref=ownership_ref,
+        initial_state=SharedWorkflowState(0, raw["declared_limit"], 1),
+        operations=operations,
+        max_actors=2,
+    )
+    fixture = ConcurrencyOwnedFixture(contract, worlds, tenant_ref, ownership_ref)
+    # Native records have no clock index. Their bounded count is a deterministic
+    # logical snapshot index; the capture hashes bind the exact record contents.
+    at_index = len(source_evidence_records) + len(peer_evidence_records)
+    capture = ConcurrencyCaptureProvenance(
+        contract_ref=contract.contract_id,
+        world_binding_refs=tuple(world.binding_id for world in worlds),
+        actor_refs=tuple(world.persona_ref for world in worlds),
+        resource_ref=contract.resource_ref,
+        tenant_ref=tenant_ref,
+        tenant_ownership_ref=ownership_ref,
+        capture_generation_ref=stable_hash(
+            "concurrency_capture_generation",
+            {
+                "run_id": raw["run_id"],
+                "attestation_signature": authorization.attestation_signature,
+                "source_evidence_refs": list(source_refs),
+            },
+        ),
+        captured_at_index=at_index,
+        valid_until_index=at_index + 1,
+        operation_ids=tuple(op.operation_id for op in operations),
+        source_evidence_refs=source_refs,
+    )
+    binding = ConcurrencyInvariantBinding.build(fixture=fixture, capture=capture)
+    schedule = WorkflowSchedule(
+        contract,
+        tuple(
+            MicroStep(world.persona_ref, op.operation_ref, kind)
+            for kind in (StepKind.OBSERVE, StepKind.COMMIT)
+            for world, op in zip(worlds, operations)
+        ),
+    )
+    return ConcurrencyEffectOneClickSpecification.from_mapping(
+        {
+            "schema_version": 1,
+            "binding": binding.to_dict(),
+            "current_capture": capture.to_dict(),
+            "schedule": schedule.to_dict(),
+            "at_index": at_index,
+            "operation_urls": raw["operation_urls"],
+            "cleanup_url": raw["cleanup_url"],
+        },
+        target_origin=target_origin,
+    )
 
 
 @dataclass(frozen=True)
@@ -790,6 +957,20 @@ class ConcurrencyEffectOneClickDispatcher:
         )
 
 
+def disabled_concurrency_effect_thin_selection(
+    value: Mapping[str, Any], *, target_origin: str
+) -> ConcurrencyEffectOneClickRun:
+    """Return a no-capture selection receipt before from-URL browser access."""
+    raw = parse_concurrency_effect_thin_body(value, target_origin=target_origin)
+    selection = {"target_origin": target_origin, "thin_body": dict(raw)}
+    return ConcurrencyEffectOneClickRun(
+        "selected_execution_disabled",
+        stable_hash("concurrency_effect_one_click_specification", selection),
+        stable_hash("concurrency_effect_transport_specification", selection),
+        disabled_gates=(CONCURRENCY_EFFECT_EXECUTION_ENV,),
+    )
+
+
 __all__ = [
     "CONCURRENCY_EFFECT_ONE_CLICK_MODE",
     "PolicyExecutorConcurrencyEffectClient",
@@ -798,4 +979,7 @@ __all__ = [
     "ConcurrencyEffectOneClickRun",
     "ConcurrencyEffectFindingCandidate",
     "ConcurrencyEffectOneClickDenied",
+    "parse_concurrency_effect_thin_body",
+    "build_concurrency_effect_specification",
+    "disabled_concurrency_effect_thin_selection",
 ]

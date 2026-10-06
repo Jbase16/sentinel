@@ -28,6 +28,7 @@ from core.behavior.concurrency_invariant_contract import (
 from core.behavior.experiment_admission import experiment_persona_ref
 from core.behavior.experiment_sdk import ExperimentWorldBinding, ExperimentWorldKind
 from core.behavior.normalize import stable_hash
+from core.behavior.prerequisite_capture_freshness import graph_bound_capture_artifact_ref
 from core.cortex.execution_policy import ExecutionPolicy, PolicyExecutor
 from core.foundry.authorization import create_envelope
 from core.foundry.vault import PersonaVault
@@ -40,6 +41,30 @@ from tests.unit.test_behavior_concurrency_invariant_effect_transport import (
 
 WORKFLOW = "behavioral_concurrency_effect"
 KINDS = ["observe", "observe", "commit", "commit", "cleanup"]
+RUN_ID = "owned-concurrency-run"
+PEER_RECORDS = ({"id": "peer-capture", "url": f"{ORIGIN}/peer", "method": "GET"},)
+THIN_GATES = (
+    "SENTINELFORGE_BEHAVIOR_PRIMARY",
+    "SENTINELFORGE_BEHAVIOR_PROOF_EXPERIMENT_ADMISSION",
+    "SENTINELFORGE_BEHAVIOR_GENERALIZED_AUTHORIZATION_EXECUTION",
+    "SENTINELFORGE_BEHAVIOR_CONCURRENCY_EFFECT_EXECUTION",
+)
+
+
+def _set_thin_gates(monkeypatch, *, disabled=None):
+    for name in THIN_GATES:
+        monkeypatch.setenv(name, "0" if name == disabled else "1")
+
+
+def _thin_body(mapping):
+    return {
+        "schema_version": 1,
+        "run_id": RUN_ID,
+        "operation_urls": mapping["operation_urls"].copy(),
+        "cleanup_url": mapping["cleanup_url"],
+        "guard_mode": mapping["binding"]["fixture"]["contract"]["operations"][0]["guard_mode"],
+        "declared_limit": mapping["binding"]["fixture"]["contract"]["initial_state"]["declared_limit"],
+    }
 
 
 def _module():
@@ -128,7 +153,7 @@ def _case(tmp_path, monkeypatch, *, secure=False, limit=1, budget=5, cleanup="ve
     )
     operations = tuple(
         ConcurrencyOperation(
-            operation_ref=stable_hash("concurrency_operation", persona.persona_id),
+            operation_ref=stable_hash("concurrency_operation", label),
             actor_ref=world.persona_ref,
             op_index=0,
             amount=1,
@@ -138,7 +163,7 @@ def _case(tmp_path, monkeypatch, *, secure=False, limit=1, budget=5, cleanup="ve
                 else ConcurrencyGuardMode.OBSERVE_TIME_ONLY
             ),
         )
-        for world, persona in zip(worlds, (source, peer))
+        for label, world in zip(("a", "b"), worlds)
     )
     contract = ConcurrencyInvariantContract.build(
         resource_ref=stable_hash("owned_resource", "shared-cap"),
@@ -158,6 +183,14 @@ def _case(tmp_path, monkeypatch, *, secure=False, limit=1, budget=5, cleanup="ve
             MicroStep(worlds[1].persona_ref, operations[1].operation_ref, StepKind.COMMIT),
         ),
     )
+    records = ({"id": "capture", "url": f"{ORIGIN}/state", "method": "GET"},)
+    source_refs = tuple(
+        graph_bound_capture_artifact_ref(
+            evidence, target_origin=ORIGIN, world_id=world.binding_id
+        )
+        for evidence, world in zip((records, PEER_RECORDS), worlds)
+    )
+    at_index = len(records) + len(PEER_RECORDS)
     capture = ConcurrencyCaptureProvenance(
         contract_ref=contract.contract_id,
         world_binding_refs=tuple(world.binding_id for world in worlds),
@@ -165,22 +198,26 @@ def _case(tmp_path, monkeypatch, *, secure=False, limit=1, budget=5, cleanup="ve
         resource_ref=contract.resource_ref,
         tenant_ref=tenant,
         tenant_ownership_ref=ownership,
-        capture_generation_ref=stable_hash("concurrency_capture_generation", "current"),
-        captured_at_index=10,
-        valid_until_index=20,
-        operation_ids=tuple(op.operation_id for op in operations),
-        source_evidence_refs=tuple(
-            stable_hash("source_evidence", i) for i in range(len(operations))
+        capture_generation_ref=stable_hash(
+            "concurrency_capture_generation",
+            {
+                "run_id": RUN_ID,
+                "attestation_signature": envelope.attestation_signature,
+                "source_evidence_refs": list(source_refs),
+            },
         ),
+        captured_at_index=at_index,
+        valid_until_index=at_index + 1,
+        operation_ids=tuple(op.operation_id for op in operations),
+        source_evidence_refs=source_refs,
     )
     binding = ConcurrencyInvariantBinding.build(fixture=fixture, capture=capture)
-    records = ({"id": "capture", "url": f"{ORIGIN}/state", "method": "GET"},)
     mapping = {
         "schema_version": 1,
         "binding": binding.to_dict(),
         "current_capture": capture.to_dict(),
         "schedule": schedule.to_dict(),
-        "at_index": 10,
+        "at_index": at_index,
         "operation_urls": [f"{ORIGIN}/consume/{i}" for i in range(len(operations))],
         "cleanup_url": f"{ORIGIN}/cleanup",
     }
@@ -212,6 +249,98 @@ def _assert_no_authority(value):
     assert value["promotion_authority"] is False
     assert value["real_concurrency_effect_observed"] is False
     assert value["wired_into_production"] is False
+
+
+@pytest.mark.parametrize("secure,limit", [(False, 1), (True, 1), (False, 2)])
+def test_thin_builder_matches_hand_built_capture_binding(
+    tmp_path, monkeypatch, secure, limit
+):
+    case = _case(tmp_path, monkeypatch, secure=secure, limit=limit)
+    module, hand_built, mapping, _, _, _, envelope, source, peer, records = case
+    thin = _thin_body(mapping)
+    built = module.build_concurrency_effect_specification(
+        target_origin=ORIGIN,
+        source_persona_id=source.persona_id,
+        peer_persona_id=peer.persona_id,
+        authorization=envelope,
+        source_evidence_records=records,
+        peer_evidence_records=PEER_RECORDS,
+        thin_body=thin,
+    )
+    assert built == hand_built
+    assert built.specification_id == hand_built.specification_id
+    assert module.ConcurrencyEffectOneClickSpecification.from_mapping(
+        mapping, target_origin=ORIGIN
+    ) == built
+    assert module.ConcurrencyEffectOneClickSpecification.from_dict(
+        built.to_dict()
+    ) == built
+    assert built.to_dict()["owned_target_origin_bound"] is False
+
+
+def test_thin_builder_binds_run_and_both_capture_artifacts(tmp_path, monkeypatch):
+    case = _case(tmp_path, monkeypatch)
+    module, hand_built, mapping, _, _, _, envelope, source, peer, records = case
+    arguments = {
+        "target_origin": ORIGIN,
+        "source_persona_id": source.persona_id,
+        "peer_persona_id": peer.persona_id,
+        "authorization": envelope,
+        "source_evidence_records": records,
+        "peer_evidence_records": PEER_RECORDS,
+        "thin_body": _thin_body(mapping),
+    }
+    assert module.build_concurrency_effect_specification(**arguments) == hand_built
+    changed_peer = {
+        **arguments,
+        "peer_evidence_records": (
+            {"id": "changed-peer", "url": f"{ORIGIN}/peer", "method": "GET"},
+        ),
+    }
+    changed_run = {
+        **arguments,
+        "thin_body": {**arguments["thin_body"], "run_id": "next-run"},
+    }
+    assert module.build_concurrency_effect_specification(
+        **changed_peer
+    ).specification_id != hand_built.specification_id
+    assert module.build_concurrency_effect_specification(
+        **changed_run
+    ).specification_id != hand_built.specification_id
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"operation_urls": ["https://foreign.example.test/consume", f"{ORIGIN}/consume/1"]},
+        {"cleanup_url": "https://foreign.example.test/cleanup"},
+        {"cleanup_url": None},
+        {"guard_mode": None},
+        {"guard_mode": "unknown"},
+        {"declared_limit": 0},
+        {"binding": {}},
+    ],
+)
+def test_thin_builder_rejects_invalid_or_mixed_body(tmp_path, monkeypatch, change):
+    case = _case(tmp_path, monkeypatch)
+    module, _, mapping, target, executor, _, envelope, source, peer, records = case
+    thin = _thin_body(mapping)
+    thin.update(change)
+    if "cleanup_url" in change and change["cleanup_url"] is None:
+        thin.pop("cleanup_url")
+    if "guard_mode" in change and change["guard_mode"] is None:
+        thin.pop("guard_mode")
+    with pytest.raises((TypeError, ValueError)):
+        module.build_concurrency_effect_specification(
+            target_origin=ORIGIN,
+            source_persona_id=source.persona_id,
+            peer_persona_id=peer.persona_id,
+            authorization=envelope,
+            source_evidence_records=records,
+            peer_evidence_records=PEER_RECORDS,
+            thin_body=thin,
+        )
+    assert target.calls == [] and executor.claims == executor.sends == 0
 
 
 def test_gate_off_is_inert(tmp_path, monkeypatch):
@@ -417,6 +546,9 @@ def test_module_safety_and_exact_core_consumer():
         "ConcurrencyEffectOneClickRun",
         "ConcurrencyEffectFindingCandidate",
         "ConcurrencyEffectOneClickDenied",
+        "parse_concurrency_effect_thin_body",
+        "build_concurrency_effect_specification",
+        "disabled_concurrency_effect_thin_selection",
     ]
 
 
@@ -546,6 +678,101 @@ def test_foundry_enabled_path_uses_full_five_request_budget(tmp_path, monkeypatc
     assert [call["kind"] for call in target.calls] == KINDS
 
 
+@pytest.mark.parametrize(
+    "secure,limit,oracle,statuses,candidate",
+    [
+        (False, 1, "effect_observed_violation", ["accepted", "accepted"], True),
+        (True, 1, "effect_absent", ["accepted", "refused"], False),
+        (False, 2, "effect_absent", ["accepted", "accepted"], False),
+    ],
+)
+def test_foundry_thin_body_dispatches_canonical_twins_and_boundary(
+    tmp_path, monkeypatch, secure, limit, oracle, statuses, candidate
+):
+    case = _case(tmp_path, monkeypatch, secure=secure, limit=limit)
+    module, _, mapping, target, _, _, envelope, source, peer, records = case
+    from core.server.routers.foundry import (
+        RunBehavioralAuthorizationRequest,
+        run_behavioral_authorization_endpoint,
+    )
+    from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+    request = RunBehavioralAuthorizationRequest(
+        target_origin=ORIGIN,
+        envelope_id=envelope.envelope_id,
+        source_persona_id=source.persona_id,
+        peer_persona_id=peer.persona_id,
+        source_records=list(records),
+        peer_records=list(PEER_RECORDS),
+        concurrency_effect=_thin_body(mapping),
+    )
+    _set_thin_gates(monkeypatch)
+
+    async def fake_send(_transport, persona_id, replay_request):
+        assert persona_id == source.persona_id
+        status, body = await target.send(
+            replay_request.method,
+            replay_request.url,
+            json.loads(replay_request.body),
+            _redirect_mode=replay_request.redirect_mode,
+        )
+        return ReplayResponse(status, json.dumps(body))
+
+    monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+    response = asyncio.run(run_behavioral_authorization_endpoint(request, _=True))
+    selected = response["concurrency_invariant_effect_one_click"]
+    assert selected["status"] == "completed" and selected["dispatched"] is True
+    assert (selected["candidate"] is not None) is candidate
+    evidence = selected["result"]["effect_evidence"]
+    assert evidence["oracle_outcome"] == oracle
+    assert [item["status"] for item in evidence["responses"]] == statuses
+    assert selected["result"]["step_attempts"] == 4
+    assert selected["result"]["cleanup_attempts"] == 1
+    assert len(target.calls) == 5
+    assert [call["kind"] for call in target.calls] == KINDS
+    assert response["finding"] is None and response["finding_confirmed"] is False
+    for value in (selected, selected["result"], response):
+        _assert_no_authority(value)
+    assert selected["adversarial_triage_required"] is True
+    if candidate:
+        _assert_no_authority(selected["candidate"])
+        assert selected["candidate"]["adversarial_triage_required"] is True
+
+
+@pytest.mark.parametrize("disabled", THIN_GATES)
+def test_foundry_thin_body_gate_off_is_inert(tmp_path, monkeypatch, disabled):
+    case = _case(tmp_path, monkeypatch)
+    module, _, mapping, target, _, _, envelope, source, peer, records = case
+    from core.server.routers.foundry import (
+        RunBehavioralAuthorizationRequest,
+        run_behavioral_authorization_endpoint,
+    )
+    from core.wraith.bola_replay import SNDReplayTransport
+
+    request = RunBehavioralAuthorizationRequest(
+        target_origin=ORIGIN,
+        envelope_id=envelope.envelope_id,
+        source_persona_id=source.persona_id,
+        peer_persona_id=peer.persona_id,
+        source_records=list(records),
+        peer_records=list(PEER_RECORDS),
+        concurrency_effect=_thin_body(mapping),
+    )
+    _set_thin_gates(monkeypatch, disabled=disabled)
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("gate-off thin request reached target transport")
+
+    monkeypatch.setattr(SNDReplayTransport, "send", forbidden)
+    response = asyncio.run(run_behavioral_authorization_endpoint(request, _=True))
+    selected = response["concurrency_invariant_effect_one_click"]
+    assert response["status"] == "no_executable_candidate"
+    assert selected["status"] == "selected_execution_disabled"
+    _assert_no_authority(selected)
+    assert selected["adversarial_triage_required"] is True
+    assert target.calls == []
+
+
 def test_from_url_gate_off_returns_before_capture(tmp_path, monkeypatch):
     case = _case(tmp_path, monkeypatch)
     module, _, mapping, _, _, _, envelope, source, peer, _ = case
@@ -574,6 +801,41 @@ def test_from_url_gate_off_returns_before_capture(tmp_path, monkeypatch):
     selected = response["concurrency_invariant_effect_one_click"]
     assert selected["status"] == "selected_execution_disabled"
     _assert_no_authority(selected)
+
+
+@pytest.mark.parametrize("disabled", THIN_GATES)
+def test_from_url_thin_gate_off_returns_before_capture(
+    tmp_path, monkeypatch, disabled
+):
+    case = _case(tmp_path, monkeypatch)
+    module, _, mapping, _, _, _, envelope, source, peer, _ = case
+    from core.server.routers import driver
+    from core.server.routers.foundry import (
+        RunBehavioralAuthorizationFromURLRequest,
+        run_behavioral_authorization_from_url_endpoint,
+    )
+
+    request = RunBehavioralAuthorizationFromURLRequest(
+        target_url=f"{ORIGIN}/app",
+        envelope_id=envelope.envelope_id,
+        source_persona_id=source.persona_id,
+        peer_persona_id=peer.persona_id,
+        concurrency_effect=_thin_body(mapping),
+    )
+    _set_thin_gates(monkeypatch, disabled=disabled)
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("gate-off URL thin request reached native capture")
+
+    monkeypatch.setattr(driver, "capture_persona_pair", forbidden)
+    response = asyncio.run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+    selected = response["concurrency_invariant_effect_one_click"]
+    assert response["status"] == "no_executable_candidate"
+    assert selected["status"] == "selected_execution_disabled"
+    assert selected["result"] is None and selected["candidate"] is None
+    assert selected["adversarial_triage_required"] is True
+    _assert_no_authority(selected)
+    assert module.ConcurrencyEffectOneClickRun.from_dict(selected).to_dict() == selected
 
 
 @pytest.mark.parametrize("from_url", [False, True])
@@ -686,3 +948,74 @@ def test_from_url_enabled_reaches_inner_foundry(tmp_path, monkeypatch):
     assert response["kind"] == "concurrency_invariant_effect_one_click"
     assert response["finding"] is None
     assert [call["kind"] for call in target.calls] == KINDS
+
+
+@pytest.mark.parametrize("secure", [False, True])
+def test_from_url_thin_body_builds_after_native_capture(
+    tmp_path, monkeypatch, secure
+):
+    case = _case(tmp_path, monkeypatch, secure=secure)
+    module, _, mapping, target, _, _, envelope, source, peer, records = case
+    from core.server.routers import driver
+    from core.server.routers.foundry import (
+        RunBehavioralAuthorizationFromURLRequest,
+        run_behavioral_authorization_from_url_endpoint,
+    )
+    from core.wraith.bola_replay import ReplayResponse, SNDReplayTransport
+
+    request = RunBehavioralAuthorizationFromURLRequest(
+        target_url=f"{ORIGIN}/app",
+        envelope_id=envelope.envelope_id,
+        source_persona_id=source.persona_id,
+        peer_persona_id=peer.persona_id,
+        concurrency_effect=_thin_body(mapping),
+    )
+    _set_thin_gates(monkeypatch)
+
+    async def capture_pair(**kwargs):
+        return (
+            driver.PersonaCaptureArtifact(
+                persona_id=source.persona_id,
+                path="/private/concurrency-source.jsonl",
+                records=records,
+                captured_bytes=10,
+                limit_reached=False,
+                page_url=f"{ORIGIN}/app",
+            ),
+            driver.PersonaCaptureArtifact(
+                persona_id=peer.persona_id,
+                path="/private/concurrency-peer.jsonl",
+                records=PEER_RECORDS,
+                captured_bytes=10,
+                limit_reached=False,
+                page_url=f"{ORIGIN}/app",
+            ),
+            (),
+        )
+
+    async def validate_windows(persona_ids):
+        assert tuple(persona_ids) == (source.persona_id, peer.persona_id)
+
+    async def fake_send(_transport, persona_id, replay_request):
+        assert persona_id == source.persona_id
+        status, body = await target.send(
+            replay_request.method,
+            replay_request.url,
+            json.loads(replay_request.body),
+            _redirect_mode=replay_request.redirect_mode,
+        )
+        return ReplayResponse(status, json.dumps(body))
+
+    monkeypatch.setattr(driver, "capture_persona_pair", capture_pair)
+    monkeypatch.setattr(driver, "validate_persona_windows", validate_windows)
+    monkeypatch.setattr(SNDReplayTransport, "send", fake_send)
+    response = asyncio.run(run_behavioral_authorization_from_url_endpoint(request, _=True))
+    selected = response["concurrency_invariant_effect_one_click"]
+    assert response["finding"] is None
+    assert selected["status"] == "completed" and selected["dispatched"] is True
+    assert selected["result"]["effect_evidence"]["oracle_outcome"] == (
+        "effect_absent" if secure else "effect_observed_violation"
+    )
+    assert len(target.calls) == 5
+    _assert_no_authority(selected)
+    _assert_no_authority(response)
