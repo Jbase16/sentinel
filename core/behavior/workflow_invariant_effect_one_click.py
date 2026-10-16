@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
+import time
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from core.cortex.execution_policy import CandidateAction, DENIED_STATUS, PolicyExecutor
 from core.foundry.authorization import AuthorizationEnvelope
@@ -412,6 +414,25 @@ class WorkflowEffectFindingCandidate:
 
 
 @dataclass(frozen=True)
+class WorkflowEffectRunContext:
+    """Terminal observation and owned refs, separate from deterministic evidence."""
+
+    observed_at_epoch: float
+    experiment_world_ref: str | None = None
+    authority_ref: str | None = None
+    tenant_ref: str | None = None
+    source_evidence_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.observed_at_epoch) is not float
+            or not math.isfinite(self.observed_at_epoch)
+            or self.observed_at_epoch <= 0
+        ):
+            raise ValueError("workflow effect observation epoch is invalid")
+
+
+@dataclass(frozen=True)
 class WorkflowEffectOneClickRun:
     status: str
     specification_id: str
@@ -597,9 +618,12 @@ class WorkflowEffectOneClickDispatcher:
         persona_vault: PersonaVault,
         evidence_records: Sequence[Mapping[str, Any]],
         config: WorkflowEffectExecutionConfig | None = None,
+        clock: Callable[[], object] = time.time,
     ) -> None:
         if type(specification) is not WorkflowEffectOneClickSpecification:
             raise TypeError("workflow effect specification is invalid")
+        if not callable(clock):
+            raise TypeError("workflow effect clock is invalid")
         self.specification = specification
         self.config = (
             config
@@ -610,6 +634,12 @@ class WorkflowEffectOneClickDispatcher:
             raise TypeError("workflow effect execution config is invalid")
         self.executor = executor
         self.persona_id = persona_id
+        self._clock = clock
+        self._run_context: WorkflowEffectRunContext | None = None
+        self._experiment_world_ref: str | None = None
+        self._authority_ref: str | None = None
+        self._tenant_ref: str | None = None
+        self._source_evidence_ref: str | None = None
         if not self.config.enabled:
             return
         if (
@@ -664,12 +694,21 @@ class WorkflowEffectOneClickDispatcher:
             validate_current_capture(
                 binding, specification.current_capture, specification.at_index
             )
+            self._experiment_world_ref = world.world_ref
+            self._authority_ref = authority_ref
+            self._tenant_ref = tenant_ref
+            self._source_evidence_ref = source_ref
         except Exception as exc:
             raise WorkflowEffectOneClickDenied(
                 "workflow_effect_context_invalid"
             ) from exc
 
+    @property
+    def run_context(self) -> WorkflowEffectRunContext | None:
+        return self._run_context
+
     async def run(self) -> WorkflowEffectOneClickRun:
+        self._run_context = None
         if not self.config.enabled:
             return WorkflowEffectOneClickRun.disabled(self.specification)
         if self.executor is None:
@@ -707,18 +746,30 @@ class WorkflowEffectOneClickDispatcher:
             raise
         if not result.admitted:
             raise WorkflowEffectOneClickDenied("workflow_effect_transport_not_admitted")
+        observed = self._clock()
+        if type(observed) is not float or not math.isfinite(observed) or observed <= 0:
+            raise ValueError("workflow effect observation epoch is invalid")
         candidate = (
             WorkflowEffectFindingCandidate.from_result(result)
             if _is_candidate(result)
             else None
         )
-        return WorkflowEffectOneClickRun(
+        context = WorkflowEffectRunContext(
+            observed_at_epoch=observed,
+            experiment_world_ref=self._experiment_world_ref if candidate else None,
+            authority_ref=self._authority_ref if candidate else None,
+            tenant_ref=self._tenant_ref if candidate else None,
+            source_evidence_ref=self._source_evidence_ref if candidate else None,
+        )
+        run = WorkflowEffectOneClickRun(
             "completed",
             self.specification.specification_id,
             self.specification.transport_spec.specification_id,
             result,
             candidate,
         )
+        self._run_context = context
+        return run
 
 
 __all__ = [
@@ -726,6 +777,7 @@ __all__ = [
     "PolicyExecutorWorkflowEffectClient",
     "WorkflowEffectOneClickSpecification",
     "WorkflowEffectOneClickDispatcher",
+    "WorkflowEffectRunContext",
     "WorkflowEffectOneClickRun",
     "WorkflowEffectFindingCandidate",
     "WorkflowEffectOneClickDenied",

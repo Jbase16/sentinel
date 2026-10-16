@@ -1083,10 +1083,14 @@ def _capability_effect_receipt_projection(
 
 def _workflow_effect_receipt_projection(
     response: Mapping[str, Any],
+    *,
+    retain_authoritative_evidence: bool = False,
 ) -> Mapping[str, Any]:
     """Persist only a generic root status until workflow receipts exist."""
 
     if response.get("kind") != "workflow_invariant_effect_one_click":
+        return response
+    if retain_authoritative_evidence and "workflow_effect_evidence" in response:
         return response
     projected = {
         "status": "no_executable_candidate",
@@ -1419,9 +1423,18 @@ async def run_behavioral_authorization_endpoint(
     from core.behavior.capability_effect_evidence import (
         build_capability_effect_evidence,
     )
+    from core.behavior.workflow_effect_evidence import (
+        WorkflowEffectEvidence,
+        bind_to_run as bind_workflow_effect_to_run,
+        workflow_effect_producer_build_identity,
+        workflow_runtime_evidence_classification,
+    )
     from core.behavior.capability_effect_promotion import (
         CapabilityEffectPromotionService,
         runtime_evidence_classification,
+    )
+    from core.behavior.workflow_effect_promotion import (
+        WorkflowEffectPromotionService,
     )
     from core.behavior.affordances import ClientArtifact
     from core.cortex.execution_policy import (
@@ -1992,6 +2005,10 @@ async def run_behavioral_authorization_endpoint(
     capability_effect_admission = None
     capability_effect_promotion_service = None
     capability_effect_runtime_classification = None
+    workflow_effect_admission = None
+    workflow_effect_promotion_service = None
+    workflow_effect_runtime_classification = None
+    workflow_effect_producer_identity = None
     fresh_boundary_executor = None
     omission_confirmation_admission = None
     executors = None
@@ -2395,6 +2412,24 @@ async def run_behavioral_authorization_endpoint(
                         "execution refused"
                     ),
                 ) from exc
+        if workflow_effect_profile_selected:
+            try:
+                workflow_effect_promotion_service = WorkflowEffectPromotionService(
+                    receipt_store=receipt_store,
+                )
+                workflow_effect_runtime_classification = (
+                    workflow_runtime_evidence_classification()
+                )
+                workflow_effect_producer_identity = (
+                    workflow_effect_producer_build_identity()
+                )
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "workflow evidence persistence unavailable; execution refused"
+                    ),
+                ) from exc
         try:
             receipt_fingerprint = request_fingerprint({
                 "schema_version": 2,
@@ -2563,6 +2598,16 @@ async def run_behavioral_authorization_endpoint(
                 ):
                     cached["capability_effect_promotion"] = (
                         capability_effect_promotion_service.status(
+                            reservation.receipt.receipt_id
+                        ).to_dict()
+                    )
+                if (
+                    workflow_effect_profile_selected
+                    and workflow_effect_promotion_service is not None
+                    and "workflow_effect_evidence" in cached
+                ):
+                    cached["workflow_effect_promotion"] = (
+                        workflow_effect_promotion_service.status(
                             reservation.receipt.receipt_id
                         ).to_dict()
                     )
@@ -4307,6 +4352,7 @@ async def run_behavioral_authorization_endpoint(
         and not workflow_effect_config.enabled
         else None
     )
+    workflow_effect_run_context = None
     concurrency_effect_one_click_run = (
         ConcurrencyEffectOneClickRun.disabled(concurrency_effect_specification)
         if concurrency_effect_specification is not None
@@ -4351,7 +4397,7 @@ async def run_behavioral_authorization_endpoint(
                 or receipt_reservation_token is None
             ):
                 raise WorkflowEffectOneClickDenied("workflow_effect_execution_gate_unavailable")
-            workflow_effect_one_click_run = await WorkflowEffectOneClickDispatcher(
+            workflow_effect_dispatcher = WorkflowEffectOneClickDispatcher(
                 target_origin=target_origin,
                 persona_id=source_persona.persona_id,
                 specification=workflow_effect_specification,
@@ -4360,7 +4406,9 @@ async def run_behavioral_authorization_endpoint(
                 persona_vault=vault,
                 evidence_records=workflow_effect_records,
                 config=workflow_effect_config,
-            ).run()
+            )
+            workflow_effect_one_click_run = await workflow_effect_dispatcher.run()
+            workflow_effect_run_context = workflow_effect_dispatcher.run_context
         if concurrency_effect_specification is not None and concurrency_effect_config.enabled:
             if (
                 concurrency_effect_executor is None
@@ -4755,6 +4803,59 @@ async def run_behavioral_authorization_endpoint(
             status_code=500,
             detail="behavioral execution failed closed",
         ) from exc
+    if (
+        workflow_effect_one_click_run is not None
+        and workflow_effect_one_click_run.candidate is not None
+    ):
+        try:
+            if (
+                workflow_effect_specification is None
+                or workflow_effect_promotion_service is None
+                or workflow_effect_producer_identity is None
+                or receipt_fingerprint is None
+            ):
+                raise ValueError("workflow evidence admission is unavailable")
+            envelope_id, envelope_ref = authorization_envelope_binding(
+                envelope,
+                target_origin=target_origin,
+            )
+            workflow_effect_admission = (
+                workflow_effect_promotion_service.reserve_execution(
+                    target_origin=target_origin,
+                    authorization_envelope_id=envelope_id,
+                    authorization_envelope_ref=envelope_ref,
+                    persona_id=source_persona.persona_id,
+                    persona_source_ref=stable_identity_source_ref(
+                        "persona_vault",
+                        {
+                            "persona_id": source_persona.persona_id,
+                            "created_at": source_persona.created_at,
+                        },
+                    ),
+                    world_persona_ref=(
+                        workflow_effect_specification.binding.fixture.world.persona_ref
+                    ),
+                    tenant_ref=(
+                        workflow_effect_specification.binding.fixture.contract.tenant_ref
+                    ),
+                    binding_ref=workflow_effect_specification.binding.binding_id,
+                    specification_id=workflow_effect_one_click_run.specification_id,
+                    transport_specification_id=(
+                        workflow_effect_one_click_run.transport_specification_id
+                    ),
+                    candidate_id=workflow_effect_one_click_run.candidate.candidate_id,
+                    source_fingerprint=receipt_fingerprint,
+                    event_run_id=workflow_effect_one_click_run.candidate.result_id,
+                    requested_session_id=req._assessment_session_id,
+                    producer_identity=workflow_effect_producer_identity,
+                )
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            abort_reserved_root_receipt("workflow_evidence_admission_failed")
+            raise HTTPException(
+                status_code=503,
+                detail="workflow evidence admission unavailable; execution stopped",
+            ) from exc
     if not (
         (
             concurrency_effect_one_click_run is not None
@@ -4913,6 +5014,89 @@ async def run_behavioral_authorization_endpoint(
                     "could not be constructed"
                 ),
             ) from exc
+    if (
+        workflow_effect_one_click_run is not None
+        and workflow_effect_one_click_run.candidate is not None
+    ):
+        try:
+            workflow_result = workflow_effect_one_click_run.result
+            workflow_candidate = workflow_effect_one_click_run.candidate
+            if (
+                workflow_result is None
+                or workflow_result.evidence is None
+                or workflow_effect_specification is None
+                or workflow_effect_admission is None
+                or workflow_effect_run_context is None
+                or workflow_effect_producer_identity is None
+                or workflow_effect_runtime_classification is None
+                or receipt_fingerprint is None
+                or any(
+                    value is None
+                    for value in (
+                        workflow_effect_run_context.experiment_world_ref,
+                        workflow_effect_run_context.authority_ref,
+                        workflow_effect_run_context.tenant_ref,
+                        workflow_effect_run_context.source_evidence_ref,
+                    )
+                )
+            ):
+                raise ValueError("workflow evidence source context is unavailable")
+            workflow_evidence = WorkflowEffectEvidence.build(
+                source_receipt_id=f"behavioral-{receipt_fingerprint}",
+                execution_admission_ref=workflow_effect_admission.admission_id,
+                specification_id=workflow_effect_specification.specification_id,
+                transport_specification_id=(
+                    workflow_effect_one_click_run.transport_specification_id
+                ),
+                candidate_id=workflow_candidate.candidate_id,
+                result_id=workflow_candidate.result_id,
+                evidence_id=workflow_candidate.evidence_id,
+                target_origin=target_origin,
+                assessment_session_id=workflow_effect_admission.session_id,
+                identity_binding=workflow_effect_admission.identity_binding,
+                experiment_world_ref=workflow_effect_run_context.experiment_world_ref,
+                authority_ref=workflow_effect_run_context.authority_ref,
+                tenant_ref=workflow_effect_run_context.tenant_ref,
+                source_evidence_ref=(
+                    workflow_effect_run_context.source_evidence_ref
+                ),
+                oracle={
+                    "outcome": workflow_result.evidence.oracle_outcome.value,
+                    "correspondence": workflow_result.correspondence.value,
+                    "effect_observed": (
+                        workflow_result.evidence.oracle_outcome.value
+                        == "effect_observed_violation"
+                        and workflow_result.correspondence.value == "coherent"
+                    ),
+                    "adversarial_triage_required": (
+                        workflow_candidate.adversarial_triage_required
+                    ),
+                    "promotion_authority": workflow_candidate.promotion_authority,
+                    "finding_authority": workflow_candidate.finding_authority,
+                },
+                compensating_cleanup_verified=(
+                    workflow_result.compensating_cleanup_verified
+                ),
+                producer_identity=workflow_effect_producer_identity,
+                observed_at_epoch=workflow_effect_run_context.observed_at_epoch,
+                runtime_evidence_classification=(
+                    workflow_effect_runtime_classification
+                ),
+            )
+            bind_workflow_effect_to_run(
+                workflow_evidence, workflow_effect_one_click_run
+            )
+            response["workflow_effect_evidence"] = workflow_evidence.to_dict()
+            response["assessment_session_id"] = workflow_effect_admission.session_id
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            abort_reserved_root_receipt("workflow_evidence_publication_failed")
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "workflow execution completed but durable evidence "
+                    "could not be constructed"
+                ),
+            ) from exc
     attach_adaptive_proof_handoff(
         response,
         adaptive_proof_handoff,
@@ -4932,7 +5116,8 @@ async def run_behavioral_authorization_endpoint(
                             _capability_effect_receipt_projection(
                                 response,
                                 retain_authoritative_evidence=True,
-                            )
+                            ),
+                            retain_authoritative_evidence=True,
                         )
                     )
                 ),
@@ -4975,6 +5160,39 @@ async def run_behavioral_authorization_endpoint(
                     "assessment_session_id": (
                         capability_effect_admission.session_id
                         if capability_effect_admission is not None
+                        else None
+                    ),
+                    "source_receipt_id": completed_receipt.receipt_id,
+                    "execution_state": "completed",
+                    "evidence_classification": "unavailable",
+                    "promotion_state": "retryable_local_persistence_failure",
+                    "reason_code": "retryable_local_persistence_failure",
+                    "canonical_observation_id": None,
+                    "canonical_finding_id": None,
+                    "permitted_next_local_action": "retry_promotion",
+                }
+        if (
+            workflow_effect_one_click_run is not None
+            and workflow_effect_one_click_run.candidate is not None
+            and workflow_effect_promotion_service is not None
+        ):
+            try:
+                response["workflow_effect_promotion"] = (
+                    workflow_effect_promotion_service.promote(
+                        completed_receipt.receipt_id
+                    ).to_dict()
+                )
+            except Exception:
+                logger.exception(
+                    "workflow source persisted but local promotion failed"
+                )
+                response["workflow_effect_promotion"] = {
+                    "schema_version": 1,
+                    "slice": "R5E9f",
+                    "execution_id": completed_receipt.receipt_id,
+                    "assessment_session_id": (
+                        workflow_effect_admission.session_id
+                        if workflow_effect_admission is not None
                         else None
                     ),
                     "source_receipt_id": completed_receipt.receipt_id,

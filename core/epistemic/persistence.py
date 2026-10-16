@@ -31,6 +31,24 @@ _MAX_CAPABILITY_ATTEMPTS_DATA_BYTES = (
     _MAX_CAPABILITY_ATTEMPT_HISTORY * _MAX_CAPABILITY_ATTEMPT_BYTES
 )
 
+_WORKFLOW_PROMOTION_STATES = frozenset(
+    {
+        "source_incomplete",
+        "awaiting_source",
+        "blocked_by_policy",
+        "eligible_awaiting_processing",
+        "retryable_local_persistence_failure",
+        "invalid_evidence",
+        "not_workflow_invariant_violation",
+        "promoted",
+    }
+)
+_MAX_WORKFLOW_ATTEMPT_HISTORY = 32
+_MAX_WORKFLOW_ATTEMPT_BYTES = 4096
+_MAX_WORKFLOW_ATTEMPTS_DATA_BYTES = (
+    _MAX_WORKFLOW_ATTEMPT_HISTORY * _MAX_WORKFLOW_ATTEMPT_BYTES
+)
+
 
 def _plain_json(value: Any) -> Any:
     """Convert immutable Mapping projections into JSON encoder primitives."""
@@ -55,6 +73,36 @@ def _capability_promotion_state(value: str) -> str:
     if value not in _CAPABILITY_PROMOTION_STATES:
         raise ValueError("unsupported capability promotion journal state")
     return value
+
+
+def _workflow_promotion_state(value: str) -> str:
+    if value not in _WORKFLOW_PROMOTION_STATES:
+        raise ValueError("unsupported workflow promotion journal state")
+    return value
+
+
+def _workflow_admission_id(
+    *,
+    session_id: str,
+    target_origin: str,
+    identity_digest: str,
+    specification_id: str,
+    transport_specification_id: str,
+    candidate_id: str,
+    producer: Mapping[str, Any],
+) -> str:
+    return stable_hash(
+        "workflow_effect_promotion_admission",
+        {
+            "session_id": session_id,
+            "target_origin": target_origin,
+            "identity_digest": identity_digest,
+            "specification_id": specification_id,
+            "transport_specification_id": transport_specification_id,
+            "candidate_id": candidate_id,
+            "producer": producer,
+        },
+    )
 
 
 class CanonicalEvidenceRepositoryCorruption(ValueError):
@@ -155,6 +203,57 @@ class CanonicalEvidenceRepository:
                     ON capability_effect_promotion_journal(state, admission_id);
 
                 CREATE TABLE IF NOT EXISTS capability_effect_persistence_preflight (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    token TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS workflow_effect_promotion_journal (
+                    admission_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL CHECK(session_id <> 'global_scan'),
+                    target_origin TEXT NOT NULL,
+                    identity_data TEXT NOT NULL CHECK(json_valid(identity_data)),
+                    specification_id TEXT NOT NULL,
+                    transport_specification_id TEXT NOT NULL,
+                    candidate_id TEXT NOT NULL,
+                    producer_data TEXT NOT NULL CHECK(json_valid(producer_data)),
+                    source_receipt_id TEXT UNIQUE,
+                    source_fingerprint TEXT UNIQUE,
+                    event_timestamp REAL NOT NULL,
+                    event_run_id TEXT NOT NULL,
+                    attempt_count INTEGER NOT NULL DEFAULT 0
+                        CHECK(attempt_count >= 0),
+                    attempts_data TEXT NOT NULL DEFAULT '[]'
+                        CHECK(json_valid(attempts_data))
+                        CHECK(json_type(attempts_data) = 'array'),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'source_incomplete',
+                        'awaiting_source',
+                        'blocked_by_policy',
+                        'eligible_awaiting_processing',
+                        'retryable_local_persistence_failure',
+                        'invalid_evidence',
+                        'not_workflow_invariant_violation',
+                        'promoted'
+                    )),
+                    evidence_root TEXT,
+                    cas_blob_hash TEXT,
+                    observation_id TEXT,
+                    finding_id TEXT,
+                    last_error TEXT,
+                    CHECK(
+                        state <> 'promoted'
+                        OR (
+                            evidence_root IS NOT NULL
+                            AND cas_blob_hash IS NOT NULL
+                            AND observation_id IS NOT NULL
+                            AND finding_id IS NOT NULL
+                        )
+                    )
+                );
+                CREATE INDEX IF NOT EXISTS idx_workflow_effect_promotion_state
+                    ON workflow_effect_promotion_journal(state, admission_id);
+
+                CREATE TABLE IF NOT EXISTS workflow_effect_persistence_preflight (
                     id INTEGER PRIMARY KEY CHECK(id = 1),
                     token TEXT NOT NULL
                 );
@@ -877,6 +976,681 @@ class CanonicalEvidenceRepository:
         record = self.load_capability_effect_admission(admission_id)
         if record is None:
             raise ValueError("capability promotion result disappeared")
+        return record, created
+
+    def reserve_workflow_effect_promotion(
+        self,
+        *,
+        admission_id: str,
+        session_id: str,
+        target_origin: str,
+        identity: Mapping[str, Any],
+        specification_id: str,
+        transport_specification_id: str,
+        candidate_id: str,
+        producer: Mapping[str, Any],
+        event_timestamp: float,
+        event_run_id: str,
+    ) -> dict[str, Any]:
+        """Reserve immutable journal context; this substrate grants no authority."""
+
+        session_id = _session(session_id)
+        immutable = (
+            admission_id,
+            session_id,
+            target_origin,
+            _encode(identity),
+            specification_id,
+            transport_specification_id,
+            candidate_id,
+            _encode(producer),
+            event_timestamp,
+            event_run_id,
+        )
+        # Validate the complete proposed row before writing, including its pinned ID.
+        self._workflow_promotion_row(
+            (
+                *immutable[:8],
+                None,
+                None,
+                *immutable[8:],
+                0,
+                "[]",
+                "source_incomplete",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+        )
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                existing = connection.execute(
+                    """
+                    SELECT * FROM workflow_effect_promotion_journal
+                    WHERE admission_id = ?
+                    """,
+                    (admission_id,),
+                ).fetchone()
+                if existing is None:
+                    connection.execute(
+                        """
+                        INSERT INTO workflow_effect_promotion_journal(
+                            admission_id, session_id, target_origin, identity_data,
+                            specification_id, transport_specification_id,
+                            candidate_id, producer_data, event_timestamp,
+                            event_run_id, state
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'source_incomplete')
+                        """,
+                        immutable,
+                    )
+                else:
+                    self._workflow_promotion_row(existing)
+                    if tuple(existing[:8]) != immutable[:8]:
+                        raise ValueError(
+                            "workflow promotion admission context collision"
+                        )
+                record = self._workflow_promotion_row(
+                    connection.execute(
+                        "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                        (admission_id,),
+                    ).fetchone()
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return record
+
+    def bind_workflow_effect_source(
+        self,
+        *,
+        admission_id: str,
+        source_receipt_id: str,
+        source_fingerprint: str,
+    ) -> dict[str, Any]:
+        """Append-once bind an exact inner receipt, without executing it."""
+
+        if not isinstance(source_receipt_id, str) or not isinstance(
+            source_fingerprint, str
+        ):
+            raise ValueError("workflow promotion journal source binding is invalid")
+
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                owner = connection.execute(
+                    """
+                    SELECT * FROM workflow_effect_promotion_journal
+                    WHERE source_receipt_id = ? OR source_fingerprint = ?
+                    """,
+                    (source_receipt_id, source_fingerprint),
+                ).fetchone()
+                if owner is not None:
+                    owner_record = self._workflow_promotion_row(owner)
+                    if owner_record["admission_id"] != admission_id:
+                        raise ValueError(
+                            "workflow source is owned by another admission"
+                        )
+                row = connection.execute(
+                    "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                    (admission_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("workflow promotion admission is missing")
+                current = self._workflow_promotion_row(row)
+                binding = (current["source_receipt_id"], current["source_fingerprint"])
+                if binding == (None, None):
+                    connection.execute(
+                        """
+                        UPDATE workflow_effect_promotion_journal
+                        SET source_receipt_id = ?, source_fingerprint = ?,
+                            state = 'awaiting_source'
+                        WHERE admission_id = ?
+                        """,
+                        (source_receipt_id, source_fingerprint, admission_id),
+                    )
+                elif binding != (source_receipt_id, source_fingerprint):
+                    raise ValueError("workflow source binding is immutable")
+                record = self._workflow_promotion_row(
+                    connection.execute(
+                        "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                        (admission_id,),
+                    ).fetchone()
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                raise ValueError("workflow source binding collision") from exc
+            except BaseException:
+                connection.rollback()
+                raise
+        return record
+
+    @staticmethod
+    def _workflow_promotion_row(row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
+        keys = (
+            "admission_id",
+            "session_id",
+            "target_origin",
+            "identity_data",
+            "specification_id",
+            "transport_specification_id",
+            "candidate_id",
+            "producer_data",
+            "source_receipt_id",
+            "source_fingerprint",
+            "event_timestamp",
+            "event_run_id",
+            "attempt_count",
+            "attempts_data",
+            "state",
+            "evidence_root",
+            "cas_blob_hash",
+            "observation_id",
+            "finding_id",
+            "last_error",
+        )
+        if len(row) != len(keys):
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion journal column count is invalid"
+            )
+        value = dict(zip(keys, row))
+        try:
+            for field in (
+                "identity_data",
+                "producer_data",
+            ):
+                decoded = json.loads(value[field])
+                if not isinstance(decoded, dict):
+                    raise TypeError(field)
+                value[field] = decoded
+            serialized_attempts = value["attempts_data"]
+            if (
+                not isinstance(serialized_attempts, str)
+                or len(serialized_attempts.encode("utf-8"))
+                > _MAX_WORKFLOW_ATTEMPTS_DATA_BYTES
+            ):
+                raise TypeError("attempts_data")
+            attempts = json.loads(serialized_attempts)
+            if (
+                not isinstance(attempts, list)
+                or len(attempts) > _MAX_WORKFLOW_ATTEMPT_HISTORY
+                or any(
+                    not isinstance(item, dict)
+                    or len(_encode(item).encode("utf-8")) > _MAX_WORKFLOW_ATTEMPT_BYTES
+                    for item in attempts
+                )
+            ):
+                raise TypeError("attempts_data")
+            value["attempts_data"] = attempts
+        except (json.JSONDecodeError, TypeError, UnicodeError) as exc:
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion journal JSON shape is invalid"
+            ) from exc
+
+        state = value["state"]
+        if state not in _WORKFLOW_PROMOTION_STATES:
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion journal state is invalid"
+            )
+        attempt_count = value["attempt_count"]
+        if (
+            type(attempt_count) is not int
+            or attempt_count < len(value["attempts_data"])
+            or attempt_count < 0
+        ):
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion attempt count is invalid"
+            )
+        admission_id = value["admission_id"]
+        if (
+            not isinstance(admission_id, str)
+            or not admission_id.startswith("workflow_effect_promotion_admission:")
+            or len(admission_id) != len("workflow_effect_promotion_admission:") + 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in admission_id.rsplit(":", 1)[-1]
+            )
+            or not isinstance(value["session_id"], str)
+            or not value["session_id"]
+            or value["session_id"] == "global_scan"
+            or not isinstance(value["target_origin"], str)
+            or not value["target_origin"]
+            or not isinstance(value["event_run_id"], str)
+            or isinstance(value["event_timestamp"], bool)
+            or not isinstance(value["event_timestamp"], (int, float))
+            or not math.isfinite(float(value["event_timestamp"]))
+            or float(value["event_timestamp"]) <= 0
+        ):
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion journal identity is invalid"
+            )
+        for field, reference, prefix in (
+            (
+                "identity digest",
+                value["identity_data"].get("digest"),
+                "assessment_identity",
+            ),
+            (
+                "specification",
+                value["specification_id"],
+                "workflow_effect_one_click_specification",
+            ),
+            (
+                "transport specification",
+                value["transport_specification_id"],
+                "workflow_effect_transport_specification",
+            ),
+            ("candidate", value["candidate_id"], "workflow_effect_finding_candidate"),
+        ):
+            if (
+                not isinstance(reference, str)
+                or not reference.startswith(f"{prefix}:")
+                or len(reference) != len(prefix) + 65
+                or any(
+                    character not in "0123456789abcdef" for character in reference[-64:]
+                )
+            ):
+                raise CanonicalEvidenceRepositoryCorruption(
+                    f"workflow promotion journal {field} is invalid"
+                )
+        expected_admission_id = _workflow_admission_id(
+            session_id=value["session_id"],
+            target_origin=value["target_origin"],
+            identity_digest=value["identity_data"]["digest"],
+            specification_id=value["specification_id"],
+            transport_specification_id=value["transport_specification_id"],
+            candidate_id=value["candidate_id"],
+            producer=value["producer_data"],
+        )
+        if admission_id != expected_admission_id:
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion journal admission commitment is invalid"
+            )
+        source_receipt_id = value["source_receipt_id"]
+        source_fingerprint = value["source_fingerprint"]
+        if (source_receipt_id is None) != (source_fingerprint is None) or (
+            source_receipt_id is not None
+            and (
+                not isinstance(source_receipt_id, str)
+                or not isinstance(source_fingerprint, str)
+                or source_receipt_id != f"behavioral-{source_fingerprint}"
+                or len(source_fingerprint) != 64
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in source_fingerprint
+                )
+            )
+        ):
+            raise CanonicalEvidenceRepositoryCorruption(
+                "workflow promotion journal source binding is invalid"
+            )
+        if state == "promoted":
+            if not all(
+                isinstance(value[field], str) and value[field]
+                for field in (
+                    "evidence_root",
+                    "cas_blob_hash",
+                    "observation_id",
+                    "finding_id",
+                )
+            ):
+                raise CanonicalEvidenceRepositoryCorruption(
+                    "promoted workflow journal result is incomplete"
+                )
+            for field in ("evidence_root", "cas_blob_hash"):
+                reference = value[field]
+                if len(reference) != 64 or any(
+                    character not in "0123456789abcdef" for character in reference
+                ):
+                    raise CanonicalEvidenceRepositoryCorruption(
+                        "promoted workflow journal digest is invalid"
+                    )
+            if not value["observation_id"].startswith("obs-") or not value[
+                "finding_id"
+            ].startswith("find-"):
+                raise CanonicalEvidenceRepositoryCorruption(
+                    "promoted workflow journal entity reference is invalid"
+                )
+        return value
+
+    def load_workflow_effect_admission(
+        self,
+        identifier: str,
+    ) -> Optional[dict[str, Any]]:
+        if identifier.startswith("workflow_effect_promotion_admission:"):
+            column = "admission_id"
+        elif identifier.startswith("behavioral-"):
+            column = "source_receipt_id"
+        elif len(identifier) == 64 and all(
+            character in "0123456789abcdef" for character in identifier
+        ):
+            column = "source_fingerprint"
+        else:
+            return None
+        return self._load_workflow_effect_admission_by(column, identifier)
+
+    def _load_workflow_effect_admission_by(
+        self,
+        column: str,
+        identifier: str,
+    ) -> Optional[dict[str, Any]]:
+        if column not in {
+            "admission_id",
+            "source_receipt_id",
+            "source_fingerprint",
+        }:
+            raise ValueError("unsupported workflow journal lookup")
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                f"""
+                SELECT admission_id, session_id, target_origin, identity_data,
+                       specification_id, transport_specification_id, candidate_id,
+                       producer_data,
+                       source_receipt_id, source_fingerprint, event_timestamp,
+                       event_run_id, attempt_count, attempts_data, state,
+                       evidence_root, cas_blob_hash, observation_id, finding_id,
+                       last_error
+                FROM workflow_effect_promotion_journal
+                WHERE {column} = ?
+                """,
+                (identifier,),
+            ).fetchone()
+        return None if row is None else self._workflow_promotion_row(row)
+
+    def list_workflow_effect_admissions(
+        self,
+        *,
+        states: Optional[Sequence[str]] = None,
+        limit: int = 256,
+    ) -> Tuple[dict[str, Any], ...]:
+        if type(limit) is not int or limit < 1 or limit > 1000:
+            raise ValueError("workflow promotion journal limit is invalid")
+        normalized_states = tuple(states or ())
+        for state in normalized_states:
+            _workflow_promotion_state(state)
+        where = ""
+        parameters: list[Any] = []
+        if normalized_states:
+            placeholders = ",".join("?" for _ in normalized_states)
+            where = f"WHERE state IN ({placeholders})"
+            parameters.extend(normalized_states)
+        parameters.append(limit)
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                f"""
+                SELECT admission_id, session_id, target_origin, identity_data,
+                       specification_id, transport_specification_id, candidate_id,
+                       producer_data,
+                       source_receipt_id, source_fingerprint, event_timestamp,
+                       event_run_id, attempt_count, attempts_data, state,
+                       evidence_root, cas_blob_hash, observation_id, finding_id,
+                       last_error
+                FROM workflow_effect_promotion_journal
+                {where}
+                ORDER BY admission_id
+                LIMIT ?
+                """,
+                tuple(parameters),
+            ).fetchall()
+        return tuple(self._workflow_promotion_row(row) for row in rows)
+
+    def list_workflow_effect_admission_ids(
+        self,
+        *,
+        states: Sequence[str],
+        limit: int = 256,
+    ) -> Tuple[str, ...]:
+        """Return a bounded, validated worklist; unrelated rows are not decoded."""
+
+        if type(limit) is not int or limit < 1 or limit > 1000:
+            raise ValueError("workflow promotion journal limit is invalid")
+        normalized_states = tuple(states)
+        if not normalized_states:
+            return ()
+        return tuple(
+            row["admission_id"]
+            for row in self.list_workflow_effect_admissions(
+                states=normalized_states, limit=limit
+            )
+        )
+
+    def record_workflow_effect_attempt(
+        self,
+        *,
+        admission_id: str,
+        attempt: Mapping[str, Any],
+        state: str,
+        last_error: Optional[str] = None,
+    ) -> dict[str, Any]:
+        _workflow_promotion_state(state)
+        attempt_json = _encode(dict(attempt))
+        if len(attempt_json.encode("utf-8")) > _MAX_WORKFLOW_ATTEMPT_BYTES:
+            raise ValueError("workflow promotion attempt is too large")
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                    (admission_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("workflow promotion admission is missing")
+                current = self._workflow_promotion_row(row)
+                attempts = current["attempts_data"][
+                    -(_MAX_WORKFLOW_ATTEMPT_HISTORY - 1) :
+                ]
+                attempts.append(json.loads(attempt_json))
+                attempts_json = json.dumps(
+                    attempts, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                )
+                while (
+                    len(attempts_json.encode("utf-8"))
+                    > _MAX_WORKFLOW_ATTEMPTS_DATA_BYTES
+                ):
+                    attempts.pop(0)
+                    attempts_json = json.dumps(
+                        attempts,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    )
+                connection.execute(
+                    """
+                    UPDATE workflow_effect_promotion_journal
+                    SET attempt_count = attempt_count + 1, attempts_data = ?,
+                        state = CASE
+                            WHEN state = 'promoted' THEN state ELSE ? END,
+                        last_error = CASE
+                            WHEN state = 'promoted' THEN NULL ELSE ? END
+                    WHERE admission_id = ?
+                    """,
+                    (
+                        attempts_json,
+                        state,
+                        last_error,
+                        admission_id,
+                    ),
+                )
+                record = self._workflow_promotion_row(
+                    connection.execute(
+                        "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                        (admission_id,),
+                    ).fetchone()
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return record
+
+    def set_workflow_effect_state(
+        self,
+        *,
+        admission_id: str,
+        state: str,
+        last_error: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Update processing state without changing identity or policy audit."""
+
+        _workflow_promotion_state(state)
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                    (admission_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("workflow promotion admission is missing")
+                self._workflow_promotion_row(row)
+                connection.execute(
+                    """
+                    UPDATE workflow_effect_promotion_journal
+                    SET state = CASE
+                            WHEN state = 'promoted' THEN state ELSE ? END,
+                        last_error = CASE
+                            WHEN state = 'promoted' THEN NULL ELSE ? END
+                    WHERE admission_id = ?
+                    """,
+                    (state, last_error, admission_id),
+                )
+                record = self._workflow_promotion_row(
+                    connection.execute(
+                        "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                        (admission_id,),
+                    ).fetchone()
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+        return record
+
+    def commit_workflow_effect_promotion(
+        self,
+        *,
+        admission_id: str,
+        session_id: str,
+        target_origin: str,
+        observation_id: str,
+        observation_commitment: str,
+        observation: Mapping[str, Any],
+        observation_event: Mapping[str, Any],
+        finding_id: str,
+        finding_commitment: str,
+        finding: Mapping[str, Any],
+        finding_event: Mapping[str, Any],
+        evidence_root: str,
+        cas_blob_hash: str,
+        source_receipt_id: str,
+        source_fingerprint: str,
+        identity: Mapping[str, Any],
+        specification_id: str,
+        transport_specification_id: str,
+        candidate_id: str,
+        producer: Mapping[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically store a supplied pair; no evidence or admission decision is made."""
+
+        session_id = _session(session_id)
+        created = False
+        with closing(self._connect()) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                row = connection.execute(
+                    "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                    (admission_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError("workflow promotion admission is invalid")
+                current = self._workflow_promotion_row(row)
+                if (
+                    current["state"]
+                    not in {
+                        "eligible_awaiting_processing",
+                        "retryable_local_persistence_failure",
+                        "promoted",
+                    }
+                    or current["session_id"] != session_id
+                    or current["target_origin"] != target_origin
+                    or current["source_receipt_id"] is None
+                    or current["source_receipt_id"] != source_receipt_id
+                    or current["source_fingerprint"] != source_fingerprint
+                    or _encode(current["identity_data"]) != _encode(identity)
+                    or current["specification_id"] != specification_id
+                    or current["transport_specification_id"]
+                    != transport_specification_id
+                    or current["candidate_id"] != candidate_id
+                    or _encode(current["producer_data"]) != _encode(producer)
+                ):
+                    raise ValueError("workflow promotion context does not match")
+                expected = (evidence_root, cas_blob_hash, observation_id, finding_id)
+                if current["state"] == "promoted":
+                    if (
+                        tuple(
+                            current[key]
+                            for key in (
+                                "evidence_root",
+                                "cas_blob_hash",
+                                "observation_id",
+                                "finding_id",
+                            )
+                        )
+                        != expected
+                    ):
+                        raise ValueError("workflow promotion result collision")
+                # Verify identical canonical bytes on replay as well as first insert.
+                self._insert_or_verify_entity(
+                    connection,
+                    entity_id=observation_id,
+                    session_id=session_id,
+                    kind="observation",
+                    commitment=observation_commitment,
+                    data=_encode(observation),
+                )
+                self._insert_or_verify_event(
+                    connection,
+                    session_id,
+                    observation_event,
+                    _encode(observation_event),
+                )
+                self._insert_or_verify_entity(
+                    connection,
+                    entity_id=finding_id,
+                    session_id=session_id,
+                    kind="finding",
+                    commitment=finding_commitment,
+                    data=_encode(finding),
+                )
+                self._insert_or_verify_event(
+                    connection, session_id, finding_event, _encode(finding_event)
+                )
+                if current["state"] != "promoted":
+                    connection.execute(
+                        """
+                        UPDATE workflow_effect_promotion_journal
+                        SET state = 'promoted', evidence_root = ?,
+                            cas_blob_hash = ?, observation_id = ?, finding_id = ?,
+                            last_error = NULL
+                        WHERE admission_id = ?
+                        """,
+                        (*expected, admission_id),
+                    )
+                    created = True
+                record = self._workflow_promotion_row(
+                    connection.execute(
+                        "SELECT * FROM workflow_effect_promotion_journal WHERE admission_id = ?",
+                        (admission_id,),
+                    ).fetchone()
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
         return record, created
 
     @staticmethod

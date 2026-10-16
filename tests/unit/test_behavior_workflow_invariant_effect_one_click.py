@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import ast
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -232,7 +233,7 @@ def _case(tmp_path, monkeypatch, *, secure=False, amounts=(6, 6), cleanup="verif
     )
 
 
-def _dispatcher(case, *, enabled):
+def _dispatcher(case, *, enabled, clock=time.time):
     module, specification, _, _, executor, vault, envelope, persona, records = case
     return module.WorkflowEffectOneClickDispatcher(
         target_origin=ORIGIN,
@@ -243,6 +244,7 @@ def _dispatcher(case, *, enabled):
         persona_vault=vault,
         evidence_records=records,
         config=module.WorkflowEffectExecutionConfig(enabled=enabled),
+        clock=clock,
     )
 
 
@@ -255,7 +257,13 @@ def test_gate_off_never_constructs_client_or_touches_executor(tmp_path, monkeypa
         "PolicyExecutorWorkflowEffectClient",
         lambda **_: pytest.fail("client constructed"),
     )
-    run = asyncio.run(_dispatcher(case, enabled=False).run())
+    run = asyncio.run(
+        _dispatcher(
+            case,
+            enabled=False,
+            clock=lambda: pytest.fail("disabled run read observation clock"),
+        ).run()
+    )
     assert run == module.WorkflowEffectOneClickRun.disabled(specification)
     assert run.selected and not run.dispatched
     assert run.to_dict()["disabled_gates"] == [module.WORKFLOW_EFFECT_EXECUTION_ENV]
@@ -322,7 +330,13 @@ def test_exactly_one_core_consumer_and_no_lab_import():
             exclude=(Path(module.__file__).resolve(),),
         )
     )
-    assert consumers == ["core/server/routers/foundry.py"]
+    # R5E9b-r2: the authority-free workflow effect evidence contract read-only
+    # imports the run type (WorkflowEffectOneClickRun), so it is a declared,
+    # audited sibling consumer alongside the single production consumer.
+    assert consumers == [
+        "core/behavior/workflow_effect_evidence.py",
+        "core/server/routers/foundry.py",
+    ]
     lab_root = repository.parent / "sentinel-visual-acceptance-lab"
     if lab_root.is_dir():
         assert not [
@@ -352,12 +366,20 @@ def test_hermetic_twins_and_boundary_have_no_promotion_authority(
 
     async def dispatch():
         caller_loop = asyncio.get_running_loop()
-        return caller_loop, await _dispatcher(case, enabled=True).run()
+        dispatcher = _dispatcher(case, enabled=True)
+        run = await dispatcher.run()
+        return caller_loop, run, dispatcher.run_context
 
-    caller_loop, run = asyncio.run(dispatch())
+    caller_loop, run, context = asyncio.run(dispatch())
     assert run.dispatched and run.result.evidence is not None
     assert run.result.evidence.oracle_outcome.value == observed
     assert (run.candidate is not None) is candidate
+    assert context is not None
+    if not candidate:
+        assert context.experiment_world_ref is None
+        assert context.authority_ref is None
+        assert context.tenant_ref is None
+        assert context.source_evidence_ref is None
     assert run.result.compensating_cleanup_verified
     assert [body["kind"] for _, body in target.calls] == [
         "operation",
@@ -382,6 +404,77 @@ def test_hermetic_twins_and_boundary_have_no_promotion_authority(
         )
         == run
     )
+
+
+def test_dispatched_run_context_uses_terminal_injected_clock(tmp_path, monkeypatch):
+    case = _case(tmp_path, monkeypatch)
+    module, _, _, target, *_ = case
+    clock_calls = []
+
+    def terminal_clock():
+        assert target.calls[-1][1]["kind"] == "cleanup"
+        assert target.consumed == 0
+        clock_calls.append(True)
+        return 1234.5
+
+    dispatcher = _dispatcher(case, enabled=True, clock=terminal_clock)
+    assert dispatcher.run_context is None
+    run = asyncio.run(dispatcher.run())
+    assert run.dispatched
+    assert clock_calls == [True]
+    context = dispatcher.run_context
+    assert context is not None
+    assert context.observed_at_epoch == 1234.5
+    assert context.experiment_world_ref == stable_hash("world", case[7].persona_id)
+    assert context.authority_ref == experiment_authority_context_ref(
+        case[6], ORIGIN, (WORKFLOW,)
+    )
+    assert context.tenant_ref == case[1].binding.fixture.contract.tenant_ref
+    assert context.source_evidence_ref == case[1].binding.capture.source_evidence_refs[0]
+    assert "observed_at_epoch" not in run.to_dict()
+    assert run.finding_authority is False
+    assert run.promotion_authority is False
+    assert run.real_workflow_effect_observed is False
+    assert run.wired_into_production is False
+
+
+def test_run_clock_does_not_change_hermetic_evidence(tmp_path, monkeypatch):
+    case = _case(tmp_path, monkeypatch)
+    second_case = (*case[:4], TrackingExecutor(case[3]), *case[5:])
+    first = _dispatcher(case, enabled=True, clock=lambda: 100.0)
+    second = _dispatcher(second_case, enabled=True, clock=lambda: 200.0)
+    first_run = asyncio.run(first.run())
+    second_run = asyncio.run(second.run())
+    first_evidence = first_run.result.evidence
+    second_evidence = second_run.result.evidence
+    assert first_evidence is not None and second_evidence is not None
+    assert first.run_context.observed_at_epoch == 100.0
+    assert second.run_context.observed_at_epoch == 200.0
+    assert first_evidence.evidence_id == second_evidence.evidence_id
+    assert json.dumps(first_evidence.to_dict(), sort_keys=True).encode() == json.dumps(
+        second_evidence.to_dict(), sort_keys=True
+    ).encode()
+
+
+@pytest.mark.parametrize("observed", [1, "1.0", float("nan"), float("inf"), 0.0, -1.0])
+def test_invalid_terminal_clock_reading_fails_closed(
+    tmp_path, monkeypatch, observed
+):
+    case = _case(tmp_path, monkeypatch)
+    target = case[3]
+    dispatcher = _dispatcher(case, enabled=True, clock=lambda: observed)
+    with pytest.raises(ValueError, match="workflow effect observation epoch is invalid"):
+        asyncio.run(dispatcher.run())
+    assert dispatcher.run_context is None
+    assert target.calls[-1][1]["kind"] == "cleanup"
+    assert target.consumed == 0
+
+
+def test_noncallable_clock_is_rejected_before_dispatch(tmp_path, monkeypatch):
+    case = _case(tmp_path, monkeypatch)
+    with pytest.raises(TypeError, match="workflow effect clock is invalid"):
+        _dispatcher(case, enabled=True, clock=None)
+    assert case[3].calls == []
 
 
 def test_specification_and_disabled_run_round_trip(tmp_path, monkeypatch):
@@ -545,6 +638,7 @@ def test_module_transport_safety_and_exact_exports():
         "PolicyExecutorWorkflowEffectClient",
         "WorkflowEffectOneClickSpecification",
         "WorkflowEffectOneClickDispatcher",
+        "WorkflowEffectRunContext",
         "WorkflowEffectOneClickRun",
         "WorkflowEffectFindingCandidate",
         "WorkflowEffectOneClickDenied",

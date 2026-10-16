@@ -606,6 +606,10 @@ def test_effect_is_unwired_and_has_no_production_or_transport_imports():
         for suffix in ("contract", "binding", "ledger", "store", "evidence", "effect")
     }
     family.add("workflow_invariant_effect_transport")
+    # R5E9b-r2: the authority-free workflow effect evidence contract reads the
+    # two effect enums (WorkflowEffectOutcome / WorkflowEffectCorrespondence);
+    # it is a declared, audited sibling, not an unknown production consumer.
+    family.add("workflow_effect_evidence")
     consumers = []
     for path in (repository / "core").rglob("*.py"):
         if path.stem in family:

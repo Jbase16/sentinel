@@ -717,6 +717,7 @@ class EvidenceLedger:
                     active_proof=entity.active_proof,
                 )
                 self._validate_capability_replay_finding(entity, cited)
+                self._validate_workflow_invariant_finding(entity, cited)
                 self._findings[entity.id] = entity
             else:
                 raise ValueError("unsupported persisted epistemic entity")
@@ -1276,6 +1277,215 @@ class EvidenceLedger:
                     logger.exception("capability promotion listener failed")
         return observation, finding
 
+    def admit_workflow_invariant_finding(
+        self,
+        *,
+        evidence: Any,
+        admission_id: str,
+        event_timestamp: float,
+        event_run_id: Optional[str],
+    ) -> tuple[ObservationEnvelope, Finding]:
+        """Atomically admit one eligible workflow observation and finding."""
+
+        from core.behavior.workflow_effect_evidence import (
+            WorkflowEffectEvidence,
+            evaluate_workflow_effect_eligibility,
+            workflow_invariant_finding_material,
+        )
+        from core.behavior.compiler import OperationFamily, OperationInstance, OperationSafety
+
+        if type(evidence) is not WorkflowEffectEvidence:
+            raise TypeError("workflow invariant admission requires typed evidence")
+        if not evaluate_workflow_effect_eligibility(evidence).eligible:
+            raise ValueError("workflow invariant evidence is not eligible")
+        if (
+            isinstance(event_timestamp, bool)
+            or not isinstance(event_timestamp, (int, float))
+            or event_timestamp <= 0
+        ):
+            raise ValueError("workflow invariant event timestamp is invalid")
+
+        identity = AssessmentIdentityContext.from_dict(evidence.identity_binding)
+        blob_hash = self.cas.store(evidence.to_json_bytes())
+        source_ref = stable_hash(
+            "source_ref",
+            {
+                "source_receipt_id": evidence.source_receipt_id,
+                "evidence_root": evidence.evidence_root,
+            },
+        )
+        family = OperationFamily.build(
+            action_id=stable_hash(
+                "action",
+                {"kind": "workflow_invariant_evidence_admission"},
+            ),
+            label="workflow invariant evidence admission",
+            method="LOCAL",
+            requires=(),
+            safety=OperationSafety.READ_ONLY,
+            source_refs=(source_ref,),
+        )
+        instance = OperationInstance.build(
+            family_id=family.family_id,
+            source_ref=source_ref,
+            world_ref=(
+                identity.world_id
+                if identity.world_id.startswith("world:")
+                else stable_hash("world", identity.world_id)
+            ),
+            state_ref=stable_hash(
+                "state",
+                {
+                    "evidence_root": evidence.evidence_root,
+                    "source_receipt_id": evidence.source_receipt_id,
+                },
+            ),
+            response_status=200,
+            outputs=(),
+        )
+        tool = ToolContext(
+            name="workflow_effect_evidence",
+            args=(evidence.source_receipt_id,),
+            version=evidence.schema_version,
+            exit_code=0,
+        )
+        observation_material = _observation_envelope_material(
+            tool=tool,
+            target=evidence.target_origin,
+            blob_hash=blob_hash,
+            identity=identity,
+            operation_family=family,
+            operation_instance=instance,
+        )
+        observation_commitment = stable_hash(
+            "observation_envelope", observation_material
+        )
+        observation = ObservationEnvelope(
+            id=f"obs-{observation_commitment.rsplit(':', 1)[-1]}",
+            timestamp=evidence.observed_at_epoch,
+            tool=tool,
+            target=evidence.target_origin,
+            blob_hash=blob_hash,
+            commitment=observation_commitment,
+            identity=identity,
+            operation_family=family,
+            operation_instance=instance,
+        )
+        claim = workflow_invariant_finding_material(evidence)
+        citation = Citation(observation_id=observation.id)
+        active_proof = ActiveProofCitation(
+            observation_id=observation.id,
+            receipt_id=evidence.source_receipt_id,
+            provenance_root=evidence.evidence_root,
+        )
+        finding = Finding(
+            id="",
+            title=claim["title"],
+            severity=claim["severity"],
+            citations=[citation],
+            description=claim["description"],
+            remediation=claim["remediation"],
+            metadata=claim["metadata"],
+            confirmation_level=claim["confirmation_level"],
+            session_id=identity.session_id,
+            active_proof=[active_proof],
+        )
+        finding.commitment = _canonical_finding_commitment(finding)
+        finding.id = f"find-{finding.commitment.rsplit(':', 1)[-1]}"
+
+        self._validate_active_proof(
+            evidence_citations=[citation],
+            observations=[observation],
+            active_proof=[active_proof],
+        )
+        self._validate_workflow_invariant_finding(
+            finding, [observation], require_committed_journal=False
+        )
+
+        def event_for(event_type: EventType, entity: Any) -> EpistemicEvent:
+            payload = entity.to_dict()
+            content = {
+                "type": event_type,
+                "entity": entity.id,
+                "payload": payload,
+                "time": event_timestamp,
+            }
+            return EpistemicEvent(
+                id=self._generate_deterministic_id("evt", content),
+                event_type=event_type,
+                entity_id=entity.id,
+                payload=payload,
+                timestamp=float(event_timestamp),
+                run_id=event_run_id,
+            )
+
+        observation_event = event_for(EventType.OBSERVED, observation)
+        finding_event = event_for(EventType.PROMOTED, finding)
+        journal = self._repository.load_workflow_effect_admission(admission_id)
+        if journal is None:
+            raise ValueError("workflow invariant admission journal is missing")
+
+        def event_value(event: EpistemicEvent) -> Dict[str, Any]:
+            return {
+                "id": event.id,
+                "event_type": event.event_type.value,
+                "entity_id": event.entity_id,
+                "payload": event.payload,
+                "timestamp": event.timestamp,
+                "run_id": event.run_id,
+            }
+
+        _committed, created = self._repository.commit_workflow_effect_promotion(
+            admission_id=admission_id,
+            session_id=identity.session_id,
+            target_origin=evidence.target_origin,
+            observation_id=observation.id,
+            observation_commitment=observation.commitment,
+            observation=observation.to_dict(),
+            observation_event=event_value(observation_event),
+            finding_id=finding.id,
+            finding_commitment=finding.commitment,
+            finding=finding.to_dict(),
+            finding_event=event_value(finding_event),
+            evidence_root=evidence.evidence_root,
+            cas_blob_hash=blob_hash,
+            source_receipt_id=evidence.source_receipt_id,
+            source_fingerprint=evidence.source_receipt_id.removeprefix("behavioral-"),
+            identity=evidence.identity_binding,
+            specification_id=evidence.specification_id,
+            transport_specification_id=evidence.transport_specification_id,
+            candidate_id=evidence.candidate_id,
+            producer=evidence.producer_identity,
+        )
+
+        if not created:
+            return observation, finding
+
+        existing_observation = self._observations.get(observation.id)
+        if existing_observation is not None and existing_observation != observation:
+            raise ValueError("workflow observation in-memory collision")
+        existing_finding = self._findings.get(finding.id)
+        if existing_finding is not None and existing_finding != finding:
+            raise ValueError("workflow finding in-memory collision")
+        self._observations[observation.id] = observation
+        self._findings[finding.id] = finding
+        existing_event_ids = {item.id for item in self._event_log}
+        for event in (observation_event, finding_event):
+            if event.id in existing_event_ids:
+                continue
+            self._event_log.append(event)
+            try:
+                self._append_audit_event(event)
+            except OSError:
+                logger.exception("failed to append canonical workflow audit event")
+            self._apply_event(event)
+            for listener in self._listeners:
+                try:
+                    listener(event)
+                except Exception:
+                    logger.exception("workflow promotion listener failed")
+        return observation, finding
+
     @staticmethod
     def _contains_provenance_root(value: Any, expected: str) -> bool:
         if value == expected:
@@ -1392,6 +1602,45 @@ class EvidenceLedger:
                 ):
                     raise ValueError("capability active proof evidence does not match")
                 continue
+            if observation.tool.name == "workflow_effect_evidence":
+                from core.behavior.workflow_effect_evidence import (
+                    WorkflowEffectEvidence,
+                    evaluate_workflow_effect_eligibility,
+                )
+
+                evidence_value = receipt.outcome.get("workflow_effect_evidence")
+                if not isinstance(evidence_value, Mapping):
+                    raise ValueError("workflow active proof evidence is missing")
+                try:
+                    evidence = WorkflowEffectEvidence.from_mapping(evidence_value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("workflow active proof evidence is invalid") from exc
+                blob = self.cas.load(observation.blob_hash)
+                journal = self._repository.load_workflow_effect_admission(receipt.receipt_id)
+                if (
+                    blob != evidence.to_json_bytes()
+                    or evidence.source_receipt_id != receipt.receipt_id
+                    or evidence.assessment_session_id != observation.session_id
+                    or evidence.identity_binding != observation.identity.to_dict()
+                    or proof.provenance_root != evidence.evidence_root
+                    or not evaluate_workflow_effect_eligibility(evidence).eligible
+                    or journal is None
+                    or journal["admission_id"] != evidence.execution_admission_ref
+                    or journal["session_id"] != evidence.assessment_session_id
+                    or journal["source_receipt_id"] != evidence.source_receipt_id
+                    or journal["source_fingerprint"] != receipt.fingerprint
+                    or journal["target_origin"] != evidence.target_origin
+                    or journal["identity_data"] != evidence.identity_binding
+                    or journal["specification_id"] != evidence.specification_id
+                    or journal["transport_specification_id"] != evidence.transport_specification_id
+                    or journal["candidate_id"] != evidence.candidate_id
+                    or journal["producer_data"] != evidence.producer_identity
+                    or journal.get("evidence_root") not in {None, evidence.evidence_root}
+                    or journal.get("cas_blob_hash") not in {None, observation.blob_hash}
+                    or journal.get("observation_id") not in {None, observation.id}
+                ):
+                    raise ValueError("workflow active proof evidence does not match")
+                continue
             if not self._contains_provenance_root(
                 receipt.outcome, proof.provenance_root
             ):
@@ -1472,6 +1721,76 @@ class EvidenceLedger:
                 or journal["finding_id"] != finding.id
             ):
                 raise ValueError("capability replay promotion journal mismatch")
+
+    def _validate_workflow_invariant_finding(
+        self,
+        finding: Finding,
+        observations: List[Optional[Observation]],
+        *,
+        require_committed_journal: bool = True,
+    ) -> None:
+        """Validate the workflow claim on admission and every restore."""
+
+        workflow_observations = [
+            item
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+            and item.tool.name == "workflow_effect_evidence"
+        ]
+        declared = finding.metadata.get("finding_class") == (
+            "workflow_invariant_violation_v1"
+        )
+        if not declared and not workflow_observations:
+            return
+        if not declared or len(workflow_observations) != 1:
+            raise ValueError("workflow invariant finding class is invalid")
+        if (
+            len(observations) != 1
+            or not isinstance(observations[0], ObservationEnvelope)
+            or observations[0].tool.name != "workflow_effect_evidence"
+            or len(finding.active_proof) != 1
+        ):
+            raise ValueError("workflow invariant finding evidence shape is invalid")
+        observation = observations[0]
+        blob = self.cas.load(observation.blob_hash)
+        if blob is None:
+            raise ValueError("workflow invariant finding evidence is unavailable")
+        from core.behavior.workflow_effect_evidence import (
+            WorkflowEffectEvidence,
+            workflow_invariant_finding_material,
+        )
+
+        try:
+            evidence = WorkflowEffectEvidence.from_json_bytes(blob)
+            material = workflow_invariant_finding_material(evidence)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("workflow invariant finding evidence is invalid") from exc
+        if (
+            finding.title != material["title"]
+            or finding.severity != material["severity"]
+            or finding.description != material["description"]
+            or finding.remediation != material["remediation"]
+            or finding.confirmation_level != material["confirmation_level"]
+            or finding.metadata != material["metadata"]
+            or finding.citations != [Citation(observation_id=observation.id)]
+            or finding.active_proof[0].observation_id != observation.id
+            or finding.active_proof[0].receipt_id != evidence.source_receipt_id
+            or finding.active_proof[0].provenance_root != evidence.evidence_root
+        ):
+            raise ValueError("workflow invariant finding template mismatch")
+        if require_committed_journal:
+            journal = self._repository.load_workflow_effect_admission(
+                evidence.source_receipt_id
+            )
+            if (
+                journal is None
+                or journal["state"] != "promoted"
+                or journal["evidence_root"] != evidence.evidence_root
+                or journal["cas_blob_hash"] != observation.blob_hash
+                or journal["observation_id"] != observation.id
+                or journal["finding_id"] != finding.id
+            ):
+                raise ValueError("workflow invariant promotion journal mismatch")
 
     def evaluate_and_promote(self, proposal: FindingProposal) -> Optional[Finding]:
         """

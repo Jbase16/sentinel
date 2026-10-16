@@ -4353,6 +4353,38 @@ def redacted_capability_effect_evidence_outcome(
     }
 
 
+def redacted_workflow_effect_evidence_outcome(
+    response: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Persist the strict inner R5E9 workflow source without candidate authority."""
+
+    from core.behavior.workflow_effect_evidence import WorkflowEffectEvidence
+
+    if response.get("kind") != "workflow_invariant_effect_one_click":
+        raise ReceiptStoreError("workflow effect receipt kind is invalid")
+    evidence_value = response.get("workflow_effect_evidence")
+    if not isinstance(evidence_value, Mapping):
+        raise ReceiptStoreError("workflow effect receipt evidence is missing")
+    try:
+        evidence = WorkflowEffectEvidence.from_mapping(evidence_value)
+    except (TypeError, ValueError) as exc:
+        raise ReceiptStoreError(
+            "workflow effect receipt evidence is invalid"
+        ) from exc
+    status = evidence.oracle["correspondence"]
+    if response.get("status") != status:
+        raise ReceiptStoreError("workflow effect receipt status is inconsistent")
+    return {
+        "kind": "workflow_invariant_effect_one_click",
+        "status": status,
+        "workflow_effect_evidence": evidence.to_dict(),
+        "finding": None,
+        "finding_confirmed": False,
+        "promotion_authority": False,
+        "finding_authority": False,
+    }
+
+
 def redacted_capability_effect_orchestration_outcome(
     response: Mapping[str, Any],
 ) -> Dict[str, Any]:
@@ -4388,6 +4420,11 @@ def redacted_outcome(response: Mapping[str, Any]) -> Dict[str, Any]:
         and "capability_effect_evidence" in response
     ):
         return redacted_capability_effect_evidence_outcome(response)
+    if (
+        response.get("kind") == "workflow_invariant_effect_one_click"
+        and "workflow_effect_evidence" in response
+    ):
+        return redacted_workflow_effect_evidence_outcome(response)
     if response.get("kind") == "graph_bound_prerequisite_execution":
         return redacted_graph_bound_prerequisite_execution_outcome(response)
     if response.get("kind") == "role_protected_effect_execution":
@@ -4471,6 +4508,8 @@ def _redacted_stored_outcome(value: Mapping[str, Any]) -> Dict[str, Any]:
         return redacted_capability_effect_orchestration_outcome(value)
     if value.get("kind") == "capability_effect_one_click":
         return redacted_capability_effect_evidence_outcome(value)
+    if value.get("kind") == "workflow_invariant_effect_one_click":
+        return redacted_workflow_effect_evidence_outcome(value)
     if value.get("kind") == "graph_bound_prerequisite_execution":
         return redacted_graph_bound_prerequisite_execution_outcome(value)
     if value.get("kind") == "role_protected_effect_execution":
