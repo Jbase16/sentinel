@@ -1014,6 +1014,14 @@ class EvidenceLedger:
             raise ValueError(
                 "capability effect evidence requires typed replay-leak admission"
             )
+        if any(
+            item.tool.name == "workflow_effect_evidence"
+            for item in observations
+            if isinstance(item, ObservationEnvelope)
+        ):
+            raise ValueError(
+                "workflow effect evidence requires typed workflow-invariant admission"
+            )
         normalized_active_proof = sorted(
             active_proof or [],
             key=lambda item: json.dumps(asdict(item), sort_keys=True),

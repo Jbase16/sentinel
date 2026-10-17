@@ -27,6 +27,7 @@ from core.epistemic.ledger import (
     ActiveProofCitation,
     Citation,
     ConfirmationLevel,
+    EventType,
     EvidenceLedger,
 )
 from core.foundry.authorization import create_envelope
@@ -837,3 +838,54 @@ def test_cross_session_active_proof_is_rejected(
 
     assert ledger.session_read_model("session-a").findings == ()
     assert ledger.session_read_model("session-b").findings == ()
+
+
+def test_workflow_effect_evidence_observation_requires_typed_admission(
+    isolated_runtime: SentinelConfig,
+) -> None:
+    ledger = EvidenceLedger(isolated_runtime, receipt_store=_ReceiptIndex({}))
+    session_id = "session-workflow-fence"
+    operation = _operation(session_id)
+    observation = ledger.record_canonical_observation(
+        tool_name="workflow_effect_evidence",
+        tool_args=["behavioral-" + "3" * 64],
+        target=f"{ORIGIN}/notes/1",
+        raw_output=b'{"id":"owned-note"}',
+        identity=_identity(session_id),
+        operation_family=operation.operation_family,
+        operation_instance=operation.operation_instance,
+    )
+    entities_before, events_before = ledger._repository.load()
+    event_ids_before = tuple(item.id for item in ledger._event_log)
+
+    with pytest.raises(
+        ValueError,
+        match="workflow effect evidence requires typed workflow-invariant admission",
+    ):
+        ledger.promote_canonical_finding(
+            title="Untyped workflow claim",
+            severity="HIGH",
+            citations=[Citation(observation_id=observation.id)],
+            description="Must require typed workflow-invariant admission.",
+            confirmation_level=ConfirmationLevel.CONFIRMED.value,
+            active_proof=[
+                ActiveProofCitation(
+                    observation_id=observation.id,
+                    receipt_id="behavioral-" + "3" * 64,
+                    provenance_root=PROVENANCE_ROOT,
+                )
+            ],
+        )
+
+    assert ledger.session_read_model(session_id).findings == ()
+    assert ledger._findings == {}
+    assert tuple(item.id for item in ledger._event_log) == event_ids_before
+    assert all(
+        item.event_type is not EventType.PROMOTED for item in ledger._event_log
+    )
+    entities_after, events_after = ledger._repository.load()
+    assert (entities_after, events_after) == (entities_before, events_before)
+    assert all(entity["kind"] != "finding" for entity in entities_after)
+    assert all(
+        event["event_type"] != EventType.PROMOTED.value for event in events_after
+    )
