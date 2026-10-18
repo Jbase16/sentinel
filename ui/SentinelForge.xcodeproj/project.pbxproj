@@ -44,6 +44,7 @@
 		9E5726936E260B4FCC10DF3F /* PTYClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7C910B6EF70385F75EC7BA /* PTYClient.swift */; };
 		A38739FF3B95F3B1102BA3C9 /* EventStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */; };
 		A69DC389458BE83CA02318CC /* BackendSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BB1DE1E3EE6C98ABFF1F47D /* BackendSettingsView.swift */; };
+		A9284E265CAECAAC9C94F899 /* GhostCaptureOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D794AEB46E8CBB50FDDB1E8 /* GhostCaptureOrigin.swift */; };
 		A96E61E2762FD4FD4E275E4B /* ActionRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB064037D50A118943B7AB93 /* ActionRequestView.swift */; };
 		AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */; };
 		AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230001B3E6349D392B2FE004 /* AppReducer.swift */; };
@@ -75,6 +76,7 @@
 
 /* Begin PBXFileReference section */
 		067CE6DABF3050B27FC85508 /* core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = core; path = ../core; sourceTree = SOURCE_ROOT; };
+		0D794AEB46E8CBB50FDDB1E8 /* GhostCaptureOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostCaptureOrigin.swift; sourceTree = "<group>"; };
 		1269D7C35447A70FD8D1D9FB /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		13132A4BDB652874A328C71B /* SentinelForgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelForgeApp.swift; sourceTree = "<group>"; };
 		13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalAlertBanners.swift; sourceTree = "<group>"; };
@@ -383,6 +385,7 @@
 				230001B3E6349D392B2FE004 /* AppReducer.swift */,
 				A0AEE541E4462F9FE3D09CB8 /* BackendState.swift */,
 				7E340539956225F2B0A21565 /* ErrorClassifier.swift */,
+				0D794AEB46E8CBB50FDDB1E8 /* GhostCaptureOrigin.swift */,
 				A442363A1B53E54628FA1C71 /* GhostJavaScript.swift */,
 				D45E68340782F5F007892DD6 /* HelixError.swift */,
 				946E142FF6202E3202EA5B2D /* RetryBackoff.swift */,
@@ -500,6 +503,7 @@
 				8226DC9F780680AC29BC0FDB /* GhostAPIClient.swift in Sources */,
 				56F1D7C10092F352980169CD /* GhostBrowserWindow.swift in Sources */,
 				C97C66E3ACF3313E004CBE13 /* GhostCaptureBrowser.swift in Sources */,
+				A9284E265CAECAAC9C94F899 /* GhostCaptureOrigin.swift in Sources */,
 				FAF5F3644A98AEA223E96513 /* GhostConsoleView.swift in Sources */,
 				AE965B116019EB5B7BCB4BBE /* GhostJavaScript.swift in Sources */,
 				C4EAE38493520E1B56033FEE /* GraphModels.swift in Sources */,

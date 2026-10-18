@@ -3,25 +3,7 @@ import CryptoKit
 import WebKit
 
 public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
-    private struct CaptureOrigin: Equatable {
-        let scheme: String
-        let host: String
-        let port: Int
-
-        init?(url: URL) {
-            guard let rawScheme = url.scheme?.lowercased(),
-                  ["http", "https"].contains(rawScheme),
-                  let rawHost = url.host?.lowercased() else { return nil }
-            var normalizedHost = rawHost
-            while normalizedHost.hasSuffix(".") {
-                normalizedHost.removeLast()
-            }
-            guard !normalizedHost.isEmpty else { return nil }
-            scheme = rawScheme
-            host = normalizedHost
-            port = url.port ?? (rawScheme == "https" ? 443 : 80)
-        }
-    }
+    private typealias CaptureOrigin = GhostCaptureOrigin
 
     private func canonicalInteractionURL(
         _ identity: String,
@@ -1856,7 +1838,17 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
     
     public func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        if message.name == "sndRecordingBridge", let dict = message.body as? [String: Any] {
+        guard message.name == "sndRecordingBridge" else { return }
+        // The capture scripts run in subframes; only the current page's origin
+        // may report their activity through the native bridge.
+        let frameOrigin = message.frameInfo.securityOrigin
+        guard GhostCaptureOrigin.admitsBridgeFrame(
+            pageURL: webView.url,
+            frameScheme: frameOrigin.protocol,
+            frameHost: frameOrigin.host,
+            framePort: frameOrigin.port
+        ) else { return }
+        if let dict = message.body as? [String: Any] {
             // Forward back to python backend
             DriverBridgeClient.shared.sendSpontaneousEvent(
                 event: "recorded_action",
