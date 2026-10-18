@@ -25,14 +25,16 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import os
 
 # 🧠 CONFIGURATION
-# Resolve paths relative to the project root
-# Script is in scripts/, so root is one level up
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Script is in tools/ops/, two levels below the project root.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 
 MODEL_PATH = os.path.join(MODELS_DIR, "gemma-2-9b-it-sft-fused-4bit")
 ADAPTER_PATH = os.path.join(MODELS_DIR, "surgical_adapter")
 PORT = 8009
+MAX_BODY_BYTES = int(os.environ.get("SENTINEL_BRAIN_MAX_BODY_BYTES", "1048576"))
+if MAX_BODY_BYTES <= 0:
+    raise ValueError("SENTINEL_BRAIN_MAX_BODY_BYTES must be positive")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("SentinelBrain")
@@ -81,16 +83,30 @@ class SentinelHandler(BaseHTTPRequestHandler):
         """Function do_POST."""
         # Conditional branch.
         if self.path == "/api/generate":
-            ensure_model_loaded()
-            from mlx_lm import generate
-            
-            content_length = int(self.headers['Content-Length'])
+            length_header = self.headers.get("Content-Length")
+            if length_header is None:
+                self.send_error(411, "Content-Length required")
+                return
+            try:
+                content_length = int(length_header)
+            except ValueError:
+                self.send_error(400, "Invalid Content-Length")
+                return
+            if content_length < 0:
+                self.send_error(400, "Invalid Content-Length")
+                return
+            if content_length > MAX_BODY_BYTES:
+                self.send_error(413, "Request body too large")
+                self.close_connection = True
+                return
             post_data = self.rfile.read(content_length)
             
             try:
                 data = json.loads(post_data)
                 prompt = data.get("prompt", "")
                 system = data.get("system", "")
+                ensure_model_loaded()
+                from mlx_lm import generate
                 
                 # Combine System + User into Gemma Format
                 full_prompt = f"<start_of_turn>user\n{system}\n\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
@@ -121,7 +137,7 @@ class SentinelHandler(BaseHTTPRequestHandler):
 
 def run(server_class=HTTPServer, handler_class=SentinelHandler, port=PORT):
     """Function run."""
-    server_address = ('', port)
+    server_address = ('127.0.0.1', port)
     httpd = server_class(server_address, handler_class)
     logger.info(f"🚀 Sentinel Brain active at http://localhost:{port}")
     httpd.serve_forever()
