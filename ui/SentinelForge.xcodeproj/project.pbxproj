@@ -50,7 +50,6 @@
 		AF8160EFA180077F6DF5E81E /* ToolMetadataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */; };
 		B1BD00E0CAE513A6167E414A /* xterm-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = FC00BAB0D29801A84911E481 /* xterm-LICENSE.txt */; };
 		B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C303CDE894C92523DAC01B0A /* ToolsBankView.swift */; };
-		B26A9F685FC70AC9C6D5D1A0 /* LedgerStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 008A72B75EBAE4A0EB5BB1FE /* LedgerStreamClient.swift */; };
 		B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE68CC8F07C4B289363C486 /* CortexStream.swift */; };
 		B4BB52D55A287ED8069CD66A /* index.html in Resources */ = {isa = PBXBuildFile; fileRef = 66511897847C968BFC7F8D7A /* index.html */; };
 		BA612DD4500BA86414972F25 /* HelixError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45E68340782F5F007892DD6 /* HelixError.swift */; };
@@ -74,7 +73,6 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		008A72B75EBAE4A0EB5BB1FE /* LedgerStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerStreamClient.swift; sourceTree = "<group>"; };
 		067CE6DABF3050B27FC85508 /* core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = core; path = ../core; sourceTree = SOURCE_ROOT; };
 		1269D7C35447A70FD8D1D9FB /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		13132A4BDB652874A328C71B /* SentinelForgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelForgeApp.swift; sourceTree = "<group>"; };
@@ -206,7 +204,6 @@
 				2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */,
 				86E92E19E923FA9F4CEDD71B /* GhostAPIClient.swift */,
 				A6E965EAA183C95650BC9FC8 /* GhostCaptureBrowser.swift */,
-				008A72B75EBAE4A0EB5BB1FE /* LedgerStreamClient.swift */,
 				F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */,
 				8318D0791A1940E626D7A7ED /* ModelRouter.swift */,
 				5F7C910B6EF70385F75EC7BA /* PTYClient.swift */,
@@ -507,7 +504,6 @@
 				BA612DD4500BA86414972F25 /* HelixError.swift in Sources */,
 				31F9071AEE2F7FBEBD7D9A36 /* IdentityStatusView.swift in Sources */,
 				84565490131B06C520A4801A /* LLMService.swift in Sources */,
-				B26A9F685FC70AC9C6D5D1A0 /* LedgerStreamClient.swift in Sources */,
 				120436A0BDDDBF24C31F8D30 /* MainWindowView.swift in Sources */,
 				5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */,
 				9AD2014C3C59940C44A7233D /* NetworkGraphView.swift in Sources */,
