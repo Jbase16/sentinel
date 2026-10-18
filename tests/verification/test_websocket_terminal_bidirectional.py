@@ -95,45 +95,46 @@ def test_terminal_control_keystrokes_are_preserved():
 
 def test_ui_terminal_connects_to_pty_endpoint():
     """
-    INVARIANT: UI terminal must connect to /ws/pty (bidirectional), not /ws/terminal (read-only).
+    INVARIANT: the UI terminal must connect to /ws/pty (bidirectional), not /ws/terminal (read-only).
 
-    This verifies the Swift/HTML UI is using the correct endpoint.
+    The PTY socket is owned by the Swift bridge (TerminalView/PTYClient); the webview only
+    relays input/output through the native message bridge, so the endpoint lives in Swift.
     """
-    # Check HTML terminal
-    html_path = Path(__file__).parent.parent.parent / "ui" / "Sources" / "Resources" / "terminal" / "index.html"
+    swift_path = (
+        Path(__file__).parent.parent.parent
+        / "ui" / "Sources" / "Views" / "Navigation" / "TerminalView.swift"
+    )
+    assert swift_path.exists(), "TerminalView.swift not found"
+    swift = swift_path.read_text()
 
-    if html_path.exists():
-        html_content = html_path.read_text()
-
-        # Must connect to /ws/pty
-        assert "/ws/pty" in html_content, (
-            "Terminal HTML doesn't connect to /ws/pty!"
-        )
-
-        # Must NOT connect to /ws/terminal (read-only)
-        assert "/ws/terminal" not in html_content or html_content.count("/ws/pty") > html_content.count("/ws/terminal"), (
-            "Terminal HTML connects to wrong endpoint!"
-        )
+    assert "/ws/pty" in swift, "Swift terminal bridge doesn't connect to /ws/pty!"
+    assert (
+        "/ws/terminal" not in swift
+        or swift.count("/ws/pty") > swift.count("/ws/terminal")
+    ), "Swift terminal bridge connects to the wrong endpoint!"
 
 
 def test_ui_terminal_sends_keystrokes():
     """
-    INVARIANT: UI must send keystrokes to server.
+    INVARIANT: the UI must send keystrokes to the server.
 
-    xterm.js provides term.onData() event for keystrokes.
+    The webview forwards xterm's onData to the native PTY bridge; Swift's PTYClient writes
+    them to /ws/pty. (The browser no longer owns the socket, so there is no JS ws.send.)
     """
-    html_path = Path(__file__).parent.parent.parent / "ui" / "Sources" / "Resources" / "terminal" / "index.html"
+    html_path = (
+        Path(__file__).parent.parent.parent
+        / "ui" / "Sources" / "Resources" / "terminal" / "index.html"
+    )
 
     if html_path.exists():
         html_content = html_path.read_text()
 
-        # Verify keystroke handling
         assert "onData" in html_content or "term.on" in html_content, (
             "Terminal doesn't register keystroke handler!"
         )
 
-        assert "ws.send" in html_content, (
-            "Terminal doesn't send data to WebSocket!"
+        assert "messageHandlers.pty.postMessage" in html_content, (
+            "Terminal doesn't forward keystrokes to the native PTY bridge!"
         )
 
 
