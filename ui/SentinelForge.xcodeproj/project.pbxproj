@@ -67,6 +67,7 @@
 		DBAB5790AC80CE69F7F453E4 /* BountyReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59070AC06A493619616984F /* BountyReportView.swift */; };
 		E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1614A34830DE729E55890F6 /* ScanControlView.swift */; };
 		F1D02E19B9E5B252F227CA09 /* GraphRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */; };
+		F28E120B9B614ECC027E5354 /* SecureAppLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AF192DC24E57DCCE1E4AF8E /* SecureAppLog.swift */; };
 		F2A6940951134C1E794F738A /* xterm-addon-fit-0.8.0.js in Resources */ = {isa = PBXBuildFile; fileRef = AF0172A8FADF2F5600374454 /* xterm-addon-fit-0.8.0.js */; };
 		FAF5F3644A98AEA223E96513 /* GhostConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9D7718A76376AF130F1182 /* GhostConsoleView.swift */; };
 		FB54B31E033C572BFA666FB3 /* AnyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA4C5DC1C91D1C3867752C8 /* AnyCodable.swift */; };
@@ -76,6 +77,7 @@
 
 /* Begin PBXFileReference section */
 		067CE6DABF3050B27FC85508 /* core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = core; path = ../core; sourceTree = SOURCE_ROOT; };
+		0AF192DC24E57DCCE1E4AF8E /* SecureAppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureAppLog.swift; sourceTree = "<group>"; };
 		0D794AEB46E8CBB50FDDB1E8 /* GhostCaptureOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostCaptureOrigin.swift; sourceTree = "<group>"; };
 		1269D7C35447A70FD8D1D9FB /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		13132A4BDB652874A328C71B /* SentinelForgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentinelForgeApp.swift; sourceTree = "<group>"; };
@@ -390,6 +392,7 @@
 				D45E68340782F5F007892DD6 /* HelixError.swift */,
 				946E142FF6202E3202EA5B2D /* RetryBackoff.swift */,
 				1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */,
+				0AF192DC24E57DCCE1E4AF8E /* SecureAppLog.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -525,6 +528,7 @@
 				4A1FF7DA7509E33F640B70A5 /* RetryBackoff.swift in Sources */,
 				E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */,
 				AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */,
+				F28E120B9B614ECC027E5354 /* SecureAppLog.swift in Sources */,
 				14F802FA073267C118AFB865 /* SentinelAPIClient.swift in Sources */,
 				BE954D7AE0662CD4A638C666 /* SentinelForgeApp.swift in Sources */,
 				80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */,

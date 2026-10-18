@@ -5,16 +5,7 @@ import AppKit
 
 func logToSnd(_ message: String) {
     print(message)
-    if let data = (message + "\n").data(using: .utf8) {
-        let url = URL(fileURLWithPath: "/tmp/snd_swift.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            handle.closeFile()
-        } else {
-            try? data.write(to: url)
-        }
-    }
+    SecureAppLog.append(message, dataDirectory: SentinelRuntimePaths.dataDirectory)
 }
 
 public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocketDelegate {
