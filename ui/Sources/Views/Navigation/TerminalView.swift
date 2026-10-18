@@ -23,7 +23,6 @@ struct TerminalView: NSViewRepresentable {
   /// Function makeNSView.
   func makeNSView(context: Context) -> WKWebView {
     let config = WKWebViewConfiguration()
-    config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
 
     let userContentController = WKUserContentController()
     userContentController.add(context.coordinator, name: "pty")
@@ -32,67 +31,11 @@ struct TerminalView: NSViewRepresentable {
     let webView = WKWebView(frame: .zero, configuration: config)
     context.coordinator.webView = webView
 
-    // Embedded HTML to avoid bundle resource issues
-    let html = """
-      <!doctype html>
-      <html>
-        <head>
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
-          <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-          <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
-          <style>
-            body { margin: 0; padding: 0; background: #1e1e1e; height: 100vh; overflow: hidden; }
-            #terminal { width: 100%; height: 100%; }
-          </style>
-        </head>
-        <body>
-          <div id="terminal"></div>
-          <script>
-            const term = new Terminal({
-              theme: { background: '#1e1e1e' },
-              fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-              fontSize: 14,
-              cursorBlink: true
-            });
-            const fitAddon = new FitAddon.FitAddon();
-            term.loadAddon(fitAddon);
-            term.open(document.getElementById('terminal'));
-            fitAddon.fit();
-
-            // Bridge: Send Input to Swift
-            term.onData(data => {
-              window.webkit.messageHandlers.pty.postMessage({
-                  type: "input",
-                  data: data
-              });
-            });
-
-            window.addEventListener('resize', () => {
-              // Debounce resize events
-              clearTimeout(window.resizeTimer);
-              window.resizeTimer = setTimeout(() => {
-                 fitAddon.fit();
-                 window.webkit.messageHandlers.pty.postMessage({
-                     type: "resize",
-                     cols: term.cols,
-                     rows: term.rows
-                 });
-              }, 100);
-            });
-
-            // Bridge: Receive Output from Swift
-            window.receiveOutput = function(text) {
-              term.write(text);
-            }
-            
-            // Initial connect signal
-            window.webkit.messageHandlers.pty.postMessage({type: "ready"});
-          </script>
-        </body>
-      </html>
-      """
-
-    webView.loadHTMLString(html, baseURL: nil)
+    if let htmlURL = Bundle.main.url(forResource: "index", withExtension: "html") {
+      webView.loadFileURL(htmlURL, allowingReadAccessTo: htmlURL.deletingLastPathComponent())
+    } else {
+      webView.loadHTMLString("<p>Terminal resources are unavailable.</p>", baseURL: nil)
+    }
 
     // Connect PTY Client logic is in Coordinator
     return webView

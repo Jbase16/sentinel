@@ -19,6 +19,7 @@
 		31F9071AEE2F7FBEBD7D9A36 /* IdentityStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA5A2EAB8B8B727F4AF90C39 /* IdentityStatusView.swift */; };
 		3B4CFF3A62200F95F03F2377 /* FindingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E37493145D7E9C47F0B89B /* FindingModels.swift */; };
 		41D448283BD2E10C0EEE06A0 /* ErrorClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E340539956225F2B0A21565 /* ErrorClassifier.swift */; };
+		436D631BCEDF63548A801704 /* xterm-5.3.0.css in Resources */ = {isa = PBXBuildFile; fileRef = AA23473DE392B727AFD78D95 /* xterm-5.3.0.css */; };
 		442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */ = {isa = PBXBuildFile; fileRef = D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */; };
 		4A1FF7DA7509E33F640B70A5 /* RetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946E142FF6202E3202EA5B2D /* RetryBackoff.swift */; };
 		4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1FB66EC2747EC1973D336E /* DashboardView.swift */; };
@@ -26,6 +27,8 @@
 		5BF1C14DFCA00863B476778E /* OperationalAlertBanners.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */; };
 		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
 		6ACAA9191D686B0F50DE6548 /* OperationalStateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 882050DB17B4CE0CB0263245 /* OperationalStateModels.swift */; };
+		6F0FD49D6AADD9B60E8909FA /* VENDOR.md in Resources */ = {isa = PBXBuildFile; fileRef = AFD677B251701FB8C9878B74 /* VENDOR.md */; };
+		733AD9D1D8B389A298C93C1B /* xterm-addon-fit-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = CADED5811E187111070A6ABA /* xterm-addon-fit-LICENSE.txt */; };
 		74987EE4B7580B65E63446E7 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62409FA58DFFE1F4DBADB601 /* TerminalView.swift */; };
 		80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B8394185D36FC0D1095C1111 /* Shaders.metal */; };
 		8226DC9F780680AC29BC0FDB /* GhostAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E92E19E923FA9F4CEDD71B /* GhostAPIClient.swift */; };
@@ -45,6 +48,7 @@
 		AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */; };
 		AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230001B3E6349D392B2FE004 /* AppReducer.swift */; };
 		AF8160EFA180077F6DF5E81E /* ToolMetadataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */; };
+		B1BD00E0CAE513A6167E414A /* xterm-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = FC00BAB0D29801A84911E481 /* xterm-LICENSE.txt */; };
 		B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C303CDE894C92523DAC01B0A /* ToolsBankView.swift */; };
 		B26A9F685FC70AC9C6D5D1A0 /* LedgerStreamClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 008A72B75EBAE4A0EB5BB1FE /* LedgerStreamClient.swift */; };
 		B2B02F24B8BBCE6B7103DF29 /* CortexStream.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCE68CC8F07C4B289363C486 /* CortexStream.swift */; };
@@ -56,11 +60,13 @@
 		C4EDBDE9C6812EFA33977B44 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1269D7C35447A70FD8D1D9FB /* ChatView.swift */; };
 		C94EFAA35A0D3B712FC57FB6 /* GenerateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2629EBACF27C2661DD8B72E7 /* GenerateModels.swift */; };
 		C97C66E3ACF3313E004CBE13 /* GhostCaptureBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6E965EAA183C95650BC9FC8 /* GhostCaptureBrowser.swift */; };
+		CEBFD5F80F2CC174FDF1B17F /* xterm-5.3.0.js in Resources */ = {isa = PBXBuildFile; fileRef = 46AC02BA56E79091D4598CA2 /* xterm-5.3.0.js */; };
 		CED0A0C8A66B99389F601E4C /* DriverBridgeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E47F14AFA91EECE221531D6A /* DriverBridgeClient.swift */; };
 		D0C5750A70133A74C61FED34 /* FoundryAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC166B404EED51D85979004C /* FoundryAPIClient.swift */; };
 		DBAB5790AC80CE69F7F453E4 /* BountyReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F59070AC06A493619616984F /* BountyReportView.swift */; };
 		E75B45E5BB77A4B604D97732 /* ScanControlView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1614A34830DE729E55890F6 /* ScanControlView.swift */; };
 		F1D02E19B9E5B252F227CA09 /* GraphRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */; };
+		F2A6940951134C1E794F738A /* xterm-addon-fit-0.8.0.js in Resources */ = {isa = PBXBuildFile; fileRef = AF0172A8FADF2F5600374454 /* xterm-addon-fit-0.8.0.js */; };
 		FAF5F3644A98AEA223E96513 /* GhostConsoleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E9D7718A76376AF130F1182 /* GhostConsoleView.swift */; };
 		FB54B31E033C572BFA666FB3 /* AnyCodable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EA4C5DC1C91D1C3867752C8 /* AnyCodable.swift */; };
 		FD713260357E395BCDCB0682 /* BackendManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7308F0EA7AC9B332BAD2C77B /* BackendManager.swift */; };
@@ -81,6 +87,7 @@
 		2DBADD02037E358509CA4563 /* FoundryConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundryConsoleView.swift; sourceTree = "<group>"; };
 		3A57E58ABCFE5304C0257CA6 /* PressureGraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressureGraphModels.swift; sourceTree = "<group>"; };
 		3E61DA673B2F360C4460F9F9 /* NetworkGraphView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkGraphView.swift; sourceTree = "<group>"; };
+		46AC02BA56E79091D4598CA2 /* xterm-5.3.0.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "xterm-5.3.0.js"; sourceTree = "<group>"; };
 		493C6711EF03532E783C01F1 /* GraphModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphModels.swift; sourceTree = "<group>"; };
 		4A68494FDEACABC92B894B50 /* AuditFeedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditFeedView.swift; sourceTree = "<group>"; };
 		56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TierBadgeView.swift; sourceTree = "<group>"; };
@@ -107,7 +114,10 @@
 		A0AEE541E4462F9FE3D09CB8 /* BackendState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendState.swift; sourceTree = "<group>"; };
 		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
 		A6E965EAA183C95650BC9FC8 /* GhostCaptureBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostCaptureBrowser.swift; sourceTree = "<group>"; };
+		AA23473DE392B727AFD78D95 /* xterm-5.3.0.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = "xterm-5.3.0.css"; sourceTree = "<group>"; };
 		AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamClient.swift; sourceTree = "<group>"; };
+		AF0172A8FADF2F5600374454 /* xterm-addon-fit-0.8.0.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "xterm-addon-fit-0.8.0.js"; sourceTree = "<group>"; };
+		AFD677B251701FB8C9878B74 /* VENDOR.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = VENDOR.md; sourceTree = "<group>"; };
 		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
 		B28396B11B909875C4B8BB20 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		B8394185D36FC0D1095C1111 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
@@ -117,6 +127,7 @@
 		C303CDE894C92523DAC01B0A /* ToolsBankView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolsBankView.swift; sourceTree = "<group>"; };
 		C9621E8CBC929F4AEEBBC33A /* VerifyConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyConsoleView.swift; sourceTree = "<group>"; };
 		CA1FB66EC2747EC1973D336E /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
+		CADED5811E187111070A6ABA /* xterm-addon-fit-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "xterm-addon-fit-LICENSE.txt"; sourceTree = "<group>"; };
 		CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolMetadataModels.swift; sourceTree = "<group>"; };
 		D45E68340782F5F007892DD6 /* HelixError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HelixError.swift; sourceTree = "<group>"; };
 		D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = PressureShader.metal; sourceTree = "<group>"; };
@@ -127,6 +138,7 @@
 		F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMService.swift; sourceTree = "<group>"; };
 		F59070AC06A493619616984F /* BountyReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BountyReportView.swift; sourceTree = "<group>"; };
 		F6E914AE1A9757AE1CCF0849 /* VerifyAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VerifyAPIClient.swift; sourceTree = "<group>"; };
+		FC00BAB0D29801A84911E481 /* xterm-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "xterm-LICENSE.txt"; sourceTree = "<group>"; };
 		FEBD4BFB76B48DD1736FC1FA /* ChatBubbleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatBubbleView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -334,6 +346,12 @@
 			isa = PBXGroup;
 			children = (
 				66511897847C968BFC7F8D7A /* index.html */,
+				AFD677B251701FB8C9878B74 /* VENDOR.md */,
+				AA23473DE392B727AFD78D95 /* xterm-5.3.0.css */,
+				46AC02BA56E79091D4598CA2 /* xterm-5.3.0.js */,
+				AF0172A8FADF2F5600374454 /* xterm-addon-fit-0.8.0.js */,
+				CADED5811E187111070A6ABA /* xterm-addon-fit-LICENSE.txt */,
+				FC00BAB0D29801A84911E481 /* xterm-LICENSE.txt */,
 			);
 			path = terminal;
 			sourceTree = "<group>";
@@ -440,7 +458,13 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6F0FD49D6AADD9B60E8909FA /* VENDOR.md in Resources */,
 				B4BB52D55A287ED8069CD66A /* index.html in Resources */,
+				436D631BCEDF63548A801704 /* xterm-5.3.0.css in Resources */,
+				CEBFD5F80F2CC174FDF1B17F /* xterm-5.3.0.js in Resources */,
+				B1BD00E0CAE513A6167E414A /* xterm-LICENSE.txt in Resources */,
+				F2A6940951134C1E794F738A /* xterm-addon-fit-0.8.0.js in Resources */,
+				733AD9D1D8B389A298C93C1B /* xterm-addon-fit-LICENSE.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
