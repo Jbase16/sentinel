@@ -199,7 +199,8 @@ def _gather_session_data(conn: sqlite3.Connection, sid: str) -> Optional[Dict[st
     if _table_exists(conn, "decisions"):
         decisions = conn.execute(
             "SELECT id, event_sequence, type, chosen, reason FROM decisions "
-            "ORDER BY event_sequence ASC LIMIT 50"
+            "WHERE session_id=? ORDER BY event_sequence ASC LIMIT 50",
+            (sid,),
         ).fetchall()
 
     edge_count = 0

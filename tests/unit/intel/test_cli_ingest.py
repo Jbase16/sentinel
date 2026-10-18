@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import stat
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -218,6 +219,23 @@ class TestSuccessfulIngest:
         assert (tmp_path / "example-scope.txt").exists()
         assert (tmp_path / "example-personas.json").exists()
         assert (tmp_path / "example-restrictions.json").exists()
+        for path in tmp_path.iterdir():
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    async def test_restricts_existing_output_before_rewriting(self, tmp_path):
+        path = tmp_path / "example-personas.json"
+        path.write_text("old data")
+        path.chmod(0o644)
+        scope = _program_scope(handle="example")
+        with patch.object(
+            sentinel_ingest, "default_resolver",
+            return_value=_FakeResolver([_FakeExtractor(returns=scope)]),
+        ):
+            args = _make_args(program="fake:x", out_dir=tmp_path, skip_verify=True)
+            code = await sentinel_ingest.run(args)
+        assert code == sentinel_ingest.EXIT_OK
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert path.read_text() != "old data"
 
     async def test_program_scope_json_is_valid(self, tmp_path):
         scope = _program_scope(handle="rt")

@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,6 +70,14 @@ EXIT_GENERIC_ERROR = 1
 EXIT_BLOCKED_BY_RESTRICTION = 2
 EXIT_OPERATOR_CANCELLED = 3
 EXIT_UNRESOLVED = 4
+
+
+def _write_private_text(path: Path, content: str) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.truncate()
+        stream.write(content)
 
 
 async def run(args: argparse.Namespace) -> int:
@@ -161,22 +170,22 @@ async def run(args: argparse.Namespace) -> int:
 
     # 5a. Full ProgramScope (for cache / replay).
     program_scope_path = out_dir / f"{handle}-program-scope.json"
-    program_scope_path.write_text(scope.to_json())
+    _write_private_text(program_scope_path, scope.to_json())
     files_written.append(program_scope_path)
 
     # 5b. Scope file.
     scope_path = out_dir / f"{handle}-scope.txt"
-    scope_path.write_text(compile_scope_file(scope))
+    _write_private_text(scope_path, compile_scope_file(scope))
     files_written.append(scope_path)
 
     # 5c. Personas file.
     personas_path = out_dir / f"{handle}-personas.json"
-    personas_path.write_text(compile_personas_json(scope))
+    _write_private_text(personas_path, compile_personas_json(scope))
     files_written.append(personas_path)
 
     # 5d. Restrictions file.
     restrictions_path = out_dir / f"{handle}-restrictions.json"
-    restrictions_path.write_text(compile_restrictions_json(scope))
+    _write_private_text(restrictions_path, compile_restrictions_json(scope))
     files_written.append(restrictions_path)
 
     # ─── 6. Read back the restrictions and surface enforcement preview ──
