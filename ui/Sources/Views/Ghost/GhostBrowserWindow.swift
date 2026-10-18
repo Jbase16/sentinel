@@ -563,32 +563,12 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     
     // MARK: - Selectors & Eval
     
-    private func buildJsSelector(_ selector: [String: String]) -> String {
-        let by = selector["by"] ?? ""
-        let val = selector["value"] ?? ""
-        
-        switch by {
-        case "css":
-            return "document.querySelector('\(val)')"
-        case "name":
-            return "document.querySelector('[name=\"\(val)\"]')"
-        case "placeholder":
-            return "Array.from(document.querySelectorAll('input,textarea')).find(el => el.placeholder === '\(val)')"
-        case "text":
-            return """
-            Array.from(document.querySelectorAll('*')).reverse().find(el => {
-                if (el.textContent.trim() !== '\(val)') return false;
-                let rect = el.getBoundingClientRect();
-                return rect.width > 0 && rect.height > 0;
-            })
-            """
-        default:
-            return "document.querySelector('\(val)')"
-        }
+    private func buildJsSelector(_ selector: [String: String]) throws -> String {
+        try GhostJavaScript.selector(selector)
     }
     
     private func getBoundingRect(selector: [String: String], timeoutS: TimeInterval = 10.0) async throws -> CGRect {
-        let jsSelector = buildJsSelector(selector)
+        let jsSelector = try buildJsSelector(selector)
         let js = """
         (function() {
             var el = \(jsSelector);
@@ -676,7 +656,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
     
     public func fill(selector: [String: String], value: String) async throws {
-        let jsSelector = buildJsSelector(selector)
+        let jsSelector = try buildJsSelector(selector)
         var focused = false
         for attempt in 1...3 {
             // Keep focus acquisition physical.  A busy WKWebView can process
@@ -744,7 +724,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
     }
     
     public func extract(selector: [String: String], mode: String) async throws -> String {
-        let jsSelector = buildJsSelector(selector)
+        let jsSelector = try buildJsSelector(selector)
         var js = ""
         if mode == "text" {
             js = "(\(jsSelector)).textContent"
@@ -752,7 +732,7 @@ public class GhostBrowserWindow: NSWindow, WKNavigationDelegate, WKScriptMessage
             js = "(\(jsSelector)).value"
         } else if mode.starts(with: "attr:") {
             let attr = String(mode.dropFirst(5))
-            js = "(\(jsSelector)).getAttribute('\(attr)')"
+            js = "(\(jsSelector)).getAttribute(\(try GhostJavaScript.stringLiteral(attr)))"
         } else {
             js = "(\(jsSelector)).textContent"
         }

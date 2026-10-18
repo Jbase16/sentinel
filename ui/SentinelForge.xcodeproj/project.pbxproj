@@ -47,6 +47,7 @@
 		A96E61E2762FD4FD4E275E4B /* ActionRequestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB064037D50A118943B7AB93 /* ActionRequestView.swift */; };
 		AB8FD5D06E719FC5A93C0A44 /* ScanProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */; };
 		AE2C2769FC822A34B4C92CB1 /* AppReducer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230001B3E6349D392B2FE004 /* AppReducer.swift */; };
+		AE965B116019EB5B7BCB4BBE /* GhostJavaScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = A442363A1B53E54628FA1C71 /* GhostJavaScript.swift */; };
 		AF8160EFA180077F6DF5E81E /* ToolMetadataModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDA17BE4D58A8FE361029BE7 /* ToolMetadataModels.swift */; };
 		B1BD00E0CAE513A6167E414A /* xterm-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = FC00BAB0D29801A84911E481 /* xterm-LICENSE.txt */; };
 		B22F980AC2493CBC402F5BA2 /* ToolsBankView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C303CDE894C92523DAC01B0A /* ToolsBankView.swift */; };
@@ -111,6 +112,7 @@
 		9F23349083792B008C4E1131 /* GhostBrowserWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostBrowserWindow.swift; sourceTree = "<group>"; };
 		A0AEE541E4462F9FE3D09CB8 /* BackendState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendState.swift; sourceTree = "<group>"; };
 		A19E9F4E50E60ADC4DBDE5B7 /* GraphRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphRenderer.swift; sourceTree = "<group>"; };
+		A442363A1B53E54628FA1C71 /* GhostJavaScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostJavaScript.swift; sourceTree = "<group>"; };
 		A6E965EAA183C95650BC9FC8 /* GhostCaptureBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostCaptureBrowser.swift; sourceTree = "<group>"; };
 		AA23473DE392B727AFD78D95 /* xterm-5.3.0.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = "xterm-5.3.0.css"; sourceTree = "<group>"; };
 		AA7A4E2BDBAF9FC290B68C79 /* EventStreamClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStreamClient.swift; sourceTree = "<group>"; };
@@ -381,6 +383,7 @@
 				230001B3E6349D392B2FE004 /* AppReducer.swift */,
 				A0AEE541E4462F9FE3D09CB8 /* BackendState.swift */,
 				7E340539956225F2B0A21565 /* ErrorClassifier.swift */,
+				A442363A1B53E54628FA1C71 /* GhostJavaScript.swift */,
 				D45E68340782F5F007892DD6 /* HelixError.swift */,
 				946E142FF6202E3202EA5B2D /* RetryBackoff.swift */,
 				1F19F1AECDC4AE62CF2F41FE /* ScanProjection.swift */,
@@ -498,6 +501,7 @@
 				56F1D7C10092F352980169CD /* GhostBrowserWindow.swift in Sources */,
 				C97C66E3ACF3313E004CBE13 /* GhostCaptureBrowser.swift in Sources */,
 				FAF5F3644A98AEA223E96513 /* GhostConsoleView.swift in Sources */,
+				AE965B116019EB5B7BCB4BBE /* GhostJavaScript.swift in Sources */,
 				C4EAE38493520E1B56033FEE /* GraphModels.swift in Sources */,
 				F1D02E19B9E5B252F227CA09 /* GraphRenderer.swift in Sources */,
 				0D5D3E555E784A70305E042C /* HelixAppState.swift in Sources */,
