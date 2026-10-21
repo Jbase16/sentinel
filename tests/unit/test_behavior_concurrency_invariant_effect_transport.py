@@ -51,10 +51,10 @@ from tests.unit.test_behavior_concurrency_invariant_contract import case
 REPOSITORY = Path(__file__).resolve().parents[2]
 ORIGIN = "https://owned.example.test"
 _HONESTY = (
-    "Origin confinement is self-referential to the declared authorized origin; "
-    "proving that origin belongs to the owned target this binding represents is "
-    "deferred to F8 (the real client + Foundry composition against the real owned "
-    "target), exactly as E's real target binding was established only at E8."
+    "Origin confinement is self-referential to the declared authorized origin. "
+    "An owned-origin-binding evidence contract now exists but is unwired; this "
+    "transport result keeps owned_target_origin_bound=False until a future "
+    "wire-in slice consults it."
 )
 _FORBIDDEN = {
     "threading",
@@ -833,8 +833,8 @@ def test_registry_and_verbatim_honesty_statement():
             "description": "Bounded, admission-gated (default-off), origin-confined concurrency-effect transport with verified compensating cleanup; unwired (no production caller)",
         }
     ]
-    assert _HONESTY in module.__doc__
     docstring = " ".join(module.__doc__.split())
+    assert _HONESTY in docstring
     assert (
         "It is not evidence of an effect against a live running target, it is not "
         "wired into any production caller, and it carries no finding-promotion "

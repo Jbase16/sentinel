@@ -5,8 +5,9 @@ one production consumer. Confirmed outcomes are triage candidates with no
 finding-promotion authority. Operator authorization covers target_origin, and
 frozen F7 confines every transport URL to that origin. The F binding has no
 origin anchor, so this cannot prove that the confined origin is the owned
-world's origin. That binding is deferred to OCB-S22 native;
-owned_target_origin_bound remains False. No live/native execution is performed
+world's origin. An owned-origin-binding evidence contract now exists but is
+unwired; owned_target_origin_bound remains False until a future wire-in slice
+consults it. No live/native execution is performed
 by this slice. The async dispatcher runs frozen F7 in a worker thread;
 each synchronous client call completes PolicyExecutor's async send on a fresh
 event loop in that thread, never on the server's running loop.

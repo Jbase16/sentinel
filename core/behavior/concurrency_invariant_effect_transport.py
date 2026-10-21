@@ -7,7 +7,10 @@ effect against a live running target, it is not wired into any production
 caller, and it carries no finding-promotion or durable-receipt authority and
 no OCB-S22/native claim.
 
-Origin confinement is self-referential to the declared authorized origin; proving that origin belongs to the owned target this binding represents is deferred to F8 (the real client + Foundry composition against the real owned target), exactly as E's real target binding was established only at E8.
+Origin confinement is self-referential to the declared authorized origin. An
+owned-origin-binding evidence contract now exists but is unwired; this
+transport result keeps owned_target_origin_bound=False until a future wire-in
+slice consults it.
 
 The client is supplied by the caller. This module opens no connection and
 grants no target scope, receipt, finding, or promotion authority. A target's
