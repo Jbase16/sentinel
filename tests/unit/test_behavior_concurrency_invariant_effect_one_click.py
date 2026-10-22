@@ -548,6 +548,7 @@ def test_module_safety_and_exact_core_consumer():
         "ConcurrencyEffectOneClickDenied",
         "parse_concurrency_effect_thin_body",
         "build_concurrency_effect_specification",
+        "bind_owned_origin",
         "disabled_concurrency_effect_thin_selection",
     ]
 
