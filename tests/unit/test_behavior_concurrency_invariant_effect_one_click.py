@@ -551,6 +551,21 @@ def test_module_safety_and_exact_core_consumer():
         "bind_owned_origin",
         "disabled_concurrency_effect_thin_selection",
     ]
+    # The native-arc apparatus (S20/S21/S22) legitimately imports subject
+    # plumbing to drive the real subject under a frozen SHA; isolation for this
+    # guard means the lab must not import the subject's one-click module, so its
+    # oracle recomputes the verdict independently rather than reusing it.
+    lab_root = repository.parent / "sentinel-visual-acceptance-lab"
+    if lab_root.is_dir():
+        lab_consumers = sorted(
+            path.relative_to(lab_root).as_posix()
+            for path in find_module_consumers(
+                (p for p in lab_root.rglob("*.py") if ".venv" not in p.parts),
+                "core.behavior.concurrency_invariant_effect_one_click",
+                repository_root=lab_root,
+            )
+        )
+        assert lab_consumers == []
 
 
 def test_scan_and_ordinary_click_pass_through(tmp_path, monkeypatch):
