@@ -43,6 +43,7 @@ from .workflow_invariant_effect_transport import (
     WorkflowEffectTransportSpec,
     run_workflow_effect_transport,
 )
+from .owned_origin_binding_evidence import OwnedOriginBindingEvidence, binds_to
 
 
 WORKFLOW_EFFECT_ONE_CLICK_MODE = "behavioral_workflow_effect_one_click_v1"
@@ -331,6 +332,46 @@ def _is_candidate(result: WorkflowEffectTransportResult) -> bool:
 
 
 @dataclass(frozen=True)
+class OwnedOriginBinding:
+    evidence: OwnedOriginBindingEvidence
+    confined_origin: str
+
+    def __post_init__(self) -> None:
+        if type(self.evidence) is not OwnedOriginBindingEvidence:
+            raise TypeError("owned origin binding evidence is invalid")
+        if type(self.confined_origin) is not str:
+            raise ValueError("owned origin binding confined origin is invalid")
+
+    @property
+    def bound(self) -> bool:
+        return binds_to(self.evidence, self.confined_origin)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "proven_origin_evidence": self.evidence.to_dict(),
+            "confined_origin": self.confined_origin,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> OwnedOriginBinding:
+        raw = _exact(
+            value, {"proven_origin_evidence", "confined_origin"}, "owned origin binding"
+        )
+        return cls(
+            OwnedOriginBindingEvidence.from_mapping(raw["proven_origin_evidence"]),
+            raw["confined_origin"],
+        )
+
+
+def _valid_origin_binding(binding: OwnedOriginBinding | None, flag: bool) -> bool:
+    if binding is None:
+        return flag is False
+    if type(binding) is not OwnedOriginBinding:
+        return False
+    return flag is binding.bound
+
+
+@dataclass(frozen=True)
 class WorkflowEffectFindingCandidate:
     candidate_id: str
     result_id: str
@@ -341,6 +382,8 @@ class WorkflowEffectFindingCandidate:
     promotion_authority: bool = False
     real_workflow_effect_observed: bool = False
     wired_into_production: bool = False
+    owned_target_origin_bound: bool = False
+    origin_binding: OwnedOriginBinding | None = None
 
     @classmethod
     def from_result(
@@ -365,6 +408,24 @@ class WorkflowEffectFindingCandidate:
             rebuilt,
         )
 
+    @classmethod
+    def from_result_with_binding(
+        cls,
+        result: WorkflowEffectTransportResult,
+        evidence: OwnedOriginBindingEvidence,
+        confined_origin: str,
+    ) -> WorkflowEffectFindingCandidate:
+        base = cls.from_result(result)
+        binding = OwnedOriginBinding(evidence, confined_origin)
+        return cls(
+            base.candidate_id,
+            base.result_id,
+            base.evidence_id,
+            base._result,
+            owned_target_origin_bound=binding.bound,
+            origin_binding=binding,
+        )
+
     def __post_init__(self) -> None:
         if type(self._result) is not WorkflowEffectTransportResult:
             raise ValueError("workflow effect candidate result is invalid")
@@ -385,6 +446,9 @@ class WorkflowEffectFindingCandidate:
             or self.promotion_authority is not False
             or self.real_workflow_effect_observed is not False
             or self.wired_into_production is not False
+            or not _valid_origin_binding(
+                self.origin_binding, self.owned_target_origin_bound
+            )
         ):
             raise ValueError("workflow effect candidate is invalid")
 
@@ -398,19 +462,48 @@ class WorkflowEffectFindingCandidate:
             "promotion_authority": False,
             "real_workflow_effect_observed": False,
             "wired_into_production": False,
+            "owned_target_origin_bound": self.owned_target_origin_bound,
+            "owned_origin_binding": self.origin_binding.to_dict()
+            if self.origin_binding is not None
+            else None,
         }
 
     @classmethod
     def from_dict(
         cls, value: Mapping[str, Any], result: WorkflowEffectTransportResult
     ) -> WorkflowEffectFindingCandidate:
-        _exact(
-            value, set(cls.from_result(result).to_dict()), "workflow effect candidate"
+        raw = _exact(
+            value,
+            set(cls.from_result(result).to_dict()),
+            "workflow effect candidate",
         )
-        rebuilt = cls.from_result(result)
-        if value != rebuilt.to_dict():
+        serialized_binding = raw["owned_origin_binding"]
+        if serialized_binding is None:
+            rebuilt = cls.from_result(result)
+        else:
+            binding = OwnedOriginBinding.from_dict(serialized_binding)
+            rebuilt = cls.from_result_with_binding(
+                result, binding.evidence, binding.confined_origin
+            )
+        if (
+            raw["owned_target_origin_bound"] is not rebuilt.owned_target_origin_bound
+            or value != rebuilt.to_dict()
+        ):
             raise ValueError("workflow effect candidate serialization is invalid")
         return rebuilt
+
+
+def _run_candidate_matches(
+    candidate: WorkflowEffectFindingCandidate | None,
+    expected: WorkflowEffectFindingCandidate | None,
+) -> bool:
+    if candidate is None or expected is None:
+        return candidate is expected
+    return (
+        candidate.candidate_id == expected.candidate_id
+        and candidate.result_id == expected.result_id
+        and candidate.evidence_id == expected.evidence_id
+    )
 
 
 @dataclass(frozen=True)
@@ -445,6 +538,7 @@ class WorkflowEffectOneClickRun:
     promotion_authority: bool = False
     real_workflow_effect_observed: bool = False
     wired_into_production: bool = False
+    owned_target_origin_bound: bool = False
 
     @classmethod
     def disabled(
@@ -496,11 +590,17 @@ class WorkflowEffectOneClickRun:
                 self.candidate is not None
                 and type(self.candidate) is not WorkflowEffectFindingCandidate
             )
-            or self.candidate != expected_candidate
+            or not _run_candidate_matches(self.candidate, expected_candidate)
             or self.finding_authority is not False
             or self.promotion_authority is not False
             or self.real_workflow_effect_observed is not False
             or self.wired_into_production is not False
+            or self.owned_target_origin_bound
+            is not (
+                self.candidate.owned_target_origin_bound
+                if self.candidate is not None
+                else False
+            )
         ):
             raise ValueError("workflow effect one-click run is invalid")
 
@@ -530,6 +630,7 @@ class WorkflowEffectOneClickRun:
             "promotion_authority": False,
             "real_workflow_effect_observed": False,
             "wired_into_production": False,
+            "owned_target_origin_bound": self.owned_target_origin_bound,
         }
 
     @classmethod
@@ -551,6 +652,7 @@ class WorkflowEffectOneClickRun:
                 "promotion_authority",
                 "real_workflow_effect_observed",
                 "wired_into_production",
+                "owned_target_origin_bound",
             },
             "workflow effect run",
         )
@@ -580,6 +682,7 @@ class WorkflowEffectOneClickRun:
             raw["promotion_authority"],
             raw["real_workflow_effect_observed"],
             raw["wired_into_production"],
+            raw["owned_target_origin_bound"],
         )
         if raw != run.to_dict():
             raise ValueError("workflow effect run serialization is invalid")
@@ -600,8 +703,52 @@ class WorkflowEffectOneClickRun:
             "adversarial_triage_required": True,
             "finding_authority": False,
             "promotion_authority": False,
+            "real_workflow_effect_observed": False,
+            "wired_into_production": False,
+            "owned_target_origin_bound": self.owned_target_origin_bound,
             "workflow_invariant_effect_one_click": self.to_dict(),
         }
+
+
+def bind_owned_origin(
+    run: WorkflowEffectOneClickRun,
+    evidence: OwnedOriginBindingEvidence,
+    specification: WorkflowEffectOneClickSpecification,
+) -> WorkflowEffectOneClickRun:
+    """Attest the completed run's confined origin against proven owned origin.
+
+    This post-hoc operator step grants no authority. Only
+    owned_target_origin_bound may change, through binds_to. The dispatcher is
+    unchanged, and this function issues no live or native traffic.
+    """
+    if type(run) is not WorkflowEffectOneClickRun:
+        raise TypeError("workflow effect run is invalid")
+    if type(evidence) is not OwnedOriginBindingEvidence:
+        raise TypeError("owned origin binding evidence is invalid")
+    if type(specification) is not WorkflowEffectOneClickSpecification:
+        raise TypeError("workflow effect specification is invalid")
+    if (
+        run.specification_id != specification.specification_id
+        or run.transport_specification_id
+        != specification.transport_spec.specification_id
+    ):
+        raise ValueError("owned-origin binding specification does not match the run")
+    if run.status != "completed" or run.candidate is None:
+        return run
+    confined_origin = specification.transport_spec.target_origin
+    bound_candidate = WorkflowEffectFindingCandidate.from_result_with_binding(
+        run.result, evidence, confined_origin
+    )
+    return WorkflowEffectOneClickRun(
+        run.status,
+        run.specification_id,
+        run.transport_specification_id,
+        run.result,
+        bound_candidate,
+        run.disabled_gates,
+        run.mode,
+        owned_target_origin_bound=bound_candidate.owned_target_origin_bound,
+    )
 
 
 class WorkflowEffectOneClickDispatcher:
@@ -781,4 +928,5 @@ __all__ = [
     "WorkflowEffectOneClickRun",
     "WorkflowEffectFindingCandidate",
     "WorkflowEffectOneClickDenied",
+    "bind_owned_origin",
 ]

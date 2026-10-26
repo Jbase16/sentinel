@@ -647,6 +647,7 @@ def test_module_transport_safety_and_exact_exports():
         "WorkflowEffectOneClickRun",
         "WorkflowEffectFindingCandidate",
         "WorkflowEffectOneClickDenied",
+        "bind_owned_origin",
     ]
 
 
