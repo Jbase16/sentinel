@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Sequence
 
 from core.cortex.execution_policy import CandidateAction, DENIED_STATUS, PolicyExecutor
@@ -57,6 +57,10 @@ from .concurrency_invariant_effect_transport import (
 )
 from .owned_origin_binding_evidence import OwnedOriginBindingEvidence, binds_to
 from .prerequisite_capture_freshness import graph_bound_capture_artifact_ref
+from .real_concurrency_effect_evidence import (
+    RealConcurrencyEffectEvidence,
+    corroborates,
+)
 
 
 CONCURRENCY_EFFECT_ONE_CLICK_MODE = "behavioral_concurrency_effect_one_click_v1"
@@ -586,6 +590,72 @@ def _valid_origin_binding(binding: OwnedOriginBinding | None, flag: bool) -> boo
 
 
 @dataclass(frozen=True)
+class RealConcurrencyEffectBinding:
+    evidence: RealConcurrencyEffectEvidence
+    confined_origin: str
+    resource_ref: str
+    declared_limit: int
+
+    def __post_init__(self) -> None:
+        if type(self.evidence) is not RealConcurrencyEffectEvidence:
+            raise TypeError("real concurrency effect binding evidence is invalid")
+        if type(self.confined_origin) is not str:
+            raise ValueError("real concurrency effect binding origin is invalid")
+        if type(self.resource_ref) is not str:
+            raise ValueError("real concurrency effect binding resource ref is invalid")
+        if type(self.declared_limit) is not int:
+            raise ValueError("real concurrency effect binding limit is invalid")
+
+    @property
+    def corroborated(self) -> bool:
+        return corroborates(
+            self.evidence,
+            confined_origin=self.confined_origin,
+            resource_ref=self.resource_ref,
+            declared_limit=self.declared_limit,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "real_concurrency_effect_evidence": self.evidence.to_dict(),
+            "confined_origin": self.confined_origin,
+            "resource_ref": self.resource_ref,
+            "declared_limit": self.declared_limit,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> RealConcurrencyEffectBinding:
+        raw = _exact(
+            value,
+            {
+                "real_concurrency_effect_evidence",
+                "confined_origin",
+                "resource_ref",
+                "declared_limit",
+            },
+            "real concurrency effect binding",
+        )
+        return cls(
+            RealConcurrencyEffectEvidence.from_mapping(
+                raw["real_concurrency_effect_evidence"]
+            ),
+            raw["confined_origin"],
+            raw["resource_ref"],
+            raw["declared_limit"],
+        )
+
+
+def _valid_real_concurrency_effect_binding(
+    binding: RealConcurrencyEffectBinding | None, flag: bool
+) -> bool:
+    if binding is None:
+        return flag is False
+    if type(binding) is not RealConcurrencyEffectBinding:
+        return False
+    return flag is binding.corroborated
+
+
+@dataclass(frozen=True)
 class ConcurrencyEffectFindingCandidate:
     candidate_id: str
     result_id: str
@@ -598,6 +668,7 @@ class ConcurrencyEffectFindingCandidate:
     wired_into_production: bool = False
     owned_target_origin_bound: bool = False
     origin_binding: OwnedOriginBinding | None = None
+    real_effect_binding: RealConcurrencyEffectBinding | None = None
 
     @classmethod
     def from_result(
@@ -640,6 +711,28 @@ class ConcurrencyEffectFindingCandidate:
             origin_binding=binding,
         )
 
+    @classmethod
+    def from_result_with_real_effect_binding(
+        cls,
+        result: ConcurrencyEffectTransportResult,
+        evidence: RealConcurrencyEffectEvidence,
+        confined_origin: str,
+        resource_ref: str,
+        declared_limit: int,
+    ) -> ConcurrencyEffectFindingCandidate:
+        base = cls.from_result(result)
+        binding = RealConcurrencyEffectBinding(
+            evidence, confined_origin, resource_ref, declared_limit
+        )
+        return cls(
+            base.candidate_id,
+            base.result_id,
+            base.evidence_id,
+            base._result,
+            real_concurrency_effect_observed=binding.corroborated,
+            real_effect_binding=binding,
+        )
+
     def __post_init__(self) -> None:
         if type(self._result) is not ConcurrencyEffectTransportResult:
             raise ValueError("concurrency effect candidate result is invalid")
@@ -658,7 +751,9 @@ class ConcurrencyEffectFindingCandidate:
             or self.adversarial_triage_required is not True
             or self.finding_authority is not False
             or self.promotion_authority is not False
-            or self.real_concurrency_effect_observed is not False
+            or not _valid_real_concurrency_effect_binding(
+                self.real_effect_binding, self.real_concurrency_effect_observed
+            )
             or self.wired_into_production is not False
             or not _valid_origin_binding(
                 self.origin_binding, self.owned_target_origin_bound
@@ -674,11 +769,14 @@ class ConcurrencyEffectFindingCandidate:
             "adversarial_triage_required": True,
             "finding_authority": False,
             "promotion_authority": False,
-            "real_concurrency_effect_observed": False,
+            "real_concurrency_effect_observed": self.real_concurrency_effect_observed,
             "wired_into_production": False,
             "owned_target_origin_bound": self.owned_target_origin_bound,
             "owned_origin_binding": self.origin_binding.to_dict()
             if self.origin_binding is not None
+            else None,
+            "real_concurrency_effect_binding": self.real_effect_binding.to_dict()
+            if self.real_effect_binding is not None
             else None,
         }
 
@@ -691,16 +789,25 @@ class ConcurrencyEffectFindingCandidate:
             set(cls.from_result(result).to_dict()),
             "concurrency effect candidate",
         )
-        serialized_binding = raw["owned_origin_binding"]
-        if serialized_binding is None:
-            rebuilt = cls.from_result(result)
-        else:
-            binding = OwnedOriginBinding.from_dict(serialized_binding)
+        rebuilt = cls.from_result(result)
+        owned_serialized = raw["owned_origin_binding"]
+        if owned_serialized is not None:
+            owned = OwnedOriginBinding.from_dict(owned_serialized)
             rebuilt = cls.from_result_with_binding(
-                result, binding.evidence, binding.confined_origin
+                result, owned.evidence, owned.confined_origin
+            )
+        effect_serialized = raw["real_concurrency_effect_binding"]
+        if effect_serialized is not None:
+            effect = RealConcurrencyEffectBinding.from_dict(effect_serialized)
+            rebuilt = replace(
+                rebuilt,
+                real_concurrency_effect_observed=effect.corroborated,
+                real_effect_binding=effect,
             )
         if (
             raw["owned_target_origin_bound"] is not rebuilt.owned_target_origin_bound
+            or raw["real_concurrency_effect_observed"]
+            is not rebuilt.real_concurrency_effect_observed
             or value != rebuilt.to_dict()
         ):
             raise ValueError("concurrency effect candidate serialization is invalid")
@@ -788,7 +895,12 @@ class ConcurrencyEffectOneClickRun:
             or not _run_candidate_matches(self.candidate, expected_candidate)
             or self.finding_authority is not False
             or self.promotion_authority is not False
-            or self.real_concurrency_effect_observed is not False
+            or self.real_concurrency_effect_observed
+            is not (
+                self.candidate.real_concurrency_effect_observed
+                if self.candidate is not None
+                else False
+            )
             or self.wired_into_production is not False
             or self.owned_target_origin_bound
             is not (
@@ -823,7 +935,7 @@ class ConcurrencyEffectOneClickRun:
             "adversarial_triage_required": True,
             "finding_authority": False,
             "promotion_authority": False,
-            "real_concurrency_effect_observed": False,
+            "real_concurrency_effect_observed": self.real_concurrency_effect_observed,
             "wired_into_production": False,
             "owned_target_origin_bound": self.owned_target_origin_bound,
         }
@@ -898,7 +1010,7 @@ class ConcurrencyEffectOneClickRun:
             "adversarial_triage_required": True,
             "finding_authority": False,
             "promotion_authority": False,
-            "real_concurrency_effect_observed": False,
+            "real_concurrency_effect_observed": self.real_concurrency_effect_observed,
             "wired_into_production": False,
             "owned_target_origin_bound": self.owned_target_origin_bound,
             "concurrency_invariant_effect_one_click": self.to_dict(),
@@ -943,6 +1055,57 @@ def bind_owned_origin(
         run.disabled_gates,
         run.mode,
         owned_target_origin_bound=bound_candidate.owned_target_origin_bound,
+    )
+
+
+def bind_real_concurrency_effect(
+    run: ConcurrencyEffectOneClickRun,
+    evidence: RealConcurrencyEffectEvidence,
+    specification: ConcurrencyEffectOneClickSpecification,
+) -> ConcurrencyEffectOneClickRun:
+    """Attest the completed run's real concurrent oversell against proof.
+
+    This post-hoc operator step grants no authority. Only
+    real_concurrency_effect_observed may change, through corroborates against
+    the run's own confined origin, resource ref, and declared limit. The
+    dispatcher is unchanged, and this function issues no live or native traffic.
+    """
+    if type(run) is not ConcurrencyEffectOneClickRun:
+        raise TypeError("concurrency effect run is invalid")
+    if type(evidence) is not RealConcurrencyEffectEvidence:
+        raise TypeError("real concurrency effect evidence is invalid")
+    if type(specification) is not ConcurrencyEffectOneClickSpecification:
+        raise TypeError("concurrency effect specification is invalid")
+    if (
+        run.specification_id != specification.specification_id
+        or run.transport_specification_id
+        != specification.transport_spec.specification_id
+    ):
+        raise ValueError(
+            "real-concurrency-effect binding specification does not match the run"
+        )
+    if run.status != "completed" or run.candidate is None:
+        return run
+    confined_origin = specification.transport_spec.target_origin
+    contract = specification.binding.fixture.contract
+    resource_ref = contract.resource_ref
+    declared_limit = contract.initial_state.declared_limit
+    bound_candidate = (
+        ConcurrencyEffectFindingCandidate.from_result_with_real_effect_binding(
+            run.result, evidence, confined_origin, resource_ref, declared_limit
+        )
+    )
+    return ConcurrencyEffectOneClickRun(
+        run.status,
+        run.specification_id,
+        run.transport_specification_id,
+        run.result,
+        bound_candidate,
+        run.disabled_gates,
+        run.mode,
+        real_concurrency_effect_observed=(
+            bound_candidate.real_concurrency_effect_observed
+        ),
     )
 
 
@@ -1122,5 +1285,6 @@ __all__ = [
     "parse_concurrency_effect_thin_body",
     "build_concurrency_effect_specification",
     "bind_owned_origin",
+    "bind_real_concurrency_effect",
     "disabled_concurrency_effect_thin_selection",
 ]

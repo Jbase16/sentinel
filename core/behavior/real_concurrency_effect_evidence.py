@@ -1,9 +1,14 @@
 """Canonical, authority-free evidence for one real concurrent oversell.
 
-This record is dormant and unwired. No production entry point imports it.
+This record attests explicit proof identifiers, a caller-supplied canonical
+observed origin, a declared limit, and an overshoot beyond it. It consults no
+receipt store, lab oracle, candidate, or run. The concurrency one-click's
+post-hoc, operator-invoked ``bind_real_concurrency_effect`` consults this record
+through ``corroborates``; that step grants no authority, and no production
+dispatch path calls it.
+
 Neither eligibility nor corroboration grants authority or changes
-``real_concurrency_effect_observed``. Producing a real-concurrency observation
-artifact and the future C2 candidate-derivation wire-in are deferred.
+``real_concurrency_effect_observed`` on any production path.
 """
 
 from __future__ import annotations
@@ -337,10 +342,11 @@ def corroborates(
 ) -> bool:
     """Purely corroborate a matching real concurrent oversell observation.
 
-    This grants NO authority. It is the seam a FUTURE C2 candidate-derivation
-    would call with the run's confined origin, resource ref, and declared limit
-    before it could consider a real-concurrency authority decision. C1 wires
-    none of that.
+    This grants NO authority. The post-hoc, operator-invoked
+    ``bind_real_concurrency_effect`` calls this predicate with the run's own
+    confined origin, resource ref, and declared limit before a corroborated
+    real-concurrency effect may be reported. No production dispatch path calls
+    the binder.
     """
 
     if (

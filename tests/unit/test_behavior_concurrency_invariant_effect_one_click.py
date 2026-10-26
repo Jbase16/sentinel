@@ -549,6 +549,7 @@ def test_module_safety_and_exact_core_consumer():
         "parse_concurrency_effect_thin_body",
         "build_concurrency_effect_specification",
         "bind_owned_origin",
+        "bind_real_concurrency_effect",
         "disabled_concurrency_effect_thin_selection",
     ]
     # The native-arc apparatus (S20/S21/S22) legitimately imports subject
