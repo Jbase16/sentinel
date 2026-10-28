@@ -3,6 +3,17 @@ import Foundation
 import Combine
 import AppKit
 
+enum DriverCommandPersona {
+    static func identifier(for command: String, args: [String: Any]) -> String? {
+        switch command {
+        case "click", "fill", "wait_for", "extract", "screenshot", "get_cookies":
+            return args["persona"] as? String
+        default:
+            return nil
+        }
+    }
+}
+
 func logToSnd(_ message: String) {
     print(message)
     SecureAppLog.append(message, dataDirectory: SentinelRuntimePaths.dataDirectory)
@@ -122,6 +133,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         }
         
         let args = dict["args"] as? [String: Any] ?? [:]
+        let personaId = DriverCommandPersona.identifier(for: command, args: args)
         logToSnd("[SND] Handling command: \(command)")
         
         Task { @MainActor in
@@ -142,25 +154,25 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                     }
                 case "click":
                     if let selector = args["selector"] as? [String: String] {
-                        result = try await click(selector: selector)
+                        result = try await click(selector: selector, personaId: personaId)
                     }
                 case "fill":
                     if let selector = args["selector"] as? [String: String],
                        let value = args["value"] as? String {
-                        result = try await fill(selector: selector, value: value)
+                        result = try await fill(selector: selector, value: value, personaId: personaId)
                     }
                 case "wait_for":
                     if let selector = args["selector"] as? [String: String],
                        let timeoutS = args["timeout_s"] as? Double {
-                        result = try await waitFor(selector: selector, timeoutS: timeoutS)
+                        result = try await waitFor(selector: selector, timeoutS: timeoutS, personaId: personaId)
                     }
                 case "extract":
                     if let selector = args["selector"] as? [String: String],
                        let mode = args["mode"] as? String {
-                        result = try await extract(selector: selector, mode: mode)
+                        result = try await extract(selector: selector, mode: mode, personaId: personaId)
                     }
                 case "screenshot":
-                    result = try await screenshot()
+                    result = try await screenshot(personaId: personaId)
                 case "current_url":
                     result = try await currentUrl(
                         personaId: args["persona"] as? String
@@ -288,7 +300,7 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
                 case "close":
                     result = try await closeBrowser()
                 case "get_cookies":
-                    result = try await getCookies()
+                    result = try await getCookies(personaId: personaId)
                 case "replay":
                     await executeReplay(reqId: reqId, args: args)
                     // executeReplay handles sending its own response/error, so we return early
@@ -402,31 +414,31 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return "ok"
     }
     
-    @MainActor private func click(selector: [String: String]) async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func click(selector: [String: String], personaId: String?) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         try await b.click(selector: selector)
         return "ok"
     }
     
-    @MainActor private func fill(selector: [String: String], value: String) async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func fill(selector: [String: String], value: String, personaId: String?) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         try await b.fill(selector: selector, value: value)
         return "ok"
     }
     
-    @MainActor private func waitFor(selector: [String: String], timeoutS: Double) async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func waitFor(selector: [String: String], timeoutS: Double, personaId: String?) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         try await b.waitFor(selector: selector, timeoutS: timeoutS)
         return "ok"
     }
     
-    @MainActor private func extract(selector: [String: String], mode: String) async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func extract(selector: [String: String], mode: String, personaId: String?) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         return try await b.extract(selector: selector, mode: mode)
     }
     
-    @MainActor private func screenshot() async throws -> String {
-        let b = try getBrowser()
+    @MainActor private func screenshot(personaId: String?) async throws -> String {
+        let b = try getBrowser(personaId: personaId)
         return try await b.screenshotBase64()
     }
     
@@ -597,8 +609,8 @@ public class DriverBridgeClient: NSObject, ObservableObject, URLSessionWebSocket
         return "ok"
     }
     
-    @MainActor private func getCookies() async throws -> [String: String] {
-        let b = try getBrowser()
+    @MainActor private func getCookies(personaId: String?) async throws -> [String: String] {
+        let b = try getBrowser(personaId: personaId)
         return try await b.getCookies()
     }
     

@@ -79,4 +79,17 @@ final class CriticalPathTests: XCTestCase {
     func testBackendAttachDecisions() {
         BackendAttachDecisionTests.run()
     }
+
+    func testRetainedPersonaCommandsResolveIdentifier() {
+        let arguments: [String: Any] = ["persona": "alice"]
+        for command in ["click", "fill", "wait_for", "extract", "screenshot", "get_cookies"] {
+            XCTAssertEqual(
+                DriverCommandPersona.identifier(for: command, args: arguments),
+                "alice",
+                command
+            )
+        }
+        XCTAssertNil(DriverCommandPersona.identifier(for: "click", args: [:]))
+        XCTAssertNil(DriverCommandPersona.identifier(for: "click", args: ["persona": 42]))
+    }
 }
