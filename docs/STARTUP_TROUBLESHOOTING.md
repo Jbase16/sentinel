@@ -59,7 +59,7 @@ Error Domain=NSURLErrorDomain Code=-1011 "There was a bad response from the serv
 ```
 
 This script:
-- Creates a virtual environment if needed
+- Creates `.venv/` if needed
 - Installs dependencies
 - Checks for Ollama (for AI features)
 - Starts the server on `http://127.0.0.1:8765`
@@ -68,15 +68,19 @@ This script:
 
 ```bash
 # Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 # Start the server
 python -m sentinelforge.cli.sentinel start
 ```
+
+The CLI `start` command launches the backend. Its `scan` and `debug` commands are
+unimplemented and exit with an error without starting work. Set `SENTINEL_DEBUG=true`
+with `start` for backend debug logging.
 
 #### Option C: Using uvicorn directly
 
@@ -162,15 +166,16 @@ The Xcode app automatically discovers this token and uses it for authentication.
 
 Default settings (from `core/base/config.py`):
 - `api_host`: `127.0.0.1` (loopback only)
-- `require_auth`: `false` (but token still used when available)
-- `allowed_origins`: `http://127.0.0.1:*`, `http://localhost:*`, `tauri://localhost`
+- `require_auth`: `true` (API token required)
+- `terminal_require_auth`: `false` (terminal follows the API auth setting)
+- `allowed_origins`: `http://127.0.0.1:8765`, `http://localhost:8765`
 
 ### Security Notes
 
 - **Network Exposure Warning:** If you change `api_host` to `0.0.0.0`, authentication is **required**
 - The security interlock prevents starting with exposed host + no authentication
 - WebSocket connections validate origin headers and tokens
-- The token changes each restart for security
+- A valid token in `~/.sentinelforge/api_token` is reused across restarts
 
 ## Common Issues and Solutions
 
@@ -278,7 +283,7 @@ The enhanced logging in `core/server/routers/realtime.py` now logs:
 Watch for these logs in the backend output:
 ```
 [WebSocket] /ws/graph - Connection attempt from ('127.0.0.1', 54321)
-[WebSocket] /ws/graph - is_exposed: False, require_auth: False
+[WebSocket] /ws/graph - is_exposed: False, require_auth: True
 [WebSocket] /ws/graph - Authentication successful
 ```
 

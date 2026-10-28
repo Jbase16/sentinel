@@ -1,4 +1,7 @@
 # Cookbook
+
+> **Archived design reference (2026-10-28).** The `core/cal/` runtime has been removed from the current tree. The syntax, examples, and integration paths below are historical proposals, not runnable Sentinel interfaces.
+
 Practical patterns you can copy/paste and adapt.
 
 ## 1) Pattern: detector → reasoner review → validator

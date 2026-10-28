@@ -1,4 +1,7 @@
 # Debugging and Replay
+
+> **Archived design reference (2026-10-28).** The `core/cal/` runtime has been removed from the current tree. The syntax, examples, and integration paths below are historical proposals, not runnable Sentinel interfaces.
+
 A CAL runtime should be debuggable like a language, not a workflow YAML.
 
 ## 1) What you debug in CAL

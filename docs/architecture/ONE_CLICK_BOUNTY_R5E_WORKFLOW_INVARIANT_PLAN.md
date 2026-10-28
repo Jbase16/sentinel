@@ -1,5 +1,10 @@
 # OCB-R5 Family E Workflow-Invariant Passive Spine
 
+> **Historical checkpoint (2026-09-27).** This records the R5E1–R5E5 passive
+> foundation at its original local branch. The current canonical tree extends
+> Family E through R5E9; see the [master execution plan](ONE_CLICK_BOUNTY_MASTER_EXECUTION_PLAN.md)
+> for current source state and open acceptance gates.
+
 Status: R5E1–R5E5 implemented, focused-tested and suite-proved; locally committed,
 push blocked by execution approval policy. Passive/unwired only. `OCB-S21` is registered and deferred, not
 implemented or accepted.

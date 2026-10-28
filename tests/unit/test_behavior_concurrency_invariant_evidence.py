@@ -354,14 +354,14 @@ def test_exact_stem_matching_ignores_lookalike_module_name():
     )
 
 
-def test_registry_has_exact_eight_additive_slice_records():
+def test_registry_has_exact_nine_additive_slice_records():
     from core.contracts.architecture_ids import (
         IdentifierRegistry,
         default_registry_path,
     )
 
     registry = IdentifierRegistry.load(default_registry_path(REPOSITORY))
-    assert all(f"R5F{index}" in registry.canonical_ids for index in range(1, 9))
+    assert all(f"R5F{index}" in registry.canonical_ids for index in range(1, 10))
     records = json.loads(
         (REPOSITORY / "docs/architecture/CANONICAL_ID_REGISTRY.json").read_text()
     )["canonical_ids"]
@@ -374,5 +374,6 @@ def test_registry_has_exact_eight_additive_slice_records():
         "R5F6",
         "R5F7",
         "R5F8",
+        "R5F9",
     ]
     assert not any(record["id"] == "OCB-S22" for record in records)

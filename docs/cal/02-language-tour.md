@@ -1,4 +1,7 @@
 # Language Tour
+
+> **Archived design reference (2026-10-28).** The `core/cal/` runtime has been removed from the current tree. The syntax, examples, and integration paths below are historical proposals, not runnable Sentinel interfaces.
+
 This is a guided tour of CAL features and idioms.
 
 ## 1) Declarations at a glance

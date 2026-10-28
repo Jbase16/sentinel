@@ -1,4 +1,7 @@
 # Getting Started
+
+> **Archived design reference (2026-10-28).** The `core/cal/` runtime has been removed from the current tree. The syntax, examples, and integration paths below are historical proposals, not runnable Sentinel interfaces.
+
 This guide teaches you to write a small but realistic CAL flow: *detect → review → validate → confirm*.
 
 ## 1) The smallest useful CAL program

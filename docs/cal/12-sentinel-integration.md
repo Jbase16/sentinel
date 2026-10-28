@@ -1,4 +1,7 @@
 # Sentinel Integration
+
+> **Archived design reference (2026-10-28).** The `core/cal/` runtime has been removed from the current tree. The syntax, examples, and integration paths below are historical proposals, not runnable Sentinel interfaces.
+
 This document explains the intended integration shape between CAL and Sentinel.
 
 ## 1) What CAL should integrate with

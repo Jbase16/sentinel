@@ -1,4 +1,7 @@
 # CAL: Collaborative Agent Language
+
+> **Archived design reference (2026-10-28).** The `core/cal/` runtime has been removed from the current tree. The syntax, examples, and integration paths below are historical proposals, not runnable Sentinel interfaces.
+
 ## A Programming Language for Multi-Agent Cybersecurity Reasoning
 
 **Version:** 0.1 (Design Draft)  
