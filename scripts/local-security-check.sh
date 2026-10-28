@@ -1,25 +1,26 @@
 #!/bin/bash
 
-# Local Security Check Script
-# Run this before pushing to catch issues early
-# This replicates what the security-gate workflow does
-
+# Local security gate. Run from any directory before committing.
 set -e
 
-echo "🔒 Running local security checks..."
-echo ""
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 FAILED=0
-BASELINE_FILE="$(dirname "${BASH_SOURCE[0]}")/security-check-baseline.txt"
+BASELINE_FILE="scripts/security-check-baseline.txt"
+LINT_BASELINE="scripts/security-lint-baseline.json"
+SCAN_DIRS=(core scripts tools sentinelforge)
 
-if [[ ! -r "$BASELINE_FILE" ]]; then
-    echo -e "${RED}❌ Security-check baseline is missing or unreadable: $BASELINE_FILE${NC}"
+if [[ ! -r "$BASELINE_FILE" || ! -r "$LINT_BASELINE" ]]; then
+    echo "Security baseline missing or unreadable"
+    exit 1
+fi
+
+if [[ -x .venv/bin/python ]]; then
+    PYTHON_BIN=.venv/bin/python
+elif command -v python3 > /dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+else
+    echo "Python 3 is required for the local security gate"
     exit 1
 fi
 
@@ -38,12 +39,13 @@ is_baselined() {
 }
 
 check_new_matches() {
-    local pattern="$1" label="$2" matches status=0 match path content candidate
-    local new_matches=()
+    local pattern="$1" label="$2" mode="$3" matches status=0 match path content candidate
+    local grep_options=() new_matches=()
+    [[ "$mode" == extended ]] && grep_options+=(-E)
 
-    matches=$(grep -rn "$pattern" core/ --include="*.py") || status=$?
+    matches=$(grep -rn "${grep_options[@]}" --include='*.py' "$pattern" "${SCAN_DIRS[@]}") || status=$?
     if [[ $status -gt 1 ]]; then
-        echo -e "${RED}❌ Could not scan core/ for $label${NC}"
+        echo "Could not scan Python sources for $label"
         FAILED=1
         return
     fi
@@ -61,96 +63,76 @@ check_new_matches() {
     done <<< "$matches"
 
     if [[ ${#new_matches[@]} -gt 0 ]]; then
-        echo -e "${RED}❌ NEW $label violation(s) found${NC}"
-        printf '  → %s\n' "${new_matches[@]}"
+        echo "NEW $label violation(s):"
+        printf '  %s\n' "${new_matches[@]}"
         FAILED=1
     else
-        echo -e "${GREEN}✅ No new $label found${NC}"
+        echo "$label: no new matches"
     fi
 }
 
-# Check 1: shell=True
-echo "📍 Checking for shell=True (command injection)..."
-check_new_matches "shell=True" "shell=True"
-echo ""
+resolve_tool() {
+    local name="$1"
+    if command -v "$name" > /dev/null 2>&1; then
+        command -v "$name"
+    elif [[ -x ".venv/bin/$name" ]]; then
+        printf '%s\n' ".venv/bin/$name"
+    else
+        return 1
+    fi
+}
 
-# Check 2: eval/exec
-echo "📍 Checking for eval()/exec()..."
-check_new_matches "eval(" "eval()"
-check_new_matches "exec(" "exec()"
-echo ""
+temp_dir="$(mktemp -d)"
+trap 'rm -rf "$temp_dir"' EXIT
 
-# Check 3: os.system
-echo "📍 Checking for os.system()..."
-check_new_matches "os.system(" "os.system()"
-echo ""
+run_linter() {
+    local name="$1" binary="$2" status=0 report="$temp_dir/$1.json"
+    shift 2
+    "$binary" "$@" > "$report" 2> "$temp_dir/$name.err" || status=$?
+    if [[ $status -gt 1 ]]; then
+        echo "$name failed to run (exit $status):"
+        cat "$temp_dir/$name.err"
+        FAILED=1
+    elif ! "$PYTHON_BIN" scripts/security_gate_findings.py "$name" "$report" "$LINT_BASELINE"; then
+        FAILED=1
+    fi
+}
 
-# Check 4: Hardcoded secrets (loose check)
-echo "📍 Checking for potential hardcoded secrets..."
-if grep -r -E "(password|secret|api_key)\s*=\s*['\"][^'\"]{12,}" core/ --include="*.py" > /dev/null 2>&1; then
-    echo -e "${YELLOW}⚠️  Potential hardcoded secrets found (may be false positives):${NC}"
-    grep -rn -E "(password|secret|api_key)\s*=\s*['\"][^'\"]{12,}" core/ --include="*.py"
-    # Don't fail, just warn
+echo "Running local security checks across ${SCAN_DIRS[*]}"
+check_new_matches 'shell=True' 'shell=True' basic
+check_new_matches 'eval(' 'eval()' basic
+check_new_matches 'exec(' 'exec()' basic
+check_new_matches 'os.system(' 'os.system()' basic
+SECRET_PATTERN="(password|secret|api_key)[[:space:]]*=[[:space:]]*['\"][^'\"]{12,}"
+check_new_matches "$SECRET_PATTERN" 'potential hardcoded secret' extended
+
+python_files=()
+while IFS= read -r -d '' file; do
+    python_files+=("$file")
+done < <(find "${SCAN_DIRS[@]}" -type f -name '*.py' -print0)
+if "$PYTHON_BIN" -m py_compile "${python_files[@]}"; then
+    echo "Python syntax: passed (${#python_files[@]} files)"
 else
-    echo -e "${GREEN}✅ No obvious hardcoded secrets${NC}"
-fi
-echo ""
-
-# Check 5: Python syntax
-echo "📍 Checking Python syntax..."
-if python -m py_compile core/**/*.py > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Python syntax valid${NC}"
-else
-    echo -e "${RED}❌ Python syntax errors found${NC}"
+    echo "Python syntax: failed"
     FAILED=1
 fi
-echo ""
 
-# Optional: Run Bandit if installed
-if command -v bandit &> /dev/null; then
-    echo "📍 Running Bandit (if installed)..."
-    if bandit -r core/ -ll --quiet; then
-        echo -e "${GREEN}✅ Bandit passed${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Bandit found issues${NC}"
-        # Don't fail, just warn
-    fi
-    echo ""
+if bandit_bin="$(resolve_tool bandit)"; then
+    run_linter bandit "$bandit_bin" -r "${SCAN_DIRS[@]}" -ll -q -f json
 else
-    echo -e "${YELLOW}⚠️  Bandit not installed (pip install bandit to enable)${NC}"
-    echo ""
+    echo "Bandit is required for the local security gate"
+    FAILED=1
 fi
 
-# Optional: Run ruff if installed
-if command -v ruff &> /dev/null; then
-    echo "📍 Running ruff (if installed)..."
-    if ruff check core/ --quiet; then
-        echo -e "${GREEN}✅ Ruff passed${NC}"
-    else
-        echo -e "${YELLOW}⚠️  Ruff found issues${NC}"
-        # Don't fail, just warn
-    fi
-    echo ""
+if ruff_bin="$(resolve_tool ruff)"; then
+    run_linter ruff "$ruff_bin" check "${SCAN_DIRS[@]}" --output-format json
 else
-    echo -e "${YELLOW}⚠️  Ruff not installed (pip install ruff to enable)${NC}"
-    echo ""
+    echo "Ruff is required for the local security gate"
+    FAILED=1
 fi
 
-# Summary
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-if [ $FAILED -eq 1 ]; then
-    echo -e "${RED}❌ SECURITY CHECKS FAILED${NC}"
-    echo "Fix the issues above before pushing."
-    echo "The CI security gate will block these."
+if [[ $FAILED -ne 0 ]]; then
+    echo "SECURITY CHECKS FAILED"
     exit 1
-else
-    echo -e "${GREEN}✅ ALL CRITICAL CHECKS PASSED${NC}"
-    echo "Safe to push (CI security gate should pass)."
-    echo ""
-    echo "Note: Full CI will also run:"
-    echo "  - Semgrep"
-    echo "  - Dependency scanning"
-    echo "  - Behavioral tests"
-    echo "  - Type checking"
 fi
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "SECURITY CHECKS PASSED (existing lint debt remains recorded in the baseline)"

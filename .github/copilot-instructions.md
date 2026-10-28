@@ -21,7 +21,7 @@ Sentinel is a **security-focused, model-assisted cybersecurity platform** that c
 
 ## Technology Stack
 
-- **Python:** 3.11+ (FastAPI, uvicorn, httpx, aiosqlite, networkx)
+- **Python:** 3.12 (FastAPI, uvicorn, httpx, aiosqlite, networkx)
 - **Swift:** SwiftUI for macOS
 - **Local LLMs:** Ollama (llama3, phi3, deepseek-coder, gemma)
 - **Testing:** pytest, pytest-asyncio, pytest-cov
@@ -171,25 +171,19 @@ mypy core/
 3. Register through `core/api.py`
 4. Add tests and documentation
 
-## CI/CD & Workflows
+## Local verification
 
-Sentinel has a comprehensive GitHub Actions setup:
-
-- **ci.yml:** Main CI with security gate (blocks shell=True before tests)
-- **fast-ci.yml:** Quick feedback for feature branches (unit tests only)
-- **security-scan.yml:** Static analysis (Bandit, Semgrep, CVE scanning)
-- **sentinel-health.yml:** Behavioral tests (fail-closed, state machines)
-- **adversarial-ci.yml:** Sentinel attacks itself (manual trigger)
-- **experimental-ci.yml:** Non-blocking checks for experiment branches
-
-**All workflows are security-first** — violations block merges.
+No GitHub Actions workflows are configured. Run
+`scripts/local-security-check.sh` and the two separate pytest partitions
+described in `RUN_WORKFLOWS.md` before handoff. The only pre-commit hook is
+`make check-schemas`; neither it nor GitHub runs the full local gate for you.
 
 ## Documentation
 
 - **AGENTS.md:** Detailed agent role and philosophy (read this first!)
 - **README.md:** Architecture overview and getting started
 - **TODO.md:** Current stabilization work and known issues
-- **GITHUB_ACTIONS_SETUP.md:** CI/CD pipeline documentation
+- **RUN_WORKFLOWS.md:** Local verification commands and limits
 - **docs/:** CAL language design, architecture, roadmap
 
 ## Communication Style

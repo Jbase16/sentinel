@@ -1,7 +1,9 @@
-# Reviewed false positives for checks 1-3 of local-security-check.sh.
+# Reviewed false positives and fixed test payloads for checks 1-4 of
+# local-security-check.sh.
 # Each entry is a repo-relative path, one TAB, and matched source line with
 # leading/trailing whitespace removed. Line numbers are intentionally omitted.
-# These 17 unique keys cover 18 reviewed matches (two identical installer lines).
+# Existing entries are retained; the final two cover a classifier example and
+# an intentionally fixed credential used by a local logic probe.
 # To regenerate or extend: run the script, review every NEW match, then add only
 # confirmed false positives in this format. Do not bulk-accept scanner output.
 core/ai/ai_engine.py	def _try_dispatch_exec(self, line: str) -> Optional[str]:
@@ -21,3 +23,5 @@ core/foundry/driver_native.py	async def eval(self, js: str) -> Any:
 core/sentient/mimic/ast_parser.py	- Parsing only - no eval() or code execution
 core/toolkit/installer.py	proc = await asyncio.create_subprocess_exec(
 core/toolkit/installer.py	verify_proc = await asyncio.create_subprocess_exec(
+core/toolkit/raw_classifier.py	# Example: api_key="abcdef1234567890ghijklmnopqrstuvwxyz"
+core/wraith/logic_probe.py	password = "Sf!Probe_9183"
