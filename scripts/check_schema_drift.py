@@ -8,12 +8,14 @@ from typing import Type
 
 from pydantic import BaseModel
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 # ---- SAME IMPORTS AS GENERATOR ----
-from core.web.contracts.models import (
+from core.web.contracts.models import (  # noqa: E402
     EvidenceBundle,
     FindingRecord,
 )
-from core.web.contracts.events import (
+from core.web.contracts.events import (  # noqa: E402
     EventEnvelope,
     WebAuthEstablishedPayload,
     WebDeltaDetectedPayload,

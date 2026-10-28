@@ -3,16 +3,16 @@
 import asyncio
 import logging
 import sys
-import os
-import time
+from pathlib import Path
 from typing import List, Dict
 
 # Ensure core matches
-sys.path.append(os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from core.cortex.events import EventBus, EventStore, GraphEventType
-from core.scheduler.strategos import Strategos
-from core.scheduler.modes import ScanMode
+from core.cortex.events import get_event_bus, GraphEventType  # noqa: E402
+from core.cortex.event_store import get_event_store  # noqa: E402
+from core.scheduler.strategos import Strategos  # noqa: E402
+from core.scheduler.modes import ScanMode  # noqa: E402
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -29,8 +29,8 @@ async def main():
     print("--- Verifying Strategic Logging ---")
     
     # 1. Setup Event Bus
-    store = EventStore()
-    bus = EventBus(store)
+    store = get_event_store()
+    bus = get_event_bus()
     
     # 2. Setup Strategos with EventBus
     brain = Strategos(
@@ -43,7 +43,8 @@ async def main():
         """AsyncFunction event_listener."""
         print("--- Listening for Events ---")
         # Async loop over items.
-        async for event in store.subscribe():
+        async for stored_event in store.subscribe():
+            event = stored_event.event
             if event.type == GraphEventType.DECISION_MADE:
                 intent = event.payload.get("intent")
                 reason = event.payload.get("reason")
@@ -51,7 +52,7 @@ async def main():
             elif event.type == GraphEventType.SCAN_PHASE_CHANGED:
                 phase = event.payload.get("phase")
                 print(f"✅ [EVENT: PHASE] Transitioned to {phase}")
-            elif event.type == GraphEventType.LOG_EMITTED:
+            elif event.type == GraphEventType.LOG:
                  # Too noisy, ignore for now or print
                  pass
     
@@ -76,7 +77,7 @@ async def main():
     
     print(f"--- Event Store Dump ({len(store._events)} events) ---")
     # Loop over items.
-    for e in store._events:
+    for e in store.get_latest(len(store._events)):
         print(f"Stored Event: {e.type} | {e.payload}")
 
     print("--- Verification Complete ---")

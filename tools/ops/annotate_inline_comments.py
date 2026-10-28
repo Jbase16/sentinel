@@ -14,13 +14,12 @@ Safety
 Usage
   python scripts/annotate_inline_comments.py [repo_root]
 
-Default root is the parent directory of this script (project root).
+Default root is the repository root, two directories above this script.
 """
 
 from __future__ import annotations
 
 import ast
-import os
 import sys
 from pathlib import Path
 from typing import Iterable, Tuple
@@ -418,7 +417,7 @@ def annotate_swift(path: Path) -> bool:
 
 def main(argv: list[str]) -> int:
     """Function main."""
-    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[1]
+    root = Path(argv[1]).resolve() if len(argv) > 1 else Path(__file__).resolve().parents[2]
     annotated = 0
     scanned = 0
     # Loop over items.

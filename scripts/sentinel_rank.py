@@ -28,10 +28,12 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
-from core.intel.program_scope import ProgramScope
-from core.intel.selection import ProgramFitScore, rank_programs
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from core.intel.program_scope import ProgramScope  # noqa: E402
+from core.intel.selection import ProgramFitScore, rank_programs  # noqa: E402
 
 
 def _load_programs_from_dir(d: Path) -> List[ProgramScope]:
@@ -83,7 +85,7 @@ def _print_verbose(rankings: List[ProgramFitScore], top_n: int) -> None:
         print(f"  saturation:       {int(s.saturation_penalty * 100)}% "
               f"(score reduced by this much)")
         print(f"  raw EV:           ${s.capabilities_match_usd:,.0f}")
-        print(f"  top vuln fits:")
+        print("  top vuln fits:")
         for tc in s.top_vuln_classes:
             print(
                 f"    • {tc['name']} "

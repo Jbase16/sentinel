@@ -1,9 +1,10 @@
 .PHONY: schemas check-schemas
+PYTHON ?= python3
 
 schemas:
 	@echo "Generating web schemas..."
-	python scripts/generate_web_schemas.py
+	$(PYTHON) scripts/generate_web_schemas.py
 
 check-schemas:
 	@echo "Checking schema drift..."
-	python scripts/check_schema_drift.py
+	$(PYTHON) scripts/check_schema_drift.py

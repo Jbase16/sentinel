@@ -34,14 +34,15 @@ import json
 import os
 import signal
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
 
-from core.intel import token_store
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from core.intel import token_store  # noqa: E402
 
 
 INTEL_DIR = Path.home() / ".sentinelforge" / "intel"
@@ -116,7 +117,6 @@ def _persist_as_program_scope(attrs: Dict[str, Any], out_dir: Path) -> Optional[
     DOMAIN entries — exact patterns aren't known until full ingest,
     but the count is what PT1's scorer cares about."""
     from core.intel.program_scope import (
-        Persona,
         Platform,
         ProgramScope,
         ScopeRule,
@@ -226,7 +226,7 @@ def _print_verbose(rankings: list, top_n: int) -> None:
         print(f"  expected value:   ${s.final_score:,.0f}")
         print(f"  scope size:       {s.scope_size} listed assets")
         print(f"  saturation prior: {int(s.saturation_penalty * 100)}%")
-        print(f"  top vuln fits:")
+        print("  top vuln fits:")
         for tc in s.top_vuln_classes:
             print(
                 f"    • {tc['name']} [{tc['cwe']}] — "

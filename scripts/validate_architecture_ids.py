@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
-from core.contracts.architecture_ids import IdentifierRegistry, default_registry_path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from core.contracts.architecture_ids import IdentifierRegistry, default_registry_path  # noqa: E402
 
 
 def main() -> int:

@@ -7,7 +7,6 @@ Usage examples:
 """
 
 import argparse
-from core.engine.orchestrator import Orchestrator
 
 
 def main():
@@ -16,7 +15,6 @@ def main():
     args = parser.parse_args()
 
     if args.command == "start":
-        print("🚀 Starting SentinelForge backend...")
         print("🚀 Starting SentinelForge backend...")
         import uvicorn
         from core.base.config import get_config
@@ -28,10 +26,8 @@ def main():
             port=config.api_port,
             reload=config.debug
         )
-    elif args.command == "scan":
-        print("🔍 Running a manual scan...")
-    elif args.command == "debug":
-        print("🧠 Launching debug mode...")
+    elif args.command in {"scan", "debug"}:
+        parser.error(f"{args.command} is not implemented; no action was taken")
 
 if __name__ == "__main__":
     main()

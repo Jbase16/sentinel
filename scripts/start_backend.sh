@@ -17,20 +17,23 @@ if ! command -v python3 &> /dev/null; then
 fi
 
 # Check if virtual environment exists
-if [ ! -d "venv" ]; then
+if [ ! -d ".venv" ]; then
     echo "⚠️  No virtual environment found. Creating one..."
-    python3 -m venv venv
+    python3 -m venv .venv
     echo "✅ Virtual environment created"
 fi
 
 # Activate virtual environment
-source venv/bin/activate
+source .venv/bin/activate
 
 # Install dependencies if needed
-if [ ! -f "venv/.installed" ]; then
+if [ ! -f ".venv/.installed" ]; then
     echo "📦 Installing dependencies..."
-    pip install -q -r requirements.txt
-    touch venv/.installed
+    if ! python -m pip --version > /dev/null 2>&1; then
+        python -m ensurepip --upgrade
+    fi
+    python -m pip install -q -r requirements.txt
+    touch .venv/.installed
     echo "✅ Dependencies installed"
 fi
 

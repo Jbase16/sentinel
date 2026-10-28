@@ -16,14 +16,15 @@
 import asyncio
 import logging
 import sys
-import os
+from pathlib import Path
 
 # Ensure core matches
-sys.path.append(os.getcwd())
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from core.engine.scanner_engine import ScannerEngine
-from core.base.session import ScanSession
-from core.data.db import Database
+from core.engine.scanner_engine import ScannerEngine  # noqa: E402
+from core.base.session import ScanSession  # noqa: E402
+from core.data.db import Database  # noqa: E402
+from core.data.blackbox import BlackBox  # noqa: E402
 
 # Configure Logging to Stdout
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -41,10 +42,6 @@ async def main():
     
     # Init Engine
     engine = ScannerEngine(session=session)
-    
-    # Run
-    # mocking cancel flag
-    cancel_event = asyncio.Event()
     
     # Error handling block.
     try:

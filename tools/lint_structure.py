@@ -5,7 +5,8 @@ Verifies that the SentinelForge project structure is still clean and consistent.
 import os
 
 ALLOWED_ROOT = {"sentinelforge", "README.md",
-                "requirements.txt", "tests", "ui", "docs", "tools"}
+                "requirements.txt", "tests", "ui", "docs", "tools",
+                "core", "scripts", "pyproject.toml", "Makefile"}
 
 def main():
     for item in os.listdir("."):

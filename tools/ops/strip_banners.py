@@ -93,7 +93,7 @@ def strip_banner_block(text: str, is_python: bool) -> str:
 
 def main() -> int:
     """Function main."""
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     changed = 0
     scanned = 0
     # Loop over items.

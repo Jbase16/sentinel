@@ -1,11 +1,16 @@
 """Module run_real_scan_headless: inline documentation for /Users/jason/Developer/sentinelforge/scripts/run_real_scan_headless.py."""
 import asyncio
+import sys
+from pathlib import Path
 from typing import List, Dict
-from core.scheduler.strategos import Strategos
-from core.scheduler.modes import ScanMode
-from core.cortex.events import EventBus
-from core.cortex.narrator import NarratorEngine
-from core.scheduler.decisions import DecisionLedger
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from core.scheduler.strategos import Strategos  # noqa: E402
+from core.scheduler.modes import ScanMode  # noqa: E402
+from core.cortex.events import EventBus  # noqa: E402
+from core.cortex.narrator import NarratorEngine  # noqa: E402
+from core.scheduler.decisions import DecisionLedger  # noqa: E402
 
 async def mock_tool_execution(tool: str) -> List[Dict]:
     """
@@ -31,10 +36,10 @@ async def main():
         # Error handling block.
         try:
             print(f"[EVENT] {event.type.value}: {event.payload}")
-        except:
+        except (AttributeError, TypeError):
             print(f"[EVENT] {event}")
 
-    event_bus.subscribe(print_event)
+    event_bus.subscribe_sync(print_event)
 
     # Strategos ONLY (no API, no chat)
     strategos = Strategos(

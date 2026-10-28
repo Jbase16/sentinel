@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Type
 
 from pydantic import BaseModel
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 # ---- IMPORT YOUR CONTRACT MODELS HERE ----
-from core.web.contracts.models import (
+from core.web.contracts.models import (  # noqa: E402
     EvidenceBundle,
     FindingRecord,
 )
-from core.web.contracts.events import (
+from core.web.contracts.events import (  # noqa: E402
     EventEnvelope,
     WebAuthEstablishedPayload,
     WebDeltaDetectedPayload,
