@@ -1,5 +1,6 @@
-// Pure attach-decision tests. Compile with BackendAttachDecision.swift in the
-// temporary SwiftPM proof package; the historical UI test runner is not used.
+// Pure attach-decision tests invoked by the Xcode unit-test target.
+
+@testable import SentinelForge
 
 enum BackendAttachDecisionTests {
     static func run() {

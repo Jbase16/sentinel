@@ -16,6 +16,10 @@ import requests
 import json
 import time
 import sys
+import os
+import pytest
+
+pytestmark = pytest.mark.live_external
 
 BASE_URL = "http://127.0.0.1:8765"
 
@@ -60,6 +64,8 @@ def run_scan_test():
     stream_events()
 
 if __name__ == "__main__":
+    if os.environ.get("SENTINEL_RUN_LIVE") != "1":
+        raise SystemExit("Set SENTINEL_RUN_LIVE=1 to run the external scan probe")
     try:
         run_scan_test()
     except KeyboardInterrupt:

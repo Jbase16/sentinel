@@ -46,6 +46,17 @@ targets:
           CODE_SIGN_ENTITLEMENTS: SentinelForge.Release.entitlements
           CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
 
+  SentinelForgeTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/Sources/TestRunner
+    dependencies:
+      - target: SentinelForge
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   SentinelForge:
     build:
@@ -53,6 +64,9 @@ schemes:
         SentinelForge: all
     run:
       config: Debug
+    test:
+      targets:
+        - SentinelForgeTests
   SentinelForge-Acceptance:
     build:
       targets:

@@ -44,6 +44,15 @@ def pytest_configure(config):
         pass
 
 
+def pytest_collection_modifyitems(config, items):
+    if os.environ.get("SENTINEL_RUN_LIVE") == "1":
+        return
+    skip_live = pytest.mark.skip(reason="external target requires SENTINEL_RUN_LIVE=1")
+    for item in items:
+        if item.get_closest_marker("live_external") is not None:
+            item.add_marker(skip_live)
+
+
 def _reset_event_runtime() -> None:
     """Reset process-wide event state that must share the sequence epoch."""
     import core.cortex.event_store as event_store_module

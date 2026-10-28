@@ -23,6 +23,7 @@
 		442083AD514DA033F1A9DC4E /* PressureShader.metal in Sources */ = {isa = PBXBuildFile; fileRef = D6ADAB1DD2D246A739B3EC7E /* PressureShader.metal */; };
 		4A1FF7DA7509E33F640B70A5 /* RetryBackoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946E142FF6202E3202EA5B2D /* RetryBackoff.swift */; };
 		4DF5F8EFA32641E9BCBD5678 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA1FB66EC2747EC1973D336E /* DashboardView.swift */; };
+		55A013B332EF4C5ABB645C65 /* BackendAttachDecisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D50BF5ED0B6809B41C41080 /* BackendAttachDecisionTests.swift */; };
 		56F1D7C10092F352980169CD /* GhostBrowserWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F23349083792B008C4E1131 /* GhostBrowserWindow.swift */; };
 		5BF1C14DFCA00863B476778E /* OperationalAlertBanners.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13DA6777080A2826EACD926A /* OperationalAlertBanners.swift */; };
 		5E27CAE9D470F58A550FB74F /* ModelRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8318D0791A1940E626D7A7ED /* ModelRouter.swift */; };
@@ -33,6 +34,7 @@
 		80A6BB3BC05E24DFF75831EB /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = B8394185D36FC0D1095C1111 /* Shaders.metal */; };
 		8226DC9F780680AC29BC0FDB /* GhostAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E92E19E923FA9F4CEDD71B /* GhostAPIClient.swift */; };
 		84565490131B06C520A4801A /* LLMService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E8FDC8C9DD1772F9943B8F /* LLMService.swift */; };
+		8530D76CD9E3CB085CB33A06 /* CriticalPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B8B3AA3E2D4472034A38411C /* CriticalPathTests.swift */; };
 		854DB144D784ECD29694882E /* StatusComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2569FD3CDF297078C1886472 /* StatusComponents.swift */; };
 		8D2EC02C24E7EDBC587BBCF1 /* BolaLabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF54C363DCAFCDA5E5FAA418 /* BolaLabView.swift */; };
 		8F1F1CC3866F00EBB302665E /* TierBadgeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56B9FBAAB3F224DEE97A35DE /* TierBadgeView.swift */; };
@@ -75,6 +77,16 @@
 		07AB998B9C7C4F0ABD4BF1D5 /* BackendAttachDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50D47347DC36403C89E93254 /* BackendAttachDecision.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		E777C29815E99F5803B7D51E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7625DDA0D8E32C089687270D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 78EB87E2AC973F5EBBEE1BD3;
+			remoteInfo = SentinelForge;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		067CE6DABF3050B27FC85508 /* core */ = {isa = PBXFileReference; lastKnownFileType = folder; name = core; path = ../core; sourceTree = SOURCE_ROOT; };
 		0AF192DC24E57DCCE1E4AF8E /* SecureAppLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureAppLog.swift; sourceTree = "<group>"; };
@@ -109,6 +121,7 @@
 		8318D0791A1940E626D7A7ED /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
 		86E92E19E923FA9F4CEDD71B /* GhostAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostAPIClient.swift; sourceTree = "<group>"; };
 		882050DB17B4CE0CB0263245 /* OperationalStateModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationalStateModels.swift; sourceTree = "<group>"; };
+		8D50BF5ED0B6809B41C41080 /* BackendAttachDecisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackendAttachDecisionTests.swift; sourceTree = "<group>"; };
 		8E9D7718A76376AF130F1182 /* GhostConsoleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhostConsoleView.swift; sourceTree = "<group>"; };
 		8FD7FEF00ADB9A4983F8F7F4 /* DecisionStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecisionStreamView.swift; sourceTree = "<group>"; };
 		946E142FF6202E3202EA5B2D /* RetryBackoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RetryBackoff.swift; sourceTree = "<group>"; };
@@ -124,7 +137,9 @@
 		AFD677B251701FB8C9878B74 /* VENDOR.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = VENDOR.md; sourceTree = "<group>"; };
 		B1614A34830DE729E55890F6 /* ScanControlView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScanControlView.swift; sourceTree = "<group>"; };
 		B28396B11B909875C4B8BB20 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		B62A64978A3C7C8067A9907F /* SentinelForgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SentinelForgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B8394185D36FC0D1095C1111 /* Shaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = Shaders.metal; sourceTree = "<group>"; };
+		B8B3AA3E2D4472034A38411C /* CriticalPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CriticalPathTests.swift; sourceTree = "<group>"; };
 		BA5A2EAB8B8B727F4AF90C39 /* IdentityStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdentityStatusView.swift; sourceTree = "<group>"; };
 		BB064037D50A118943B7AB93 /* ActionRequestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionRequestView.swift; sourceTree = "<group>"; };
 		BCE68CC8F07C4B289363C486 /* CortexStream.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CortexStream.swift; sourceTree = "<group>"; };
@@ -183,6 +198,7 @@
 			children = (
 				F69478BB4593A2ED44797763 /* Core (Python) */,
 				A39ECB073AF93C27FA90F973 /* Sources */,
+				AF0527868B89C5126130660A /* TestRunner */,
 				73F5367697371FAE0E7DD69E /* Products */,
 			);
 			sourceTree = "<group>";
@@ -267,6 +283,7 @@
 			isa = PBXGroup;
 			children = (
 				24341BFC06FC18EE38977FFC /* SentinelForge.app */,
+				B62A64978A3C7C8067A9907F /* SentinelForgeTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -334,6 +351,16 @@
 				D2F5FD7733DE5DF6B1387441 /* Views */,
 			);
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		AF0527868B89C5126130660A /* TestRunner */ = {
+			isa = PBXGroup;
+			children = (
+				8D50BF5ED0B6809B41C41080 /* BackendAttachDecisionTests.swift */,
+				B8B3AA3E2D4472034A38411C /* CriticalPathTests.swift */,
+			);
+			name = TestRunner;
+			path = Tests/Sources/TestRunner;
 			sourceTree = "<group>";
 		};
 		CBB201D7DEF1757F9F9AF0CC /* Navigation */ = {
@@ -408,6 +435,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		3A713A6128AEE19A072830B0 /* SentinelForgeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 87F98FF21EEC7D80C7B51EDF /* Build configuration list for PBXNativeTarget "SentinelForgeTests" */;
+			buildPhases = (
+				DF30C25917287BB6AB61B1F9 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6269318E66C1C7C328B52A45 /* PBXTargetDependency */,
+			);
+			name = SentinelForgeTests;
+			packageProductDependencies = (
+			);
+			productName = SentinelForgeTests;
+			productReference = B62A64978A3C7C8067A9907F /* SentinelForgeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		78EB87E2AC973F5EBBEE1BD3 /* SentinelForge */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 7165F87375CBF309E67E885C /* Build configuration list for PBXNativeTarget "SentinelForge" */;
@@ -455,6 +500,7 @@
 			projectRoot = "";
 			targets = (
 				78EB87E2AC973F5EBBEE1BD3 /* SentinelForge */,
+				3A713A6128AEE19A072830B0 /* SentinelForgeTests */,
 			);
 		};
 /* End PBXProject section */
@@ -543,9 +589,43 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DF30C25917287BB6AB61B1F9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				55A013B332EF4C5ABB645C65 /* BackendAttachDecisionTests.swift in Sources */,
+				8530D76CD9E3CB085CB33A06 /* CriticalPathTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		6269318E66C1C7C328B52A45 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 78EB87E2AC973F5EBBEE1BD3 /* SentinelForge */;
+			targetProxy = E777C29815E99F5803B7D51E /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		0DF988B88518B0F7F3421846 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sentinel.SentinelForgeTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SentinelForge.app/Contents/MacOS/SentinelForge";
+			};
+			name = Debug;
+		};
 		4D54E480A64E462BD66A4709 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -588,6 +668,23 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
+		};
+		D77A622388A8D238F3B58793 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sentinel.SentinelForgeTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SentinelForge.app/Contents/MacOS/SentinelForge";
+			};
+			name = Release;
 		};
 		DED2496B2FA01707D6E07D6C /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -716,6 +813,15 @@
 			buildConfigurations = (
 				6703269B016ABDA4D0775DBA /* Debug */,
 				4D54E480A64E462BD66A4709 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		87F98FF21EEC7D80C7B51EDF /* Build configuration list for PBXNativeTarget "SentinelForgeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0DF988B88518B0F7F3421846 /* Debug */,
+				D77A622388A8D238F3B58793 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

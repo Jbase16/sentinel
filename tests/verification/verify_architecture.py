@@ -23,6 +23,7 @@ Verifies the Principal Engineering Upgrades:
 import asyncio
 import os
 import sys
+import pytest
 
 # Add root to implementation
 sys.path.append(os.getcwd())
@@ -72,6 +73,7 @@ async def test_session_isolation():
     assert len(loaded_b) == 0
     print("    [OK] Session B has zero findings (Isolation Verified).")
 
+@pytest.mark.live_external
 async def test_scanner_integration():
     """AsyncFunction test_scanner_integration."""
     print("[*] Testing Scanner Engine Integration...")
@@ -85,6 +87,8 @@ async def test_scanner_integration():
     print("    [OK] Scanner Engine initialized with Session.")
 
 if __name__ == "__main__":
+    if os.environ.get("SENTINEL_RUN_LIVE") != "1":
+        raise SystemExit("Set SENTINEL_RUN_LIVE=1 to run the external scanner probe")
     loop = asyncio.new_event_loop()
     loop.run_until_complete(test_session_isolation())
     loop.run_until_complete(test_scanner_integration())

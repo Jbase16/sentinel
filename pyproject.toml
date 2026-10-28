@@ -37,6 +37,7 @@ include = ["core*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live_external: requires SENTINEL_RUN_LIVE=1 to contact an external target"]
 # Manual probes may contact a running local server and are invoked directly.
 norecursedirs = ["tests/manual"]
 # importlib import mode lets the full tree collect despite duplicate test

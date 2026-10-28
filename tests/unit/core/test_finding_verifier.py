@@ -124,9 +124,13 @@ async def test_exposed_admin_refuted_on_redirect_to_login():
     assert verdict == fv.REFUTED
 
 
+@pytest.mark.parametrize("target", [
+    "management.example.test",
+    pytest.param("scanme.nmap.org", marks=pytest.mark.live_external),
+])
 @pytest.mark.asyncio
-async def test_unknown_category_is_unverifiable_not_dropped():
-    finding = {"title": "Exposed Management Service", "target": "scanme.nmap.org"}
+async def test_unknown_category_is_unverifiable_not_dropped(target):
+    finding = {"title": "Exposed Management Service", "target": target}
     async with _client(lambda r: httpx.Response(200)) as c:
         verdict, _ = await fv.verify_finding(finding, c)
     # HTTP can't re-test an SSH/RDP service finding — keep it, but never as fact.
